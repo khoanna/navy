@@ -24,14 +24,14 @@ src/
 
 ## 📜 Smart Contracts
 
-All core contracts of Navy are stored in `src/contracts/contracts`.  
+All core contracts of Navy are stored in `src/contracts/contracts` run on **Sepolia**.  
 Below is the list of deployed contracts with their purpose:
 
 | Contract              | Address (to be updated) | Description                                                                 |
 |-----------------------|--------------------------|-----------------------------------------------------------------------------|
 | **WBTC**              | `0x8788bD875141C37080eb7Ef4bc5914A768058169`                 | Test token simulating Wrapped Bitcoin. Used for testing and integration.    |
 | **WETH**              | `0x48253BA0c207cABf5a8D97F05003878B6a7adc02`                 | Test token simulating Wrapped Ether. Used for testing and liquidity.        |
-| **NVDToken**          | `0xf3825D101e6Bade4Dcbd96D7de2Ed951bc425e18.`                 | The main **Navy Token (NVD)** used within the ecosystem.                    |
+| **NVDToken**          | `0xf3825D101e6Bade4Dcbd96D7de2Ed951bc425e18`                 | The main **Navy Token Vietnam Dong (NVD)** used within the ecosystem.                    |
 | **NVDMintGovernance** | `0xF48A4d9e43195bE392a3D9507Ad013387B22223D`                 | Governance contract controlling minting rules, permissions, and proposals.  |
 | **NVDVault**          | `0xE0AF880c72F3df087Ff981a7BCC093880B4f4782`                 | Secure vault managing collateral, reserves, and overall protocol stability. |
 
@@ -50,10 +50,12 @@ Below is the list of deployed contracts with their purpose:
 ```bash
 # Install dependencies
 npm install
-
+```
+```bash
 # Run development server
 npm run dev
-
+```
+```bash
 # Build for production
 npm run build
 ```
