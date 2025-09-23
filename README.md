@@ -1,4 +1,4 @@
-# 🌊 Navy Frontend
+# 🌊 Navy
 
 This repository contains the **Frontend** for the **Navy Project** – an **on-chain minting platform** and governance system.  
 The frontend connects directly to the deployed smart contracts to allow seamless interaction with the blockchain.
