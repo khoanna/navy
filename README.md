@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🌊 Navy Frontend
 
-## Getting Started
+This repository contains the **Frontend** for the **Navy Project** – an **on-chain minting platform** and governance system.  
+The frontend connects directly to the deployed smart contracts to allow seamless interaction with the blockchain.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🚀 Project Goals
+- Enable users to **mint tokens** directly on-chain.  
+- Provide a governance interface for **Navy Mint Governance**.  
+- Display transparent, real-time data from blockchain (Vault, Governance, Tokens).  
+
+---
+
+## 📂 Project Structure
+
+```
+src/
+ ├── app/               # Front-end app
+ ├── contracts/         # Smart contract & ABIs
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📜 Smart Contracts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All core contracts of Navy are stored in `src/contracts/contracts`.  
+Below is the list of deployed contracts with their purpose:
 
-## Learn More
+| Contract              | Address (to be updated) | Description                                                                 |
+|-----------------------|--------------------------|-----------------------------------------------------------------------------|
+| **WBTC**              | `0x8788bD875141C37080eb7Ef4bc5914A768058169`                 | Test token simulating Wrapped Bitcoin. Used for testing and integration.    |
+| **WETH**              | `0x48253BA0c207cABf5a8D97F05003878B6a7adc02`                 | Test token simulating Wrapped Ether. Used for testing and liquidity.        |
+| **NVDToken**          | `0xf3825D101e6Bade4Dcbd96D7de2Ed951bc425e18.`                 | The main **Navy Token (NVD)** used within the ecosystem.                    |
+| **NVDMintGovernance** | `0xF48A4d9e43195bE392a3D9507Ad013387B22223D`                 | Governance contract controlling minting rules, permissions, and proposals.  |
+| **NVDVault**          | `0xE0AF880c72F3df087Ff981a7BCC093880B4f4782`                 | Secure vault managing collateral, reserves, and overall protocol stability. |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🛠️ Tech Stack
+- **Next.js** – UI framework  
+- **Ethers.js** – Blockchain interactions  
+- **TailwindCSS** – Styling  
+- **TypeScript** – Type safety  
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## ⚡ Getting Started
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+# Install dependencies
+npm install
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+```
+
+---
+
+## 📌 Notes
+- Make sure to update contract **addresses** once they are deployed.  
+- ABIs are located in `src/contracts/contracts`.  
+
+---
+
+## 🐋 Navy Vision
+Navy aims to provide a **transparent, decentralized, and secure minting mechanism** for tokens, governed by the community and powered by on-chain smart contracts.
