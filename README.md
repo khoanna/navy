@@ -64,7 +64,7 @@ npm run build
 
 ## 📌 Notes
 - Make sure to update contract **addresses** once they are deployed.  
-- ABIs are located in `src/contracts/contracts`.  
+- All contract are located in `src/contracts/contracts`.  
 
 ---
 
