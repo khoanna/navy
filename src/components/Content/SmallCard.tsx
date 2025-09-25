@@ -1,7 +1,7 @@
 import { Box, Heading, Text } from "@chakra-ui/react";
 
 
-export default ({ value, text }) => {
+export default function SmallCard ({ value, text }: { value: string, text: string })  {
   return (
     <Box p={6} bg="#DBE3E5" borderRadius="3xl">
       <Heading fontWeight="light" fontSize="2xl">

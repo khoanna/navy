@@ -16,6 +16,15 @@ import {
 import { JsonRpcSigner } from "ethers"
 import { useState } from "react"
 import { FaBitcoin, FaEthereum } from "react-icons/fa"
+import { IconType } from "react-icons/lib"
+
+interface TokenCardProps {
+  name: string;
+  symbol: string;
+  icon: IconType;
+  color?: string;
+  balance?: number | string;
+}
 
 export default function DepositWithdraw(balance: { WBTC?: number, WETH?: number, signer?: JsonRpcSigner }) {
   const [amounts, setAmounts] = useState<{ [key: string]: string }>({
@@ -49,7 +58,7 @@ export default function DepositWithdraw(balance: { WBTC?: number, WETH?: number,
     }
   }
 
-  const TokenCard = ({ name, symbol, icon, color, balance }: any) => (
+  const TokenCard = ({ name, symbol, icon, color, balance }: TokenCardProps) => (
     <Box
       p={8}
       rounded="2xl"

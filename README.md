@@ -17,14 +17,14 @@ The frontend connects directly to the deployed smart contracts to allow seamless
 ```
 src/
  ├── app/                        # Front-end app
- ├── contracts/contracts         # Smart contracts of Navy
+ ├── contracts/         # Smart contracts of Navy
 ```
 
 ---
 
 ## 📜 Smart Contracts
 
-All core contracts of Navy are stored in `src/contracts/contracts` run on **Sepolia**.  
+All core contracts of Navy are stored in `src/contracts/` run on **Sepolia**.  
 Below is the list of deployed contracts with their purpose:
 
 | Contract              | Address | Description                                                                 |
@@ -65,7 +65,7 @@ npm run build
 
 ## 📌 Notes
 - Make sure to update contract **addresses** once they are deployed.  
-- All contract are located in `src/contracts/contracts`.  
+- All contract are located in `src/contracts`.  
 
 ---
 

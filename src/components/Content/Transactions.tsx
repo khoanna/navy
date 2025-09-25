@@ -22,8 +22,8 @@ export default function MintAndBurn({ isConnected, signer }: { isConnected: bool
       if (!mintAmount || Number(mintAmount) <= 0) throw new Error("Invalid mint amount")
       await mintNVD(mintAmount);
       console.log("Minting:", mintAmount)
-    } catch (err: any) {
-      setError(err.message || "Mint failed")
+    } catch (e) {
+      setError("Mint failed")
     } finally {
       setLoading(null)
     }
@@ -37,8 +37,8 @@ export default function MintAndBurn({ isConnected, signer }: { isConnected: bool
       await approve(repayAmount)
       await repayNVD(repayAmount);
       console.log("Repaying:", repayAmount)
-    } catch (err: any) {
-      setError(err.message || "Repay failed")
+    } catch (e) {
+      setError("Repay failed")
     } finally {
       setLoading(null)
     }

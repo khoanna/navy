@@ -1,11 +1,11 @@
 'use client'
 
-import { 
-  Box, 
-  SimpleGrid, 
-  GridItem, 
-  Stack, 
-  Heading, 
+import {
+  Box,
+  SimpleGrid,
+  GridItem,
+  Stack,
+  Heading,
   Flex
 } from "@chakra-ui/react"
 
@@ -29,20 +29,21 @@ export default function App() {
   const [WETH, setWETH] = useState<number>()
   const [WBTC, setWBTC] = useState<number>()
 
-  useEffect(() => {
-    const run = async () => {
-      if (address) {
-        const cr = await getCollateralRatio(address)
-        const value = await getCollateralValue(address)
-        const position = await getPosition(address)
-        
-        setWETH(Number(formatEther(position[0])))
-        setWBTC(Number(formatEther(position[1])))
-        setNVDminted(Number(formatEther(position[2])))
-        setValue(Number(value))
-        setCr(Number(cr))
-      }
+  const run = async () => {
+    if (address) {
+      const cr = await getCollateralRatio(address)
+      const value = await getCollateralValue(address)
+      const position = await getPosition(address)
+
+      setWETH(Number(formatEther(position[0])))
+      setWBTC(Number(formatEther(position[1])))
+      setNVDminted(Number(formatEther(position[2])))
+      setValue(Number(value))
+      setCr(Number(cr))
     }
+  }
+  
+  useEffect(() => {
     run()
   }, [address, isConnected])
 
@@ -56,7 +57,7 @@ export default function App() {
 
       {/* Main Layout */}
       <SimpleGrid columns={{ base: 1, md: 12 }} gap={6}>
-        
+
         {/* Left side (8/12) */}
         <GridItem colSpan={{ base: 1, md: 8 }}>
           <SimpleGrid columns={{ base: 1, md: 5 }} gap={6} mb={6}>
@@ -82,7 +83,7 @@ export default function App() {
 
         {/* Right side (4/12) - Full height */}
         <GridItem colSpan={{ base: 1, md: 4 }} rowSpan={2}>
-          <Security WETH={WETH} WBTC={WBTC} signer={signer}/>
+          <Security WETH={WETH} WBTC={WBTC} signer={signer} />
         </GridItem>
       </SimpleGrid>
     </Box>
