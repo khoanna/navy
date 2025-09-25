@@ -20,10 +20,10 @@ const Faucet = () => {
                 duration: 3000,
                 isClosable: true,
             });
-        } catch (error: any) {
+        } catch (e) {
             toast({
                 title: "Error",
-                description: error?.message || "Claim failed",
+                description: "Claim failed",
                 status: "error",
                 duration: 3000,
                 isClosable: true,
@@ -41,10 +41,10 @@ const Faucet = () => {
                 duration: 3000,
                 isClosable: true,
             });
-        } catch (error: any) {
+        } catch (e) {
             toast({
                 title: "Error",
-                description: error?.message || "Claim failed",
+                description: "Claim failed",
                 status: "error",
                 duration: 3000,
                 isClosable: true,
