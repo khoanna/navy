@@ -1,103 +1,90 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { 
+  Box, 
+  SimpleGrid, 
+  GridItem, 
+  Stack, 
+  Heading, 
+  Flex
+} from "@chakra-ui/react"
+
+import BigCard from "@/components/Content/BigCard"
+import Security from "@/components/Content/Security"
+import SmallCard from "@/components/Content/SmallCard"
+import Transactions from "@/components/Content/Transactions"
+
+import { useWeb3Context } from "@/context/Web3Context"
+import { useVault } from "@/services/Vault"
+import { useEffect, useState } from "react"
+import { formatEther } from "ethers"
+
+export default function App() {
+  const { signer, address, isConnected } = useWeb3Context()
+  const { getCollateralValue, getCollateralRatio, getPosition } = useVault(signer)
+
+  const [cr, setCr] = useState<number>()
+  const [value, setValue] = useState<number>()
+  const [NVDminted, setNVDminted] = useState<number>()
+  const [WETH, setWETH] = useState<number>()
+  const [WBTC, setWBTC] = useState<number>()
+
+  useEffect(() => {
+    const run = async () => {
+      if (address) {
+        const cr = await getCollateralRatio(address)
+        const value = await getCollateralValue(address)
+        const position = await getPosition(address)
+        
+        setWETH(Number(formatEther(position[0])))
+        setWBTC(Number(formatEther(position[1])))
+        setNVDminted(Number(formatEther(position[2])))
+        setValue(Number(value))
+        setCr(Number(cr))
+      }
+    }
+    run()
+  }, [address, isConnected])
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <Box p={8} bg="gray.50" minH="100vh">
+      {/* Header */}
+      <Flex justify="space-between" align="center" mb={10}>
+        <Heading size="xl" fontWeight="bold">Dashboard</Heading>
+        <w3m-button />
+      </Flex>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+      {/* Main Layout */}
+      <SimpleGrid columns={{ base: 1, md: 12 }} gap={6}>
+        
+        {/* Left side (8/12) */}
+        <GridItem colSpan={{ base: 1, md: 8 }}>
+          <SimpleGrid columns={{ base: 1, md: 5 }} gap={6} mb={6}>
+            <GridItem colSpan={3}>
+              <BigCard
+                title="NVD Minted"
+                balance={NVDminted}
+                cr={cr}
+                value={value}
+              />
+            </GridItem>
+            <GridItem colSpan={2}>
+              <Stack spacing={6}>
+                <SmallCard value="130%" text="Min Collateral Rate" />
+                <SmallCard value="110%" text="Liquidation Threshold" />
+              </Stack>
+            </GridItem>
+          </SimpleGrid>
+
+          {/* Transactions */}
+          <Transactions isConnected signer={signer} />
+        </GridItem>
+
+        {/* Right side (4/12) - Full height */}
+        <GridItem colSpan={{ base: 1, md: 4 }} rowSpan={2}>
+          <Security WETH={WETH} WBTC={WBTC} signer={signer}/>
+        </GridItem>
+      </SimpleGrid>
+    </Box>
+  )
 }
