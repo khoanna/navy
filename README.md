@@ -16,8 +16,8 @@ The frontend connects directly to the deployed smart contracts to allow seamless
 
 ```
 src/
- ├── app/               # Front-end app
- ├── contracts/         # Smart contract & ABIs
+ ├── app/                        # Front-end app
+ ├── contracts/contracts         # Smart contracts of Navy
 ```
 
 ---

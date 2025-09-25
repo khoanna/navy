@@ -232,7 +232,7 @@ contract NVDVault is Ownable, ReentrancyGuard {
         uint256 ethValue = (ethAmount * getLatestEthPriceInVND()) / 1e18;
         uint256 btcValue = (btcAmount * getLatestBtcPriceInVND()) / 1e18;
         uint256 totalValue = ethValue + btcValue;
-        return (totalValue) * 1e18 / debt;
+        return (totalValue*100) * 1e18 / debt;
     }
 
     function getCollateralValueNVD(

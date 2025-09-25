@@ -38,7 +38,7 @@ export const Web3ContextProvider = ({ children }: { children: ReactNode }) => {
             }
         };
         connectToBlockchain();
-    }, []);
+    }, [isConnected, address]);
 
     const value: IWeb3Context = {
         address,
