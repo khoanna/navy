@@ -34,6 +34,7 @@ Below is the list of deployed contracts with their purpose:
 | **NVDToken**          | `0xf3825D101e6Bade4Dcbd96D7de2Ed951bc425e18`                 | The main **Navy Token Vietnam Dong (NVD)** used within the ecosystem.                    |
 | **NVDMintGovernance** | `0xF48A4d9e43195bE392a3D9507Ad013387B22223D`                 | Governance contract controlling minting rules, permissions, and proposals.  |
 | **NVDVault**          | `0xE0AF880c72F3df087Ff981a7BCC093880B4f4782`                 | Secure vault managing collateral, reserves, and overall protocol stability. |
+| **RWA Token (ERC-1400)** | _TBD_ | Tokenized Real World Asset compliant with [ERC-1400](https://github.com/ndaxio/ERC1400). |
 
 ---
 
