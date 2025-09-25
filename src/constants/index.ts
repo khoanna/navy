@@ -2231,6 +2231,97 @@ const VAULT_ABI = [
     }
 ]
 
+const FAUCET_ADDRESS = "0xb4448E69f61dA820ddf8530B7d0A820720f1aF29"
+const FAUCET_ABI = [
+	{
+		"inputs": [],
+		"name": "claimWBTC",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "claimWETH",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_weth",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "_wbtc",
+				"type": "address"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "constructor"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "token",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "withdraw",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "owner",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "WBTC",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "WETH",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+]
+
 export {
     NVD_ADDRESS,
     NVD_ABI,
@@ -2241,5 +2332,7 @@ export {
     MINT_ADDRESS,
     MINT_ABI,
     VAULT_ADDRESS,
-    VAULT_ABI
+    VAULT_ABI,
+    FAUCET_ADDRESS, 
+    FAUCET_ABI
 }

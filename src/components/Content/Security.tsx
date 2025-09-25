@@ -26,7 +26,7 @@ interface TokenCardProps {
   balance?: number | string;
 }
 
-export default function DepositWithdraw(balance: { WBTC?: number, WETH?: number, signer?: JsonRpcSigner }) {
+export default function DepositWithdraw(balance: { WBTC?: number, WETH?: number, signer?: JsonRpcSigner, reload: () => void }) {
   const [amounts, setAmounts] = useState<{ [key: string]: string }>({
     WBTC: "",
     WETH: ""
@@ -44,17 +44,21 @@ export default function DepositWithdraw(balance: { WBTC?: number, WETH?: number,
     if (symbol === "WBTC") {
       await approveWBTC(amounts.WBTC)
       await depositWBTC(amounts.WBTC)
+      balance.reload();
     } else if (symbol === "WETH") {
       await approveWETH(amounts.WETH)
       await depositWETH(amounts.WETH)
+      balance.reload();
     }
   }
 
   const handleRedeem = async (symbol: string) => {
     if (symbol === "WBTC") {
       await redeemWBTC(amounts.WBTC)
+      balance.reload();
     } else if (symbol === "WETH") {
       await redeemWETH(amounts.WETH)
+      balance.reload();
     }
   }
 

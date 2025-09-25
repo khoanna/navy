@@ -6,7 +6,7 @@ import { Box, Flex, Heading, Input, Button, Stack, Text } from "@chakra-ui/react
 import { JsonRpcSigner } from "ethers"
 import { useState } from "react"
 
-export default function MintAndBurn({ isConnected, signer }: { isConnected: boolean, signer?: JsonRpcSigner }) {
+export default function MintAndBurn({ isConnected, signer, reload }: { isConnected: boolean, signer?: JsonRpcSigner, reload: () => void }) {
   const [mintAmount, setMintAmount] = useState("")
   const [repayAmount, setRepayAmount] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -21,6 +21,8 @@ export default function MintAndBurn({ isConnected, signer }: { isConnected: bool
       setLoading("mint")
       if (!mintAmount || Number(mintAmount) <= 0) throw new Error("Invalid mint amount")
       await mintNVD(mintAmount);
+      setMintAmount("")
+      reload();
       console.log("Minting:", mintAmount)
     } catch (e) {
       setError("Mint failed")
@@ -36,6 +38,8 @@ export default function MintAndBurn({ isConnected, signer }: { isConnected: bool
       if (!repayAmount || Number(repayAmount) <= 0) throw new Error("Invalid repay amount")
       await approve(repayAmount)
       await repayNVD(repayAmount);
+      setRepayAmount("")
+      reload();
       console.log("Repaying:", repayAmount)
     } catch (e) {
       setError("Repay failed")

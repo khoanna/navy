@@ -25,7 +25,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const handleMint = async (amount: string) => {
         try {
             const tx = await contract.mintNVD(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -34,7 +34,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const handleBurn = async (amount: string) => {
         try {
             const tx = await contract.repays(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Repay exceeds minted amount!")
         }
@@ -52,7 +52,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const depositWETH = async (amount: string) => {
         try {
             const tx = await contract.depositWETH(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -61,7 +61,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const depositWBTC = async (amount: string) => {
         try {
             const tx = await contract.depositWBTC(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -70,7 +70,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const redeemWETH = async (amount: string) => {
         try {
             const tx = await contract.withdrawWETH(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -79,7 +79,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const redeemWBTC = async (amount: string) => {
         try {
             const tx = await contract.withdrawWBTC(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -88,7 +88,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const mintNVD = async (amount: string) => {
         try {
             const tx = await contract.mintNVD(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Your collateral ratio is too low!")
         }
@@ -97,7 +97,7 @@ export const useVault = (signer?: JsonRpcSigner) => {
     const repayNVD = async (amount: string) => {
         try {
             const tx = await contract.repay(parseEther(amount));
-            await tx;
+            await tx.wait();
         } catch (error) {
             throw new Error("Repay exceeds NVD minted!")
         }

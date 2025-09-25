@@ -16,7 +16,7 @@ import Transactions from "@/components/Content/Transactions"
 
 import { useWeb3Context } from "@/context/Web3Context"
 import { useVault } from "@/services/Vault"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { formatEther } from "ethers"
 
 export default function App() {
@@ -29,36 +29,33 @@ export default function App() {
   const [WETH, setWETH] = useState<number>()
   const [WBTC, setWBTC] = useState<number>()
 
-  const run = async () => {
-    if (address) {
-      const cr = await getCollateralRatio(address)
-      const value = await getCollateralValue(address)
-      const position = await getPosition(address)
+  const run = useCallback(async () => {
+    if (address && isConnected) {
+      const cr = await getCollateralRatio(address);
+      const value = await getCollateralValue(address);
+      const position = await getPosition(address);
 
-      setWETH(Number(formatEther(position[0])))
-      setWBTC(Number(formatEther(position[1])))
-      setNVDminted(Number(formatEther(position[2])))
-      setValue(Number(value))
-      setCr(Number(cr))
+      setWETH(Number(formatEther(position[0])));
+      setWBTC(Number(formatEther(position[1])));
+      setNVDminted(Number(formatEther(position[2])));
+      setValue(Number(value));
+      setCr(Number(cr));
     }
-  }
-  
+  }, [address, isConnected, getCollateralRatio, getCollateralValue, getPosition]);
+
   useEffect(() => {
     run()
   }, [address, isConnected])
 
   return (
     <Box p={8} bg="gray.50" minH="100vh">
-      {/* Header */}
       <Flex justify="space-between" align="center" mb={10}>
         <Heading size="xl" fontWeight="bold">Dashboard</Heading>
         <w3m-button />
       </Flex>
 
-      {/* Main Layout */}
       <SimpleGrid columns={{ base: 1, md: 12 }} gap={6}>
 
-        {/* Left side (8/12) */}
         <GridItem colSpan={{ base: 1, md: 8 }}>
           <SimpleGrid columns={{ base: 1, md: 5 }} gap={6} mb={6}>
             <GridItem colSpan={3}>
@@ -77,13 +74,11 @@ export default function App() {
             </GridItem>
           </SimpleGrid>
 
-          {/* Transactions */}
-          <Transactions isConnected signer={signer} />
+          <Transactions isConnected signer={signer} reload={run} />
         </GridItem>
 
-        {/* Right side (4/12) - Full height */}
         <GridItem colSpan={{ base: 1, md: 4 }} rowSpan={2}>
-          <Security WETH={WETH} WBTC={WBTC} signer={signer} />
+          <Security WETH={WETH} WBTC={WBTC} signer={signer} reload={run} />
         </GridItem>
       </SimpleGrid>
     </Box>
