@@ -145,8 +145,8 @@ const BankDashboard: React.FC = () => {
                                         >
                                             <HStack justify="space-between">
                                                 <Text fontWeight="bold">Request #{req[0]}</Text>
-                                                <Badge colorScheme={req[4] ? 'green' : 'yellow'}>
-                                                    {req[4] ? 'Confirmed' : 'Pending'}
+                                                <Badge colorScheme='yellow'>
+                                                    Pending
                                                 </Badge>
                                             </HStack>
                                             <Divider my={3} />
