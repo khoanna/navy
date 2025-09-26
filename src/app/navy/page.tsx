@@ -157,16 +157,14 @@ const BankDashboard: React.FC = () => {
                                                 <b>Amount:</b>{' '}
                                                 {Number(formatEther(req[2])).toLocaleString('vi-VN')} NVD
                                             </Text>
-                                            {!req[4] && (
-                                                <Button
-                                                    mt={4}
-                                                    colorScheme="green"
-                                                    size="sm"
-                                                    onClick={() => handleConfirm(req[0])}
-                                                >
-                                                    Confirm
-                                                </Button>
-                                            )}
+                                            <Button
+                                                mt={4}
+                                                colorScheme="green"
+                                                size="sm"
+                                                onClick={() => handleConfirm(req[0])}
+                                            >
+                                                Confirm
+                                            </Button>
                                         </Box>
                                     ))}
                                 </Stack>

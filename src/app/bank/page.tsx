@@ -21,7 +21,7 @@ import {
     Badge,
     Flex
 } from '@chakra-ui/react'
-import {formatEther } from 'ethers'
+import { formatEther } from 'ethers'
 
 const BankDashboard: React.FC = () => {
     const { signer, isConnected } = useWeb3Context()
@@ -157,16 +157,14 @@ const BankDashboard: React.FC = () => {
                                                 <b>Amount:</b>{' '}
                                                 {Number(formatEther(req[2])).toLocaleString('vi-VN')} NVD
                                             </Text>
-                                            {!req[4] && (
-                                                <Button
-                                                    mt={4}
-                                                    colorScheme="green"
-                                                    size="sm"
-                                                    onClick={() => handleConfirm(req[0])}
-                                                >
-                                                    Confirm
-                                                </Button>
-                                            )}
+                                            <Button
+                                                mt={4}
+                                                colorScheme="green"
+                                                size="sm"
+                                                onClick={() => handleConfirm(req[0])}
+                                            >
+                                                Confirm
+                                            </Button>
                                         </Box>
                                     ))}
                                 </Stack>
@@ -174,7 +172,7 @@ const BankDashboard: React.FC = () => {
                         )}
                     </CardBody>
                 </Card>
-f
+                f
             </Stack>
         </Box>
     )
