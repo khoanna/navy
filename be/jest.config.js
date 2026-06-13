@@ -5,4 +5,5 @@ module.exports = {
   transform: { '^.+\\.ts$': 'ts-jest' },
   collectCoverageFrom: ['src/**/*.ts'],
   testEnvironment: 'node',
+  setupFiles: ['dotenv/config'],
 };
