@@ -24,6 +24,12 @@
     "plugins": [
       "expo-secure-store",
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "privyAppId": "PRIVY_APP_ID_PLACEHOLDER",
+      "privyClientId": "PRIVY_CLIENT_ID_PLACEHOLDER",
+      "navyApiUrl": "http://localhost:3000"
+    },
+    "scheme": "navy"
   }
 }
