@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeyService } from './api-key.service';
@@ -21,7 +21,15 @@ export class MerchantService {
     return merchant;
   }
 
+  private async assertApproved(merchantId: string) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) throw new UnauthorizedException('Merchant not found');
+    if (merchant.approvalStatus !== 'approved') throw new ForbiddenException('Merchant not approved');
+    return merchant;
+  }
+
   async issueApiKey(merchantId: string) {
+    await this.assertApproved(merchantId);
     const issued = this.apiKeys.generate();
     await this.prisma.merchantApiKey.create({
       data: { merchantId, apiKey: issued.apiKey, secretHash: issued.secretHash },
@@ -30,6 +38,7 @@ export class MerchantService {
   }
 
   async setPayoutAddress(merchantId: string, address: string, message: string, signature: string) {
+    await this.assertApproved(merchantId);
     if (!verifyWalletSignature(address, message, signature)) {
       throw new BadRequestException('Invalid wallet signature');
     }
