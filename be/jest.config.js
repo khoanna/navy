@@ -3,8 +3,11 @@ module.exports = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   transform: { '^.+\\.ts$': 'ts-jest' },
+  // @solana/web3.js -> rpc-websockets pulls in an ESM-only uuid that Jest's CJS
+  // runner can't require; redirect to the CJS-compatible uuid resolved from our
+  // direct devDependency (stable, not pinned to a pnpm store hash).
   moduleNameMapper: {
-    '^uuid$': require.resolve('/home/khoa/Desktop/uni/be/node_modules/.pnpm/uuid@8.3.2/node_modules/uuid/dist/index.js'),
+    '^uuid$': require.resolve('uuid'),
   },
   collectCoverageFrom: ['src/**/*.ts'],
   testEnvironment: 'node',
