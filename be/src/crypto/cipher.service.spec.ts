@@ -26,4 +26,26 @@ describe('EnvelopeCipherService', () => {
     const bad = { ...sealed, encryptedPrivkey: Buffer.from('00'.repeat(40), 'hex').toString('base64') };
     await expect(cipher.open(bad)).rejects.toThrow();
   });
+
+  it('rejects a 32-byte != master key', () => {
+    expect(() => new EnvelopeCipherService(Buffer.alloc(16, 1))).toThrow(/32 bytes/);
+  });
+
+  it('fails to open if the wrapped data key is tampered (wrap-layer auth)', async () => {
+    const sealed = await cipher.seal(Buffer.from('secret'));
+    const bad = { ...sealed, dataKeyWrapped: Buffer.from('00'.repeat(40), 'hex').toString('base64') };
+    await expect(cipher.open(bad)).rejects.toThrow();
+  });
+
+  it('fails to open under a different master key', async () => {
+    const sealed = await cipher.seal(Buffer.from('secret'));
+    const other = new EnvelopeCipherService(Buffer.alloc(32, 99));
+    await expect(other.open(sealed)).rejects.toThrow();
+  });
+
+  it('rejects a malformed (too short) blob', async () => {
+    const bad = { encryptedPrivkey: Buffer.from('00', 'hex').toString('base64'),
+                  dataKeyWrapped: (await cipher.seal(Buffer.from('x'))).dataKeyWrapped };
+    await expect(cipher.open(bad)).rejects.toThrow();
+  });
 });

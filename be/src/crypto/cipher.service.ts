@@ -11,6 +11,7 @@ function enc(key: Buffer, plaintext: Buffer): string {
 }
 function dec(key: Buffer, blob: string): Buffer {
   const buf = Buffer.from(blob, 'base64');
+  if (buf.length < 28) throw new Error('malformed ciphertext blob');
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(12, 28);
   const ct = buf.subarray(28);
@@ -21,7 +22,9 @@ function dec(key: Buffer, blob: string): Buffer {
 
 @Injectable()
 export class EnvelopeCipherService implements Cipher {
-  constructor(private readonly masterKey: Buffer) {}
+  constructor(private readonly masterKey: Buffer) {
+    if (masterKey.length !== 32) throw new Error('master key must be 32 bytes');
+  }
 
   async seal(plaintext: Buffer): Promise<SealedSecret> {
     const dataKey = randomBytes(32);

@@ -1,6 +1,6 @@
 export interface SealedSecret {
-  encryptedPrivkey: string; // base64 iv:tag:ciphertext
-  dataKeyWrapped: string;   // base64 iv:tag:wrappedDataKey
+  encryptedPrivkey: string; // base64(iv(12) || tag(16) || ciphertext)
+  dataKeyWrapped: string;   // base64(iv(12) || tag(16) || ciphertext)
 }
 
 export interface Cipher {
