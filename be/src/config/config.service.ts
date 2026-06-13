@@ -1,0 +1,30 @@
+import { Injectable } from '@nestjs/common';
+
+export type Network = 'devnet' | 'mainnet';
+
+@Injectable()
+export class NavyConfigService {
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {
+    if (!/^[0-9a-fA-F]{64}$/.test(this.req('SUBWALLET_MASTER_KEY'))) {
+      throw new Error('SUBWALLET_MASTER_KEY must be 32 bytes (64 hex chars)');
+    }
+  }
+  private req(k: string): string {
+    const v = this.env[k];
+    if (!v) throw new Error(`Missing required env var: ${k}`);
+    return v;
+  }
+  get network(): Network { return this.req('NETWORK') as Network; }
+  get rpcUrl(): string {
+    return this.network === 'mainnet'
+      ? this.req('SOLANA_RPC_MAINNET')
+      : this.req('SOLANA_RPC_DEVNET');
+  }
+  get jwtSecret(): string { return this.req('NAVY_JWT_SECRET'); }
+  get accessTtl(): number { return parseInt(this.req('NAVY_JWT_ACCESS_TTL'), 10); }
+  get refreshTtl(): number { return parseInt(this.req('NAVY_JWT_REFRESH_TTL'), 10); }
+  get masterKey(): Buffer { return Buffer.from(this.req('SUBWALLET_MASTER_KEY'), 'hex'); }
+  get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
+  get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
+  get adminMaxTotpFails(): number { return parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10); }
+}
