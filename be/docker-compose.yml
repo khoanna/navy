@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: navy
+      POSTGRES_PASSWORD: navy
+      POSTGRES_DB: navy
+    ports:
+      - "5432:5432"
+    volumes:
+      - navy_pg:/var/lib/postgresql/data
+volumes:
+  navy_pg:
