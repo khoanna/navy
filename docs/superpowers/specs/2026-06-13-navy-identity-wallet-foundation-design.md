@@ -231,3 +231,17 @@ audit_log(
 - Merchant approval workflow (state transitions, admin review UI) → **Admin Panel** project.
 - Farming logic, pool integrations, compounding, subwallet funding UX → **Farming Agent** project.
 - Move encryption master key into KMS/HSM → **before mainnet launch** (tracked as the documented upgrade path in §6).
+
+## 11. Backend implementation status & review follow-ups (as of 2026-06-13)
+
+The backend (Plan 1 of 3) is implemented on branch `feat/identity-wallet-backend` — 18 commits, 32 unit tests + 4 e2e tests passing, build clean. A final holistic review confirmed the core is sound (RBAC correctly applied, JWT claim shape consistent, secrets never leaked, constant-time HMAC compare, sound AES-256-GCM envelope, and the SigningService deriving program IDs authoritatively from the transaction). One blocking finding was fixed inline:
+
+- **Fixed — merchant approval gate (C1):** `approvalStatus` was a dead field; privileged merchant capabilities (`issueApiKey`, `setPayoutAddress`) now require `approvalStatus === 'approved'`. Admin-driven approval remains deferred to the Admin Panel project (simulated via DB update in e2e).
+
+Deferred follow-ups (documented, not blocking the foundation):
+- **Refresh-token rotation / logout / revocation** — `AuthSession` rows are written but never consumed; add a refresh+revoke endpoint. (Auth hardening)
+- **Global `ValidationPipe` + class-validator DTOs** — currently missing; malformed bodies can reach argon2/Privy and 500 instead of 400.
+- **Runtime claim-shape validation in `verifyAccess`** — assert `role ∈ {user,merchant,admin}`; defense-in-depth if a future endpoint forgets `@Roles`.
+- **Payout-binding message hardening (M2)** — server-template the signed message with `merchantId` + nonce + expiry to prevent replay, before payouts go live.
+- **SigningService transfer-destination decoding** — `transferDestinations` is still caller-provided (clearly marked `SECURITY TODO`); decode SystemProgram/SPL-token transfers from the tx before the farming agent goes live. (Farming Agent project)
+- **Minor:** consolidate the duplicated `PrivyService` provider (WalletModule + UserModule); admin lockout has no auto-unlock timer; modernize the Prisma generator to `prisma-client`.
