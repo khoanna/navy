@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  privyDid      String   @unique
+  primaryWallet String?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  subwallets    FarmingSubwallet[]
+}
+
+model Merchant {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  passwordHash   String
+  businessName   String
+  approvalStatus String   @default("pending")
+  payoutAddress  String?
+  createdAt      DateTime @default(now())
+  apiKeys        MerchantApiKey[]
+}
+
+model MerchantApiKey {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  apiKey     String   @unique
+  secretHash String
+  status     String   @default("active")
+  createdAt  DateTime @default(now())
+}
+
+model Admin {
+  id              String @id @default(uuid())
+  email           String @unique
+  passwordHash    String
+  totpSecret      String
+  failedTotpCount Int    @default(0)
+}
+
+model FarmingSubwallet {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  pubkey           String   @unique
+  encryptedPrivkey String
+  dataKeyWrapped   String
+  policyJson       Json
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+}
+
+model AuthSession {
+  id               String   @id @default(uuid())
+  subjectId        String
+  role             String
+  refreshTokenHash String
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actor     String
+  action    String
+  target    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
