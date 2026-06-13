@@ -10,16 +10,19 @@ module.exports = {
           diagnostics: false,
         }],
       },
-      testMatch: ['<rootDir>/src/config/**/*.test.ts'],
+      // All plain-TS logic modules (env, api client, token store, session) are
+      // written without React Native imports, so they run here under ts-jest/node.
+      testMatch: ['<rootDir>/src/**/*.test.ts'],
     },
-    // React Native / Expo component tests.
+    // React Native / Expo component tests (*.test.tsx). None yet — UI is verified
+    // by typecheck + manual smoke — but this keeps RN tests off the node project.
     {
       displayName: 'expo',
       preset: 'jest-expo',
       transformIgnorePatterns: [
         'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@privy-io/.*|@solana/.*))',
       ],
-      testMatch: ['<rootDir>/src/**/!(config)/**/*.test.{ts,tsx}', '<rootDir>/src/**/*.test.tsx'],
+      testMatch: ['<rootDir>/src/**/*.test.tsx'],
     },
   ],
 };
