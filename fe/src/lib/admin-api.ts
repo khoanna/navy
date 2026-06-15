@@ -1,0 +1,17 @@
+import { cookies } from 'next/headers';
+import { ACCESS_COOKIE } from './session';
+import { serverEnv } from './env';
+
+export function buildAuthHeaders(token: string | undefined): Record<string, string> {
+  if (!token) throw new Error('unauthenticated: no admin session token');
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+export async function adminBackendFetch(path: string, init?: RequestInit): Promise<Response> {
+  const token = (await cookies()).get(ACCESS_COOKIE)?.value;
+  return fetch(`${serverEnv().navyApiUrl}${path}`, {
+    ...init,
+    headers: { ...buildAuthHeaders(token), ...(init?.headers ?? {}) },
+    cache: 'no-store',
+  });
+}
