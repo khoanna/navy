@@ -16,10 +16,12 @@ function prismaMock(merchant: any) {
   } as any;
 }
 
+const cipherStub = () => ({ seal: jest.fn().mockResolvedValue({ encryptedPrivkey: 'e', dataKeyWrapped: 'w' }), open: jest.fn() } as any);
+
 describe('MerchantService', () => {
   it('logs in with a valid email + password', async () => {
     const merchant = { id: 'm1', email: 'm@x.com', passwordHash: await argon2.hash('pw'), approvalStatus: 'approved' };
-    const svc = new MerchantService(prismaMock(merchant), new ApiKeyService());
+    const svc = new MerchantService(prismaMock(merchant), new ApiKeyService(), cipherStub());
     const result = await svc.login('m@x.com', 'pw');
     expect(result.id).toBe('m1');
   });
@@ -30,14 +32,14 @@ describe('MerchantService', () => {
     const message = 'Navy payout binding for m1';
     const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
     const prisma = prismaMock({ id: 'm1', approvalStatus: 'approved' });
-    const svc = new MerchantService(prisma, new ApiKeyService());
+    const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
     const out = await svc.setPayoutAddress('m1', address, message, signature);
     expect(out.payoutAddress).toBe(address);
   });
 
   it('rejects a payout address with a bad signature', async () => {
     const kp = Keypair.generate();
-    const svc = new MerchantService(prismaMock({ id: 'm1', approvalStatus: 'approved' }), new ApiKeyService());
+    const svc = new MerchantService(prismaMock({ id: 'm1', approvalStatus: 'approved' }), new ApiKeyService(), cipherStub());
     await expect(
       svc.setPayoutAddress('m1', kp.publicKey.toBase58(), 'msg', bs58.encode(Buffer.alloc(64))),
     ).rejects.toThrow(/signature/);
@@ -48,7 +50,7 @@ describe('MerchantService', () => {
       merchant: { findUnique: jest.fn().mockResolvedValue({ id: 'm1', approvalStatus: 'pending' }) },
       merchantApiKey: { create: jest.fn() },
     } as any;
-    const svc = new MerchantService(prisma, new ApiKeyService());
+    const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
     await expect(svc.issueApiKey('m1')).rejects.toThrow(/not approved/i);
     expect(prisma.merchantApiKey.create).not.toHaveBeenCalled();
   });
@@ -65,8 +67,23 @@ describe('MerchantService', () => {
     const prisma = {
       merchant: { findUnique: jest.fn().mockResolvedValue({ id: 'm1', approvalStatus: 'pending' }), update: jest.fn() },
     } as any;
-    const svc = new MerchantService(prisma, new ApiKeyService());
+    const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
     await expect(svc.setPayoutAddress('m1', address, message, signature)).rejects.toThrow(/not approved/i);
     expect(prisma.merchant.update).not.toHaveBeenCalled();
+  });
+
+  it('stores the api secret encrypted (envelope) for later HMAC verification', async () => {
+    const sealed = { encryptedPrivkey: 'enc', dataKeyWrapped: 'wrap' };
+    const cipher = { seal: jest.fn().mockResolvedValue(sealed), open: jest.fn() };
+    const create = jest.fn().mockResolvedValue({ id: 'k1' });
+    const prisma = { merchant: { findUnique: jest.fn().mockResolvedValue({ id: 'm1', approvalStatus: 'approved' }) },
+                     merchantApiKey: { create } } as any;
+    const { ApiKeyService } = require('./api-key.service');
+    const svc = new MerchantService(prisma, new ApiKeyService(), cipher as any);
+    await svc.issueApiKey('m1');
+    expect(cipher.seal).toHaveBeenCalled();
+    const data = create.mock.calls[0][0].data;
+    expect(data.secretEnc).toBe('enc');
+    expect(data.dataKeyWrapped).toBe('wrap');
   });
 });

@@ -1,12 +1,18 @@
-import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeyService } from './api-key.service';
 import { verifyWalletSignature } from '../common/solana.util';
+import { CIPHER } from '../crypto/cipher.interface';
+import type { Cipher } from '../crypto/cipher.interface';
 
 @Injectable()
 export class MerchantService {
-  constructor(private readonly prisma: PrismaService, private readonly apiKeys: ApiKeyService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly apiKeys: ApiKeyService,
+    @Inject(CIPHER) private readonly cipher: Cipher,
+  ) {}
 
   async signup(email: string, password: string, businessName: string) {
     const passwordHash = await argon2.hash(password);
@@ -31,8 +37,15 @@ export class MerchantService {
   async issueApiKey(merchantId: string) {
     await this.assertApproved(merchantId);
     const issued = this.apiKeys.generate();
+    const sealed = await this.cipher.seal(Buffer.from(issued.apiSecret, 'utf8'));
     await this.prisma.merchantApiKey.create({
-      data: { merchantId, apiKey: issued.apiKey, secretHash: issued.secretHash },
+      data: {
+        merchantId,
+        apiKey: issued.apiKey,
+        secretHash: issued.secretHash,
+        secretEnc: sealed.encryptedPrivkey,
+        dataKeyWrapped: sealed.dataKeyWrapped,
+      },
     });
     return { apiKey: issued.apiKey, apiSecret: issued.apiSecret };
   }
