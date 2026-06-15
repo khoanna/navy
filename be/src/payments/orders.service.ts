@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,10 +28,38 @@ export class OrdersService {
       },
     });
     await this.audit.record({ actor: `merchant:${merchantId}`, action: 'order.create', target: id });
-    const payUrl = `${this.payBaseUrl}/${id}`;
+    const payUrl = `${this.payBaseUrl}/${order.id}`;
     const qr = await QRCode.toDataURL(payUrl);
-    return { orderId: id, payUrl, qr, amount: order.amount.toString(), expiresAt, status: order.status };
+    return { orderId: order.id, payUrl, qr, amount: order.amount.toString(), expiresAt, status: order.status };
   }
 
   get(id: string) { return this.prisma.order.findUnique({ where: { id } }); }
+
+  private serialize(o: any) {
+    return {
+      id: o.id, reference: o.reference, amount: o.amount.toString(), status: o.status,
+      createdAt: o.createdAt, paidAt: o.paidAt ?? null, payer: o.payer ?? null, txSignature: o.txSignature ?? null,
+    };
+  }
+
+  async createForMerchant(merchantId: string, input: CreateOrderInput) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant || merchant.approvalStatus !== 'approved') {
+      throw new ConflictException('Merchant is not approved');
+    }
+    return this.create(merchantId, input);
+  }
+
+  async listForMerchant(merchantId: string, opts: { status?: string; take: number; skip: number }) {
+    const where: any = { merchantId };
+    if (opts.status && opts.status !== 'all') where.status = opts.status;
+    const rows = await this.prisma.order.findMany({ where, take: opts.take, skip: opts.skip, orderBy: { createdAt: 'desc' } });
+    return rows.map((o) => this.serialize(o));
+  }
+
+  async getForMerchant(merchantId: string, id: string) {
+    const o = await this.prisma.order.findFirst({ where: { id, merchantId } });
+    if (!o) throw new NotFoundException('Order not found');
+    return this.serialize(o);
+  }
 }
