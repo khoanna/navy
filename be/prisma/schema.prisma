@@ -20,11 +20,14 @@ model Merchant {
   email          String   @unique
   passwordHash   String
   businessName   String
-  approvalStatus String   @default("pending")
-  payoutAddress  String?
-  createdAt      DateTime @default(now())
-  apiKeys        MerchantApiKey[]
-  orders         Order[]
+  approvalStatus        String    @default("pending")
+  payoutAddress         String?
+  createdAt             DateTime  @default(now())
+  onchainRegisteredAt   DateTime?
+  onchainRegisterTx     String?
+  rejectionReason       String?
+  apiKeys               MerchantApiKey[]
+  orders                Order[]
 }
 
 model MerchantApiKey {
