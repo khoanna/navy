@@ -76,3 +76,17 @@ describe('OrdersService merchant-scoped', () => {
     await expect(svc.getForMerchant('m1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('OrdersService.listForPayer', () => {
+  it("returns the payer's paid orders, scoped + serialized", async () => {
+    const rows = [{ id: 'o1', reference: 'R1', amount: 990000n, status: 'paid', paidAt: new Date(), txSignature: 'sig', merchant: { businessName: 'Acme' } }];
+    const prisma = { order: { findMany: jest.fn().mockResolvedValue(rows) } } as any;
+    const audit = { record: jest.fn() } as any;
+    const svc = new OrdersService(prisma, audit, 'navy://pay', 100);
+    const out = await svc.listForPayer('PAYER', { take: 50, skip: 0 });
+    expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { payer: 'PAYER', status: 'paid' }, orderBy: { paidAt: 'desc' },
+    }));
+    expect(out[0]).toEqual(expect.objectContaining({ orderId: 'o1', amount: '990000', merchant: 'Acme', txSignature: 'sig' }));
+  });
+});

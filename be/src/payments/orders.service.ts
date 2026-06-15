@@ -62,4 +62,16 @@ export class OrdersService {
     if (!o) throw new NotFoundException('Order not found');
     return this.serialize(o);
   }
+
+  async listForPayer(payer: string, opts: { take: number; skip: number }) {
+    const rows = await this.prisma.order.findMany({
+      where: { payer, status: 'paid' },
+      orderBy: { paidAt: 'desc' }, take: opts.take, skip: opts.skip,
+      include: { merchant: { select: { businessName: true } } },
+    });
+    return rows.map((o: any) => ({
+      orderId: o.id, reference: o.reference, amount: o.amount.toString(), status: o.status,
+      paidAt: o.paidAt, txSignature: o.txSignature ?? null, merchant: o.merchant?.businessName ?? null,
+    }));
+  }
 }

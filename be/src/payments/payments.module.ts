@@ -3,6 +3,7 @@ import { OnchainModule } from '../onchain/onchain.module';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { MerchantOrdersController } from './merchant-orders.controller';
+import { UserPaymentsController } from './user-payments.controller';
 import { RelayerService } from './relayer.service';
 import { ChainWatcherService } from './chain-watcher.service';
 import { WebhookService } from './webhook.service';
@@ -15,7 +16,7 @@ import { AuditService } from '../audit/audit.service';
 
 @Module({
   imports: [OnchainModule],
-  controllers: [OrdersController, MerchantOrdersController],
+  controllers: [OrdersController, MerchantOrdersController, UserPaymentsController],
   providers: [
     ApiKeyService,
     OrderAuthService,
