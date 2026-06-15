@@ -24,16 +24,19 @@ model Merchant {
   payoutAddress  String?
   createdAt      DateTime @default(now())
   apiKeys        MerchantApiKey[]
+  orders         Order[]
 }
 
 model MerchantApiKey {
-  id         String   @id @default(uuid())
-  merchantId String
-  merchant   Merchant @relation(fields: [merchantId], references: [id])
-  apiKey     String   @unique
-  secretHash String
-  status     String   @default("active")
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  merchantId     String
+  merchant       Merchant @relation(fields: [merchantId], references: [id])
+  apiKey         String   @unique
+  secretHash     String
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+  secretEnc      String?
+  dataKeyWrapped String?
 }
 
 model Admin {
@@ -72,4 +75,34 @@ model AuditLog {
   target    String?
   metadata  Json?
   createdAt DateTime @default(now())
+}
+
+model Order {
+  id               String   @id @default(uuid())
+  merchantId       String
+  merchant         Merchant @relation(fields: [merchantId], references: [id])
+  reference        String
+  amount           BigInt
+  feeBps           Int
+  status           String   @default("created")
+  onchainInvoiceId String
+  txSignature      String?
+  payer            String?
+  callbackUrl      String?
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  paidAt           DateTime?
+  webhooks         WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id          String   @id @default(uuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+  url         String
+  status      String   @default("pending")
+  attempts    Int      @default(0)
+  lastError   String?
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
 }
