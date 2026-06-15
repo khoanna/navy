@@ -28,7 +28,9 @@
     "extra": {
       "privyAppId": "PRIVY_APP_ID_PLACEHOLDER",
       "privyClientId": "PRIVY_CLIENT_ID_PLACEHOLDER",
-      "navyApiUrl": "http://localhost:3000"
+      "navyApiUrl": "http://localhost:3000",
+      "solanaRpc": "https://api.devnet.solana.com",
+      "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
     },
     "scheme": "navy"
   }
