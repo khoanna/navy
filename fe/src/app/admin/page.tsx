@@ -9,7 +9,7 @@ export default async function AdminDashboard() {
     <main style={{ padding: 32, fontFamily: 'sans-serif' }}>
       <h1>Admin dashboard</h1>
       <p>Signed in as role: <b>{role ?? 'unknown'}</b></p>
-      <p>Merchant approval management arrives in the Admin Panel sub-project.</p>
+      <p><a href="/admin/merchants">Manage merchants →</a></p>
       <LogoutButton />
     </main>
   );

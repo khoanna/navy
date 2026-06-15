@@ -32,3 +32,8 @@ Prerequisites: Solana CLI, Anchor, a funded devnet keypair at ~/.config/solana/i
 8. Smoke: with the backend running, create an order (HMAC), GET /v1/orders/:id/payment-tx?payer=<userPubkey>,
    sign the returned tx with the user wallet, POST /v1/orders/:id/submit { signedTx }, then GET /v1/orders/:id
    and confirm status 'paid' and the webhook fired.
+
+## Admin registrar (sub-project 4)
+- NAVY_ADMIN_SECRET must be the program's admin authority keypair (the one that ran `init-config`), as a 64-byte JSON array. Fund it with devnet SOL (it pays rent for register_merchant): `solana airdrop 2 <registrarPubkey> --url devnet`.
+- Approving a merchant in the admin UI calls register_merchant (or reactivates) on-chain automatically; rejecting deactivates.
+- Integration check (localnet): with the program deployed + config initialized, set NAVY_ADMIN_SECRET to the config admin, create a merchant with a payoutAddress, POST /admin/merchants/:id/approve, then assert the on-chain Merchant PDA exists and active=true (mirror onchain/tests/navy-payments.merchant.ts).
