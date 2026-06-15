@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { OnchainModule } from '../onchain/onchain.module';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
+import { MerchantOrdersController } from './merchant-orders.controller';
 import { RelayerService } from './relayer.service';
 import { ChainWatcherService } from './chain-watcher.service';
 import { WebhookService } from './webhook.service';
@@ -14,7 +15,7 @@ import { AuditService } from '../audit/audit.service';
 
 @Module({
   imports: [OnchainModule],
-  controllers: [OrdersController],
+  controllers: [OrdersController, MerchantOrdersController],
   providers: [
     ApiKeyService,
     OrderAuthService,
