@@ -1,0 +1,52 @@
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { PublicKey, Transaction } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
+import { NAVY_ONCHAIN } from '../onchain/onchain.module';
+import type { NavyOnchain } from '../onchain/onchain.module';
+import { buildPayInvoiceTx } from '../onchain/payments-client';
+import { orderIdToInvoiceId } from './invoice-id';
+
+@Injectable()
+export class RelayerService {
+  private issued = new Map<string, Buffer>();
+
+  constructor(@Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain) {}
+
+  async buildPaymentTx(
+    order: { id: string; amount: bigint; expiresAt: Date },
+    merchantAuthority: PublicKey,
+    payer: PublicKey,
+  ): Promise<string> {
+    const payout = await getAssociatedTokenAddress(this.chain.usdcMint, merchantAuthority);
+    const tx = await buildPayInvoiceTx(this.chain.program, {
+      merchantAuthority,
+      payout,
+      treasury: this.chain.treasury,
+      usdcMint: this.chain.usdcMint,
+      invoiceId: orderIdToInvoiceId(order.id),
+      amount: order.amount,
+      expiry: Math.floor(order.expiresAt.getTime() / 1000),
+      payer,
+      relayer: this.chain.relayer.publicKey,
+    });
+    tx.recentBlockhash = (await this.chain.connection.getLatestBlockhash()).blockhash;
+    tx.feePayer = this.chain.relayer.publicKey;
+    tx.partialSign(this.chain.relayer);
+    this.issued.set(order.id, tx.serializeMessage());
+    return tx.serialize({ requireAllSignatures: false }).toString('base64');
+  }
+
+  messagesMatch(a: Transaction, b: Transaction): boolean {
+    return a.serializeMessage().equals(b.serializeMessage());
+  }
+
+  async verifyAndSubmit(orderId: string, signedTxB64: string): Promise<string> {
+    const expected = this.issued.get(orderId);
+    if (!expected) throw new BadRequestException('No issued transaction for this order');
+    const tx = Transaction.from(Buffer.from(signedTxB64, 'base64'));
+    if (!tx.serializeMessage().equals(expected)) throw new BadRequestException('Submitted transaction does not match issued');
+    const sig = await this.chain.connection.sendRawTransaction(tx.serialize());
+    await this.chain.connection.confirmTransaction(sig, 'confirmed');
+    return sig;
+  }
+}
