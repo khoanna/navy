@@ -8,6 +8,7 @@
     "@solana/web3.js": "^1.98.4",
     "expo": "~56.0.11",
     "expo-application": "~56.0.3",
+    "expo-camera": "~56.0.8",
     "expo-constants": "~56.0.18",
     "expo-linking": "~56.0.14",
     "expo-router": "~56.2.10",
