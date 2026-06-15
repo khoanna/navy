@@ -1,0 +1,32 @@
+[package]
+name = "navy-payments"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "navy_payments"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+
+[dependencies]
+anchor-lang = { version = "0.32.0", features = ["init-if-needed"] }
+anchor-spl = "0.32.0"
+# Force blake3 to 1.5.5 to avoid digest 0.11 / block-buffer 0.12.1 which
+# requires Rust 1.85 (incompatible with Solana platform-tools v1.51 / rustc 1.84.1)
+blake3 = "=1.5.5"
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
