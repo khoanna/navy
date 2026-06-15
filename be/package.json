@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.js"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -28,6 +29,7 @@
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@privy-io/server-auth": "^1.32.5",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "argon2": "^0.44.0",
     "bs58": "^6.0.0",
