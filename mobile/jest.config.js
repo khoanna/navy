@@ -10,10 +10,11 @@ module.exports = {
           diagnostics: false,
         }],
       },
-      // uuid v14 is ESM-only; remap it to the CJS-compatible v8 build that's
-      // already present in the pnpm store as a transitive dependency.
+      // @solana/spl-token -> rpc-websockets pulls in an ESM-only uuid that the
+      // node/ts-jest project can't require; redirect to the CJS uuid resolved
+      // from our direct devDependency (stable, not pinned to a pnpm store hash).
       moduleNameMapper: {
-        '^uuid$': '<rootDir>/node_modules/.pnpm/uuid@8.3.2/node_modules/uuid/dist/index.js',
+        '^uuid$': require.resolve('uuid'),
       },
       // All plain-TS logic modules (env, api client, token store, session) are
       // written without React Native imports, so they run here under ts-jest/node.

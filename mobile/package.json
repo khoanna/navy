@@ -25,7 +25,8 @@
     "jest": "^30.4.2",
     "jest-expo": "^56.0.5",
     "ts-jest": "^29.4.11",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "uuid": "^9.0.1"
   },
   "scripts": {
     "start": "expo start",
