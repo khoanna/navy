@@ -14,7 +14,8 @@ function deps() {
     getPosition: jest.fn().mockResolvedValue({ principalLamports: 100n, currentValueLamports: 105n, cTokenAmount: 100n }),
     policyAllowlist: jest.fn().mockResolvedValue({ programIds: ['P'], destinations: ['D'] }),
   };
-  const signing = { signTransaction: jest.fn().mockImplementation(async (_id: string, tx: Transaction) => tx) };
+  // a real signed Transaction is serialize-able; the stub returns a lightweight serializable object
+  const signing = { signTransaction: jest.fn().mockResolvedValue({ serialize: () => Buffer.from('signed-tx') }) };
   const chain = { connection: { sendRawTransaction: jest.fn().mockResolvedValue('sig'), confirmTransaction: jest.fn().mockResolvedValue({}), getBalance: jest.fn().mockResolvedValue(0) } };
   const audit = { record: jest.fn() };
   return { svc: new FarmingService(prisma, subwallets as any, adapter as any, signing as any, chain as any, audit as any), prisma, subwallets, adapter, signing, sw };

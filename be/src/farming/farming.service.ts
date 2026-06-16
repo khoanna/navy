@@ -74,16 +74,8 @@ export class FarmingService {
     return this.prisma.farmingEvent.findMany({ where: { subwallet: { userId } }, orderBy: { createdAt: 'desc' }, take: 50 });
   }
 
-  private async submit(signed: Transaction): Promise<string> {
-    let raw: Buffer;
-    try {
-      raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
-    } catch {
-      // Fallback for test stubs where the adapter returns an empty Transaction
-      // without blockhash/feePayer. In production, the adapter always provides
-      // a fully-formed transaction so this branch is never reached.
-      raw = Buffer.alloc(0);
-    }
+  private async submit(signed: { serialize(opts?: unknown): Buffer }): Promise<string> {
+    const raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
     const sig = await this.chain.connection.sendRawTransaction(raw);
     await this.chain.connection.confirmTransaction(sig, 'confirmed');
     return sig;
