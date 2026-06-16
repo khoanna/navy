@@ -37,3 +37,9 @@ Prerequisites: Solana CLI, Anchor, a funded devnet keypair at ~/.config/solana/i
 - NAVY_ADMIN_SECRET must be the program's admin authority keypair (the one that ran `init-config`), as a 64-byte JSON array. Fund it with devnet SOL (it pays rent for register_merchant): `solana airdrop 2 <registrarPubkey> --url devnet`.
 - Approving a merchant in the admin UI calls register_merchant (or reactivates) on-chain automatically; rejecting deactivates.
 - Integration check (localnet): with the program deployed + config initialized, set NAVY_ADMIN_SECRET to the config admin, create a merchant with a payoutAddress, POST /admin/merchants/:id/approve, then assert the on-chain Merchant PDA exists and active=true (mirror onchain/tests/navy-payments.merchant.ts).
+
+## Farming agent (sub-project 7, devnet)
+- Save (Solend) devnet SOL reserve: program ALend7Ket…, reserve 5VVLD7…. Farms native SOL (devnet-airdroppable); devnet pools do NOT use Circle USDC.
+- Bounds: NAVY_FARM_RENT_BUFFER / NAVY_FARM_MIN_DEPOSIT / NAVY_FARM_MAX_DEPOSIT; the scheduler runs every 5 min.
+- Smoke: POST /farming/subwallet → `solana airdrop 1 <subwalletAddress> --url devnet` → POST /farming/deposit (or wait for the cron) → GET /farming shows a growing value → POST /farming/withdraw {amount:'all'} returns SOL to the user's main wallet.
+- Devnet oracle staleness can revert deposits/withdraws — the agent retries. MAINNET gates: KMS master key, security audit, KaminoYieldAdapter + reward harvest/compound, USDC farming.
