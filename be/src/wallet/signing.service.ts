@@ -4,7 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CIPHER } from '../crypto/cipher.interface';
 import type { Cipher } from '../crypto/cipher.interface';
 import { AuditService } from '../audit/audit.service';
-import { PolicyValidator, SubwalletPolicy, TxSummary } from './policy.validator';
+import { PolicyValidator } from './policy.validator';
+import type { SubwalletPolicy } from './policy.validator';
+import { deriveTxSummary } from './tx-summary';
 
 @Injectable()
 export class SigningService {
@@ -15,16 +17,12 @@ export class SigningService {
     private readonly audit: AuditService,
   ) {}
 
-  async signTransaction(subwalletId: string, tx: Transaction, summary: TxSummary): Promise<Transaction> {
+  async signTransaction(subwalletId: string, tx: Transaction): Promise<Transaction> {
     const row = await this.prisma.farmingSubwallet.findUnique({ where: { id: subwalletId } });
     if (!row || row.status !== 'active') throw new NotFoundException('Subwallet not available');
 
-    // Derive authoritative program ids FROM the transaction itself — never trust caller-provided programIds.
-    const programIds = tx.instructions.map((ix) => ix.programId.toBase58());
-    // SECURITY TODO (farming phase): derive transferDestinations by decoding SystemProgram/SPL-token
-    // transfer instructions from tx instead of trusting the caller.
-    const authoritativeSummary: TxSummary = { programIds, transferDestinations: summary.transferDestinations };
-    const verdict = this.policy.check(row.policyJson as unknown as SubwalletPolicy, authoritativeSummary);
+    const summary = deriveTxSummary(tx);
+    const verdict = this.policy.check(row.policyJson as unknown as SubwalletPolicy, summary);
     if (!verdict.ok) {
       await this.audit.record({ actor: `subwallet:${row.pubkey}`, action: 'subwallet.sign.denied', metadata: { reason: verdict.reason } });
       throw new ForbiddenException(`Policy denied: ${verdict.reason}`);

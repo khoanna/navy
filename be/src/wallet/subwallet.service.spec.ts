@@ -13,7 +13,7 @@ describe('SubwalletService', () => {
     const audit = { record: jest.fn() } as any;
     const svc = new SubwalletService(prisma, cipher, audit);
 
-    const policy = { allowedProgramIds: ['P'], ownerMainWallet: 'OWNER' };
+    const policy = { allowedProgramIds: ['P'], allowedDestinations: ['OWNER'] };
     const result = await svc.provision('u1', policy);
 
     expect(result.pubkey).toEqual(expect.any(String));
