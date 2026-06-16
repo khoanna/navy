@@ -30,6 +30,7 @@ export default function Home() {
       <Text selectable style={styles.addr}>{address ?? 'provisioning…'}</Text>
       <Button title="Scan to pay" onPress={() => router.push('/scan')} />
       <Button title="History" onPress={() => router.push('/history')} />
+      <Button title="Farming" onPress={() => router.push('/farming')} />
     </View>
   );
 }
