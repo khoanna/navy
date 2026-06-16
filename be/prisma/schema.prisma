@@ -60,6 +60,22 @@ model FarmingSubwallet {
   policyJson       Json
   status           String   @default("active")
   createdAt        DateTime @default(now())
+  ownerMainWallet      String?
+  principalLamports    BigInt   @default(0)
+  currentValueLamports BigInt   @default(0)
+  lastRefreshedAt      DateTime?
+  events               FarmingEvent[]
+}
+
+model FarmingEvent {
+  id          String   @id @default(uuid())
+  subwalletId String
+  subwallet   FarmingSubwallet @relation(fields: [subwalletId], references: [id])
+  kind        String
+  amount      BigInt   @default(0)
+  txSignature String?
+  detail      String?
+  createdAt   DateTime @default(now())
 }
 
 model AuthSession {
