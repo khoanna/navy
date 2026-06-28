@@ -23,11 +23,12 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-router"
+      "expo-router",
+      "expo-web-browser"
     ],
     "extra": {
-      "privyAppId": "PRIVY_APP_ID_PLACEHOLDER",
-      "privyClientId": "PRIVY_CLIENT_ID_PLACEHOLDER",
+      "privyAppId": "cmqx65j8s006w0cietx8rb9su",
+      "privyClientId": "client-WY6aV5oZSuds7zseYEFPcNgwMp3HJKHrcrgH5oyTr57y1",
       "navyApiUrl": "http://localhost:3000",
       "solanaRpc": "https://api.devnet.solana.com",
       "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
