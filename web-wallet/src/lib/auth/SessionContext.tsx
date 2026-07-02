@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { getEnv } from '@/lib/config/env';
 import { NavyClient } from '@/lib/api/navyClient';
@@ -25,6 +25,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const [session, setSession] = useState<NavySession | null>(null);
   const [initializing, setInitializing] = useState(true);
+  // Latched once we begin/complete an auto-establish for the current Privy auth,
+  // so a failed establish does not hot-loop. Reset only when Privy auth drops.
+  const establishingRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -39,6 +42,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setSession(s);
   }, [getAccessToken, manager]);
 
+  // Backstop for the OAuth full-page redirect flow: after Google/Apple returns,
+  // the user is Privy-authenticated but no code path has called establishFromPrivy.
+  // Auto-establish the Navy session once Privy is ready & authenticated but we have none.
+  useEffect(() => {
+    if (initializing) return; // wait for the localStorage restore to settle
+    if (ready && authenticated && !session && !establishingRef.current) {
+      establishingRef.current = true; // latch: fires at most once until auth drops
+      (async () => {
+        try {
+          const privyToken = await getAccessToken();
+          if (!privyToken) return;
+          const s = await manager.establish(privyToken);
+          setSession(s);
+        } catch {
+          // Swallow: ref stays latched so we don't hot-loop on a failed establish.
+          // It resets when Privy `authenticated` goes false (see effect below).
+        }
+      })();
+    }
+  }, [initializing, ready, authenticated, session, getAccessToken, manager]);
+
   const signOut = useCallback(async () => {
     await manager.clear();
     await logout();
@@ -46,7 +70,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [manager, logout]);
 
   useEffect(() => {
-    if (ready && !authenticated && session) { manager.clear().then(() => setSession(null)); }
+    if (ready && !authenticated) {
+      // Privy logged out (incl. via signOut): reset the latch so a later
+      // re-login can auto-establish again, and clear any stale session.
+      establishingRef.current = false;
+      if (session) { manager.clear().then(() => setSession(null)); }
+    }
   }, [ready, authenticated, session, manager]);
 
   return (
