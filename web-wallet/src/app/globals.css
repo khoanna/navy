@@ -28,6 +28,9 @@ body {
   max-width: var(--frame-max);
   margin: 0 auto;
   min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   position: relative;
   background: var(--bg);
   overflow: hidden;

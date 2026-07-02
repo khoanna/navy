@@ -65,16 +65,14 @@ export function Screen({
 
   const rootStyle: React.CSSProperties = {
     flex: 1,
+    minHeight: 0,
     backgroundColor: colors.bg,
-    height: '100%',
   };
 
   if (scroll) {
     return (
-      <div style={rootStyle}>
-        <div style={{ overflowY: 'auto', height: '100%', ...pad }}>
-          {content}
-        </div>
+      <div style={{ ...rootStyle, overflowY: 'auto', ...pad }}>
+        {content}
       </div>
     );
   }

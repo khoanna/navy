@@ -118,6 +118,9 @@ export function Button({
       onMouseDown={() => !isDisabled && setPressed(true)}
       onMouseUp={() => setPressed(false)}
       onMouseLeave={() => setPressed(false)}
+      onTouchStart={() => !isDisabled && setPressed(true)}
+      onTouchEnd={() => setPressed(false)}
+      onTouchCancel={() => setPressed(false)}
     >
       <button
         onClick={onPress}

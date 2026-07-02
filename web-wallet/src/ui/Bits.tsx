@@ -131,6 +131,9 @@ export function PressRow({
       onMouseDown={() => setPressed(true)}
       onMouseUp={() => setPressed(false)}
       onMouseLeave={() => setPressed(false)}
+      onTouchStart={() => setPressed(true)}
+      onTouchEnd={() => setPressed(false)}
+      onTouchCancel={() => setPressed(false)}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -147,7 +150,7 @@ export function PressRow({
 }
 
 /** #rrggbb + alpha → rgba(). */
-export function hexA(hex: string, a: number): string {
+function hexA(hex: string, a: number): string {
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);

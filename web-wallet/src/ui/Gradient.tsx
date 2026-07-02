@@ -15,7 +15,7 @@ export interface GradientProps {
 
 export function Gradient({ colors, locations, direction = 'diagonal', glow, style, children }: GradientProps) {
   const stops = colors.map((c, i) => {
-    const pct = locations ? locations[i] * 100 : (i / (colors.length - 1)) * 100;
+    const pct = locations ? locations[i] * 100 : colors.length === 1 ? 0 : (i / (colors.length - 1)) * 100;
     return `${c} ${pct}%`;
   }).join(', ');
   const base = `linear-gradient(${ANGLE[direction]}, ${stops})`;
