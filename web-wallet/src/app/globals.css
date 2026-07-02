@@ -1,2 +1,55 @@
+:root {
+  --bg: #060B17;
+  --bg-elevated: #0B1322;
+  --surface: #111B2E;
+  --text-hi: #F3F7FF;
+  --text: #CBD6EC;
+  --accent: #4F8CFF;
+  --aqua: #2FE0C2;
+  --frame-max: 430px;
+}
+
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; height: 100%; }
+
+body {
+  background:
+    radial-gradient(55% 40% at 12% 0%, rgba(79,140,255,0.20), transparent),
+    radial-gradient(50% 35% at 95% 22%, rgba(47,224,194,0.14), transparent),
+    var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+}
+
+/* Centered phone column */
+.navy-frame {
+  max-width: var(--frame-max);
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: 0 0 60px rgba(0,0,0,0.5);
+}
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input { font: inherit; }
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+@keyframes navy-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+@keyframes navy-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes navy-laser {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(var(--laser-travel, 260px)); }
+  100% { transform: translateY(0); }
+}
+.navy-fade-in { animation: navy-rise 420ms ease both; }
