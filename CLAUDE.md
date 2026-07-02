@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `be/` | Nest.js 11 + Prisma 7 (Postgres) | Backend API: auth, payments gateway, admin, farming agent, on-chain relayer |
 | `fe/` | Next.js 16 (App Router) + React 19 | Web for **admin** + **merchant** (no end-user wallet) |
 | `mobile/` | Expo SDK 56 + `@privy-io/expo` | End-user wallet (balances, scan-to-pay, farming) |
+| `web-wallet/` | Next.js 16 (App Router) + `@privy-io/react-auth` | Mobile-first **web** port of the end-user wallet (same balances/scan-to-pay/farming, phone-column layout) |
 | `onchain/` | Anchor 0.32 + Solana CLI 4.0 (Agave) | `navy_payments` Anchor program |
 
 **Development is spec-driven.** Every feature was designed → planned → built via `docs/superpowers/specs/*-design.md` and `docs/superpowers/plans/*.md`. Read the relevant spec/plan before changing a subsystem — they capture the *why* and the locked decisions. `docs/` is the source of truth for intent.
@@ -39,6 +40,12 @@ pnpm test <pattern>               # jest "unit" project = src/**/*.test.ts (ts-j
 pnpm exec tsc --noEmit            # gate for screens
 pnpm exec expo start
 
+# web-wallet/  (needs be up + WEB_WALLET_ORIGIN set; web origin whitelisted in Privy dashboard)
+pnpm test <pattern>               # jest — ONLY runs src/lib/**/*.test.ts (ported plain-TS logic)
+pnpm exec tsc --noEmit            # typecheck gate for screens/components
+pnpm build                        # next build — the runtime gate (catches browser polyfill/resolution issues tsc misses)
+pnpm dev -p 3001                  # runs on 3001 (be is 3000, fe is 3000-range); matches WEB_WALLET_ORIGIN
+
 # onchain/
 anchor build                      # SLOW (Rust + BPF); also regenerates target/idl + target/types
 anchor test                       # boots a local validator, runs tests/**/*.ts (ts-mocha)
@@ -58,11 +65,16 @@ anchor test                       # boots a local validator, runs tests/**/*.ts 
 
 - **Devnet only.** USDC = Circle devnet mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`. Farming uses **native SOL** on devnet (no devnet DeFi pool uses Circle USDC). Mainnet work (audit, KMS, real-protocol adapters) is deferred everywhere it appears in specs.
 - **SDK drift is real — verify before coding.** `fe/AGENTS.md` and `mobile/AGENTS.md` warn that Next/Expo have breaking changes vs training data; consult the installed `node_modules` types / versioned docs. Known pins/workarounds already in place: **otplib v12** (v13 dropped `authenticator`), **Prisma 7 driver adapter** via `be/prisma.config.ts` + `PrismaPg`, **jest `moduleNameMapper`** for ESM-only `uuid` (and `rpc-websockets` in `be/`) so `@solana/web3.js`/spl-token load under ts-jest. Privy Expo signing is `provider.signTransaction({transaction: Uint8Array}) → {signedTransaction}` (sign-only — NOT `signAndSend`; the relayer pays gas).
+- **Mobile is Expo SDK 54; verify mobile dep changes by actually bundling** (`pnpm exec expo export --platform ios`), not just `tsc` — it's the only thing that catches missing `@privy-io/expo` peers (pnpm doesn't auto-install `"*"` peers) and the required `metro.config.js` (`unstable_enablePackageExports` + rn/browser conditions, or jose/viem hit `Unable to resolve module crypto`). Changing the SDK needs a full lockfile regen (`rm -rf node_modules pnpm-lock.yaml`) + `pnpm.overrides` for stale transitive peers. See `mobile/AGENTS.md`.
 - **Toolchain:** Anchor 0.32 + current Solana crates require **Rust 1.85+** (platform-tools v1.53 via `agave-install update`; the active Solana CLI is 4.0.1).
 - **Keep non-UI logic in plain-TS modules** (no React Native / Next imports) so it's unit-testable; screens/handlers stay thin and are typecheck-verified. This pattern is used throughout `fe/src/lib`, `mobile/src`, `be/src/**`.
 - **pnpm 10 blocks native postinstall scripts.** When adding a dep with a native build (argon2, bufferutil, blake-hash, tiny-secp256k1, prisma, `@solana/*`), add it to `pnpm.onlyBuiltDependencies` in that app's `package.json` and reinstall — otherwise it installs unbuilt and breaks at runtime/build. (Already configured in all four apps.)
 - **Money is `BigInt` in Prisma; serialize to string before returning it from Nest.** Controllers/services must map `amount`/`*Lamports` → `.toString()` (JSON can't encode BigInt). Returning a raw Prisma row with a BigInt column throws at response time.
-- **Stale Prisma client:** if `pnpm build` errors on a model/field that IS in `schema.prisma`, run `pnpm prisma generate` (migrate usually does this, but the client can lag after manual edits).
+- **Stale Prisma client:** if `pnpm build` errors on a model/field that IS in `schema.prisma`, run `pnpm prisma generate` (migrate usually does this, but the client can lag after manual edits). A clean `rm -rf node_modules && CI=true pnpm install` also resets the generated client — re-run `prisma generate` after.
+- **Prisma 7 CLI needs `DATABASE_URL` in the shell env.** `be/prisma.config.ts` resolves `env('DATABASE_URL')` but loads **no** dotenv, so `pnpm prisma migrate/generate` fails with `Cannot resolve environment variable: DATABASE_URL`. Prefix it: `DATABASE_URL=... pnpm prisma migrate deploy`. (`pnpm start` is unaffected — the app loads `.env` via `dotenv/config`.)
+- **`@solana/web3.js` is pinned to one version via `be/package.json` `pnpm.overrides` (`1.98.4`) — do not remove it.** The Save/Solend SDK → `jito-ts` pulls an ancient web3.js@1.77.4 (wants `rpc-websockets` v7's `dist/lib/client`) that collides with v9 and crashes boot (`ERR_PACKAGE_PATH_NOT_EXPORTED` / `Cannot find module 'rpc-websockets/dist/lib/client'`). After changing it, `rm -rf node_modules && CI=true pnpm install` to prune stale peer variants.
+- **The Anchor IDL is a runtime asset.** `be/nest-cli.json` `compilerOptions.assets` copies `src/onchain/*.json` into `dist/src`; without it `node dist`/`nest start` crashes on `Cannot find module './navy_payments.json'`. After `anchor build`, re-copy the IDL from `onchain/target/idl` into `be/src/onchain/` if it drifted.
 - The `bigint-buffer` native-binding `console.warn` in be/mobile test runs is harmless noise from `@solana/spl-token` (it falls back to pure JS) — ignore it.
 - **Git:** work lives on **stacked unmerged feature branches** (`feat/identity-wallet-*` → `feat/payments-program` → `feat/payment-gateway` → `feat/admin-panel` → `feat/merchant-panel` → `feat/mobile-wallet` → `feat/farming-agent`), not yet on `master`. Integration/devnet smokes are deferred to a consolidated pass (per the project owner). Runbook: `be/scripts/gateway-bringup.md`.
 - **Env:** each app needs its `.env`/`.env.local`/`app.json extra` populated (Privy app/client IDs, `NAVY_*` secrets incl. relayer + subwallet master key + farming bounds, Solana RPC). `be` loads `.env` via `dotenv/config`.
+- **Merchant onboarding order is enforced:** signup → set payout (`POST /merchant/payout`, wallet-signed) → admin approve (`POST /admin/merchants/:id/approve`, registers the merchant on-chain using the payout ATA) → create API key. Payout must exist *before* approval; API keys require approval.
