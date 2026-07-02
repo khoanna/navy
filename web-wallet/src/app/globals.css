@@ -53,3 +53,4 @@ input { font: inherit; }
   100% { transform: translateY(0); }
 }
 .navy-fade-in { animation: navy-rise 420ms ease both; }
+@keyframes spin { to { transform: rotate(360deg); } }
