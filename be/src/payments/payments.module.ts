@@ -28,7 +28,7 @@ import { AuditService } from '../audit/audit.service';
       provide: OrdersService,
       inject: [PrismaService, AuditService],
       useFactory: (p: PrismaService, a: AuditService) =>
-        new OrdersService(p, a, process.env.NAVY_PAY_BASE_URL ?? 'navy://pay', parseInt(process.env.NAVY_FEE_BPS ?? '100', 10)),
+        new OrdersService(p, a, process.env.NAVY_PAY_BASE_URL ?? 'https://pay.navy/pay', parseInt(process.env.NAVY_FEE_BPS ?? '100', 10)),
     },
     {
       provide: ChainWatcherService,

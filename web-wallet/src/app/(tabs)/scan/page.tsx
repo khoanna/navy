@@ -159,7 +159,7 @@ export default function Scan() {
         <input
           value={manualUrl}
           onChange={(e) => setManualUrl(e.target.value)}
-          placeholder="navy://pay/... or https://..."
+          placeholder="https://pay.navy/pay/..."
           style={{
             background: colors.surface,
             border: `1px solid ${displayError ? colors.borderStrong : colors.border}`,

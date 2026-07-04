@@ -10,7 +10,7 @@ describe('OrdersService', () => {
     };
     const prisma = { order: { create: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue(order) } } as any;
     const audit = { record: jest.fn() } as any;
-    return { svc: new OrdersService(prisma, audit, 'navy://pay', 100), prisma, order };
+    return { svc: new OrdersService(prisma, audit, 'https://pay.navy/pay', 100), prisma, order };
   }
   it('creates an order: snapshots fee, derives invoice_id, sets pay url + QR', async () => {
     const { svc, prisma } = make();
@@ -20,7 +20,7 @@ describe('OrdersService', () => {
     expect(data.feeBps).toBe(100);
     expect(data.onchainInvoiceId).toMatch(/^[0-9a-f]{32}$/);
     expect(data.status).toBe('awaiting_payment');
-    expect(res.payUrl).toMatch(/^navy:\/\/pay\//);
+    expect(res.payUrl).toMatch(/^https:\/\/pay\.navy\/pay\//);
     expect(res.qr).toMatch(/^data:image\/png;base64,/);
   });
   it('rejects a zero amount', async () => {
@@ -44,7 +44,7 @@ describe('OrdersService merchant-scoped', () => {
       },
     } as any;
     const audit = { record: jest.fn() } as any;
-    return { svc: new OrdersService(prisma, audit, 'navy://pay', 100), prisma };
+    return { svc: new OrdersService(prisma, audit, 'https://pay.navy/pay', 100), prisma };
   }
   it('createForMerchant rejects an unapproved merchant with 409', async () => {
     const { svc } = make({ id: 'm1', approvalStatus: 'pending' });
@@ -86,7 +86,7 @@ describe('OrdersService.listForPayer', () => {
     const rows = [{ id: 'o1', reference: 'R1', amount: 990000n, status: 'paid', paidAt: new Date(), txSignature: 'sig', merchant: { businessName: 'Acme' } }];
     const prisma = { order: { findMany: jest.fn().mockResolvedValue(rows) } } as any;
     const audit = { record: jest.fn() } as any;
-    const svc = new OrdersService(prisma, audit, 'navy://pay', 100);
+    const svc = new OrdersService(prisma, audit, 'https://pay.navy/pay', 100);
     const out = await svc.listForPayer('PAYER', { take: 50, skip: 0 });
     expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { payer: 'PAYER', status: 'paid' }, orderBy: { paidAt: 'desc' },
