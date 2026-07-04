@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import { usdcInputToBaseUnits } from '@/lib/money';
 
 export default function NewOrder() {
   const [amount, setAmount] = useState('');
@@ -12,11 +13,18 @@ export default function NewOrder() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(''); setResult(null);
-    const baseUnits = BigInt(Math.round(parseFloat(amount || '0') * 1_000_000)).toString();
+    let baseUnits: string;
+    try {
+      baseUnits = usdcInputToBaseUnits(amount);
+    } catch (err) {
+      setError((err as Error).message); return;
+    }
     if (baseUnits === '0') { setError('Enter an amount greater than 0'); return; }
+    const ttl = parseInt(expiresInSec, 10);
+    if (!Number.isFinite(ttl) || ttl <= 0) { setError('Enter a valid expiry in seconds'); return; }
     const res = await fetch('/api/merchant/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: baseUnits, reference, expiresInSec: parseInt(expiresInSec, 10) }),
+      body: JSON.stringify({ amount: baseUnits, reference, expiresInSec: ttl }),
     });
     const body = await res.json();
     if (res.ok) setResult({ orderId: body.orderId, qr: body.qr, payUrl: body.payUrl });

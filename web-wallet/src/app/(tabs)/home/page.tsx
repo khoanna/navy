@@ -182,7 +182,7 @@ export default function Home() {
                   </Text>
                 </div>
                 <Text variant="bodyStrong" numeric color={colors.textHi}>
-                  -{(Number(p.amount) / 1_000_000).toFixed(2)}
+                  -{usdcBaseToDisplay(p.amount)}
                 </Text>
               </div>
             </div>

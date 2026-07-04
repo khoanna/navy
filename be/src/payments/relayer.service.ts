@@ -40,13 +40,25 @@ export class RelayerService {
     return a.serializeMessage().equals(b.serializeMessage());
   }
 
-  async verifyAndSubmit(orderId: string, signedTxB64: string): Promise<string> {
+  async verifyAndSubmit(
+    orderId: string,
+    signedTxB64: string,
+  ): Promise<{ signature: string; payer: string; err: unknown }> {
     const expected = this.issued.get(orderId);
     if (!expected) throw new BadRequestException('No issued transaction for this order');
     const tx = Transaction.from(Buffer.from(signedTxB64, 'base64'));
     if (!tx.serializeMessage().equals(expected)) throw new BadRequestException('Submitted transaction does not match issued');
+    // The real payer is the signer that isn't the relayer (gasless two-signer model).
+    const relayer = this.chain.relayer.publicKey;
+    const payerSig = tx.signatures.find((s) => !s.publicKey.equals(relayer) && s.signature != null);
+    if (!payerSig) throw new BadRequestException('Submitted transaction is missing the payer signature');
+    const payer = payerSig.publicKey.toBase58();
     const sig = await this.chain.connection.sendRawTransaction(tx.serialize());
-    await this.chain.connection.confirmTransaction(sig, 'confirmed');
-    return sig;
+    // confirmTransaction resolves once the tx lands; value.err says whether it SUCCEEDED.
+    const conf = await this.chain.connection.confirmTransaction(sig, 'confirmed');
+    // The issued message is single-use: consume it so it can't be re-submitted and so
+    // the in-memory map doesn't grow unbounded (server-restart risk is documented).
+    this.issued.delete(orderId);
+    return { signature: sig, payer, err: conf.value.err };
   }
 }

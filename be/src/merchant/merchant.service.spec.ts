@@ -55,7 +55,10 @@ describe('MerchantService', () => {
     expect(prisma.merchantApiKey.create).not.toHaveBeenCalled();
   });
 
-  it('denies payout address registration for an unapproved merchant (even with a valid signature)', async () => {
+  it('sets the payout address for a pending merchant (payout must precede approval)', async () => {
+    // Onboarding order is signup -> set payout -> admin approve. approve() registers the
+    // merchant on-chain using the payout ATA, so payout MUST be settable while still pending;
+    // requiring approval here would deadlock onboarding.
     const { Keypair } = require('@solana/web3.js');
     const nacl = require('tweetnacl');
     const bs58mod = require('bs58');
@@ -65,11 +68,14 @@ describe('MerchantService', () => {
     const message = 'Navy payout binding for m1';
     const signature = bs58enc.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
     const prisma = {
-      merchant: { findUnique: jest.fn().mockResolvedValue({ id: 'm1', approvalStatus: 'pending' }), update: jest.fn() },
+      merchant: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'm1', approvalStatus: 'pending' }),
+        update: jest.fn().mockResolvedValue({ id: 'm1', payoutAddress: address }),
+      },
     } as any;
     const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
-    await expect(svc.setPayoutAddress('m1', address, message, signature)).rejects.toThrow(/not approved/i);
-    expect(prisma.merchant.update).not.toHaveBeenCalled();
+    await svc.setPayoutAddress('m1', address, message, signature);
+    expect(prisma.merchant.update).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { payoutAddress: address } });
   });
 
   it('stores the api secret encrypted (envelope) for later HMAC verification', async () => {

@@ -78,6 +78,9 @@
       "prisma",
       "unrs-resolver",
       "utf-8-validate"
-    ]
+    ],
+    "overrides": {
+      "@solana/web3.js": "1.98.4"
+    }
   }
 }

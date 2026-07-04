@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeyService } from '../merchant/api-key.service';
 
@@ -9,7 +9,7 @@ export class WebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly apiKeys: ApiKeyService,
-    private readonly fetchImpl: typeof fetch = fetch,
+    @Optional() private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   async deliver(orderId: string, url: string, secret: string, payload: unknown, opts: RetryOpts = {}): Promise<boolean> {

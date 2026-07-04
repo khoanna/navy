@@ -5,6 +5,7 @@ import { getEnv } from '@/lib/config/env';
 import { NavyPayClient } from '@/lib/pay/navyPayClient';
 import { payInvoice } from '@/lib/pay/payFlow';
 import { useWebSigner } from '@/lib/wallet/useWebSigner';
+import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
@@ -119,7 +120,7 @@ export default function PayScreen() {
             </Text>
             <div style={styles.amtRow}>
               <Text variant="display" numeric color={colors.onAccent}>
-                {(Number(order.amount) / 1_000_000).toFixed(2)}
+                {usdcBaseToDisplay(order.amount)}
               </Text>
               <Text variant="h2" color="rgba(4,17,31,0.6)" style={{ marginBottom: '6px' }}>
                 USDC
@@ -164,7 +165,7 @@ export default function PayScreen() {
             </Text>
           )}
           <Button
-            label={payable ? `Pay ${(Number(order.amount) / 1_000_000).toFixed(2)} USDC` : 'Unavailable'}
+            label={payable ? `Pay ${usdcBaseToDisplay(order.amount)} USDC` : 'Unavailable'}
             icon={payable ? 'check' : undefined}
             loading={busy}
             disabled={!payable}

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { getEnv } from '@/lib/config/env';
 import { NavyPayClient, Payment } from '@/lib/pay/navyPayClient';
+import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { IconBadge } from '@/ui/Bits';
@@ -111,7 +112,7 @@ export default function History() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                 <Text variant="bodyStrong" numeric color={colors.textHi}>
-                  -{(Number(item.amount) / 1_000_000).toFixed(2)}
+                  -{usdcBaseToDisplay(item.amount)}
                 </Text>
                 <Text variant="caption" muted>
                   USDC

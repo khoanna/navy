@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from './webhook.service';
 
@@ -32,6 +33,7 @@ export class ChainWatcherService {
     }
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
   async expireStale(): Promise<void> {
     const stale = await this.prisma.order.findMany({
       where: { status: 'awaiting_payment', expiresAt: { lt: new Date() } },

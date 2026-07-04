@@ -70,8 +70,15 @@ export class FarmingService {
     return { address: sw.pubkey, principalLamports: pos.principalLamports.toString(), currentValueLamports: pos.currentValueLamports.toString(), cTokenAmount: pos.cTokenAmount.toString() };
   }
 
-  listHistory(userId: string) {
-    return this.prisma.farmingEvent.findMany({ where: { subwallet: { userId } }, orderBy: { createdAt: 'desc' }, take: 50 });
+  async listHistory(userId: string) {
+    const events = await this.prisma.farmingEvent.findMany({
+      where: { subwallet: { userId } }, orderBy: { createdAt: 'desc' }, take: 50,
+    });
+    // amount is a Prisma BigInt column — JSON can't encode BigInt, so serialize before returning.
+    return events.map((e) => ({
+      id: e.id, kind: e.kind, amount: e.amount.toString(),
+      txSignature: e.txSignature, createdAt: e.createdAt,
+    }));
   }
 
   private async submit(signed: { serialize(opts?: unknown): Buffer }): Promise<string> {

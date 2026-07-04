@@ -51,7 +51,10 @@ export class MerchantService {
   }
 
   async setPayoutAddress(merchantId: string, address: string, message: string, signature: string) {
-    await this.assertApproved(merchantId);
+    // Payout must be set BEFORE approval: approve() requires a payoutAddress to register the
+    // merchant on-chain. So this only requires the merchant to exist, not to be approved.
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) throw new UnauthorizedException('Merchant not found');
     if (!verifyWalletSignature(address, message, signature)) {
       throw new BadRequestException('Invalid wallet signature');
     }
