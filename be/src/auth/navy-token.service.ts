@@ -24,6 +24,7 @@ export class NavyTokenService {
         subjectId: input.subjectId,
         role: input.role,
         refreshTokenHash: this.hash(refreshToken),
+        walletAddress: input.walletAddress ?? null,
         expiresAt: new Date(Date.now() + this.cfg.refreshTtl * 1000),
       },
     });
@@ -54,6 +55,7 @@ export class NavyTokenService {
     const accessToken = this.signAccess({
       sub: session.subjectId,
       role: session.role as Role,
+      walletAddress: session.walletAddress ?? undefined,
       sid: session.id,
     });
     return { accessToken, refreshToken: newRefreshToken };

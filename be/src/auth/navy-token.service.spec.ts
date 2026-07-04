@@ -94,6 +94,17 @@ describe('NavyTokenService', () => {
     await expect(svc.refresh(rotated.refreshToken)).resolves.toBeDefined();
   });
 
+  it('refresh preserves the walletAddress claim on the rotated access token', async () => {
+    const { svc } = makeService();
+    const first = await svc.issue({ subjectId: 'u1', role: 'user', walletAddress: 'PK' });
+    const rotated = await svc.refresh(first.refreshToken);
+    const claims = svc.verifyAccess(rotated.accessToken);
+    expect(claims.walletAddress).toBe('PK');
+    expect(claims.sid).toBe('sid_1');
+    expect(claims.sub).toBe('u1');
+    expect(claims.role).toBe('user');
+  });
+
   it('refresh on an unknown token throws Unauthorized', async () => {
     const { svc } = makeService();
     await expect(svc.refresh('deadbeef')).rejects.toThrow(UnauthorizedException);

@@ -87,6 +87,7 @@ model AuthSession {
   subjectId        String
   role             String
   refreshTokenHash String
+  walletAddress    String?
   expiresAt        DateTime
   createdAt        DateTime @default(now())
   revokedAt        DateTime?
