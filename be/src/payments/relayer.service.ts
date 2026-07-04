@@ -63,10 +63,6 @@ export class RelayerService {
     return tx.serialize({ requireAllSignatures: false }).toString('base64');
   }
 
-  messagesMatch(a: Transaction, b: Transaction): boolean {
-    return a.serializeMessage().equals(b.serializeMessage());
-  }
-
   async verifyAndSubmit(
     orderId: string,
     signedTxB64: string,
@@ -87,11 +83,16 @@ export class RelayerService {
     const payerSig = tx.signatures.find((s) => !s.publicKey.equals(relayer) && s.signature != null);
     if (!payerSig) throw new BadRequestException('Submitted transaction is missing the payer signature');
     const payer = payerSig.publicKey.toBase58();
+    // Optimistic single-use consume: claim the message ATOMICALLY before sending so a concurrent
+    // second submit is rejected here (not in the multi-second window after confirmTransaction).
+    const consumed = await this.prisma.order.updateMany({
+      where: { id: orderId, issuedTxConsumedAt: null },
+      data: { issuedTxConsumedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw new BadRequestException('Transaction already submitted');
     const sig = await this.chain.connection.sendRawTransaction(tx.serialize());
     // confirmTransaction resolves once the tx lands; value.err says whether it SUCCEEDED.
     const conf = await this.chain.connection.confirmTransaction(sig, 'confirmed');
-    // The issued message is single-use: consume it durably so it can't be re-submitted.
-    await this.prisma.order.update({ where: { id: orderId }, data: { issuedTxConsumedAt: new Date() } });
     return { signature: sig, payer, err: conf.value.err };
   }
 }

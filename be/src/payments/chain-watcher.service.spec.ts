@@ -65,22 +65,27 @@ describe('ChainWatcherService', () => {
   describe('markPaid', () => {
     it('marks a confirming order paid and fires the webhook', async () => {
       const order = { id: 'o1', merchantId: 'm1', status: 'confirming', txSignature: 'sig', callbackUrl: 'https://cb', amount: 1000000n, feeBps: 100, reference: 'R1' };
-      const update = jest.fn().mockResolvedValue({ ...order, status: 'paid', amount: 1000000n, feeBps: 100, reference: 'R1', paidAt: new Date() });
-      const prisma = { order: { findUnique: jest.fn().mockResolvedValue(order), update } } as any;
+      const paid = { ...order, status: 'paid', amount: 1000000n, feeBps: 100, reference: 'R1', payer: 'PK', txSignature: 'sig', paidAt: new Date() };
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      // first findUnique returns the pre-settlement order; second returns the settled row for the payload.
+      const findUnique = jest.fn().mockResolvedValueOnce(order).mockResolvedValueOnce(paid);
+      const prisma = { order: { findUnique, updateMany } } as any;
       const webhooks = { deliver: jest.fn().mockResolvedValue(true) } as any;
       const secrets = { secretForMerchant: jest.fn().mockResolvedValue('sk') } as any;
       const svc = new ChainWatcherService(prisma, webhooks, secrets, onchainMock(null));
 
       await svc.markPaid('o1', { payer: 'PK', signature: 'sig' });
 
-      expect(update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'o1' }, data: expect.objectContaining({ status: 'paid', payer: 'PK' }) }));
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'o1', status: { not: 'paid' } }, data: expect.objectContaining({ status: 'paid', payer: 'PK' }) }));
       expect(webhooks.deliver).toHaveBeenCalledWith('o1', 'https://cb', 'sk', expect.objectContaining({ status: 'paid', orderId: 'o1' }));
     });
 
     it('uses the reconciled on-chain fee when provided', async () => {
       const order = { id: 'o1', merchantId: 'm1', status: 'confirming', txSignature: 'sig', callbackUrl: 'https://cb', amount: 1000000n, feeBps: 100, reference: 'R1' };
-      const update = jest.fn().mockResolvedValue({ ...order, status: 'paid', paidAt: new Date() });
-      const prisma = { order: { findUnique: jest.fn().mockResolvedValue(order), update } } as any;
+      const paid = { ...order, status: 'paid', paidAt: new Date() };
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const findUnique = jest.fn().mockResolvedValueOnce(order).mockResolvedValueOnce(paid);
+      const prisma = { order: { findUnique, updateMany } } as any;
       const webhooks = { deliver: jest.fn().mockResolvedValue(true) } as any;
       const secrets = { secretForMerchant: jest.fn().mockResolvedValue('sk') } as any;
       const svc = new ChainWatcherService(prisma, webhooks, secrets, onchainMock(null));
@@ -92,10 +97,27 @@ describe('ChainWatcherService', () => {
     });
 
     it('is idempotent: a paid order is not re-processed', async () => {
-      const prisma = { order: { findUnique: jest.fn().mockResolvedValue({ id: 'o1', status: 'paid' }), update: jest.fn() } } as any;
+      const prisma = { order: { findUnique: jest.fn().mockResolvedValue({ id: 'o1', status: 'paid' }), updateMany: jest.fn() } } as any;
       const webhooks = { deliver: jest.fn() } as any;
       const svc = new ChainWatcherService(prisma, webhooks, { secretForMerchant: jest.fn() } as any, onchainMock(null));
       await svc.markPaid('o1', { payer: 'PK', signature: 'sig' });
+      expect(webhooks.deliver).not.toHaveBeenCalled();
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('race guard: when another caller already settled (updateMany count 0), no webhook is delivered', async () => {
+      const order = { id: 'o1', merchantId: 'm1', status: 'confirming', txSignature: 'sig', callbackUrl: 'https://cb', amount: 1000000n, feeBps: 100, reference: 'R1' };
+      // Passes the initial guard (still 'confirming' at read time) but loses the atomic claim.
+      const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+      const findUnique = jest.fn().mockResolvedValue(order);
+      const prisma = { order: { findUnique, updateMany } } as any;
+      const webhooks = { deliver: jest.fn() } as any;
+      const secrets = { secretForMerchant: jest.fn().mockResolvedValue('sk') } as any;
+      const svc = new ChainWatcherService(prisma, webhooks, secrets, onchainMock(null));
+
+      await svc.markPaid('o1', { payer: 'PK', signature: 'sig' });
+
+      expect(updateMany).toHaveBeenCalledTimes(1);
       expect(webhooks.deliver).not.toHaveBeenCalled();
     });
   });
@@ -103,8 +125,11 @@ describe('ChainWatcherService', () => {
   describe('confirmOrder', () => {
     it('settles to paid with the on-chain fee when a matching InvoicePaid event is present', async () => {
       const order = { id: ORDER_ID, merchantId: 'm1', status: 'confirming', txSignature: 'sig', callbackUrl: 'https://cb', amount: 1000000n, feeBps: 100, reference: 'R1' };
-      const update = jest.fn().mockResolvedValue({ ...order, status: 'paid', paidAt: new Date() });
-      const prisma = { order: { findUnique: jest.fn().mockResolvedValue(order), update } } as any;
+      const paid = { ...order, status: 'paid', payer: 'ONCHAIN_PAYER', paidAt: new Date() };
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      // confirmOrder's findUnique (1), markPaid's guard findUnique (2), markPaid's payload re-read (3).
+      const findUnique = jest.fn().mockResolvedValueOnce(order).mockResolvedValueOnce(order).mockResolvedValueOnce(paid);
+      const prisma = { order: { findUnique, updateMany, update: jest.fn() } } as any;
       const webhooks = { deliver: jest.fn().mockResolvedValue(true) } as any;
       const secrets = { secretForMerchant: jest.fn().mockResolvedValue('sk') } as any;
       const tx = { meta: { err: null, logMessages: ['start', invoicePaidLog({ payer: 'ONCHAIN_PAYER', fee: '5000' }), 'end'] } };
@@ -112,7 +137,7 @@ describe('ChainWatcherService', () => {
 
       await svc.confirmOrder(ORDER_ID);
 
-      expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'paid', payer: 'ONCHAIN_PAYER' }) }));
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'paid', payer: 'ONCHAIN_PAYER' }) }));
       expect(webhooks.deliver).toHaveBeenCalledWith(ORDER_ID, 'https://cb', 'sk', expect.objectContaining({ status: 'paid', fee: '5000', payer: 'ONCHAIN_PAYER' }));
     });
 

@@ -3,13 +3,6 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { RelayerService } from './relayer.service';
 import { Transaction, Keypair, SystemProgram, PublicKey } from '@solana/web3.js';
 
-function sampleTx(feePayer: PublicKey): Transaction {
-  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: feePayer, toPubkey: PublicKey.default, lamports: 1 }));
-  tx.feePayer = feePayer;
-  tx.recentBlockhash = '11111111111111111111111111111111';
-  return tx;
-}
-
 /** A signed tx from the payer, fee-paid + partially signed by the relayer (gasless two-signer). */
 function issuedSignedTx(relayer: Keypair, payer: Keypair): Transaction {
   const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: PublicKey.default, lamports: 1 }));
@@ -24,21 +17,6 @@ function issuedSignedTx(relayer: Keypair, payer: Keypair): Transaction {
 function makeCfg(min = 50_000_000) {
   return { relayerMinBalanceLamports: min } as any;
 }
-
-describe('RelayerService.messagesMatch', () => {
-  const svc = new RelayerService({} as any, {} as any, makeCfg());
-  it('returns true for identical message bytes', () => {
-    const relayer = Keypair.generate();
-    expect(svc.messagesMatch(sampleTx(relayer.publicKey), sampleTx(relayer.publicKey))).toBe(true);
-  });
-  it('returns false when instructions differ', () => {
-    const relayer = Keypair.generate();
-    const a = sampleTx(relayer.publicKey);
-    const b = sampleTx(relayer.publicKey);
-    b.add(SystemProgram.transfer({ fromPubkey: relayer.publicKey, toPubkey: relayer.publicKey, lamports: 2 }));
-    expect(svc.messagesMatch(a, b)).toBe(false);
-  });
-});
 
 describe('RelayerService issued-tx store (durable, single-use)', () => {
   const relayer = Keypair.generate();
@@ -56,11 +34,12 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
     } as any;
   }
 
-  function makePrisma(order: any) {
+  function makePrisma(order: any, consumeCount = 1) {
     return {
       order: {
         findUnique: jest.fn().mockResolvedValue(order),
         update: jest.fn().mockResolvedValue(order),
+        updateMany: jest.fn().mockResolvedValue({ count: consumeCount }),
       },
     } as any;
   }
@@ -119,15 +98,20 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
     await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/no issued transaction/i);
   });
 
-  it('verifyAndSubmit rejects an already-consumed order', async () => {
+  it('verifyAndSubmit rejects a concurrent second submit: atomic consume returns count 0, does not send', async () => {
     const tx = issuedSignedTx(relayer, payer);
     const hash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
-    const svc = new RelayerService(
-      makeChain(),
-      makePrisma({ id: 'o1', issuedTxHash: hash, issuedTxExpiresAt: new Date(Date.now() + 600_000), issuedTxConsumedAt: new Date() }),
-      makeCfg(),
-    );
+    const chain = makeChain();
+    // The optimistic consume loses the race → updateMany count 0 → reject before sending.
+    const prisma = makePrisma({ id: 'o1', issuedTxHash: hash, issuedTxExpiresAt: new Date(Date.now() + 600_000), issuedTxConsumedAt: null }, 0);
+    const svc = new RelayerService(chain, prisma, makeCfg());
+
     await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/already submitted/i);
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: { id: 'o1', issuedTxConsumedAt: null },
+      data: { issuedTxConsumedAt: expect.any(Date) },
+    });
+    expect(chain.connection.sendRawTransaction).not.toHaveBeenCalled();
   });
 
   it('verifyAndSubmit rejects an expired issued tx', async () => {
@@ -164,9 +148,13 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
     expect(res.signature).toBe('sig-123');
     expect(res.payer).toBe(payer.publicKey.toBase58());
     expect(res.err).toBeNull();
-    expect(prisma.order.update).toHaveBeenCalledWith({
-      where: { id: 'o1' },
+    // The message is consumed atomically BEFORE sending (optimistic single-use).
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: { id: 'o1', issuedTxConsumedAt: null },
       data: { issuedTxConsumedAt: expect.any(Date) },
     });
+    const consumeOrder = prisma.order.updateMany.mock.invocationCallOrder[0];
+    const sendOrder = chain.connection.sendRawTransaction.mock.invocationCallOrder[0];
+    expect(consumeOrder).toBeLessThan(sendOrder);
   });
 });

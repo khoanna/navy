@@ -22,11 +22,16 @@ export class ChainWatcherService {
   async markPaid(orderId: string, info: { payer: string; signature: string; fee?: bigint }): Promise<void> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.status === 'paid') return;
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
+    // Atomic guarded write: only ONE concurrent caller (submit fast-path vs. the 15s sweep)
+    // can flip confirming→paid. The loser gets count 0 and must NOT re-fire the webhook.
+    const claimed = await this.prisma.order.updateMany({
+      where: { id: orderId, status: { not: 'paid' } },
       data: { status: 'paid', payer: info.payer, txSignature: info.signature, paidAt: new Date() },
     });
-    if (order.callbackUrl) {
+    if (claimed.count !== 1) return; // another caller already settled — do not fire the webhook
+    // Re-read the settled row for the webhook payload (needs the updated fields).
+    const updated = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (order.callbackUrl && updated) {
       const secret = await this.secrets.secretForMerchant(order.merchantId);
       if (secret) {
         // Prefer the reconciled on-chain fee; fall back to the feeBps recompute.
