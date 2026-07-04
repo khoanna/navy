@@ -3,10 +3,15 @@ import { FarmingService } from './farming.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { IsString, Matches } from 'class-validator';
 import { parsePositiveAmount } from '../common/amount.util';
 
-class DepositDto { amountLamports!: string; }
-class WithdrawDto { amount!: string; }
+class DepositDto {
+  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amountLamports!: string;
+}
+class WithdrawDto {
+  @IsString() @Matches(/^(all|\d+)$/) amount!: string;
+}
 
 @Controller('farming')
 @UseGuards(JwtGuard, RolesGuard)

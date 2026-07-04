@@ -3,8 +3,11 @@ import { AdminMerchantsService } from './admin-merchants.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { IsOptional, IsString } from 'class-validator';
 
-class RejectDto { reason?: string; }
+class RejectDto {
+  @IsOptional() @IsString() reason?: string;
+}
 
 @Controller('admin/merchants')
 @UseGuards(JwtGuard, RolesGuard)

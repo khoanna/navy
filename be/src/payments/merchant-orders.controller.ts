@@ -3,9 +3,14 @@ import { OrdersService } from './orders.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
 import { parsePositiveAmount, parsePageSize, parseOffset } from '../common/amount.util';
 
-class CreateOrderDto { amount!: string; reference!: string; expiresInSec?: number; }
+class CreateOrderDto {
+  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amount!: string;
+  @IsString() @IsNotEmpty() reference!: string;
+  @IsInt() @IsPositive() @IsOptional() expiresInSec?: number;
+}
 
 @Controller('merchant/orders')
 @UseGuards(JwtGuard, RolesGuard)

@@ -3,8 +3,12 @@ import { PrivyService } from '../wallet/privy.service';
 import { UserService } from './user.service';
 import { NavyTokenService } from '../auth/navy-token.service';
 import { AuditService } from '../audit/audit.service';
+import { Throttle } from '@nestjs/throttler';
+import { IsNotEmpty, IsString } from 'class-validator';
 
-class PrivyLoginDto { accessToken!: string; }
+class PrivyLoginDto {
+  @IsString() @IsNotEmpty() accessToken!: string;
+}
 
 @Controller('auth')
 export class UserController {
@@ -16,6 +20,7 @@ export class UserController {
   ) {}
 
   @Post('privy')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   async loginWithPrivy(@Body() dto: PrivyLoginDto) {
     let verified;
     try { verified = await this.privy.verifyAccessToken(dto.accessToken); }

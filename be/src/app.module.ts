@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { NavyConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { CryptoModule } from './crypto/crypto.module';
@@ -16,9 +18,11 @@ import { FarmingModule } from './farming/farming.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     NavyConfigModule, PrismaModule, CryptoModule, AuditModule, AuthModule,
     UserModule, AdminModule, MerchantModule, WalletModule, PaymentsModule,
     AdminMerchantsModule, FarmingModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

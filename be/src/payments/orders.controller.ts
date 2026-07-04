@@ -5,10 +5,19 @@ import { RelayerService } from './relayer.service';
 import { ChainWatcherService } from './chain-watcher.service';
 import { OrderAuthGuard } from './order-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { Throttle } from '@nestjs/throttler';
+import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
 import { parsePositiveAmount } from '../common/amount.util';
 
-class CreateOrderDto { amount!: string; reference!: string; callbackUrl?: string; expiresInSec?: number; }
-class SubmitDto { signedTx!: string; }
+class CreateOrderDto {
+  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amount!: string;
+  @IsString() @IsNotEmpty() reference!: string;
+  @IsOptional() @IsString() callbackUrl?: string;
+  @IsInt() @IsPositive() @IsOptional() expiresInSec?: number;
+}
+class SubmitDto {
+  @IsString() @IsNotEmpty() signedTx!: string;
+}
 
 @Controller('v1/orders')
 export class OrdersController {
@@ -55,6 +64,7 @@ export class OrdersController {
   }
 
   @Post(':id/submit')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   async submit(@Param('id') id: string, @Body() dto: SubmitDto) {
     const { signature, err } = await this.relayer.verifyAndSubmit(id, dto.signedTx);
     if (err) {
