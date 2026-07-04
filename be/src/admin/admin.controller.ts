@@ -22,7 +22,24 @@ export class AdminController {
   @Post('admin')
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   async login(@Body() dto: AdminLoginDto) {
-    const admin = await this.admins.login(dto.email, dto.password, dto.totp);
+    let admin;
+    try {
+      admin = await this.admins.login(dto.email, dto.password, dto.totp);
+    } catch (e) {
+      // Classify the failure (bad password / bad totp / locked) for the audit trail —
+      // NEVER log the password or the TOTP code.
+      const msg = (e as Error).message ?? '';
+      let reason: 'locked' | 'bad_totp' | 'bad_password' = 'bad_password';
+      if (/locked/i.test(msg)) reason = 'locked';
+      else if (/totp/i.test(msg)) reason = 'bad_totp';
+      await this.audit.record({
+        actor: `admin:${dto.email}`,
+        action: 'auth.admin.login.failed',
+        target: dto.email,
+        metadata: { reason },
+      });
+      throw e;
+    }
     await this.audit.record({ actor: `admin:${admin.id}`, action: 'auth.admin.login' });
     return this.tokens.issue({ subjectId: admin.id, role: 'admin' });
   }

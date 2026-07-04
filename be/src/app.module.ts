@@ -14,6 +14,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminMerchantsModule } from './admin-merchants/admin-merchants.module';
 import { FarmingModule } from './farming/farming.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { FarmingModule } from './farming/farming.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     NavyConfigModule, PrismaModule, CryptoModule, AuditModule, AuthModule,
     UserModule, AdminModule, MerchantModule, WalletModule, PaymentsModule,
-    AdminMerchantsModule, FarmingModule,
+    AdminMerchantsModule, FarmingModule, HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

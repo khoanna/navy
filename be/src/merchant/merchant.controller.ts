@@ -41,7 +41,15 @@ export class MerchantController {
   @Post('auth/merchant')
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   async login(@Body() dto: LoginDto) {
-    const m = await this.merchants.login(dto.email, dto.password);
+    let m;
+    try {
+      m = await this.merchants.login(dto.email, dto.password);
+    } catch (e) {
+      // Audit the failure with the email as target — NEVER the password.
+      await this.audit.record({ actor: `merchant:${dto.email}`, action: 'auth.merchant.login.failed', target: dto.email });
+      throw e;
+    }
+    await this.audit.record({ actor: `merchant:${m.id}`, action: 'auth.merchant.login' });
     return this.tokens.issue({ subjectId: m.id, role: 'merchant' });
   }
 

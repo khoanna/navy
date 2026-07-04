@@ -24,9 +24,13 @@ export class UserController {
   async loginWithPrivy(@Body() dto: PrivyLoginDto) {
     let verified;
     try { verified = await this.privy.verifyAccessToken(dto.accessToken); }
-    catch { throw new UnauthorizedException('Invalid Privy token'); }
+    catch {
+      // Audit the failed login. Never log the access token.
+      await this.audit.record({ actor: 'user:unknown', action: 'auth.user.login.failed', metadata: { reason: 'invalid_privy_token' } });
+      throw new UnauthorizedException('Invalid Privy token');
+    }
     const user = await this.users.upsertByDid(verified.userId, verified.wallet);
-    await this.audit.record({ actor: `user:${user.id}`, action: 'auth.privy.login' });
+    await this.audit.record({ actor: `user:${user.id}`, action: 'auth.user.login' });
     return this.tokens.issue({ subjectId: user.id, role: 'user', walletAddress: user.primaryWallet ?? undefined });
   }
 }
