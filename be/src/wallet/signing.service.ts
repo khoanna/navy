@@ -22,7 +22,7 @@ export class SigningService {
     if (!row || row.status !== 'active') throw new NotFoundException('Subwallet not available');
 
     const summary = deriveTxSummary(tx);
-    const verdict = this.policy.check(row.policyJson as unknown as SubwalletPolicy, summary);
+    const verdict = this.policy.check(row.policyJson as unknown as SubwalletPolicy, summary, { subwallet: row.pubkey });
     if (!verdict.ok) {
       await this.audit.record({ actor: `subwallet:${row.pubkey}`, action: 'subwallet.sign.denied', metadata: { reason: verdict.reason } });
       throw new ForbiddenException(`Policy denied: ${verdict.reason}`);
