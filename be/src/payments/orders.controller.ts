@@ -4,6 +4,9 @@ import { OrdersService } from './orders.service';
 import { RelayerService } from './relayer.service';
 import { ChainWatcherService } from './chain-watcher.service';
 import { OrderAuthGuard } from './order-auth.guard';
+import { JwtGuard } from '../auth/jwt.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { Throttle } from '@nestjs/throttler';
 import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
@@ -44,6 +47,8 @@ export class OrdersController {
   }
 
   @Get(':id/payment-tx')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('user')
   async paymentTx(@Param('id') id: string, @Req() req: any) {
     const order = await this.orders.get(id);
     if (!order) return { error: 'not found' };
@@ -52,9 +57,9 @@ export class OrdersController {
     }
     let payer: PublicKey;
     try {
-      payer = new PublicKey(req.query.payer);
+      payer = new PublicKey(req.user.walletAddress);
     } catch {
-      throw new BadRequestException('Invalid payer address');
+      throw new BadRequestException('Wallet address required');
     }
     const merchant = await this.prisma.merchant.findUnique({ where: { id: order.merchantId } });
     const merchantAuthority = new PublicKey(merchant!.payoutAddress!);
@@ -64,6 +69,8 @@ export class OrdersController {
   }
 
   @Post(':id/submit')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('user')
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   async submit(@Param('id') id: string, @Body() dto: SubmitDto) {
     const { signature, err } = await this.relayer.verifyAndSubmit(id, dto.signedTx);
