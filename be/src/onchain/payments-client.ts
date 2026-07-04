@@ -6,26 +6,33 @@ export function configPda(programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('config')], programId)[0];
 }
 
-export function merchantPda(programId: PublicKey, merchantAuthority: PublicKey): PublicKey {
+/** Derive the 16-byte on-chain merchant_id from a merchant DB uuid (v4). */
+export function merchantIdFromUuid(uuid: string): number[] {
+  const hex = uuid.replace(/-/g, '');
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) throw new Error(`invalid uuid: ${uuid}`);
+  return Array.from(Buffer.from(hex, 'hex'));
+}
+
+export function merchantPda(programId: PublicKey, merchantId: number[] | Buffer): PublicKey {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('merchant'), merchantAuthority.toBuffer()],
+    [Buffer.from('merchant'), Buffer.from(merchantId)],
     programId,
   )[0];
 }
 
 export function invoicePda(
   programId: PublicKey,
-  merchantAuthority: PublicKey,
+  merchantId: number[] | Buffer,
   invoiceId: number[],
 ): PublicKey {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('invoice'), merchantAuthority.toBuffer(), Buffer.from(invoiceId)],
+    [Buffer.from('invoice'), Buffer.from(merchantId), Buffer.from(invoiceId)],
     programId,
   )[0];
 }
 
 export interface BuildPayParams {
-  merchantAuthority: PublicKey;
+  merchantId: number[];
   payout: PublicKey;
   treasury: PublicKey;
   usdcMint: PublicKey;
@@ -43,8 +50,8 @@ export async function buildPayInvoiceTx(program: Program, p: BuildPayParams): Pr
     .payInvoice(p.invoiceId, new BN(p.amount.toString()), new BN(p.expiry))
     .accounts({
       config: configPda(pid),
-      merchant: merchantPda(pid, p.merchantAuthority),
-      invoice: invoicePda(pid, p.merchantAuthority, p.invoiceId),
+      merchant: merchantPda(pid, p.merchantId),
+      invoice: invoicePda(pid, p.merchantId, p.invoiceId),
       payerToken,
       merchantPayout: p.payout,
       treasury: p.treasury,

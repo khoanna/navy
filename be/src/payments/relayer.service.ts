@@ -20,12 +20,13 @@ export class RelayerService {
   /** Builds the relayer-fee-paid, relayer-partial-signed pay_invoice tx (server-authoritative). */
   private async buildTx(
     order: { id: string; amount: bigint; expiresAt: Date },
-    merchantAuthority: PublicKey,
+    merchantId: number[],
+    payoutWallet: PublicKey,
     payer: PublicKey,
   ): Promise<Transaction> {
-    const payout = await getAssociatedTokenAddress(this.chain.usdcMint, merchantAuthority);
+    const payout = await getAssociatedTokenAddress(this.chain.usdcMint, payoutWallet);
     const tx = await buildPayInvoiceTx(this.chain.program, {
-      merchantAuthority,
+      merchantId,
       payout,
       treasury: this.chain.treasury,
       usdcMint: this.chain.usdcMint,
@@ -43,7 +44,8 @@ export class RelayerService {
 
   async buildPaymentTx(
     order: { id: string; amount: bigint; expiresAt: Date },
-    merchantAuthority: PublicKey,
+    merchantId: number[],
+    payoutWallet: PublicKey,
     payer: PublicKey,
   ): Promise<string> {
     // Guardrail: the relayer is fee payer + Invoice-rent payer for every payment. If it's low on
@@ -52,7 +54,7 @@ export class RelayerService {
     if (balance < this.cfg.relayerMinBalanceLamports) {
       throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
     }
-    const tx = await this.buildTx(order, merchantAuthority, payer);
+    const tx = await this.buildTx(order, merchantId, payoutWallet, payer);
     // Persist the issued message as a durable, single-use nonce on the order row so verify
     // survives restarts / works across instances (replaces the process-local Map).
     const issuedTxHash = createHash('sha256').update(tx.serializeMessage()).digest('hex');

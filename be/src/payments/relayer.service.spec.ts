@@ -53,7 +53,7 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
     jest.spyOn(svc as any, 'buildTx').mockResolvedValue(tx);
 
     const expiresAt = new Date(Date.now() + 600_000);
-    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, relayer.publicKey, payer.publicKey);
+    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey);
 
     const expectedHash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
     expect(prisma.order.update).toHaveBeenCalledWith({
@@ -70,7 +70,7 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
 
     const expiresAt = new Date(Date.now() + 600_000);
     await expect(
-      svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, relayer.publicKey, payer.publicKey),
+      svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey),
     ).rejects.toThrow(ServiceUnavailableException);
 
     expect(chain.connection.getBalance).toHaveBeenCalledWith(relayer.publicKey);
@@ -86,7 +86,7 @@ describe('RelayerService issued-tx store (durable, single-use)', () => {
     jest.spyOn(svc as any, 'buildTx').mockResolvedValue(tx);
 
     const expiresAt = new Date(Date.now() + 600_000);
-    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, relayer.publicKey, payer.publicKey);
+    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey);
 
     expect(chain.connection.getBalance).toHaveBeenCalledWith(relayer.publicKey);
     expect(prisma.order.update).toHaveBeenCalled();

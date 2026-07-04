@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { PublicKey } from '@solana/web3.js';
+import { merchantIdFromUuid } from '../onchain/payments-client';
 import { OrdersService } from './orders.service';
 import { RelayerService } from './relayer.service';
 import { ChainWatcherService } from './chain-watcher.service';
@@ -62,9 +63,11 @@ export class OrdersController {
       throw new BadRequestException('Wallet address required');
     }
     const merchant = await this.prisma.merchant.findUnique({ where: { id: order.merchantId } });
-    const merchantAuthority = new PublicKey(merchant!.payoutAddress!);
+    // merchant_id is the deterministic 16-byte encoding of the merchant uuid (matches the PDA seed).
+    const merchantId = merchantIdFromUuid(order.merchantId);
+    const payoutWallet = new PublicKey(merchant!.payoutAddress!);
     const tx = await this.relayer.buildPaymentTx(
-      { id: order.id, amount: order.amount, expiresAt: order.expiresAt }, merchantAuthority, payer);
+      { id: order.id, amount: order.amount, expiresAt: order.expiresAt }, merchantId, payoutWallet, payer);
     return { tx, invoice: { merchant: order.merchantId, amount: order.amount.toString(), reference: order.reference, expiresAt: order.expiresAt } };
   }
 

@@ -7,6 +7,9 @@ import { orderIdToInvoiceId, invoiceIdToHex } from './invoice-id';
 
 export interface CreateOrderInput { amount: bigint; reference: string; callbackUrl?: string; expiresInSec?: number; }
 
+/** On-chain pay_invoice enforces amount >= 10_000 base units; reject smaller orders up front. */
+export const MIN_INVOICE_AMOUNT = 10_000n;
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -18,6 +21,9 @@ export class OrdersService {
 
   async create(merchantId: string, input: CreateOrderInput) {
     if (!input.amount || input.amount <= 0n) throw new BadRequestException('amount must be > 0');
+    if (input.amount < MIN_INVOICE_AMOUNT) {
+      throw new BadRequestException(`amount must be at least ${MIN_INVOICE_AMOUNT} base units`);
+    }
     const id = randomUUID();
     const onchainInvoiceId = invoiceIdToHex(orderIdToInvoiceId(id));
     const expiresAt = new Date(Date.now() + (input.expiresInSec ?? 900) * 1000);

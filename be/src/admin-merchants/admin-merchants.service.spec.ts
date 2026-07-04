@@ -29,13 +29,15 @@ describe('AdminMerchantsService', () => {
     const { svc } = deps({ id: 'm1', payoutAddress: null, approvalStatus: 'pending' });
     await expect(svc.approve('m1')).rejects.toBeInstanceOf(BadRequestException);
   });
-  it('approves: registers on-chain then stores status + tx', async () => {
-    const { svc, prisma, registrar } = deps({ id: 'm1', payoutAddress: 'PK', approvalStatus: 'pending' });
-    const res = await svc.approve('m1');
+  it('approves: registers on-chain then stores status + tx + onchainMerchantId', async () => {
+    const uuid = '00112233-4455-6677-8899-aabbccddeeff';
+    const { svc, prisma, registrar } = deps({ id: uuid, payoutAddress: 'PK', approvalStatus: 'pending' });
+    const res = await svc.approve(uuid);
     expect(registrar.ensureRegisteredActive).toHaveBeenCalled();
     const data = prisma.merchant.update.mock.calls[0][0].data;
     expect(data.approvalStatus).toBe('approved');
     expect(data.onchainRegisterTx).toBe('sig123');
+    expect(data.onchainMerchantId).toBe('00112233445566778899aabbccddeeff');
     expect(res.approvalStatus).toBe('approved');
   });
   it('leaves the merchant pending (502) if on-chain registration fails', async () => {

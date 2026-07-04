@@ -113,7 +113,7 @@
               },
               {
                 "kind": "account",
-                "path": "merchant.merchant_authority",
+                "path": "merchant.merchant_id",
                 "account": "Merchant"
               }
             ]
@@ -138,7 +138,7 @@
               },
               {
                 "kind": "account",
-                "path": "merchant.merchant_authority",
+                "path": "merchant.merchant_id",
                 "account": "Merchant"
               },
               {
@@ -251,14 +251,11 @@
                 ]
               },
               {
-                "kind": "account",
-                "path": "merchant_authority"
+                "kind": "arg",
+                "path": "merchant_id"
               }
             ]
           }
-        },
-        {
-          "name": "merchant_authority"
         },
         {
           "name": "admin",
@@ -274,6 +271,15 @@
         }
       ],
       "args": [
+        {
+          "name": "merchant_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
         {
           "name": "payout",
           "type": "pubkey"
@@ -327,6 +333,56 @@
         {
           "name": "active",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_merchant_payout",
+      "discriminator": [
+        10,
+        89,
+        218,
+        92,
+        185,
+        10,
+        61,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "merchant",
+          "writable": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_payout",
+          "type": "pubkey"
         }
       ]
     },
@@ -471,16 +527,21 @@
     },
     {
       "code": 6004,
+      "name": "AmountTooSmall",
+      "msg": "amount is below the minimum invoice amount"
+    },
+    {
+      "code": 6005,
       "name": "WrongMint",
       "msg": "token mint does not match the configured USDC mint"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "MathOverflow",
       "msg": "arithmetic overflow"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "NotAdmin",
       "msg": "only the configured admin may perform this action"
     }
@@ -548,8 +609,13 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "merchant_authority",
-            "type": "pubkey"
+            "name": "merchant_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           },
           {
             "name": "invoice_id",
@@ -585,8 +651,13 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "merchant_authority",
-            "type": "pubkey"
+            "name": "merchant_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           },
           {
             "name": "payout",
