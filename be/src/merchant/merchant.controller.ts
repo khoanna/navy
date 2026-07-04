@@ -54,6 +54,13 @@ export class MerchantController {
     return out;
   }
 
+  @Post('merchant/payout/challenge')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('merchant')
+  async payoutChallenge(@Req() req: any) {
+    return this.merchants.issuePayoutChallenge(req.user.sub);
+  }
+
   @Post('merchant/payout')
   @UseGuards(JwtGuard, RolesGuard)
   @Roles('merchant')
