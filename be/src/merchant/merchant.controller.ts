@@ -5,10 +5,23 @@ import { AuditService } from '../audit/audit.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { Throttle } from '@nestjs/throttler';
+import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 
-class SignupDto { email!: string; password!: string; businessName!: string; }
-class LoginDto { email!: string; password!: string; }
-class PayoutDto { address!: string; message!: string; signature!: string; }
+class SignupDto {
+  @IsEmail() email!: string;
+  @IsString() @MinLength(8) password!: string;
+  @IsString() @IsNotEmpty() businessName!: string;
+}
+class LoginDto {
+  @IsEmail() email!: string;
+  @IsString() @MinLength(8) password!: string;
+}
+class PayoutDto {
+  @IsString() @IsNotEmpty() address!: string;
+  @IsString() @IsNotEmpty() message!: string;
+  @IsString() @IsNotEmpty() signature!: string;
+}
 
 @Controller()
 export class MerchantController {
@@ -26,8 +39,17 @@ export class MerchantController {
   }
 
   @Post('auth/merchant')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   async login(@Body() dto: LoginDto) {
-    const m = await this.merchants.login(dto.email, dto.password);
+    let m;
+    try {
+      m = await this.merchants.login(dto.email, dto.password);
+    } catch (e) {
+      // Audit the failure with the email as target — NEVER the password.
+      await this.audit.record({ actor: `merchant:${dto.email}`, action: 'auth.merchant.login.failed', target: dto.email });
+      throw e;
+    }
+    await this.audit.record({ actor: `merchant:${m.id}`, action: 'auth.merchant.login' });
     return this.tokens.issue({ subjectId: m.id, role: 'merchant' });
   }
 
@@ -38,6 +60,13 @@ export class MerchantController {
     const out = await this.merchants.issueApiKey(req.user.sub);
     await this.audit.record({ actor: `merchant:${req.user.sub}`, action: 'merchant.apikey.create' });
     return out;
+  }
+
+  @Post('merchant/payout/challenge')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('merchant')
+  async payoutChallenge(@Req() req: any) {
+    return this.merchants.issuePayoutChallenge(req.user.sub);
   }
 
   @Post('merchant/payout')

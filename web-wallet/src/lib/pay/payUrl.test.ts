@@ -11,4 +11,13 @@ describe('parsePayUrl', () => {
     expect(() => parsePayUrl('https://evil.com/x')).toThrow(/navy/i);
     expect(() => parsePayUrl('navy://pay/not-a-uuid')).toThrow(/invoice/i);
   });
+  it('rejects a foreign https host even with a /pay/<uuid> path (phishing)', () => {
+    expect(() => parsePayUrl('https://evil.com/pay/00112233-4455-6677-8899-aabbccddeeff')).toThrow(/navy/i);
+  });
+  it('rejects a greedy nested /pay/ path', () => {
+    expect(() => parsePayUrl('https://pay.navy/x/pay/00112233-4455-6677-8899-aabbccddeeff')).toThrow(/navy/i);
+  });
+  it('rejects a foreign navy-scheme host', () => {
+    expect(() => parsePayUrl('navy://evil/pay/00112233-4455-6677-8899-aabbccddeeff')).toThrow(/navy/i);
+  });
 });

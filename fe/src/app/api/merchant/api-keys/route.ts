@@ -1,10 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { NavyApi, NavyApiError } from '@/lib/navyApi';
 import { serverEnv } from '@/lib/env';
 import { ACCESS_COOKIE } from '@/lib/session';
+import { guardOrigin } from '@/lib/request-guards';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const rejected = guardOrigin(req);
+  if (rejected) return rejected;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 });
   const api = new NavyApi(serverEnv().navyApiUrl);

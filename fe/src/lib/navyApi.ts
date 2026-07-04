@@ -23,6 +23,7 @@ export class NavyApi {
   adminLogin(c: AdminCreds): Promise<NavyTokens> { return this.post('/auth/admin', c); }
   merchantLogin(c: MerchantCreds): Promise<NavyTokens> { return this.post('/auth/merchant', c); }
   merchantSignup(c: MerchantSignup): Promise<NavyTokens> { return this.post('/auth/merchant/signup', c); }
+  refresh(refreshToken: string): Promise<NavyTokens> { return this.post('/auth/refresh', { refreshToken }); }
   createApiKey(bearer: string): Promise<IssuedApiKey> { return this.post('/merchant/api-keys', {}, bearer); }
   setPayout(bearer: string, p: PayoutInput): Promise<{ payoutAddress: string }> { return this.post('/merchant/payout', p, bearer); }
 }

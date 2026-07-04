@@ -5,7 +5,7 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { configPda, merchantPda, invoicePda } from './pdas';
 
 export interface PayInvoiceParams {
-  merchantAuthority: PublicKey;
+  merchantId: Uint8Array;  // 16 bytes
   payout: PublicKey;
   treasury: PublicKey;
   usdcMint: PublicKey;
@@ -22,8 +22,8 @@ export async function buildPayInvoiceTx(program: Program<any>, p: PayInvoicePara
   const ix = await program.methods
     .payInvoice([...p.invoiceId], new anchor.BN(p.amount.toString()), new anchor.BN(p.expiry))
     .accounts({
-      config: configPda(pid), merchant: merchantPda(pid, p.merchantAuthority),
-      invoice: invoicePda(pid, p.merchantAuthority, p.invoiceId),
+      config: configPda(pid), merchant: merchantPda(pid, p.merchantId),
+      invoice: invoicePda(pid, p.merchantId, p.invoiceId),
       payerToken, merchantPayout: p.payout, treasury: p.treasury, usdcMint: p.usdcMint,
       payer: p.payer, relayer: p.relayer,
     })

@@ -27,6 +27,10 @@ describe('OrdersService', () => {
     const { svc } = make();
     await expect(svc.create('m1', { amount: 0n, reference: 'x' })).rejects.toThrow(/amount/i);
   });
+  it('rejects an amount below the on-chain minimum (10_000)', async () => {
+    const { svc } = make();
+    await expect(svc.create('m1', { amount: 9_999n, reference: 'x' })).rejects.toThrow(/at least 10000/i);
+  });
 });
 
 describe('OrdersService merchant-scoped', () => {

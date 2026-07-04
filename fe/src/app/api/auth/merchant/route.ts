@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { NavyApi, NavyApiError } from '@/lib/navyApi';
 import { serverEnv } from '@/lib/env';
 import { setAuthCookies } from '../admin/route';
+import { guardOrigin, parseJson } from '@/lib/request-guards';
+import type { MerchantCreds } from '@/lib/navyApi';
 
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json();
+  const rejected = guardOrigin(req);
+  if (rejected) return rejected;
+  const parsed = await parseJson<MerchantCreds>(req);
+  if (!parsed.ok) return parsed.response;
+  const { email, password } = parsed.body;
   const api = new NavyApi(serverEnv().navyApiUrl);
   try {
     const tokens = await api.merchantLogin({ email, password });

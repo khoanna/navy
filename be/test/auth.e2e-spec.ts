@@ -54,4 +54,46 @@ describe('Auth e2e (merchant flow)', () => {
   it('rejects API key creation without a token', async () => {
     await request(app.getHttpServer()).post('/merchant/api-keys').expect(401);
   });
+
+  it('refresh rotates the token pair and invalidates the old refresh token', async () => {
+    const email = `m_${Date.now()}_refresh@x.com`;
+    const signup = await request(app.getHttpServer())
+      .post('/auth/merchant/signup')
+      .send({ email, password: 'pw123456', businessName: 'Acme' });
+    const oldRefresh = signup.body.refreshToken;
+
+    const rotated = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(201);
+    expect(rotated.body.accessToken).toEqual(expect.any(String));
+    expect(rotated.body.refreshToken).toEqual(expect.any(String));
+    expect(rotated.body.refreshToken).not.toEqual(oldRefresh);
+
+    // old refresh token is now dead
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(401);
+  });
+
+  it('logout revokes the session so the access token is rejected afterward', async () => {
+    const email = `m_${Date.now()}_logout@x.com`;
+    const signup = await request(app.getHttpServer())
+      .post('/auth/merchant/signup')
+      .send({ email, password: 'pw123456', businessName: 'Acme' });
+    const token = signup.body.accessToken;
+
+    // token works before logout
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    // same token now rejected (session revoked)
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(401);
+  });
 });

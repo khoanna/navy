@@ -21,10 +21,28 @@ export class NavyConfigService {
       : this.req('SOLANA_RPC_DEVNET');
   }
   get jwtSecret(): string { return this.req('NAVY_JWT_SECRET'); }
-  get accessTtl(): number { return parseInt(this.req('NAVY_JWT_ACCESS_TTL'), 10); }
-  get refreshTtl(): number { return parseInt(this.req('NAVY_JWT_REFRESH_TTL'), 10); }
+  get accessTtl(): number { return this.posIntTtl('NAVY_JWT_ACCESS_TTL'); }
+  get refreshTtl(): number { return this.posIntTtl('NAVY_JWT_REFRESH_TTL'); }
+  /** Parse a TTL (seconds) env var, rejecting NaN / non-positive values so tokens can't be minted non-expiring. */
+  private posIntTtl(k: string): number {
+    const n = parseInt(this.req(k), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`${k} must be a positive integer (seconds); got "${this.env[k]}"`);
+    }
+    return n;
+  }
   get masterKey(): Buffer { return Buffer.from(this.req('SUBWALLET_MASTER_KEY'), 'hex'); }
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
   get adminMaxTotpFails(): number { return parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10); }
+  /** How long an admin stays locked after hitting the TOTP fail limit. Env NAVY_ADMIN_LOCK_WINDOW_MS; default 15 min. */
+  get adminLockWindowMs(): number {
+    const n = parseInt(this.env.NAVY_ADMIN_LOCK_WINDOW_MS ?? '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
+  }
+  /** Min relayer SOL balance (lamports) required before co-signing a payment. Env is SOL; default 0.05. */
+  get relayerMinBalanceLamports(): number {
+    const sol = parseFloat(this.env.NAVY_RELAYER_MIN_BALANCE_SOL ?? '0.05');
+    return Math.floor((Number.isNaN(sol) ? 0.05 : sol) * 1e9);
+  }
 }

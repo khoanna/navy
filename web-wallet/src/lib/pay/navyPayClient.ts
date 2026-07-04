@@ -6,18 +6,37 @@ export class NavyPayClient {
 
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init });
-    if (!res.ok) throw new Error(`Navy API ${path} failed (HTTP ${res.status})`);
+    if (!res.ok) {
+      // Surface the server's message (if any) so toasts show the real reason.
+      let detail = '';
+      try {
+        const body = await res.json();
+        detail = (body && (body.message || body.error)) ? `: ${body.message ?? body.error}` : '';
+      } catch {
+        try { const t = (await res.text()).trim(); if (t) detail = `: ${t}`; } catch { /* ignore */ }
+      }
+      throw new Error(`Navy API ${path} failed (HTTP ${res.status})${detail}`);
+    }
     return (await res.json()) as T;
   }
 
-  getOrder(id: string): Promise<OrderSummary> { return this.json(`/v1/orders/${id}`); }
-  getPaymentTx(id: string, payer: string): Promise<{ tx: string; invoice: unknown }> {
-    return this.json(`/v1/orders/${id}/payment-tx?payer=${payer}`);
+  getOrder(id: string): Promise<OrderSummary> {
+    return this.json(`/v1/orders/${encodeURIComponent(id)}`);
   }
-  submitSignedTx(id: string, signedTx: string): Promise<{ txSignature: string; status: string }> {
-    return this.json(`/v1/orders/${id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTx }) });
+  getPaymentTx(id: string, navyAccessToken: string): Promise<{ tx: string; invoice: unknown }> {
+    // The backend derives the payer from the Navy user token (the `?payer=` param is ignored).
+    return this.json(`/v1/orders/${encodeURIComponent(id)}/payment-tx`, {
+      headers: { Authorization: `Bearer ${navyAccessToken}` },
+    });
+  }
+  submitSignedTx(id: string, signedTx: string, navyAccessToken: string): Promise<{ txSignature: string; status: string }> {
+    return this.json(`/v1/orders/${encodeURIComponent(id)}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${navyAccessToken}` },
+      body: JSON.stringify({ signedTx }),
+    });
   }
   getUserPayments(navyAccessToken: string): Promise<Payment[]> {
-    return this.json(`/user/payments`, { headers: { Authorization: `Bearer ${navyAccessToken}` } });
+    return this.json('/user/payments', { headers: { Authorization: `Bearer ${navyAccessToken}` } });
   }
 }

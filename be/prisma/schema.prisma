@@ -25,6 +25,7 @@ model Merchant {
   createdAt             DateTime  @default(now())
   onchainRegisteredAt   DateTime?
   onchainRegisterTx     String?
+  onchainMerchantId     String?   @unique
   rejectionReason       String?
   apiKeys               MerchantApiKey[]
   orders                Order[]
@@ -48,6 +49,9 @@ model Admin {
   passwordHash    String
   totpSecret      String
   failedTotpCount Int    @default(0)
+  lastTotpStep        Int?
+  lockedUntil         DateTime?
+  failedPasswordCount Int       @default(0)
 }
 
 model FarmingSubwallet {
@@ -83,8 +87,10 @@ model AuthSession {
   subjectId        String
   role             String
   refreshTokenHash String
+  walletAddress    String?
   expiresAt        DateTime
   createdAt        DateTime @default(now())
+  revokedAt        DateTime?
 }
 
 model AuditLog {
@@ -111,6 +117,9 @@ model Order {
   expiresAt        DateTime
   createdAt        DateTime @default(now())
   paidAt           DateTime?
+  issuedTxHash       String?
+  issuedTxExpiresAt  DateTime?
+  issuedTxConsumedAt DateTime?
   webhooks         WebhookDelivery[]
 }
 
@@ -124,4 +133,14 @@ model WebhookDelivery {
   lastError   String?
   deliveredAt DateTime?
   createdAt   DateTime @default(now())
+}
+
+model PayoutChallenge {
+  id         String   @id @default(uuid())
+  merchantId String
+  nonce      String   @unique
+  challenge  String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
 }

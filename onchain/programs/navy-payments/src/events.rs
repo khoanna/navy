@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 #[event]
 pub struct InvoicePaid {
-    pub merchant_authority: Pubkey,
+    pub merchant_id: [u8; 16],
     pub invoice_id: [u8; 16],
     pub payer: Pubkey,
     pub amount: u64,

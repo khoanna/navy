@@ -1,32 +1,99 @@
-import { Transaction, SystemProgram } from '@solana/web3.js';
+import { Transaction, TransactionInstruction, SystemProgram, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
-export interface TxSummary { programIds: string[]; transferDestinations: string[]; }
+const SYSTEM_PROGRAM_ID = SystemProgram.programId.toBase58();
+const TOKEN_PROGRAM = TOKEN_PROGRAM_ID.toBase58();
+const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL').toBase58();
+const SAVE_PROGRAM_ID = new PublicKey('ALend7Ketfx5bxh6ghsCDXAoDrhvEmsXT3cynB6aPLgx').toBase58();
 
-function isSystemTransfer(programId: string, data: Buffer): boolean {
-  return programId === SystemProgram.programId.toBase58() && data.length >= 4 && data.readUInt32LE(0) === 2;
+export type IxKind =
+  | 'system-transfer'
+  | 'system-create'
+  | 'token-transfer'
+  | 'token-close'
+  | 'token-init'
+  | 'token-sync'
+  | 'ata-create'
+  | 'save'
+  | 'token-dangerous'
+  | 'unknown';
+
+export interface DecodedIx {
+  programId: string;
+  kind: IxKind;
+  destination?: string; // set for transfers (destination pubkey) and token-close (keys[1])
+  rawOpcode?: number;
 }
 
-function tokenTransferDestIndex(programId: string, data: Buffer): number | null {
-  if (programId !== TOKEN_PROGRAM_ID.toBase58() || data.length < 1) return null;
-  if (data[0] === 3) return 1;   // Transfer: [source, destination, owner]
-  if (data[0] === 12) return 2;  // TransferChecked: [source, mint, destination, owner]
-  return null;
+export interface TxSummary {
+  instructions: DecodedIx[];
+}
+
+const TOKEN_DANGEROUS_OPCODES = new Set([4, 13, 5, 6, 7, 8, 15, 10, 11]);
+
+function keyAt(ix: TransactionInstruction, index: number): string | undefined {
+  return ix.keys[index]?.pubkey.toBase58();
+}
+
+function decodeSystem(ix: TransactionInstruction, data: Buffer, programId: string): DecodedIx {
+  if (data.length < 4) return { programId, kind: 'unknown' };
+  const opcode = data.readUInt32LE(0);
+  if (opcode === 2) {
+    return { programId, kind: 'system-transfer', destination: keyAt(ix, 1) };
+  }
+  if (opcode === 0 || opcode === 1) {
+    return { programId, kind: 'system-create' };
+  }
+  return { programId, kind: 'unknown' };
+}
+
+function decodeToken(ix: TransactionInstruction, data: Buffer, programId: string): DecodedIx {
+  if (data.length < 1) return { programId, kind: 'unknown' };
+  const opcode = data[0];
+  const base: DecodedIx = { programId, kind: 'unknown', rawOpcode: opcode };
+  switch (opcode) {
+    case 3:
+      return { ...base, kind: 'token-transfer', destination: keyAt(ix, 1) };
+    case 12:
+      return { ...base, kind: 'token-transfer', destination: keyAt(ix, 2) };
+    case 9:
+      return { ...base, kind: 'token-close', destination: keyAt(ix, 1) };
+    case 1:
+    case 16:
+    case 18:
+      return { ...base, kind: 'token-init' };
+    case 17:
+      return { ...base, kind: 'token-sync' };
+    default:
+      if (TOKEN_DANGEROUS_OPCODES.has(opcode)) return { ...base, kind: 'token-dangerous' };
+      return base;
+  }
+}
+
+function decodeAta(data: Buffer, programId: string): DecodedIx {
+  if (data.length === 0) return { programId, kind: 'ata-create' };
+  const opcode = data[0];
+  if (opcode === 0 || opcode === 1) return { programId, kind: 'ata-create' };
+  return { programId, kind: 'unknown' };
+}
+
+function decodeInstruction(ix: TransactionInstruction): DecodedIx {
+  const programId = ix.programId.toBase58();
+  const data = Buffer.from(ix.data);
+  switch (programId) {
+    case SYSTEM_PROGRAM_ID:
+      return decodeSystem(ix, data, programId);
+    case TOKEN_PROGRAM:
+      return decodeToken(ix, data, programId);
+    case ATA_PROGRAM_ID:
+      return decodeAta(data, programId);
+    case SAVE_PROGRAM_ID:
+      return { programId, kind: 'save' };
+    default:
+      return { programId, kind: 'unknown' };
+  }
 }
 
 export function deriveTxSummary(tx: Transaction): TxSummary {
-  const programIds = new Set<string>();
-  const transferDestinations: string[] = [];
-  for (const ix of tx.instructions) {
-    const pid = ix.programId.toBase58();
-    programIds.add(pid);
-    const data = Buffer.from(ix.data);
-    if (isSystemTransfer(pid, data)) {
-      transferDestinations.push(ix.keys[1].pubkey.toBase58());
-      continue;
-    }
-    const ti = tokenTransferDestIndex(pid, data);
-    if (ti !== null && ix.keys[ti]) transferDestinations.push(ix.keys[ti].pubkey.toBase58());
-  }
-  return { programIds: [...programIds], transferDestinations };
+  return { instructions: tx.instructions.map(decodeInstruction) };
 }

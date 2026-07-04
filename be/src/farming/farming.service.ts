@@ -7,6 +7,7 @@ import { SaveYieldAdapter } from './save-yield-adapter';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_ONCHAIN } from '../onchain/onchain.module';
 import type { NavyOnchain } from '../onchain/onchain.module';
+import { toFarmingEventDto } from '../common/serialize';
 
 @Injectable()
 export class FarmingService {
@@ -70,8 +71,12 @@ export class FarmingService {
     return { address: sw.pubkey, principalLamports: pos.principalLamports.toString(), currentValueLamports: pos.currentValueLamports.toString(), cTokenAmount: pos.cTokenAmount.toString() };
   }
 
-  listHistory(userId: string) {
-    return this.prisma.farmingEvent.findMany({ where: { subwallet: { userId } }, orderBy: { createdAt: 'desc' }, take: 50 });
+  async listHistory(userId: string) {
+    const events = await this.prisma.farmingEvent.findMany({
+      where: { subwallet: { userId } }, orderBy: { createdAt: 'desc' }, take: 50,
+    });
+    // amount is a Prisma BigInt column — JSON can't encode BigInt, so serialize before returning.
+    return toFarmingEventDto(events);
   }
 
   private async submit(signed: { serialize(opts?: unknown): Buffer }): Promise<string> {

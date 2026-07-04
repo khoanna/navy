@@ -15,6 +15,7 @@ describe('client helpers', () => {
 
   it('buildPayInvoiceTx + submitPayInvoice pays an invoice end to end', async () => {
     const merchantAuthority = Keypair.generate();
+    const merchantId = new Uint8Array(16); merchantId.set([1, 2, 3, 4]);
     const user = Keypair.generate();
     const usdcMint = await createMint(provider.connection, admin, admin.publicKey, null, 6);
     const treasury = await createAccount(provider.connection, admin, usdcMint, admin.publicKey);
@@ -25,12 +26,12 @@ describe('client helpers', () => {
     const cfg = configPda(program.programId);
     try { await program.methods.initializeConfig(100, usdcMint).accounts({ config: cfg, treasury, admin: admin.publicKey }).rpc(); } catch {}
     await program.methods.updateConfig(100, treasury, usdcMint).accounts({ config: cfg, admin: admin.publicKey }).rpc();
-    await program.methods.registerMerchant(payout)
-      .accounts({ config: cfg, merchant: merchantPda(program.programId, merchantAuthority.publicKey), merchantAuthority: merchantAuthority.publicKey, admin: admin.publicKey }).rpc();
+    await program.methods.registerMerchant([...merchantId], payout)
+      .accounts({ config: cfg, merchant: merchantPda(program.programId, merchantId), admin: admin.publicKey }).rpc();
 
     const invoiceId = new Uint8Array(16); invoiceId.set([9, 9, 9]);
     const tx = await buildPayInvoiceTx(program as any, {
-      merchantAuthority: merchantAuthority.publicKey, payout, treasury, usdcMint,
+      merchantId, payout, treasury, usdcMint,
       invoiceId, amount: 1_000_000n, expiry: Math.floor(Date.now() / 1000) + 600,
       payer: user.publicKey, relayer: admin.publicKey,
     });

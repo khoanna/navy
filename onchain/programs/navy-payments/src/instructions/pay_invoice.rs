@@ -1,11 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Mint, TransferChecked};
-use crate::state::{Config, Merchant, Invoice};
+use crate::state::{Config, Merchant, Invoice, MIN_INVOICE_AMOUNT};
 use crate::errors::NavyError;
 use crate::events::InvoicePaid;
 
 pub fn pay_invoice(ctx: Context<PayInvoice>, invoice_id: [u8; 16], amount: u64, expiry: i64) -> Result<()> {
     require!(amount > 0, NavyError::ZeroAmount);
+    require!(amount >= MIN_INVOICE_AMOUNT, NavyError::AmountTooSmall);
     require!(ctx.accounts.merchant.active, NavyError::MerchantInactive);
     let now = Clock::get()?.unix_timestamp;
     require!(now <= expiry, NavyError::InvoiceExpired);
@@ -48,7 +49,7 @@ pub fn pay_invoice(ctx: Context<PayInvoice>, invoice_id: [u8; 16], amount: u64, 
     invoice.bump = ctx.bumps.invoice;
 
     emit!(InvoicePaid {
-        merchant_authority: ctx.accounts.merchant.merchant_authority,
+        merchant_id: ctx.accounts.merchant.merchant_id,
         invoice_id,
         payer: ctx.accounts.payer.key(),
         amount, fee, paid_at: now,
@@ -61,16 +62,16 @@ pub fn pay_invoice(ctx: Context<PayInvoice>, invoice_id: [u8; 16], amount: u64, 
 pub struct PayInvoice<'info> {
     #[account(seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
-    #[account(seeds = [b"merchant", merchant.merchant_authority.as_ref()], bump = merchant.bump)]
+    #[account(seeds = [b"merchant", merchant.merchant_id.as_ref()], bump = merchant.bump)]
     pub merchant: Account<'info, Merchant>,
     #[account(init, payer = relayer, space = 8 + Invoice::INIT_SPACE,
-        seeds = [b"invoice", merchant.merchant_authority.as_ref(), &invoice_id], bump)]
+        seeds = [b"invoice", merchant.merchant_id.as_ref(), &invoice_id], bump)]
     pub invoice: Account<'info, Invoice>,
     #[account(mut, token::mint = usdc_mint, token::authority = payer)]
     pub payer_token: Account<'info, TokenAccount>,
-    #[account(mut, address = merchant.payout)]
+    #[account(mut, address = merchant.payout, token::mint = usdc_mint)]
     pub merchant_payout: Account<'info, TokenAccount>,
-    #[account(mut, address = config.treasury)]
+    #[account(mut, address = config.treasury, token::mint = usdc_mint)]
     pub treasury: Account<'info, TokenAccount>,
     pub usdc_mint: Account<'info, Mint>,
     pub payer: Signer<'info>,

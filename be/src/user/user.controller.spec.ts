@@ -14,11 +14,18 @@ describe('UserController POST /auth/privy', () => {
     expect(users.upsertByDid).toHaveBeenCalledWith('did:privy:abc', 'PK');
     expect(tokens.issue).toHaveBeenCalledWith({ subjectId: 'u1', role: 'user', walletAddress: 'PK' });
     expect(res).toEqual({ accessToken: 'a', refreshToken: 'r' });
+    expect(audit.record).toHaveBeenCalledWith({ actor: 'user:u1', action: 'auth.user.login' });
   });
 
-  it('rejects an invalid Privy token with 401', async () => {
+  it('rejects an invalid Privy token with 401 and audits the failure (no token in log)', async () => {
     const privy = { verifyAccessToken: jest.fn().mockRejectedValue(new Error('bad')) };
-    const ctrl = new UserController(privy as any, {} as any, {} as any, { record: jest.fn() } as any);
-    await expect(ctrl.loginWithPrivy({ accessToken: 'x' })).rejects.toThrow();
+    const audit = { record: jest.fn() };
+    const ctrl = new UserController(privy as any, {} as any, {} as any, audit as any);
+    await expect(ctrl.loginWithPrivy({ accessToken: 'secret-token' })).rejects.toThrow();
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'auth.user.login.failed' }),
+    );
+    // The access token must never appear in the audit metadata.
+    expect(JSON.stringify(audit.record.mock.calls)).not.toContain('secret-token');
   });
 });
