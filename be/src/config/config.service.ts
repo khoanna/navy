@@ -27,4 +27,9 @@ export class NavyConfigService {
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
   get adminMaxTotpFails(): number { return parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10); }
+  /** Min relayer SOL balance (lamports) required before co-signing a payment. Env is SOL; default 0.05. */
+  get relayerMinBalanceLamports(): number {
+    const sol = parseFloat(this.env.NAVY_RELAYER_MIN_BALANCE_SOL ?? '0.05');
+    return Math.floor((Number.isNaN(sol) ? 0.05 : sol) * 1e9);
+  }
 }

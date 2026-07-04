@@ -1,11 +1,12 @@
 import { createHash } from 'crypto';
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { PublicKey, Transaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { NAVY_ONCHAIN } from '../onchain/onchain.module';
 import type { NavyOnchain } from '../onchain/onchain.module';
 import { buildPayInvoiceTx } from '../onchain/payments-client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NavyConfigService } from '../config/config.service';
 import { orderIdToInvoiceId } from './invoice-id';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class RelayerService {
   constructor(
     @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
     private readonly prisma: PrismaService,
+    private readonly cfg: NavyConfigService,
   ) {}
 
   /** Builds the relayer-fee-paid, relayer-partial-signed pay_invoice tx (server-authoritative). */
@@ -44,6 +46,12 @@ export class RelayerService {
     merchantAuthority: PublicKey,
     payer: PublicKey,
   ): Promise<string> {
+    // Guardrail: the relayer is fee payer + Invoice-rent payer for every payment. If it's low on
+    // SOL, fail fast + loudly (503) instead of issuing an unfundable tx that fails confusingly.
+    const balance = await this.chain.connection.getBalance(this.chain.relayer.publicKey);
+    if (balance < this.cfg.relayerMinBalanceLamports) {
+      throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
+    }
     const tx = await this.buildTx(order, merchantAuthority, payer);
     // Persist the issued message as a durable, single-use nonce on the order row so verify
     // survives restarts / works across instances (replaces the process-local Map).

@@ -24,6 +24,16 @@ describe('NavyConfigService', () => {
     expect(c.rpcUrl).toBe('https://api.mainnet-beta.solana.com');
   });
 
+  it('parses relayerMinBalanceLamports from NAVY_RELAYER_MIN_BALANCE_SOL (SOL → lamports)', () => {
+    const c = new NavyConfigService({ ...base, NAVY_RELAYER_MIN_BALANCE_SOL: '0.1' } as any);
+    expect(c.relayerMinBalanceLamports).toBe(100_000_000);
+  });
+
+  it('defaults relayerMinBalanceLamports to 0.05 SOL when unset or NaN', () => {
+    expect(new NavyConfigService(base as any).relayerMinBalanceLamports).toBe(50_000_000);
+    expect(new NavyConfigService({ ...base, NAVY_RELAYER_MIN_BALANCE_SOL: 'nonsense' } as any).relayerMinBalanceLamports).toBe(50_000_000);
+  });
+
   it('throws if the master key is not 32 bytes hex', () => {
     expect(() => new NavyConfigService({ ...base, SUBWALLET_MASTER_KEY: 'abcd' } as any))
       .toThrow(/SUBWALLET_MASTER_KEY/);
