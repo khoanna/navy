@@ -13,7 +13,7 @@ pub struct Config {
 #[account]
 #[derive(InitSpace)]
 pub struct Merchant {
-    pub merchant_authority: Pubkey,
+    pub merchant_id: [u8; 16],
     pub payout: Pubkey,
     pub active: bool,
     pub bump: u8,
@@ -30,3 +30,6 @@ pub struct Invoice {
 }
 
 pub const MAX_FEE_BPS: u16 = 1000;
+
+/// Minimum invoice amount (0.01 USDC at 6 decimals).
+pub const MIN_INVOICE_AMOUNT: u64 = 10_000;

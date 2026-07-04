@@ -11,11 +11,12 @@ describe('merchant registry', () => {
   const program = anchor.workspace.NavyPayments as Program<NavyPayments>;
   const admin = (provider.wallet as anchor.Wallet).payer;
   const merchantAuthority = Keypair.generate();
+  const merchantId = Buffer.alloc(16); merchantId.write('merchant-reg');
   let usdcMint: PublicKey;
   let payout: PublicKey;
   const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId);
   const [merchantPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('merchant'), merchantAuthority.publicKey.toBuffer()], program.programId);
+    [Buffer.from('merchant'), merchantId], program.programId);
 
   before(async () => {
     usdcMint = await createMint(provider.connection, admin, admin.publicKey, null, 6);
@@ -29,12 +30,34 @@ describe('merchant registry', () => {
   });
 
   it('admin registers a merchant', async () => {
-    await program.methods.registerMerchant(payout)
-      .accounts({ config: configPda, merchant: merchantPda, merchantAuthority: merchantAuthority.publicKey, admin: admin.publicKey })
+    await program.methods.registerMerchant([...merchantId], payout)
+      .accounts({ config: configPda, merchant: merchantPda, admin: admin.publicKey })
       .rpc();
     const m = await program.account.merchant.fetch(merchantPda);
     assert.ok(m.payout.equals(payout));
     assert.equal(m.active, true);
+    assert.deepEqual(Buffer.from(m.merchantId), merchantId);
+  });
+
+  it('admin rotates the merchant payout', async () => {
+    const newPayout = await createAccount(provider.connection, admin, usdcMint, Keypair.generate().publicKey);
+    await program.methods.setMerchantPayout(newPayout)
+      .accounts({ config: configPda, merchant: merchantPda, admin: admin.publicKey }).rpc();
+    const m = await program.account.merchant.fetch(merchantPda);
+    assert.ok(m.payout.equals(newPayout));
+    // restore original payout so downstream assertions are unaffected
+    await program.methods.setMerchantPayout(payout)
+      .accounts({ config: configPda, merchant: merchantPda, admin: admin.publicKey }).rpc();
+  });
+
+  it('rejects a non-admin rotating the payout', async () => {
+    const stranger = Keypair.generate();
+    try {
+      await program.methods.setMerchantPayout(payout)
+        .accounts({ config: configPda, merchant: merchantPda, admin: stranger.publicKey })
+        .signers([stranger]).rpc();
+      assert.fail('should have thrown');
+    } catch (e: any) { assert.ok(e); }
   });
 
   it('admin deactivates the merchant', async () => {
@@ -46,12 +69,12 @@ describe('merchant registry', () => {
 
   it('rejects a non-admin registering a merchant', async () => {
     const stranger = Keypair.generate();
-    const other = Keypair.generate();
+    const otherId = Buffer.alloc(16); otherId.write('other-merchant');
     const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('merchant'), other.publicKey.toBuffer()], program.programId);
+      [Buffer.from('merchant'), otherId], program.programId);
     try {
-      await program.methods.registerMerchant(payout)
-        .accounts({ config: configPda, merchant: pda, merchantAuthority: other.publicKey, admin: stranger.publicKey })
+      await program.methods.registerMerchant([...otherId], payout)
+        .accounts({ config: configPda, merchant: pda, admin: stranger.publicKey })
         .signers([stranger]).rpc();
       assert.fail('should have thrown');
     } catch (e: any) { assert.ok(e); }

@@ -10,6 +10,8 @@ pub enum NavyError {
     InvoiceExpired,
     #[msg("amount must be greater than zero")]
     ZeroAmount,
+    #[msg("amount is below the minimum invoice amount")]
+    AmountTooSmall,
     #[msg("token mint does not match the configured USDC mint")]
     WrongMint,
     #[msg("arithmetic overflow")]
