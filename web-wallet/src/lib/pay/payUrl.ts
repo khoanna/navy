@@ -1,4 +1,9 @@
-const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** True if `id` is a canonical UUID (used to guard hand-typed /pay/<x> URLs). */
+export function isUuid(id: string): boolean {
+  return UUID.test(id);
+}
 
 /** Hosts we trust for the https invoice fallback. localhost allowed for local dev. */
 const ALLOWED_HTTPS_HOSTS = new Set(['pay.navy', 'localhost', '127.0.0.1']);

@@ -4,6 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { getEnv } from '@/lib/config/env';
 import { NavyPayClient } from '@/lib/pay/navyPayClient';
 import { payInvoice } from '@/lib/pay/payFlow';
+import { isUuid } from '@/lib/pay/payUrl';
+import { useNavySession } from '@/lib/auth/SessionContext';
 import { useWebSigner } from '@/lib/wallet/useWebSigner';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { Screen } from '@/ui/Screen';
@@ -29,23 +31,33 @@ export default function PayScreen() {
   const router = useRouter();
   const { orderId } = useParams<{ orderId: string }>();
   const { address, sign } = useWebSigner();
+  const { session } = useNavySession();
   const toast = useToast();
   const client = new NavyPayClient(getEnv().navyApiUrl);
+
+  // Guard hand-typed /pay/<x> URLs: the QR path validates, a typed URL does not.
+  const validId = Boolean(orderId) && isUuid(orderId);
 
   const [order, setOrder] = useState<Order | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (orderId) client.getOrder(orderId).then(setOrder).catch(() => setNotFound(true));
+    if (!validId) { setNotFound(true); return; }
+    client.getOrder(orderId).then(setOrder).catch(() => setNotFound(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
+  }, [orderId, validId]);
 
   async function pay() {
-    if (!address || !orderId) return;
+    if (!validId) return;
+    const token = session?.tokens.accessToken;
+    if (!token) { toast('Payment failed: not signed in'); return; }
+    if (!address) { toast('Payment failed: no wallet available'); return; }
     setBusy(true);
     try {
-      const res = await payInvoice({ orderId, payer: address, client, signTransaction: sign });
+      // expectedSigner asserts the server-built tx (payer derived from our token) is one
+      // this embedded wallet can sign — refuses a tx built for a different payer.
+      const res = await payInvoice({ orderId, navyAccessToken: token, client, signTransaction: sign, expectedSigner: address });
       toast(`Payment sent: ${res.txSignature.slice(0, 16)}…`);
       router.replace('/home');
     } catch (e) {
