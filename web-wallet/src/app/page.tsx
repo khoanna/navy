@@ -26,7 +26,7 @@ export default function Index() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: colors.bg,
       }}
     >

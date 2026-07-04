@@ -9,7 +9,7 @@ import { Text } from '@/ui/Text';
 import { IconBadge } from '@/ui/Bits';
 import { colors, radius, space } from '@/ui/theme';
 
-// ── helpers (verbatim from mobile/app/(tabs)/history.tsx) ──────────────────
+// ── helpers ────────────────────────────────────────────────────────────────
 
 function dayLabel(iso: string | null): string {
   if (!iso) return 'Pending';

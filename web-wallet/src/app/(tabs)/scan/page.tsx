@@ -8,7 +8,7 @@ import { Button } from '@/ui/Button';
 import { IconBadge } from '@/ui/Bits';
 import { colors, radius, space } from '@/ui/theme';
 
-/** The frame side length in px. Matches mobile's FRAME logic (window – 96, capped 280). */
+/** The scan-window side length in px (fixed for the phone-column layout). */
 const FRAME = 280;
 
 /**
@@ -165,7 +165,7 @@ export default function Scan() {
             border: `1px solid ${displayError ? colors.borderStrong : colors.border}`,
             borderRadius: `${radius.md}px`,
             color: colors.textHi,
-            fontSize: 14,
+            fontSize: 16,
             padding: `${space.md}px ${space.lg}px`,
             outline: 'none',
             width: '100%',
@@ -182,7 +182,7 @@ const styles = {
   root: {
     position: 'relative',
     width: '100%',
-    height: '100vh',
+    height: '100dvh',
     overflow: 'hidden',
     backgroundColor: '#000',
   } as React.CSSProperties,

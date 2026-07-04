@@ -5,8 +5,8 @@
  * product is literally "Navy", so we lean into the nautical palette). All UI
  * primitives in `src/ui/*` consume these tokens; screens never hardcode colors.
  *
- * No external UI deps: gradients/icons are drawn with react-native-svg (already
- * installed as a Privy peer), motion uses RN's built-in Animated.
+ * No external UI deps: gradients/icons are drawn with inline SVG, motion uses
+ * CSS keyframes/transitions (see globals.css).
  */
 
 export const colors = {
@@ -76,9 +76,9 @@ export const radius = {
 } as const;
 
 /**
- * Type scale. No custom font is bundled (adding expo-font needs a native
- * dev-client rebuild — deferred), so character comes from weight, size and
- * tracking. Balances/amounts use tabular figures via the `num` style.
+ * Type scale. No custom font is bundled — we ride the system font stack (see
+ * globals.css), so character comes from weight, size and tracking.
+ * Balances/amounts use tabular figures via the `num` style.
  */
 export const type = {
   display: { fontSize: 44, fontWeight: '800', letterSpacing: -1.5, lineHeight: 48 },
@@ -92,23 +92,5 @@ export const type = {
   mono: { fontSize: 13, fontWeight: '500', letterSpacing: 0, fontFamily: 'monospace' },
 } as const;
 
-/** Glow-style shadows tuned for a dark canvas. */
-export const shadow = {
-  card: {
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 10,
-  },
-  accentGlow: {
-    shadowColor: colors.accent,
-    shadowOpacity: 0.5,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-} as const;
-
-export const theme = { colors, gradients, space, radius, type, shadow };
+export const theme = { colors, gradients, space, radius, type };
 export type Theme = typeof theme;

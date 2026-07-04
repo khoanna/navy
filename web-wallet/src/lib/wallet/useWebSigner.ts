@@ -31,12 +31,10 @@ export function useWebSigner() {
     if (!wallet) throw new Error('No Solana embedded wallet available');
     const connection = new Connection(getEnv().solanaRpc);
     const signed = await signTransaction({ transaction: tx, connection, address: wallet.address });
+    // Privy returns a legacy Transaction for the legacy Transaction we pass in.
     if (signed instanceof Transaction) return signed;
-    // Fallback: rebuild a legacy Transaction from serialized bytes if a non-legacy tx is returned.
-    if (signed instanceof VersionedTransaction) {
-      return Transaction.from(Buffer.from(signed.serialize()));
-    }
-    return Transaction.from((signed as { signedTransaction: Uint8Array }).signedTransaction);
+    // Defensive fallback: rebuild a legacy Transaction from serialized bytes via Uint8Array (browser-safe).
+    return Transaction.from(Uint8Array.from((signed as VersionedTransaction).serialize()));
   };
 
   return { address, sign, wallets };

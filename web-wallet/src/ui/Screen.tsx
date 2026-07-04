@@ -33,7 +33,7 @@ export function Screen({
 }: ScreenProps) {
   const pad: React.CSSProperties = {
     paddingTop: `${space.lg}px`,
-    paddingBottom: tabSafe ? '96px' : `${space.lg}px`,
+    paddingBottom: tabSafe ? 'calc(96px + env(safe-area-inset-bottom))' : `${space.lg}px`,
     paddingLeft: padded ? `${space.xl}px` : 0,
     paddingRight: padded ? `${space.xl}px` : 0,
   };

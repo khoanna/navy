@@ -24,9 +24,13 @@ function TabItem({
   onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
       style={{
+        border: 'none',
+        background: 'none',
+        padding: 0,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -59,7 +63,7 @@ function TabItem({
       <Text variant="label" color={focused ? colors.textHi : colors.textMute} style={{ fontSize: 10, letterSpacing: '0.5px' }}>
         {label}
       </Text>
-    </div>
+    </button>
   );
 }
 
@@ -76,7 +80,7 @@ export function TabBar() {
         bottom: 0,
         display: 'flex',
         justifyContent: 'center',
-        paddingBottom: `${space.md}px`,
+        paddingBottom: `calc(${space.md}px + env(safe-area-inset-bottom))`,
         pointerEvents: 'none',
       }}
     >
