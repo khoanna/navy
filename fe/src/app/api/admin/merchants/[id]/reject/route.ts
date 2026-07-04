@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminBackendFetch } from '@/lib/admin-api';
+import { guardOrigin } from '@/lib/request-guards';
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const rejected = guardOrigin(req);
+  if (rejected) return rejected;
   const { id } = await ctx.params;
   const { reason } = await req.json().catch(() => ({ reason: undefined }));
   const res = await adminBackendFetch(`/admin/merchants/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
