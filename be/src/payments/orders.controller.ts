@@ -56,15 +56,19 @@ export class OrdersController {
 
   @Post(':id/submit')
   async submit(@Param('id') id: string, @Body() dto: SubmitDto) {
-    const { signature, payer, err } = await this.relayer.verifyAndSubmit(id, dto.signedTx);
+    const { signature, err } = await this.relayer.verifyAndSubmit(id, dto.signedTx);
     if (err) {
       // The tx landed but reverted on-chain — do NOT mark paid or fire the merchant webhook.
       await this.prisma.order.update({ where: { id }, data: { status: 'failed', txSignature: signature } });
       return { txSignature: signature, status: 'failed' };
     }
-    // On-chain payment confirmed successfully: record the real payer and settle.
+    // Tx submitted: mark confirming with the signature, then reconcile against
+    // the on-chain InvoicePaid event (fast path). Settlement always goes through
+    // event reconciliation; if the event isn't visible yet the background sweep
+    // retries. Re-read the order so the response reflects the resulting status.
     await this.prisma.order.update({ where: { id }, data: { status: 'confirming', txSignature: signature } });
-    await this.watcher.markPaid(id, { payer, signature });
-    return { txSignature: signature, status: 'paid' };
+    await this.watcher.confirmOrder(id);
+    const settled = await this.prisma.order.findUnique({ where: { id } });
+    return { txSignature: signature, status: settled?.status ?? 'confirming' };
   }
 }

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { OnchainModule } from '../onchain/onchain.module';
+import { OnchainModule, NAVY_ONCHAIN, type NavyOnchain } from '../onchain/onchain.module';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { MerchantOrdersController } from './merchant-orders.controller';
@@ -32,8 +32,8 @@ import { AuditService } from '../audit/audit.service';
     },
     {
       provide: ChainWatcherService,
-      inject: [PrismaService, WebhookService, SecretLookupService],
-      useFactory: (p: PrismaService, w: WebhookService, s: SecretLookupService) => new ChainWatcherService(p, w, s),
+      inject: [PrismaService, WebhookService, SecretLookupService, NAVY_ONCHAIN],
+      useFactory: (p: PrismaService, w: WebhookService, s: SecretLookupService, o: NavyOnchain) => new ChainWatcherService(p, w, s, o),
     },
   ],
 })
