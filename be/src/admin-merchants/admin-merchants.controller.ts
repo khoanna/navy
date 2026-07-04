@@ -26,8 +26,8 @@ export class AdminMerchantsController {
   async get(@Param('id') id: string) { return toMerchantDto(await this.merchants.get(id)); }
 
   @Post(':id/approve')
-  approve(@Param('id') id: string) { return this.merchants.approve(id); }
+  async approve(@Param('id') id: string) { return toMerchantDto(await this.merchants.approve(id)); }
 
   @Post(':id/reject')
-  reject(@Param('id') id: string, @Body() dto: RejectDto) { return this.merchants.reject(id, dto.reason); }
+  async reject(@Param('id') id: string, @Body() dto: RejectDto) { return toMerchantDto(await this.merchants.reject(id, dto.reason)); }
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { PublicKey } from '@solana/web3.js';
 import { OrdersService } from './orders.service';
 import { RelayerService } from './relayer.service';
@@ -51,7 +51,7 @@ export class OrdersController {
   @Roles('user')
   async paymentTx(@Param('id') id: string, @Req() req: any) {
     const order = await this.orders.get(id);
-    if (!order) return { error: 'not found' };
+    if (!order) throw new NotFoundException('Order not found');
     if (order.status !== 'awaiting_payment' || order.expiresAt < new Date()) {
       throw new BadRequestException('Order is not awaiting payment');
     }
