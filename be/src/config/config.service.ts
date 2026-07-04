@@ -21,8 +21,16 @@ export class NavyConfigService {
       : this.req('SOLANA_RPC_DEVNET');
   }
   get jwtSecret(): string { return this.req('NAVY_JWT_SECRET'); }
-  get accessTtl(): number { return parseInt(this.req('NAVY_JWT_ACCESS_TTL'), 10); }
-  get refreshTtl(): number { return parseInt(this.req('NAVY_JWT_REFRESH_TTL'), 10); }
+  get accessTtl(): number { return this.posIntTtl('NAVY_JWT_ACCESS_TTL'); }
+  get refreshTtl(): number { return this.posIntTtl('NAVY_JWT_REFRESH_TTL'); }
+  /** Parse a TTL (seconds) env var, rejecting NaN / non-positive values so tokens can't be minted non-expiring. */
+  private posIntTtl(k: string): number {
+    const n = parseInt(this.req(k), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`${k} must be a positive integer (seconds); got "${this.env[k]}"`);
+    }
+    return n;
+  }
   get masterKey(): Buffer { return Buffer.from(this.req('SUBWALLET_MASTER_KEY'), 'hex'); }
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
