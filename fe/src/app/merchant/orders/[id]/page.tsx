@@ -12,7 +12,9 @@ import { MERCHANT_NAV } from '@/ui/nav';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
 
-interface Order { id: string; reference: string; amount: string; status: string; payer: string | null; txSignature: string | null; }
+interface OrderItemRow { name: string; unitPrice: string; quantity: number; }
+interface OrderChargeRow { name: string; mode: string; value: number; amount: string; }
+interface Order { id: string; reference: string; amount: string; status: string; payer: string | null; txSignature: string | null; subtotal: string | null; description: string | null; items: OrderItemRow[]; charges: OrderChargeRow[]; }
 const TERMINAL = ['paid', 'expired', 'failed'];
 
 export default function OrderDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -61,6 +63,43 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
         <div style={{ maxWidth: 560 }}>
           <Card>
             <Field label="Amount" value={`${formatUsdc(order.amount)} USDC`} numeric />
+            {order.description && (
+              <>
+                <Divider />
+                <Field label="Description" value={order.description} />
+              </>
+            )}
+            {((order.items ?? []).length > 0 || (order.charges ?? []).length > 0) && (
+              <>
+                <Divider />
+                <div style={{ paddingTop: space.sm, paddingBottom: space.sm }}>
+                  <Text variant="label" muted upper>Breakdown</Text>
+                  <div style={{ marginTop: space.sm }}>
+                    {(order.items ?? []).map((it, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: space.xs }}>
+                        <Text variant="body">{it.name} &times; {it.quantity}</Text>
+                        <Text variant="body" numeric>{formatUsdc(it.unitPrice)} USDC</Text>
+                      </div>
+                    ))}
+                    {(order.charges ?? []).length > 0 && (order.items ?? []).length > 0 && (
+                      <div style={{ height: space.xs }} />
+                    )}
+                    {(order.charges ?? []).map((c, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: space.xs }}>
+                        <Text variant="body" dim>{c.name}</Text>
+                        <Text variant="body" numeric>{formatUsdc(c.amount)} USDC</Text>
+                      </div>
+                    ))}
+                    {order.subtotal && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: space.sm, borderTop: `1px solid ${colors.border}` , paddingTop: space.sm }}>
+                        <Text variant="label" muted upper>Subtotal</Text>
+                        <Text variant="body" numeric>{formatUsdc(order.subtotal)} USDC</Text>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
             <Divider />
             <div style={{ paddingTop: space.sm, paddingBottom: space.sm }}>
               <Text variant="label" muted upper>Status</Text>
