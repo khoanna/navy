@@ -193,7 +193,7 @@ export default function Farming() {
           </Text>
           <Card glass compact style={{ marginTop: `${space.md}px` }}>
             <Text variant="caption" color={colors.text}>
-              Your USDC is deposited into Save&apos;s SOL reserve via a Navy-secured subwallet. Keys stay encrypted — the agent can
+              Your SOL is deposited into Save&apos;s SOL reserve via a Navy-secured subwallet. Keys stay encrypted — the agent can
               never move funds off-policy.
             </Text>
           </Card>
