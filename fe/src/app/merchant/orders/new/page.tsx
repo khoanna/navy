@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { usdcInputToBaseUnits } from '@/lib/money';
@@ -29,28 +29,35 @@ export default function NewOrder() {
   const [result, setResult] = useState<{ orderId: string; qr: string; payUrl: string } | null>(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    setError(''); setResult(null);
-    let baseUnits: string;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
-      baseUnits = usdcInputToBaseUnits(amount);
-    } catch (err) {
-      setError((err as Error).message); return;
+      setError(''); setResult(null);
+      let baseUnits: string;
+      try {
+        baseUnits = usdcInputToBaseUnits(amount);
+      } catch (err) {
+        setError((err as Error).message); return;
+      }
+      if (baseUnits === '0') { setError('Enter an amount greater than 0'); return; }
+      const ttl = parseInt(expiresInSec, 10);
+      if (!Number.isFinite(ttl) || ttl <= 0) { setError('Enter a valid expiry in seconds'); return; }
+      setSubmitting(true);
+      const res = await fetch('/api/merchant/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: baseUnits, reference, expiresInSec: ttl }),
+      });
+      const body = await res.json();
+      setSubmitting(false);
+      if (res.ok) setResult({ orderId: body.orderId, qr: body.qr, payUrl: body.payUrl });
+      else setError(body.error ?? (res.status === 409 ? 'Your account is not approved yet' : `Failed (${res.status})`));
+    } finally {
+      submittingRef.current = false;
     }
-    if (baseUnits === '0') { setError('Enter an amount greater than 0'); return; }
-    const ttl = parseInt(expiresInSec, 10);
-    if (!Number.isFinite(ttl) || ttl <= 0) { setError('Enter a valid expiry in seconds'); return; }
-    setSubmitting(true);
-    const res = await fetch('/api/merchant/orders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: baseUnits, reference, expiresInSec: ttl }),
-    });
-    const body = await res.json();
-    setSubmitting(false);
-    if (res.ok) setResult({ orderId: body.orderId, qr: body.qr, payUrl: body.payUrl });
-    else setError(body.error ?? (res.status === 409 ? 'Your account is not approved yet' : `Failed (${res.status})`));
   }
 
   const logout = async () => {
@@ -87,7 +94,7 @@ export default function NewOrder() {
                 <input placeholder="900" value={expiresInSec} onChange={(e) => setExpiresInSec(e.target.value)} style={inputStyle} />
               </div>
               <div style={{ marginTop: space.sm }}>
-                <Button label="Create invoice" loading={submitting} onPress={() => submit()} />
+                <Button label="Create invoice" loading={submitting} />
               </div>
               {error && <Text variant="caption" color={colors.danger}>{error}</Text>}
             </form>
