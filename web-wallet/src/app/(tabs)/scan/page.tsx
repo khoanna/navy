@@ -5,37 +5,10 @@ import { parsePayUrl } from '@/lib/pay/payUrl';
 import { useQrScanner } from '@/lib/pay/useQrScanner';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
-import { IconBadge } from '@/ui/Bits';
 import { colors, radius, space } from '@/ui/theme';
 
-/** The scan-window side length in px (fixed for the phone-column layout). */
-const FRAME = 280;
-
-/**
- * One of the four corner brackets framing the scan window.
- * Each bracket is a 34×34 div whose relevant borders form an "L" shape.
- */
-function Corner({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
-  const base: React.CSSProperties = {
-    position: 'absolute',
-    width: 34,
-    height: 34,
-    borderColor: colors.aqua,
-    borderStyle: 'solid',
-    borderWidth: 0,
-  };
-
-  const corner: React.CSSProperties =
-    pos === 'tl'
-      ? { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: `${radius.lg}px` }
-      : pos === 'tr'
-      ? { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: `${radius.lg}px` }
-      : pos === 'bl'
-      ? { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: `${radius.lg}px` }
-      : { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: `${radius.lg}px` };
-
-  return <div style={{ ...base, ...corner }} />;
-}
+/** Reticle size for the scan window (Aurora spec: ~170×170). */
+const RETICLE = 170;
 
 export default function Scan() {
   const router = useRouter();
@@ -66,7 +39,7 @@ export default function Scan() {
 
   return (
     <div style={styles.root}>
-      {/* Full-frame camera feed */}
+      {/* Full-bleed camera feed — ref and attributes unchanged */}
       <video
         ref={videoRef}
         autoPlay
@@ -75,84 +48,110 @@ export default function Scan() {
         style={styles.video}
       />
 
-      {/* Semi-transparent scrim overlay — pointer-events off so the video receives touch */}
-      <div style={styles.overlay}>
-        {/* Header */}
-        <div style={styles.header}>
-          <Text variant="label" color={colors.textHi} upper>
-            Scan to pay
-          </Text>
-          <Text variant="caption" color="rgba(255,255,255,0.7)" center style={{ marginTop: '4px' }}>
-            Point at a Navy invoice QR code
-          </Text>
-        </div>
-
-        {/* Corner-bracket frame + animated laser */}
-        <div style={{ width: FRAME, height: FRAME, position: 'relative', marginTop: -40 }}>
-          <Corner pos="tl" />
-          <Corner pos="tr" />
-          <Corner pos="bl" />
-          <Corner pos="br" />
-          {/* Laser line — CSS animation navy-laser defined in globals.css */}
-          <div
-            style={{
-              position: 'absolute',
-              left: 6,
-              right: 6,
-              top: 0,
-              height: 2,
-              borderRadius: 2,
-              backgroundColor: colors.aqua,
-              boxShadow: `0 0 8px ${colors.aqua}`,
-              // The CSS var drives the translateY travel distance
-              ['--laser-travel' as string]: `${FRAME - 6}px`,
-              animation: 'navy-laser 3.6s ease-in-out infinite',
-            }}
-          />
-        </div>
-
-        {/* Footer: hint or error pill */}
-        <div style={styles.footer}>
-          {displayError ? (
-            <div style={styles.errorPill}>
-              <Text variant="caption" color={colors.danger} center>
-                {displayError}
-              </Text>
-            </div>
-          ) : (
-            <div style={styles.hintPill}>
-              <Text variant="caption" color="rgba(255,255,255,0.8)" center>
-                Gasless — Navy covers the network fee
-              </Text>
-            </div>
-          )}
-        </div>
+      {/* Dimmed surround: four quadrant scrims that leave the reticle clear.
+          pointer-events none so camera touch still works. */}
+      <div style={styles.scrimLayer} aria-hidden="true">
+        {/* top */}
+        <div style={{ ...styles.scrimPanel, top: 0, left: 0, right: 0, bottom: `calc(50% + ${RETICLE / 2}px)` }} />
+        {/* bottom */}
+        <div style={{ ...styles.scrimPanel, top: `calc(50% + ${RETICLE / 2}px)`, left: 0, right: 0, bottom: 0 }} />
+        {/* left (middle row) */}
+        <div style={{
+          ...styles.scrimPanel,
+          top: `calc(50% - ${RETICLE / 2}px)`,
+          left: 0,
+          width: `calc(50% - ${RETICLE / 2}px)`,
+          height: RETICLE,
+        }} />
+        {/* right (middle row) */}
+        <div style={{
+          ...styles.scrimPanel,
+          top: `calc(50% - ${RETICLE / 2}px)`,
+          right: 0,
+          left: `calc(50% + ${RETICLE / 2}px)`,
+          height: RETICLE,
+        }} />
       </div>
 
-      {/* Manual fallback — always rendered below the overlay; more prominent on error */}
+      {/* Reticle border ring — drawn as a separate absolute div */}
       <div
+        aria-hidden="true"
         style={{
           position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: displayError ? colors.surface : 'rgba(6,11,23,0.85)',
-          borderTop: `1px solid ${colors.border}`,
-          padding: `${space.lg}px ${space.xl}px ${space.huge}px`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: `${space.md}px`,
-          zIndex: 20,
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: RETICLE,
+          height: RETICLE,
+          borderRadius: radius.xl,        // 24px
+          border: '2px solid rgba(255,255,255,0.85)',
+          pointerEvents: 'none',
+          zIndex: 11,
+          overflow: 'hidden',
         }}
       >
+        {/* Animated horizontal scan line using the existing navy-laser keyframe */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 2,
+            borderRadius: 2,
+            background: `linear-gradient(90deg, transparent, ${colors.aqua}, transparent)`,
+            boxShadow: `0 0 8px ${colors.aqua}, 0 0 16px ${colors.aqua}60`,
+            // --laser-travel drives the translateY in the keyframe (reticle height minus line height)
+            ['--laser-travel' as string]: `${RETICLE - 2}px`,
+            animation: 'navy-laser 2.4s ease-in-out infinite',
+          }}
+        />
+      </div>
+
+      {/* Top bar — pointer-events on so the close button works */}
+      <div style={styles.topBar}>
+        <button
+          onClick={() => router.back()}
+          style={styles.iconBtn}
+          aria-label="Close scanner"
+        >
+          <span style={styles.closeX}>✕</span>
+        </button>
+
+        <Text variant="label" color={colors.textHi} upper>
+          Scan to pay
+        </Text>
+
+        {/* Right slot kept empty (no torch in existing logic) */}
+        <div style={{ width: 40 }} />
+      </div>
+
+      {/* Hint below reticle */}
+      <div style={styles.hint}>
+        {displayError ? (
+          <div style={styles.errorPill}>
+            <Text variant="caption" color={colors.danger} center>
+              {displayError}
+            </Text>
+          </div>
+        ) : (
+          <div style={styles.hintPill}>
+            <Text variant="caption" color="rgba(255,255,255,0.8)" center>
+              Point at a Navy QR code
+            </Text>
+          </div>
+        )}
+      </div>
+
+      {/* Paste fallback — wired to existing handleManual logic */}
+      <div style={styles.pastePanel}>
         {displayError && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${space.sm}px`, paddingBottom: `${space.md}px` }}>
-            <IconBadge name="scan" color={colors.accent} size={52} />
             <Text variant="h3" color={colors.textHi} center>
               Paste an invoice link
             </Text>
             <Text variant="caption" muted center>
-              Camera unavailable — paste a Navy invoice URL below to pay.
+              Camera unavailable — paste a Navy invoice URL below.
             </Text>
           </div>
         )}
@@ -172,7 +171,7 @@ export default function Scan() {
           }}
           onKeyDown={(e) => { if (e.key === 'Enter') handleManual(); }}
         />
-        <Button label="Open invoice link" icon="send" onPress={handleManual} full />
+        <Button label="Paste address instead" icon="copy" onPress={handleManual} full />
       </div>
     </div>
   );
@@ -186,6 +185,7 @@ const styles = {
     overflow: 'hidden',
     backgroundColor: '#000',
   } as React.CSSProperties,
+
   video: {
     position: 'absolute',
     inset: 0,
@@ -193,32 +193,68 @@ const styles = {
     height: '100%',
     objectFit: 'cover',
   } as React.CSSProperties,
-  overlay: {
+
+  scrimLayer: {
     position: 'absolute',
     inset: 0,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    justifyContent: 'space-between',
     pointerEvents: 'none',
     zIndex: 10,
   } as React.CSSProperties,
-  header: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    paddingTop: `${space.xl + space.xxl}px`,
-    paddingLeft: `${space.xxl}px`,
-    paddingRight: `${space.xxl}px`,
+
+  scrimPanel: {
+    position: 'absolute',
+    backgroundColor: 'rgba(4,8,20,0.72)',
   } as React.CSSProperties,
-  footer: {
-    paddingBottom: '240px',
-    paddingLeft: `${space.xxl}px`,
-    paddingRight: `${space.xxl}px`,
-    width: '100%',
+
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: `max(${space.xl}px, env(safe-area-inset-top))`,
+    paddingLeft: `${space.lg}px`,
+    paddingRight: `${space.lg}px`,
+    paddingBottom: `${space.lg}px`,
+    zIndex: 20,
+  } as React.CSSProperties,
+
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    background: 'rgba(255,255,255,0.12)',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    WebkitTapHighlightColor: 'transparent',
+  } as React.CSSProperties,
+
+  closeX: {
+    color: colors.textHi,
+    fontSize: 17,
+    lineHeight: 1,
+    fontWeight: '600',
+  } as React.CSSProperties,
+
+  hint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    // sits ~24px below the reticle's bottom edge
+    top: `calc(50% + ${RETICLE / 2 + 24}px)`,
     display: 'flex',
     justifyContent: 'center',
+    paddingLeft: `${space.xxl}px`,
+    paddingRight: `${space.xxl}px`,
+    pointerEvents: 'none',
+    zIndex: 20,
   } as React.CSSProperties,
+
   hintPill: {
     backgroundColor: 'rgba(0,0,0,0.45)',
     paddingTop: `${space.sm}px`,
@@ -227,6 +263,7 @@ const styles = {
     paddingRight: `${space.lg}px`,
     borderRadius: `${radius.pill}px`,
   } as React.CSSProperties,
+
   errorPill: {
     backgroundColor: 'rgba(0,0,0,0.6)',
     paddingTop: `${space.sm}px`,
@@ -235,5 +272,19 @@ const styles = {
     paddingRight: `${space.lg}px`,
     borderRadius: `${radius.pill}px`,
     border: '1px solid rgba(255,107,131,0.4)',
+  } as React.CSSProperties,
+
+  pastePanel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(6,11,23,0.92)',
+    borderTop: `1px solid rgba(255,255,255,0.07)`,
+    padding: `${space.lg}px ${space.xl}px max(${space.huge}px, calc(${space.huge}px + env(safe-area-inset-bottom)))`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: `${space.md}px`,
+    zIndex: 20,
   } as React.CSSProperties,
 } satisfies Record<string, React.CSSProperties>;
