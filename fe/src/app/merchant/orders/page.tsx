@@ -56,9 +56,7 @@ export default function Orders() {
         title="Orders"
         right={
           <div style={{ minWidth: 160 }}>
-            <Link href="/merchant/orders/new">
-              <Button label="New invoice" icon="plus" full />
-            </Link>
+            <Button label="New invoice" icon="plus" full onPress={() => router.push('/merchant/orders/new')} />
           </div>
         }
       />
