@@ -9,11 +9,11 @@ import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { Card } from '@/ui/Card';
-import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
-import { IconBadge, Pill, Divider } from '@/ui/Bits';
+import { IconBadge, Pill } from '@/ui/Bits';
+import { Skeleton } from '@/ui/Skeleton';
 import { useToast } from '@/ui/Toast';
-import { colors, gradients, radius, space } from '@/ui/theme';
+import { colors, radius, space } from '@/ui/theme';
 
 const FUND_LAMPORTS = 100_000_000; // 0.1 SOL
 
@@ -31,6 +31,7 @@ export default function Farming() {
   const [pos, setPos] = useState<Position | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!token) return;
@@ -38,6 +39,8 @@ export default function Farming() {
       setPos(await client.getPosition(token));
     } catch {
       setPos(null);
+    } finally {
+      setLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -94,24 +97,40 @@ export default function Farming() {
   const gain = current - principal;
   const gainPct = principal > 0 ? (gain / principal) * 100 : 0;
 
+  const loading = !loaded;
+
   return (
     <Screen scroll tabSafe onRefresh={pull} refreshing={refreshing}>
       {/* Header */}
       <div style={styles.head}>
-        <Text variant="label" muted upper>
+        <Text variant="h2" color={colors.textHi}>
           Earn
         </Text>
-        <Text variant="h1" color={colors.textHi} style={{ marginTop: '2px' }}>
-          Grow your SOL
-        </Text>
-        <Text variant="caption" dim style={{ marginTop: `${space.xs}px` }}>
-          Idle SOL earns yield on Save (Solend) — withdraw anytime.
+        <Text variant="caption" dim>
+          Save · devnet
         </Text>
       </div>
 
-      {!pos ? (
-        /* Empty state */
-        <Card elevated style={{ marginTop: `${space.xl}px`, alignItems: 'center', paddingTop: `${space.xxxl}px`, paddingBottom: `${space.xxxl}px` }}>
+      {loading ? (
+        /* Loading hero */
+        <Card
+          glass
+          style={{
+            ...styles.hero,
+            background: 'linear-gradient(135deg, rgba(61,116,255,0.28), rgba(47,224,194,0.16))',
+          }}
+        >
+          <Text variant="label" muted upper center>
+            Deposited · earning
+          </Text>
+          <Skeleton width={170} height={44} style={{ margin: '6px auto' }} />
+        </Card>
+      ) : !pos ? (
+        /* Empty state — start farming */
+        <Card
+          glass
+          style={{ marginTop: `${space.xl}px`, alignItems: 'center', paddingTop: `${space.xxxl}px`, paddingBottom: `${space.xxxl}px` }}
+        >
           <IconBadge name="sprout" color={colors.aqua} size={76} />
           <Text variant="h2" color={colors.textHi} center style={{ marginTop: `${space.lg}px` }}>
             Start earning
@@ -126,94 +145,91 @@ export default function Farming() {
               paddingRight: `${space.sm}px`,
             }}
           >
-            Navy creates a secure, encrypted subwallet that auto-deposits into the yield reserve. Your keys never leave Navy's signer.
+            Navy creates a secure, encrypted subwallet that auto-deposits into the yield reserve. Your keys never leave Navy&apos;s signer.
           </Text>
           <Button label="Create farming wallet" icon="plus" loading={busy} onPress={start} />
         </Card>
       ) : (
         <>
-          {/* Value hero */}
-          <Gradient
-            colors={gradients.aquaGlow}
-            glow
-            style={{ ...styles.hero, boxShadow: '0 10px 22px rgba(47,224,194,0.45)' }}
+          {/* Position hero */}
+          <Card
+            glass
+            style={{
+              ...styles.hero,
+              background: 'linear-gradient(135deg, rgba(61,116,255,0.28), rgba(47,224,194,0.16))',
+            }}
           >
-            <Text variant="label" color="rgba(4,17,31,0.65)" upper>
-              Current value
+            <Text variant="label" muted upper center>
+              Deposited · earning
             </Text>
-            <div style={styles.amtRow}>
-              <Text variant="display" numeric color={colors.onAccent}>
+            <div style={styles.heroAmt}>
+              <Text variant="display" numeric color={colors.textHi}>
                 {current.toFixed(4)}
               </Text>
-              <Text variant="h2" color="rgba(4,17,31,0.6)" style={{ marginBottom: '6px' }}>
+              <Text variant="h3" color={colors.textDim} style={{ marginLeft: '6px' }}>
                 SOL
               </Text>
             </div>
-            <div style={styles.gainChip}>
-              <Icon name="trend" size={14} color={colors.onAccent} strokeWidth={2.4} />
-              <Text variant="caption" color={colors.onAccent}>
-                {gain >= 0 ? '+' : ''}
-                {gain.toFixed(4)} SOL ({gainPct >= 0 ? '+' : ''}
-                {gainPct.toFixed(2)}%)
-              </Text>
-            </div>
-          </Gradient>
-
-          {/* Details card */}
-          <Card style={{ marginTop: `${space.lg}px` }}>
-            <div style={styles.detailRow}>
-              <Text variant="caption" dim>
-                Principal deposited
-              </Text>
-              <Text variant="bodyStrong" numeric color={colors.textHi}>
-                {principal.toFixed(4)} SOL
-              </Text>
-            </div>
-            <Divider style={{ marginTop: `${space.md}px`, marginBottom: `${space.md}px` }} />
-            <div style={styles.detailRow}>
-              <Text variant="caption" dim>
-                Yield earned
-              </Text>
-              <Text variant="bodyStrong" numeric color={gain >= 0 ? colors.success : colors.danger}>
-                {gain >= 0 ? '+' : ''}
-                {gain.toFixed(4)} SOL
-              </Text>
-            </div>
-            <Divider style={{ marginTop: `${space.md}px`, marginBottom: `${space.md}px` }} />
-            <div style={styles.detailRow}>
-              <Text variant="caption" dim>
-                Subwallet
-              </Text>
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(pos.address);
-                  toast('Subwallet address copied.');
-                }}
-                style={styles.copyRow}
-              >
-                <Text variant="mono" color={colors.text}>
-                  {short(pos.address)}
-                </Text>
-                <Icon name="copy" size={14} color={colors.textDim} />
-              </button>
-            </div>
+            <Text variant="caption" color={colors.aqua}>
+              {gain >= 0 ? '+' : ''}
+              {gain.toFixed(4)} SOL earned ({gainPct >= 0 ? '+' : ''}
+              {gainPct.toFixed(2)}%)
+            </Text>
           </Card>
 
-          {/* Fund / Withdraw buttons */}
+          {/* Deposit / Withdraw actions */}
           <div style={styles.btnRow}>
             <div style={{ flex: 1 }}>
-              <Button label="Fund 0.1 SOL" icon="plus" variant="secondary" loading={busy} onPress={fund} />
+              <Button label="Deposit 0.1 SOL" icon="plus" loading={busy} onPress={fund} />
             </div>
             <div style={{ flex: 1 }}>
-              <Button label="Withdraw all" icon="down" variant="ghost" loading={busy} onPress={withdraw} />
+              <Button label="Withdraw all" icon="down" variant="secondary" loading={busy} onPress={withdraw} />
             </div>
           </div>
+
+          {/* How it works */}
+          <Text variant="h3" color={colors.textHi} style={{ marginTop: `${space.xl}px`, display: 'block' }}>
+            How it works
+          </Text>
+          <Card glass compact style={{ marginTop: `${space.md}px` }}>
+            <Text variant="caption" color={colors.text}>
+              Your USDC is deposited into Save&apos;s SOL reserve via a Navy-secured subwallet. Keys stay encrypted — the agent can
+              never move funds off-policy.
+            </Text>
+          </Card>
+
+          {/* Positions list */}
+          <Card glass compact style={{ marginTop: `${space.md}px` }}>
+            <div style={styles.posRow}>
+              <IconBadge name="sprout" color={colors.aqua} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="bodyStrong" color={colors.textHi} style={{ display: 'block' }}>
+                  SOL reserve
+                </Text>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(pos.address);
+                    toast('Subwallet address copied.');
+                  }}
+                  style={styles.copyRow}
+                >
+                  <Text variant="mono" color={colors.textDim}>
+                    {short(pos.address)}
+                  </Text>
+                  <Icon name="copy" size={12} color={colors.textDim} />
+                </button>
+              </div>
+              <Text variant="bodyStrong" numeric color={colors.textHi}>
+                {current.toFixed(4)} SOL
+              </Text>
+            </div>
+          </Card>
 
           {/* Devnet note */}
           <div style={styles.noteRow}>
             <Pill label="Devnet" tone="warning" />
             <Text variant="caption" muted style={{ flex: 1 }}>
-              Funding signs a transfer from your main wallet. Withdraw returns principal + yield to your wallet.
+              Depositing signs a transfer from your main wallet. Withdraw returns principal + yield to your wallet.
             </Text>
           </div>
         </>
@@ -225,38 +241,33 @@ export default function Farming() {
 const styles = {
   head: {
     marginTop: `${space.md}px`,
+    display: 'flex',
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
   },
   hero: {
     borderRadius: `${radius.xxl}px`,
     padding: `${space.xxl}px`,
     marginTop: `${space.xl}px`,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    gap: `${space.xs}px`,
   } as React.CSSProperties,
-  amtRow: {
+  heroAmt: {
     display: 'flex',
     flexDirection: 'row' as const,
     alignItems: 'flex-end',
-    gap: `${space.sm}px`,
-    marginTop: `${space.md}px`,
+    justifyContent: 'center',
+    marginTop: '2px',
+    marginBottom: '2px',
   },
-  gainChip: {
+  posRow: {
     display: 'flex',
     flexDirection: 'row' as const,
     alignItems: 'center',
-    gap: '5px',
-    alignSelf: 'flex-start' as const,
-    backgroundColor: 'rgba(4,17,31,0.16)',
-    paddingLeft: `${space.md}px`,
-    paddingRight: `${space.md}px`,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: `${radius.pill}px`,
-    marginTop: `${space.lg}px`,
-  },
-  detailRow: {
-    display: 'flex',
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: `${space.md}px`,
   },
   copyRow: {
     display: 'flex',
