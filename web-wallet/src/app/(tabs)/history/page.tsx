@@ -126,7 +126,7 @@ export default function History() {
           }}
           style={styles.iconBtn}
         >
-          <Icon name="scan" size={20} color={searching ? colors.accent : colors.textDim} />
+          <Icon name="search" size={20} color={searching ? colors.accent : colors.textDim} />
         </PressRow>
       </div>
 
@@ -147,7 +147,7 @@ export default function History() {
             const active = f.key === filter;
             const pill = (
               <PressRow onPress={() => setFilter(f.key)} style={{ borderRadius: `${radius.pill}px` }}>
-                <div style={active ? styles.chipInnerActive : styles.chipInner}>
+                <div style={styles.chipInner}>
                   <Text variant="label" color={active ? colors.onAccent : colors.textDim}>
                     {f.label}
                   </Text>
@@ -261,12 +261,6 @@ const styles = {
     flexWrap: 'wrap' as const,
   } as React.CSSProperties,
   chipInner: {
-    paddingTop: 8,
-    paddingBottom: 8,
-    paddingLeft: `${space.lg}px`,
-    paddingRight: `${space.lg}px`,
-  } as React.CSSProperties,
-  chipInnerActive: {
     paddingTop: 8,
     paddingBottom: 8,
     paddingLeft: `${space.lg}px`,

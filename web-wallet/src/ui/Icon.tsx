@@ -24,7 +24,8 @@ export type IconName =
   | 'trend'
   | 'shield'
   | 'down'
-  | 'arrowUpRight';
+  | 'arrowUpRight'
+  | 'search';
 
 const PATHS: Record<IconName, string[]> = {
   home: ['M4 11.4 12 5l8 6.4', 'M6 10.2V19h12v-8.8', 'M10 19v-4.2h4V19'],
@@ -44,6 +45,7 @@ const PATHS: Record<IconName, string[]> = {
   shield: ['M12 3.5 19 6v5c0 4.5-3 7.8-7 9.5-4-1.7-7-5-7-9.5V6l7-2.5z', 'M9 11.7l2 2 4-4.2'],
   down: ['M12 4.5v14', 'M6.5 13 12 18.5 17.5 13'],
   arrowUpRight: ['M6.5 17.5 17.5 6.5', 'M8.5 6.5h9v9'],
+  search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'M20 20l-3.5-3.5'],
 };
 
 /** Icons that are closed glyphs better expressed as filled shapes. */
