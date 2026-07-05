@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { colors, radius, space } from './theme';
 import { Icon, IconName } from './Icon';
@@ -10,6 +10,7 @@ const TABS: { href: string; label: string; icon: IconName }[] = [
   { href: '/scan', label: 'Pay', icon: 'scan' },
   { href: '/farming', label: 'Earn', icon: 'sprout' },
   { href: '/history', label: 'Activity', icon: 'clock' },
+  { href: '/settings', label: 'Settings', icon: 'settings' },
 ];
 
 function TabItem({
@@ -23,14 +24,30 @@ function TabItem({
   icon: IconName;
   onClick: () => void;
 }) {
+  const [pressed, setPressed] = useState(false);
+  const release = () => setPressed(false);
+  // Press scale matches the site's PressRow feel; focused tab sits slightly raised.
+  const lift = focused ? -2 : 0;
+  const scale = pressed ? 0.9 : 1;
+
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={release}
+      onMouseLeave={release}
+      onTouchStart={() => setPressed(true)}
+      onTouchEnd={release}
+      onTouchCancel={release}
       style={{
         border: 'none',
         background: 'none',
         padding: 0,
+        outline: 'none',
+        WebkitTapHighlightColor: 'transparent',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -42,21 +59,23 @@ function TabItem({
     >
       <div
         style={{
-          width: 44,
+          width: 46,
           height: 34,
           borderRadius: `${radius.md}px`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'transform 160ms ease, background 160ms ease',
-          transform: focused ? 'translateY(-2px)' : 'translateY(0)',
-          ...(focused ? { background: 'rgba(47,224,194,0.12)' } : null),
+          transition: 'transform 180ms cubic-bezier(0.34,1.56,0.64,1), box-shadow 200ms ease',
+          transform: `translateY(${lift}px) scale(${scale})`,
+          // Single solid ocean chip on the active tab — no border ring.
+          backgroundImage: focused ? 'linear-gradient(135deg, #3D74FF, #2FE0C2)' : undefined,
+          boxShadow: focused ? '0 4px 14px rgba(23,196,168,0.32)' : 'none',
         }}
       >
         <Icon
           name={icon}
           size={22}
-          color={focused ? colors.aqua : colors.textMute}
+          color={focused ? colors.textHi : colors.textMute}
           strokeWidth={focused ? 2.2 : 1.8}
         />
       </div>

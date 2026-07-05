@@ -10,7 +10,10 @@ export class NavyAuthError extends Error {
 export class NavyClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    // Native fetch must be invoked with `this === window`; stored as an instance
+    // property and called as `this.fetchImpl(...)` it would throw "Illegal invocation".
+    // Bind the default to globalThis so the production (no-arg) construction works.
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   ) {}
 
   async exchangePrivyToken(privyAccessToken: string): Promise<NavyTokens> {

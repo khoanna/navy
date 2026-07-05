@@ -9,7 +9,7 @@ import { Text } from '@/ui/Text';
 import { Card } from '@/ui/Card';
 import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
-import { IconBadge, PressRow } from '@/ui/Bits';
+import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ export default function History() {
           }}
           style={styles.iconBtn}
         >
-          <Icon name="search" size={20} color={searching ? colors.accent : colors.textDim} />
+          <Icon name="search" size={20} color={searching ? colors.aqua : colors.textDim} />
         </PressRow>
       </div>
 
@@ -176,7 +176,7 @@ export default function History() {
           <Card glass compact style={{ padding: `${space.xs}px` }}>
             {section.data.map((item) => (
               <PressRow key={item.orderId} style={styles.row}>
-                <IconBadge name="arrowUpRight" color={colors.accent} size={44} />
+                <IconBadge name="arrowUpRight" color={colors.textDim} size={44} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Text
                     variant="bodyStrong"
@@ -208,19 +208,19 @@ export default function History() {
         </div>
       ))}
 
-      {/* Empty state (restyled as glass) */}
+      {/* Empty state — card-less, centered */}
       {loaded && filtered.length === 0 && (
-        <Card glass style={styles.empty}>
-          <IconBadge name="clock" color={colors.textMute} size={72} />
-          <Text variant="h3" color={colors.text} style={{ marginTop: `${space.lg}px`, textAlign: 'center' }}>
+        <div style={styles.empty}>
+          <GlowIcon name="clock" color={colors.textDim} size={92} />
+          <Text variant="h3" color={colors.text} style={{ marginTop: `${space.lg}px`, textAlign: 'center', display: 'block' }}>
             {payments.length === 0 ? 'No payments yet' : 'Nothing matches'}
           </Text>
-          <Text dim style={{ marginTop: `${space.sm}px`, textAlign: 'center' }}>
+          <Text dim style={{ marginTop: `${space.sm}px`, textAlign: 'center', display: 'block' }}>
             {payments.length === 0
               ? 'When you pay a Navy merchant, it shows up here.'
               : 'Try a different filter or search.'}
           </Text>
-        </Card>
+        </div>
       )}
     </Screen>
   );

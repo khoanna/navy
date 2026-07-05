@@ -1,9 +1,10 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLoginWithOAuth, useLoginWithEmail, useLoginWithPasskey } from '@privy-io/react-auth';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useToast } from '@/ui/Toast';
+import { Splash } from '@/ui/Splash';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
@@ -16,7 +17,7 @@ import { colors, gradients, radius, space } from '@/ui/theme';
 export default function Login() {
   const router = useRouter();
   const toast = useToast();
-  const { establishFromPrivy } = useNavySession();
+  const { session, initializing, establishFromPrivy } = useNavySession();
   const { initOAuth } = useLoginWithOAuth();
   const email = useLoginWithEmail();
   const { loginWithPasskey } = useLoginWithPasskey();
@@ -30,6 +31,12 @@ export default function Login() {
     setBusy(true);
     try { await fn(); } catch (e) { toast(`${label}: ${(e as Error).message}`); } finally { setBusy(false); }
   };
+
+  // Already signed in (incl. returning from an OAuth full-page redirect that
+  // auto-established the session): never show the login form — go straight home.
+  useEffect(() => {
+    if (!initializing && session) router.replace('/home');
+  }, [initializing, session, router]);
 
   const finish = async () => { await establishFromPrivy(); router.replace('/home'); };
   const passkey = () => run(async () => { await loginWithPasskey(); await finish(); }, 'Passkey login failed');
@@ -48,6 +55,9 @@ export default function Login() {
     width: '100%',
     outline: 'none',
   };
+
+  // Hold the splash while the redirect above fires, so the form never flashes.
+  if (initializing || session) return <Splash />;
 
   return (
     <Screen scroll>

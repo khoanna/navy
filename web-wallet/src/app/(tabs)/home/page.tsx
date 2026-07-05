@@ -7,23 +7,19 @@ import { useNavySession } from '@/lib/auth/SessionContext';
 import { fetchBalances, lamportsToSol, usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { NavyPayClient, Payment } from '@/lib/pay/navyPayClient';
 import { useWebSigner } from '@/lib/wallet/useWebSigner';
+import { short, avatarColors } from '@/lib/wallet/identicon';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Gradient } from '@/ui/Gradient';
 import { Card } from '@/ui/Card';
 import { Icon, IconName } from '@/ui/Icon';
-import { IconBadge, Pill, PressRow } from '@/ui/Bits';
-import { Skeleton } from '@/ui/Skeleton';
+import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
 import { colors, gradients, radius, space } from '@/ui/theme';
 import { earnTip } from '@/lib/wallet/tips';
 
-function short(addr?: string) {
-  return addr ? `${addr.slice(0, 4)}…${addr.slice(-4)}` : 'provisioning…';
-}
-
 export default function Home() {
   const router = useRouter();
-  const { signOut, session } = useNavySession();
+  const { session } = useNavySession();
   const { address } = useWebSigner();
   const token = session?.tokens.accessToken;
 
@@ -31,6 +27,7 @@ export default function Home() {
   const [usdc, setUsdc] = useState('—');
   const [recent, setRecent] = useState<Payment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const env = getEnv();
@@ -65,89 +62,81 @@ export default function Home() {
     setRefreshing(false);
   };
 
-  const handleSignOut = () => {
-    if (window.confirm('End your session?')) {
-      signOut();
+  const copyAddress = async () => {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard blocked — no-op */
     }
   };
 
   // Tip: nudge idle USDC into the Earn vault
   const usdcNumeric = usdc === '—' ? 0 : Number(usdc.replaceAll(',', '')) || 0;
   const tip = earnTip(usdcNumeric, 100);
+  const [avA, avB] = avatarColors(address);
 
   return (
     <Screen scroll tabSafe onRefresh={refresh} refreshing={refreshing}>
-      {/* Header row */}
-      <div style={styles.header}>
-        <div>
-          <Text variant="caption" dim>
-            Welcome back
-          </Text>
-          <Text variant="h3" color={colors.textHi} style={{ marginTop: '2px' }}>
-            {short(address)}
-          </Text>
+      {/* Hero: wallet identity + balance, on a deep-ocean gradient */}
+      <Gradient colors={gradients.oceanDeep} glow style={styles.hero}>
+        <div style={styles.heroTop}>
+          <div style={styles.idRow}>
+            <div style={{ ...styles.avatar, backgroundImage: `linear-gradient(135deg, ${avA}, ${avB})` }} />
+            <div style={{ minWidth: 0 }}>
+              <Text variant="caption" color="rgba(255,255,255,0.72)">
+                Welcome back
+              </Text>
+              <button onClick={copyAddress} style={styles.addrPill} aria-label="Copy wallet address">
+                <Text variant="bodyStrong" numeric color={colors.textHi}>
+                  {short(address)}
+                </Text>
+                <Icon name={copied ? 'check' : 'copy'} size={13} color="rgba(255,255,255,0.9)" />
+              </button>
+            </div>
+          </div>
+          <div style={styles.gasless}>
+            <span style={styles.gaslessDot} />
+            <Text variant="label" color={colors.textHi} style={{ fontSize: 10, letterSpacing: '0.6px' }}>
+              GASLESS
+            </Text>
+          </div>
         </div>
-        <button onClick={handleSignOut} style={styles.iconBtn}>
-          <Icon name="logout" size={20} color={colors.textDim} />
-        </button>
-      </div>
 
-      {/* Centered balance hero */}
-      <div style={styles.heroWrap}>
-        {/* Eyebrow row: "Total balance" + Gasless pill */}
-        <div style={styles.heroBrow}>
-          <Text variant="label" muted upper>
+        <div style={styles.balanceBlock}>
+          <Text variant="label" upper color="rgba(255,255,255,0.6)">
             Total balance
           </Text>
-          <Pill tone="accent" label="Gasless" />
+          {usdc === '—' ? (
+            <div style={styles.balSkeleton} />
+          ) : (
+            <div style={styles.balRow}>
+              <Text variant="display" numeric color={colors.textHi}>
+                {usdc}
+              </Text>
+              <Text variant="h3" color="rgba(255,255,255,0.62)">
+                USDC
+              </Text>
+            </div>
+          )}
+          <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={{ marginTop: '2px' }}>
+            ≈ {sol} SOL
+          </Text>
         </div>
-
-        {/* Big USDC number — gradient text when loaded, skeleton when pending */}
-        {usdc === '—' ? (
-          <Skeleton width={190} height={44} style={{ margin: '6px auto' }} />
-        ) : (
-          <span
-            style={{
-              background: 'linear-gradient(90deg,#8FB4FF,#4FE6C8)',
-              WebkitBackgroundClip: 'text',
-              backgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              display: 'block',
-              textAlign: 'center',
-              marginTop: `${space.sm}px`,
-            }}
-          >
-            <Text variant="display" numeric>
-              {usdc}
-            </Text>
-          </span>
-        )}
-
-        {/* USDC label + SOL sub-line */}
-        <Text variant="caption" muted center style={{ marginTop: '2px' }}>
-          USDC
-        </Text>
-        <Text variant="caption" color={colors.aqua} center style={{ marginTop: `${space.xs}px` }}>
-          {sol} SOL
-        </Text>
-      </div>
+      </Gradient>
 
       {/* Quick actions row: Receive · Pay · Earn */}
       <div style={styles.actions}>
         <Action icon="receive" label="Receive" onPress={() => router.push('/receive')} />
-        <Action icon="scan" label="Pay" onPress={() => router.push('/scan')} emphasized />
+        <Action icon="scan" label="Pay" onPress={() => router.push('/scan')} primary />
         <Action icon="sprout" label="Earn" onPress={() => router.push('/farming')} />
       </div>
 
       {/* Earn tip card (only when eligible) */}
       {tip.show && (
-        <Card
-          glass
-          style={{
-            background: 'linear-gradient(135deg, rgba(61,116,255,0.26), rgba(47,224,194,0.15))',
-            marginTop: `${space.xl}px`,
-          }}
-        >
+        <Card glass style={{ marginTop: `${space.xl}px`, boxShadow: `inset 3px 0 0 0 ${colors.aqua}` }}>
           <Text variant="bodyStrong" color={colors.textHi}>
             Idle USDC could earn 4.2%
           </Text>
@@ -165,7 +154,7 @@ export default function Home() {
           Recent activity
         </Text>
         <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-          <Text variant="caption" color={colors.accent}>
+          <Text variant="caption" color={colors.aqua}>
             See all
           </Text>
         </button>
@@ -174,7 +163,7 @@ export default function Home() {
       <Card glass compact>
         {recent.length === 0 ? (
           <div style={styles.empty}>
-            <IconBadge name="clock" color={colors.textMute} size={48} />
+            <GlowIcon name="clock" color={colors.textDim} size={72} />
             <Text variant="caption" muted center style={{ marginTop: `${space.md}px` }}>
               No payments yet. Scan a Navy QR to make your first payment.
             </Text>
@@ -184,7 +173,7 @@ export default function Home() {
             <div key={p.orderId}>
               {i > 0 && <div style={styles.rowDiv} />}
               <div style={styles.txRow}>
-                <IconBadge name="arrowUpRight" color={colors.accent} size={40} />
+                <IconBadge name="arrowUpRight" color={colors.textDim} size={40} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Text variant="bodyStrong" color={colors.textHi} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
                     {p.merchant ?? p.reference ?? 'Payment'}
@@ -205,34 +194,25 @@ export default function Home() {
   );
 }
 
+/** A quick-action tile — a single layer, no nested badge. The primary action
+ *  (Pay) is a filled ocean tile; the others are flat navy tiles. Icon sits
+ *  directly on the tile. */
 function Action({
   icon,
   label,
   onPress,
-  emphasized,
+  primary,
 }: {
   icon: IconName;
   label: string;
   onPress: () => void;
-  emphasized?: boolean;
+  primary?: boolean;
 }) {
-  if (emphasized) {
-    return (
-      <PressRow onPress={onPress} style={styles.actionWrap}>
-        <Gradient colors={gradients.ocean} style={styles.actionCardEmphasized}>
-          <IconBadge name={icon} color={colors.onAccent} size={46} />
-          <Text variant="caption" color={colors.onAccent} style={{ marginTop: `${space.sm}px` }}>
-            {label}
-          </Text>
-        </Gradient>
-      </PressRow>
-    );
-  }
   return (
     <PressRow onPress={onPress} style={styles.actionWrap}>
-      <div style={styles.actionCard}>
-        <IconBadge name={icon} color={colors.accent} size={46} />
-        <Text variant="caption" color={colors.text} style={{ marginTop: `${space.sm}px` }}>
+      <div style={primary ? styles.actionPrimary : styles.actionCard}>
+        <Icon name={icon} size={24} color={primary ? colors.textHi : colors.text} strokeWidth={1.9} />
+        <Text variant="caption" color={primary ? colors.textHi : colors.textDim} style={{ marginTop: `${space.sm}px` }}>
           {label}
         </Text>
       </div>
@@ -241,37 +221,78 @@ function Action({
 }
 
 const styles = {
-  header: {
+  hero: {
+    borderRadius: `${radius.xl}px`,
+    padding: `${space.xl}px`,
+    boxShadow: '0 18px 42px rgba(4,18,40,0.55)',
+  } as React.CSSProperties,
+  heroTop: {
     display: 'flex',
     flexDirection: 'row' as const,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: `${space.xxl}px`,
+    alignItems: 'flex-start',
   },
-  iconBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: `${radius.md}px`,
-    backgroundColor: colors.surface,
-    border: `1px solid ${colors.border}`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  } as React.CSSProperties,
-  heroWrap: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    marginTop: `${space.xl}px`,
-  },
-  heroBrow: {
+  idRow: {
     display: 'flex',
     flexDirection: 'row' as const,
     alignItems: 'center',
-    gap: `${space.sm}px`,
-    justifyContent: 'center',
+    gap: `${space.md}px`,
+    minWidth: 0,
   },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: `${radius.pill}px`,
+    border: '1px solid rgba(255,255,255,0.4)',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.28)',
+    flexShrink: 0,
+  } as React.CSSProperties,
+  addrPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginTop: '4px',
+    padding: '4px 10px',
+    background: 'rgba(255,255,255,0.14)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    borderRadius: `${radius.pill}px`,
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  } as React.CSSProperties,
+  gasless: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '5px 10px',
+    background: 'rgba(255,255,255,0.14)',
+    border: '1px solid rgba(255,255,255,0.22)',
+    borderRadius: `${radius.pill}px`,
+    flexShrink: 0,
+  } as React.CSSProperties,
+  gaslessDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: `${radius.pill}px`,
+    background: colors.aqua,
+    boxShadow: `0 0 8px ${colors.aqua}`,
+  } as React.CSSProperties,
+  balanceBlock: {
+    marginTop: `${space.xxl}px`,
+  },
+  balRow: {
+    display: 'flex',
+    flexDirection: 'row' as const,
+    alignItems: 'baseline',
+    gap: `${space.sm}px`,
+    marginTop: '4px',
+  },
+  balSkeleton: {
+    width: '180px',
+    height: '44px',
+    borderRadius: `${radius.sm}px`,
+    background: 'rgba(255,255,255,0.16)',
+    marginTop: '6px',
+  } as React.CSSProperties,
   actions: {
     display: 'flex',
     flexDirection: 'row' as const,
@@ -292,9 +313,11 @@ const styles = {
     flexDirection: 'column' as const,
     alignItems: 'center',
   },
-  actionCardEmphasized: {
+  actionPrimary: {
     flex: 1,
     borderRadius: `${radius.lg}px`,
+    backgroundImage: 'linear-gradient(135deg, #3D74FF, #2FE0C2)',
+    boxShadow: '0 8px 20px rgba(23,196,168,0.22)',
     paddingTop: `${space.lg}px`,
     paddingBottom: `${space.lg}px`,
     display: 'flex',

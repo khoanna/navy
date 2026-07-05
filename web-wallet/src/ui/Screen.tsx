@@ -1,7 +1,6 @@
 'use client';
 import React from 'react';
 import { space, colors } from './theme';
-import { Icon } from './Icon';
 
 export interface ScreenProps {
   children: React.ReactNode;
@@ -28,8 +27,6 @@ export function Screen({
   tabSafe,
   padded = true,
   contentStyle,
-  onRefresh,
-  refreshing,
 }: ScreenProps) {
   const pad: React.CSSProperties = {
     paddingTop: `${space.lg}px`,
@@ -40,25 +37,6 @@ export function Screen({
 
   const content = (
     <div className="navy-fade-in" style={{ position: 'relative', ...contentStyle }}>
-      {onRefresh && (
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          style={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: `${space.sm}px`,
-            opacity: refreshing ? 0.45 : 1,
-          }}
-          aria-label="Refresh"
-        >
-          <Icon name="down" size={20} color={colors.aqua} />
-        </button>
-      )}
       {children}
     </div>
   );

@@ -1,5 +1,7 @@
 'use client';
+import { useEffect, useRef } from 'react';
 import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { usePrivy } from '@privy-io/react-auth';
 import { useSignTransaction, useSolanaWallets } from '@privy-io/react-auth/solana';
 import { getEnv } from '@/lib/config/env';
 
@@ -21,10 +23,28 @@ import { getEnv } from '@/lib/config/env';
 const EMBEDDED_CLIENT_TYPES = new Set(['privy', 'privy-v2']);
 
 export function useWebSigner() {
-  const { wallets } = useSolanaWallets();
+  const { authenticated } = usePrivy();
+  const { ready, wallets, createWallet } = useSolanaWallets();
   const { signTransaction } = useSignTransaction();
   const embedded = wallets?.find((w) => EMBEDDED_CLIENT_TYPES.has(w.walletClientType));
   const address = embedded?.address as string | undefined;
+
+  // Fallback provisioning: `embeddedWallets.solana.createOnLogin` covers fresh
+  // logins, but a user who authenticated before that config existed (or whose
+  // creation flow was interrupted) can be authenticated with no Solana wallet,
+  // leaving the app stuck on "provisioning…". Once Privy's wallet state is
+  // `ready` and there's still no embedded wallet, create one. Latched per mount
+  // so we never double-create (which throws) or hot-loop.
+  const creatingRef = useRef(false);
+  useEffect(() => {
+    if (ready && authenticated && !embedded && !creatingRef.current) {
+      creatingRef.current = true;
+      createWallet().catch(() => {
+        // Swallow: e.g. "already has an embedded wallet" (a race with
+        // createOnLogin) — the wallets list will populate on the next render.
+      });
+    }
+  }, [ready, authenticated, embedded, createWallet]);
 
   const sign = async (tx: Transaction): Promise<Transaction> => {
     const wallet = wallets?.find((w) => EMBEDDED_CLIENT_TYPES.has(w.walletClientType));
@@ -37,5 +57,5 @@ export function useWebSigner() {
     return Transaction.from(Uint8Array.from((signed as VersionedTransaction).serialize()));
   };
 
-  return { address, sign, wallets };
+  return { address, sign, wallets, ready };
 }

@@ -30,4 +30,29 @@ describe('NavyClient.exchangePrivyToken', () => {
     const client = new NavyClient('http://api', mockFetch(201, { accessToken: 'a' }));
     await expect(client.exchangePrivyToken('x')).rejects.toThrow(/token/i);
   });
+
+  it('calls the default fetch with the correct receiver (no "Illegal invocation")', async () => {
+    // Regression: native fetch must be invoked with `this === window`. If the default
+    // is stored unbound and called as `this.fetchImpl(...)`, browsers throw
+    // "Illegal invocation". Emulate that by making the global fetch assert its receiver.
+    const globalFetch = jest.fn(function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({ accessToken: 'a', refreshToken: 'r' }),
+      });
+    });
+    const prev = globalThis.fetch;
+    (globalThis as { fetch: unknown }).fetch = globalFetch;
+    try {
+      const client = new NavyClient('http://api'); // uses the bound default
+      const tokens = await client.exchangePrivyToken('privy-jwt');
+      expect(tokens).toEqual({ accessToken: 'a', refreshToken: 'r' });
+    } finally {
+      (globalThis as { fetch: unknown }).fetch = prev;
+    }
+  });
 });

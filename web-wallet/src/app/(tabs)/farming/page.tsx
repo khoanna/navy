@@ -9,11 +9,11 @@ import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { Card } from '@/ui/Card';
+import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
-import { IconBadge, Pill } from '@/ui/Bits';
-import { Skeleton } from '@/ui/Skeleton';
+import { IconBadge, GlowIcon, Pill } from '@/ui/Bits';
 import { useToast } from '@/ui/Toast';
-import { colors, radius, space } from '@/ui/theme';
+import { colors, gradients, radius, space } from '@/ui/theme';
 
 const FUND_LAMPORTS = 100_000_000; // 0.1 SOL
 
@@ -113,69 +113,45 @@ export default function Farming() {
 
       {loading ? (
         /* Loading hero */
-        <Card
-          glass
-          style={{
-            ...styles.hero,
-            background: 'linear-gradient(135deg, rgba(61,116,255,0.28), rgba(47,224,194,0.16))',
-          }}
-        >
-          <Text variant="label" muted upper center>
+        <Gradient colors={gradients.oceanDeep} glow style={styles.hero}>
+          <Text variant="label" upper center color="rgba(255,255,255,0.6)">
             Deposited · earning
           </Text>
-          <Skeleton width={170} height={44} style={{ margin: '6px auto' }} />
-        </Card>
+          <div style={styles.heroSkeleton} />
+        </Gradient>
       ) : !pos ? (
-        /* Empty state — start farming */
-        <Card
-          glass
-          style={{ marginTop: `${space.xl}px`, alignItems: 'center', paddingTop: `${space.xxxl}px`, paddingBottom: `${space.xxxl}px` }}
-        >
-          <IconBadge name="sprout" color={colors.aqua} size={76} />
-          <Text variant="h2" color={colors.textHi} center style={{ marginTop: `${space.lg}px` }}>
+        /* Empty state — start farming (card-less, centered) */
+        <div style={styles.emptyInner}>
+          <GlowIcon name="sprout" color={colors.aqua} size={96} />
+          <Text variant="h2" color={colors.textHi} center style={{ marginTop: `${space.lg}px`, display: 'block' }}>
             Start earning
           </Text>
-          <Text
-            dim
-            center
-            style={{
-              marginTop: `${space.sm}px`,
-              marginBottom: `${space.xl}px`,
-              paddingLeft: `${space.sm}px`,
-              paddingRight: `${space.sm}px`,
-            }}
-          >
+          <Text dim center style={{ marginTop: `${space.sm}px`, marginBottom: `${space.xl}px`, display: 'block' }}>
             Navy creates a secure, encrypted subwallet that auto-deposits into the yield reserve. Your keys never leave Navy&apos;s signer.
           </Text>
           <Button label="Create farming wallet" icon="plus" loading={busy} onPress={start} />
-        </Card>
+        </div>
       ) : (
         <>
           {/* Position hero */}
-          <Card
-            glass
-            style={{
-              ...styles.hero,
-              background: 'linear-gradient(135deg, rgba(61,116,255,0.28), rgba(47,224,194,0.16))',
-            }}
-          >
-            <Text variant="label" muted upper center>
+          <Gradient colors={gradients.oceanDeep} glow style={styles.hero}>
+            <Text variant="label" upper center color="rgba(255,255,255,0.6)">
               Deposited · earning
             </Text>
             <div style={styles.heroAmt}>
               <Text variant="display" numeric color={colors.textHi}>
                 {current.toFixed(4)}
               </Text>
-              <Text variant="h3" color={colors.textDim} style={{ marginLeft: '6px' }}>
+              <Text variant="h3" color="rgba(255,255,255,0.62)" style={{ marginLeft: '6px' }}>
                 SOL
               </Text>
             </div>
-            <Text variant="caption" color={colors.aqua}>
+            <Text variant="caption" color="rgba(255,255,255,0.82)">
               {gain >= 0 ? '+' : ''}
               {gain.toFixed(4)} SOL earned ({gainPct >= 0 ? '+' : ''}
               {gainPct.toFixed(2)}%)
             </Text>
-          </Card>
+          </Gradient>
 
           {/* Deposit / Withdraw actions */}
           <div style={styles.btnRow}>
@@ -227,7 +203,7 @@ export default function Farming() {
 
           {/* Devnet note */}
           <div style={styles.noteRow}>
-            <Pill label="Devnet" tone="warning" />
+            <Pill label="Devnet" />
             <Text variant="caption" muted style={{ flex: 1 }}>
               Depositing signs a transfer from your main wallet. Withdraw returns principal + yield to your wallet.
             </Text>
@@ -247,13 +223,31 @@ const styles = {
     alignItems: 'baseline',
   },
   hero: {
-    borderRadius: `${radius.xxl}px`,
-    padding: `${space.xxl}px`,
+    borderRadius: `${radius.xl}px`,
+    padding: `${space.xl}px`,
     marginTop: `${space.xl}px`,
+    boxShadow: '0 18px 42px rgba(4,18,40,0.55)',
     display: 'flex',
     flexDirection: 'column' as const,
     alignItems: 'center',
     gap: `${space.xs}px`,
+  } as React.CSSProperties,
+  emptyInner: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    maxWidth: '320px',
+    marginTop: '72px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  } as React.CSSProperties,
+  heroSkeleton: {
+    width: '170px',
+    height: '44px',
+    borderRadius: `${radius.sm}px`,
+    background: 'rgba(255,255,255,0.16)',
+    marginTop: '6px',
+    marginBottom: '2px',
   } as React.CSSProperties,
   heroAmt: {
     display: 'flex',

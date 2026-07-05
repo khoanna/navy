@@ -47,6 +47,7 @@ export function Pill({ label, tone = 'neutral' }: { label: string; tone?: 'neutr
 }
 
 /** A circular icon chip with a tinted ground. */
+/** A leading list-row icon — a borderless soft-filled disc (token-avatar style). */
 export function IconBadge({ name, color = colors.accent, size = 44 }: { name: IconName; color?: string; size?: number }) {
   return (
     <div
@@ -56,13 +57,33 @@ export function IconBadge({ name, color = colors.accent, size = 44 }: { name: Ic
         justifyContent: 'center',
         width: size,
         height: size,
-        borderRadius: `${size / 3}px`,
-        backgroundColor: hexA(color, 0.14),
-        border: `1px solid ${hexA(color, 0.28)}`,
+        borderRadius: `${size / 2}px`,
+        backgroundColor: hexA(color, 0.12),
         flexShrink: 0,
       }}
     >
-      <Icon name={name} size={size * 0.5} color={color} strokeWidth={2} />
+      <Icon name={name} size={size * 0.46} color={color} strokeWidth={2} />
+    </div>
+  );
+}
+
+/** A large empty-state icon — a borderless glyph in a soft radial halo. No box,
+ *  no ring; the modern-wallet empty-state treatment. */
+export function GlowIcon({ name, color = colors.aqua, size = 92 }: { name: IconName; color?: string; size?: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: `radial-gradient(circle, ${hexA(color, 0.2)}, ${hexA(color, 0)} 70%)`,
+        flexShrink: 0,
+      }}
+    >
+      <Icon name={name} size={Math.round(size * 0.4)} color={color} strokeWidth={1.7} />
     </div>
   );
 }
