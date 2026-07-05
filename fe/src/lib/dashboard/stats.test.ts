@@ -11,7 +11,7 @@ describe('formatUsdc', () => {
   });
 
   it('is safe on large values (no float precision loss)', () => {
-    expect(formatUsdc('123456789000000')).toBe('123,456,789');
+    expect(formatUsdc('99999999999999000000')).toBe('99,999,999,999,999');
   });
 });
 
