@@ -9,3 +9,4 @@ export * from './Button';
 export * from './Screen';
 export * from './Skeleton';
 export * from './Sheet';
+export * from './SlideToConfirm';
