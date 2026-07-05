@@ -1,10 +1,24 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AppShell } from '@/ui/AppShell';
+import { TopBar } from '@/ui/TopBar';
+import { DataTable, Column } from '@/ui/DataTable';
+import { Button } from '@/ui/Button';
+import { Text } from '@/ui/Text';
+import { Pill } from '@/ui/Bits';
+import { colors, space, radius } from '@/ui/theme';
+import { MERCHANT_NAV } from '@/ui/nav';
+import { formatUsdc } from '@/lib/dashboard/stats';
+import { statusTone } from '@/lib/dashboard/status';
 
 interface Order { id: string; reference: string; amount: string; status: string; createdAt: string; }
 
+const FILTERS = ['all', 'awaiting_payment', 'paid', 'expired'] as const;
+
 export default function Orders() {
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [status, setStatus] = useState('all');
 
@@ -19,31 +33,57 @@ export default function Orders() {
     return () => { active = false; clearInterval(t); };
   }, [status]);
 
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/merchant/login');
+  };
+
+  const cols: Column<Order>[] = [
+    { key: 'ref', header: 'Reference', render: (o) => <Text variant="bodyStrong" color={colors.textHi}>{o.reference}</Text> },
+    { key: 'amt', header: 'Amount', align: 'right', render: (o) => <Text variant="body" numeric>{formatUsdc(o.amount)} USDC</Text> },
+    { key: 'st', header: 'Status', align: 'right', render: (o) => { const t = statusTone(o.status); return <Pill label={t.label} tone={t.tone} />; } },
+    { key: 'view', header: 'View', align: 'right', render: (o) => <Link href={`/merchant/orders/${o.id}`}><Text variant="bodyStrong" color={colors.accent}>View →</Text></Link> },
+  ];
+
   return (
-    <main style={{ padding: 32, fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Orders</h1>
-        <Link href="/merchant/orders/new"><button>New invoice</button></Link>
-      </div>
-      <nav style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
-        {['all', 'awaiting_payment', 'paid', 'expired'].map((s) => (
-          <button key={s} onClick={() => setStatus(s)} style={{ fontWeight: s === status ? 700 : 400 }}>{s}</button>
-        ))}
+    <AppShell
+      items={MERCHANT_NAV}
+      identity={{ title: 'Merchant', subtitle: 'Dashboard' }}
+      onLogout={logout}
+    >
+      <TopBar
+        eyebrow="Merchant"
+        title="Orders"
+        right={
+          <div style={{ minWidth: 160 }}>
+            <Link href="/merchant/orders/new">
+              <Button label="New invoice" icon="plus" full />
+            </Link>
+          </div>
+        }
+      />
+      <nav style={{ display: 'flex', gap: space.sm, marginBottom: space.xl }}>
+        {FILTERS.map((s) => {
+          const active = s === status;
+          return (
+            <button
+              key={s}
+              onClick={() => setStatus(s)}
+              style={{
+                padding: `${space.sm}px ${space.lg}px`,
+                borderRadius: radius.pill,
+                border: `1px solid ${active ? colors.accent : colors.border}`,
+                background: active ? 'rgba(79,140,255,0.14)' : colors.glassFill,
+              }}
+            >
+              <Text variant="label" upper color={active ? colors.accent : colors.textDim}>
+                {statusTone(s).label}
+              </Text>
+            </button>
+          );
+        })}
       </nav>
-      <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
-        <thead><tr><th align="left">Reference</th><th align="left">Amount (USDC)</th><th align="left">Status</th><th /></tr></thead>
-        <tbody>
-          {orders.map((o) => (
-            <tr key={o.id} style={{ borderTop: '1px solid #ddd' }}>
-              <td>{o.reference}</td>
-              <td>{(Number(o.amount) / 1_000_000).toFixed(2)}</td>
-              <td>{o.status}</td>
-              <td><Link href={`/merchant/orders/${o.id}`}>view</Link></td>
-            </tr>
-          ))}
-          {orders.length === 0 && <tr><td colSpan={4}>No orders.</td></tr>}
-        </tbody>
-      </table>
-    </main>
+      <DataTable columns={cols} rows={orders} empty="No orders." />
+    </AppShell>
   );
 }
