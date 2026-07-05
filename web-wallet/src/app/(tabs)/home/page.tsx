@@ -12,9 +12,11 @@ import { Text } from '@/ui/Text';
 import { Gradient } from '@/ui/Gradient';
 import { Card } from '@/ui/Card';
 import { Icon, IconName } from '@/ui/Icon';
-import { IconBadge, PressRow } from '@/ui/Bits';
+import { IconBadge, Pill, PressRow } from '@/ui/Bits';
 import { useToast } from '@/ui/Toast';
+import { Skeleton } from '@/ui/Skeleton';
 import { colors, gradients, radius, space } from '@/ui/theme';
+import { earnTip } from '@/lib/wallet/tips';
 
 function short(addr?: string) {
   return addr ? `${addr.slice(0, 4)}…${addr.slice(-4)}` : 'provisioning…';
@@ -77,16 +79,20 @@ export default function Home() {
     }
   };
 
+  // Tip: nudge idle USDC into the Earn vault
+  const usdcNumeric = usdc === '—' ? 0 : Number(usdc.replaceAll(',', '')) || 0;
+  const tip = earnTip(usdcNumeric, 100);
+
   return (
     <Screen scroll tabSafe onRefresh={refresh} refreshing={refreshing}>
-      {/* Header */}
+      {/* Header row */}
       <div style={styles.header}>
         <div>
-          <Text variant="label" muted upper>
-            Navy Wallet
+          <Text variant="caption" dim>
+            Welcome back
           </Text>
-          <Text variant="h2" color={colors.textHi} style={{ marginTop: '2px' }}>
-            Good to see you
+          <Text variant="h3" color={colors.textHi} style={{ marginTop: '2px' }}>
+            {short(address)}
           </Text>
         </div>
         <button onClick={handleSignOut} style={styles.iconBtn}>
@@ -94,58 +100,72 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Balance hero */}
-      <Gradient
-        colors={gradients.ocean}
-        glow
-        style={{
-          ...styles.hero,
-          boxShadow: `0 10px 22px rgba(79,140,255,0.5)`,
-        }}
-      >
-        <div style={styles.heroTop}>
-          <Text variant="label" color="rgba(4,17,31,0.65)" upper>
-            USDC Balance
+      {/* Centered balance hero */}
+      <div style={styles.heroWrap}>
+        {/* Eyebrow row: "Total balance" + Gasless pill */}
+        <div style={styles.heroBrow}>
+          <Text variant="label" muted upper>
+            Total balance
           </Text>
-          <div style={styles.chip}>
-            <Icon name="bolt" size={13} color={colors.onAccent} />
-            <Text variant="label" color={colors.onAccent}>
-              Gasless
-            </Text>
-          </div>
+          <Pill tone="accent" label="Gasless" />
         </div>
 
-        <div style={styles.amountRow}>
-          <Text variant="display" numeric color={colors.onAccent}>
-            {usdc}
-          </Text>
-          <Text variant="h2" color="rgba(4,17,31,0.6)" style={{ marginBottom: '6px' }}>
-            USDC
-          </Text>
-        </div>
-
-        <div style={styles.heroFoot}>
-          <div style={styles.solChip}>
-            <Icon name="trend" size={14} color={colors.onAccent} strokeWidth={2.2} />
-            <Text variant="caption" color={colors.onAccent}>
-              {sol} SOL
+        {/* Big USDC number — gradient text when loaded, skeleton when pending */}
+        {usdc === '—' ? (
+          <Skeleton width={190} height={44} style={{ margin: '6px auto' }} />
+        ) : (
+          <span
+            style={{
+              background: 'linear-gradient(90deg,#8FB4FF,#4FE6C8)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              display: 'block',
+              textAlign: 'center',
+              marginTop: `${space.sm}px`,
+            }}
+          >
+            <Text variant="display" numeric>
+              {usdc}
             </Text>
-          </div>
-          <button onClick={copy} style={styles.addrChip}>
-            <Text variant="mono" color="rgba(4,17,31,0.75)">
-              {short(address)}
-            </Text>
-            <Icon name="copy" size={14} color="rgba(4,17,31,0.75)" />
-          </button>
-        </div>
-      </Gradient>
+          </span>
+        )}
 
-      {/* Quick actions */}
-      <div style={styles.actions}>
-        <Action icon="scan" label="Scan & Pay" onPress={() => router.push('/scan')} accent={colors.accent} />
-        <Action icon="receive" label="Receive" onPress={copy} accent={colors.aqua} />
-        <Action icon="sprout" label="Earn" onPress={() => router.push('/farming')} accent={colors.warning} />
+        {/* USDC label + SOL sub-line */}
+        <Text variant="caption" muted center style={{ marginTop: '2px' }}>
+          USDC
+        </Text>
+        <Text variant="caption" color={colors.aqua} center style={{ marginTop: `${space.xs}px` }}>
+          {sol} SOL
+        </Text>
       </div>
+
+      {/* Quick actions row: Receive · Pay · Earn */}
+      <div style={styles.actions}>
+        <Action icon="receive" label="Receive" onPress={() => router.push('/receive')} />
+        <Action icon="scan" label="Pay" onPress={() => router.push('/scan')} emphasized />
+        <Action icon="sprout" label="Earn" onPress={() => router.push('/farming')} />
+      </div>
+
+      {/* Earn tip card (only when eligible) */}
+      {tip.show && (
+        <Card
+          glass
+          style={{
+            background: 'linear-gradient(135deg, rgba(61,116,255,0.26), rgba(47,224,194,0.15))',
+            marginTop: `${space.xl}px`,
+          }}
+        >
+          <Text variant="bodyStrong" color={colors.textHi}>
+            Idle USDC could earn 4.2%
+          </Text>
+          <PressRow onPress={() => router.push('/farming')} style={{ marginTop: `${space.sm}px` }}>
+            <Text variant="caption" color={colors.aqua}>
+              Move to the Earn vault →
+            </Text>
+          </PressRow>
+        </Card>
+      )}
 
       {/* Recent activity */}
       <div style={styles.sectionHead}>
@@ -159,7 +179,7 @@ export default function Home() {
         </button>
       </div>
 
-      <Card compact>
+      <Card glass compact>
         {recent.length === 0 ? (
           <div style={styles.empty}>
             <IconBadge name="clock" color={colors.textMute} size={48} />
@@ -193,11 +213,33 @@ export default function Home() {
   );
 }
 
-function Action({ icon, label, onPress, accent }: { icon: IconName; label: string; onPress: () => void; accent: string }) {
+function Action({
+  icon,
+  label,
+  onPress,
+  emphasized,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  emphasized?: boolean;
+}) {
+  if (emphasized) {
+    return (
+      <PressRow onPress={onPress} style={styles.actionWrap}>
+        <Gradient colors={gradients.ocean} style={styles.actionCardEmphasized}>
+          <IconBadge name={icon} color={colors.onAccent} size={46} />
+          <Text variant="caption" color={colors.onAccent} style={{ marginTop: `${space.sm}px` }}>
+            {label}
+          </Text>
+        </Gradient>
+      </PressRow>
+    );
+  }
   return (
     <PressRow onPress={onPress} style={styles.actionWrap}>
       <div style={styles.actionCard}>
-        <IconBadge name={icon} color={accent} size={46} />
+        <IconBadge name={icon} color={colors.accent} size={46} />
         <Text variant="caption" color={colors.text} style={{ marginTop: `${space.sm}px` }}>
           {label}
         </Text>
@@ -225,68 +267,19 @@ const styles = {
     justifyContent: 'center',
     cursor: 'pointer',
   } as React.CSSProperties,
-  hero: {
-    borderRadius: `${radius.xxl}px`,
-    padding: `${space.xxl}px`,
-  } as React.CSSProperties,
-  heroTop: {
+  heroWrap: {
     display: 'flex',
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  chip: {
-    display: 'flex',
-    flexDirection: 'row' as const,
-    alignItems: 'center',
-    gap: '4px',
-    backgroundColor: 'rgba(4,17,31,0.14)',
-    paddingLeft: `${space.md}px`,
-    paddingRight: `${space.md}px`,
-    paddingTop: '5px',
-    paddingBottom: '5px',
-    borderRadius: `${radius.pill}px`,
-  },
-  amountRow: {
-    display: 'flex',
-    flexDirection: 'row' as const,
-    alignItems: 'flex-end',
-    gap: `${space.sm}px`,
-    marginTop: `${space.lg}px`,
-  },
-  heroFoot: {
-    display: 'flex',
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between',
+    flexDirection: 'column' as const,
     alignItems: 'center',
     marginTop: `${space.xl}px`,
   },
-  solChip: {
+  heroBrow: {
     display: 'flex',
     flexDirection: 'row' as const,
     alignItems: 'center',
-    gap: '5px',
-    backgroundColor: 'rgba(4,17,31,0.14)',
-    paddingLeft: `${space.md}px`,
-    paddingRight: `${space.md}px`,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: `${radius.pill}px`,
+    gap: `${space.sm}px`,
+    justifyContent: 'center',
   },
-  addrChip: {
-    display: 'flex',
-    flexDirection: 'row' as const,
-    alignItems: 'center',
-    gap: '6px',
-    backgroundColor: 'rgba(4,17,31,0.14)',
-    paddingLeft: `${space.md}px`,
-    paddingRight: `${space.md}px`,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: `${radius.pill}px`,
-    border: 'none',
-    cursor: 'pointer',
-  } as React.CSSProperties,
   actions: {
     display: 'flex',
     flexDirection: 'row' as const,
@@ -307,6 +300,15 @@ const styles = {
     flexDirection: 'column' as const,
     alignItems: 'center',
   },
+  actionCardEmphasized: {
+    flex: 1,
+    borderRadius: `${radius.lg}px`,
+    paddingTop: `${space.lg}px`,
+    paddingBottom: `${space.lg}px`,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+  } as React.CSSProperties,
   sectionHead: {
     display: 'flex',
     flexDirection: 'row' as const,
