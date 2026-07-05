@@ -3,12 +3,17 @@ import { OrdersService } from './orders.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
-import { parsePositiveAmount, parsePageSize, parseOffset } from '../common/amount.util';
+import { IsArray, IsInt, IsOptional, IsPositive, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { parsePageSize, parseOffset } from '../common/amount.util';
 
+class OrderLineDto {
+  @IsUUID() productId!: string;
+  @IsInt() @IsPositive() quantity!: number;
+}
 class CreateOrderDto {
-  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amount!: string;
-  @IsString() @IsNotEmpty() reference!: string;
+  @IsArray() @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
+  @IsString() @IsOptional() description?: string;
   @IsInt() @IsPositive() @IsOptional() expiresInSec?: number;
 }
 
@@ -20,9 +25,7 @@ export class MerchantOrdersController {
 
   @Post()
   create(@Req() req: any, @Body() dto: CreateOrderDto) {
-    return this.orders.createForMerchant(req.user.sub, {
-      amount: parsePositiveAmount(dto.amount), reference: dto.reference, expiresInSec: dto.expiresInSec,
-    });
+    return this.orders.createForMerchant(req.user.sub, { items: dto.items, description: dto.description, expiresInSec: dto.expiresInSec });
   }
 
   @Get()

@@ -10,12 +10,16 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { Throttle } from '@nestjs/throttler';
-import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
-import { parsePositiveAmount } from '../common/amount.util';
+import { IsArray, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
+class OrderLineDto {
+  @IsUUID() productId!: string;
+  @IsInt() @IsPositive() quantity!: number;
+}
 class CreateOrderDto {
-  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amount!: string;
-  @IsString() @IsNotEmpty() reference!: string;
+  @IsArray() @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
+  @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() callbackUrl?: string;
   @IsInt() @IsPositive() @IsOptional() expiresInSec?: number;
 }
@@ -36,7 +40,7 @@ export class OrdersController {
   @UseGuards(OrderAuthGuard)
   async create(@Req() req: any, @Body() dto: CreateOrderDto) {
     return this.orders.create(req.merchantId, {
-      amount: parsePositiveAmount(dto.amount), reference: dto.reference,
+      items: dto.items, description: dto.description,
       callbackUrl: dto.callbackUrl, expiresInSec: dto.expiresInSec,
     });
   }
@@ -44,7 +48,13 @@ export class OrdersController {
   @Get(':id')
   async get(@Param('id') id: string) {
     const o = await this.orders.get(id);
-    return o && { orderId: o.id, status: o.status, amount: o.amount.toString(), reference: o.reference, paidAt: o.paidAt };
+    return o && {
+      orderId: o.id, status: o.status, amount: o.amount.toString(), reference: o.reference, paidAt: o.paidAt,
+      subtotal: o.subtotal != null ? o.subtotal.toString() : null,
+      description: o.description ?? null,
+      items: (o.items ?? []).map((it) => ({ name: it.name, unitPrice: it.unitPrice.toString(), quantity: it.quantity })),
+      charges: (o.charges ?? []).map((c) => ({ name: c.name, mode: c.mode, value: c.value, amount: c.amount.toString() })),
+    };
   }
 
   @Get(':id/payment-tx')

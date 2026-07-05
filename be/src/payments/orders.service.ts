@@ -72,12 +72,16 @@ export class OrdersService {
     return { orderId: order.id, reference, payUrl, qr, subtotal: totals.subtotal.toString(), amount: order.amount.toString(), expiresAt, status: order.status };
   }
 
-  get(id: string) { return this.prisma.order.findUnique({ where: { id } }); }
+  get(id: string) { return this.prisma.order.findUnique({ where: { id }, include: { items: true, charges: true } }); }
 
   private serialize(o: any) {
     return {
-      id: o.id, reference: o.reference, amount: o.amount.toString(), status: o.status,
+      id: o.id, reference: o.reference, amount: o.amount.toString(),
+      subtotal: o.subtotal != null ? o.subtotal.toString() : null,
+      description: o.description ?? null, status: o.status,
       createdAt: o.createdAt, paidAt: o.paidAt ?? null, payer: o.payer ?? null, txSignature: o.txSignature ?? null,
+      items: (o.items ?? []).map((it: any) => ({ name: it.name, unitPrice: it.unitPrice.toString(), quantity: it.quantity })),
+      charges: (o.charges ?? []).map((c: any) => ({ name: c.name, mode: c.mode, value: c.value, amount: c.amount.toString() })),
     };
   }
 
@@ -97,7 +101,7 @@ export class OrdersService {
   }
 
   async getForMerchant(merchantId: string, id: string) {
-    const o = await this.prisma.order.findFirst({ where: { id, merchantId } });
+    const o = await this.prisma.order.findFirst({ where: { id, merchantId }, include: { items: true, charges: true } });
     if (!o) throw new NotFoundException('Order not found');
     return this.serialize(o);
   }
