@@ -63,9 +63,9 @@ export function Modal({
           gap: space.lg,
         }}
       >
-        <div>
-          <Text variant="h3" color={colors.textHi}>{title}</Text>
-          {subtitle && <Text variant="caption" dim style={{ marginTop: 4 }}>{subtitle}</Text>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Text variant="h3" color={colors.textHi} style={{ display: 'block' }}>{title}</Text>
+          {subtitle && <Text variant="caption" dim style={{ display: 'block' }}>{subtitle}</Text>}
         </div>
         {children}
       </div>

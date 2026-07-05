@@ -65,7 +65,7 @@ export default function MerchantOverview() {
         <TrendChart title="Paid volume · last 30 days" series={series} />
       </div>
       <div style={{ marginBottom: space.xl }}>
-        <Text variant="h3" color={colors.textHi} style={{ marginBottom: space.md }}>Recent orders</Text>
+        <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Recent orders</Text>
         <DataTable columns={cols} rows={orders} empty="No orders yet" />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.lg }}>

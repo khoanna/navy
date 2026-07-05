@@ -68,11 +68,11 @@ export default function AdminOverview() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.lg }}>
         <div>
-          <Text variant="h3" color={colors.textHi} style={{ marginBottom: space.md }}>Pending review</Text>
+          <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Pending review</Text>
           <DataTable columns={pendingCols} rows={s?.recentPending ?? []} empty="No pending merchants" />
         </div>
         <div>
-          <Text variant="h3" color={colors.textHi} style={{ marginBottom: space.md }}>Recent payments</Text>
+          <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Recent payments</Text>
           <DataTable columns={payCols} rows={s?.recentPayments ?? []} empty="No payments yet" />
         </div>
       </div>

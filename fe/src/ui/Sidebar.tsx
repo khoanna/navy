@@ -21,7 +21,14 @@ export function Sidebar({ items, identity, onLogout }: { items: NavItem[]; ident
       </div>
       <nav style={{ display: 'flex', flexDirection: 'column', gap: space.xs }}>
         {items.map((it) => {
-          const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href + '/'));
+          const matches = (href: string) =>
+            pathname === href || (href !== '/' && !!pathname?.startsWith(href + '/'));
+          // Only the most specific (longest) matching nav href is active, so a
+          // parent route (e.g. /admin) doesn't stay highlighted on a child
+          // route (/admin/merchants).
+          const active =
+            matches(it.href) &&
+            !items.some((o) => o.href !== it.href && o.href.length > it.href.length && matches(o.href));
           return (
             <Link key={it.href} href={it.href} style={{ display: 'flex', alignItems: 'center', gap: space.md, padding: `${space.md}px ${space.md}px`, borderRadius: radius.md, background: active ? `linear-gradient(135deg, ${gradients.ocean[0]}, ${gradients.ocean[1]})` : 'transparent', color: active ? colors.onAccent : colors.textDim, boxShadow: active ? '0 6px 16px rgba(23,196,168,0.28)' : undefined }}>
               <Icon name={it.icon} size={20} color={active ? colors.onAccent : colors.textDim} />
@@ -31,9 +38,9 @@ export function Sidebar({ items, identity, onLogout }: { items: NavItem[]; ident
         })}
       </nav>
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: space.sm, paddingTop: space.lg, borderTop: `1px solid ${colors.border}` }}>
-        <div style={{ padding: `${space.sm}px ${space.md}px` }}>
-          <Text variant="bodyStrong" color={colors.textHi}>{identity.title}</Text>
-          <Text variant="caption" dim>{identity.subtitle}</Text>
+        <div style={{ display: 'flex', flexDirection: 'column', padding: `${space.sm}px ${space.md}px` }}>
+          <Text variant="bodyStrong" color={colors.textHi} style={{ display: 'block' }}>{identity.title}</Text>
+          <Text variant="caption" dim style={{ display: 'block' }}>{identity.subtitle}</Text>
         </div>
         {onLogout && (
           <button onClick={onLogout} style={{ display: 'flex', alignItems: 'center', gap: space.md, padding: `${space.md}px`, borderRadius: radius.md, color: colors.danger }}>
