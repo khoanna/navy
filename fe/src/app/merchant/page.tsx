@@ -11,15 +11,9 @@ import { Pill } from '@/ui/Bits';
 import { colors, space } from '@/ui/theme';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
-import type { NavItem } from '@/ui/Sidebar';
+import { MERCHANT_NAV } from '@/ui/nav';
 import ApiKeyPanel from './ApiKeyPanel';
 import WalletConnectClient from './WalletConnectClient';
-
-const NAV: NavItem[] = [
-  { href: '/merchant', label: 'Overview', icon: 'chart' },
-  { href: '/merchant/orders', label: 'Orders', icon: 'orders' },
-  { href: '/merchant/orders/new', label: 'New Invoice', icon: 'plus' },
-];
 
 interface Stats { totalRevenue: string; paidCount: number; awaitingCount: number; expiredCount: number; series: { date: string; amount: string }[]; }
 interface Order { id: string; reference: string; amount: string; status: string; }
@@ -58,7 +52,7 @@ export default function MerchantOverview() {
   const series = (stats?.series ?? []).map((p) => ({ date: p.date, value: Number(p.amount) / 1_000_000 }));
 
   return (
-    <AppShell items={NAV} identity={{ title: 'Merchant', subtitle: 'Dashboard' }} onLogout={logout}>
+    <AppShell items={MERCHANT_NAV} identity={{ title: 'Merchant', subtitle: 'Dashboard' }} onLogout={logout}>
       <TopBar eyebrow="Merchant" title="Overview" />
       {err && <div style={{ marginBottom: space.lg }}><Text variant="caption" color={colors.danger}>Couldn’t load metrics — showing what we have.</Text></div>}
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: space.lg, marginBottom: space.xl }}>

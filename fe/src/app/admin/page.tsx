@@ -12,12 +12,7 @@ import { Pill } from '@/ui/Bits';
 import { colors, space } from '@/ui/theme';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
-import type { NavItem } from '@/ui/Sidebar';
-
-const NAV: NavItem[] = [
-  { href: '/admin', label: 'Overview', icon: 'chart' },
-  { href: '/admin/merchants', label: 'Merchants', icon: 'store' },
-];
+import { ADMIN_NAV } from '@/ui/nav';
 
 interface AdminStats {
   merchantsTotal: number; pending: number; approved: number; rejected: number; onchainRegistered: number;
@@ -59,7 +54,7 @@ export default function AdminOverview() {
   const series = (s?.series ?? []).map((p) => ({ date: p.date, value: Number(p.amount) / 1_000_000 }));
 
   return (
-    <AppShell items={NAV} identity={{ title: 'Admin', subtitle: 'Platform' }} onLogout={logout}>
+    <AppShell items={ADMIN_NAV} identity={{ title: 'Admin', subtitle: 'Platform' }} onLogout={logout}>
       <TopBar eyebrow="Admin" title="Overview" />
       {err && <div style={{ marginBottom: space.lg }}><Text variant="caption" color={colors.danger}>Couldn’t load metrics.</Text></div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: space.lg, marginBottom: space.xl }}>
