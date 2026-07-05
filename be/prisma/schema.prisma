@@ -29,6 +29,8 @@ model Merchant {
   rejectionReason       String?
   apiKeys               MerchantApiKey[]
   orders                Order[]
+  products              Product[]
+  chargeSettings        MerchantCharge[]
 }
 
 model MerchantApiKey {
@@ -107,6 +109,8 @@ model Order {
   merchantId       String
   merchant         Merchant @relation(fields: [merchantId], references: [id])
   reference        String
+  subtotal         BigInt?
+  description      String?
   amount           BigInt
   feeBps           Int
   status           String   @default("created")
@@ -121,6 +125,8 @@ model Order {
   issuedTxExpiresAt  DateTime?
   issuedTxConsumedAt DateTime?
   webhooks         WebhookDelivery[]
+  items            OrderItem[]
+  charges          OrderCharge[]
 }
 
 model WebhookDelivery {
@@ -143,4 +149,48 @@ model PayoutChallenge {
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime @default(now())
+}
+
+model Product {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  name       String
+  sku        String?
+  unitPrice  BigInt
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model MerchantCharge {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  name       String
+  mode       String
+  value      Int
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String?
+  name      String
+  unitPrice BigInt
+  quantity  Int
+}
+
+model OrderCharge {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+  name    String
+  mode    String
+  value   Int
+  amount  BigInt
 }
