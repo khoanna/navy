@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { colors, space, radius } from '@/ui/theme';
 import { Text } from '@/ui/Text';
@@ -24,6 +24,16 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+
+  // Recover a session whose access token expired but whose refresh token is
+  // still valid — silently restore it and skip straight to the dashboard.
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/auth/refresh', { method: 'POST' })
+      .then((r) => { if (alive && r.ok) router.replace('/admin'); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
