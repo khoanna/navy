@@ -10,3 +10,4 @@ export * from './Screen';
 export * from './Skeleton';
 export * from './Sheet';
 export * from './SlideToConfirm';
+export * from './OtpInput';
