@@ -5,6 +5,8 @@ import type { NavyOnchain } from '../onchain/onchain.module';
 import { RegistrarService } from '../onchain/registrar.service';
 import { AdminMerchantsService } from './admin-merchants.service';
 import { AdminMerchantsController } from './admin-merchants.controller';
+import { AdminStatsService } from './admin-stats.service';
+import { AdminStatsController } from './admin-stats.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -20,8 +22,9 @@ function parseRegistrar(): Keypair {
 
 @Module({
   imports: [OnchainModule],
-  controllers: [AdminMerchantsController],
+  controllers: [AdminMerchantsController, AdminStatsController],
   providers: [
+    AdminStatsService,
     {
       provide: RegistrarService,
       inject: [NAVY_ONCHAIN],
