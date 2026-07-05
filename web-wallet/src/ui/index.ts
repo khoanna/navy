@@ -7,3 +7,4 @@ export * from './Bits';
 export * from './Toast';
 export * from './Button';
 export * from './Screen';
+export * from './Skeleton';

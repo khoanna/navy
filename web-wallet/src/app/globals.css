@@ -59,3 +59,11 @@ input { font: inherit; }
 }
 .navy-fade-in { animation: navy-rise 420ms ease both; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes navy-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .navy-fade-in, .navy-skeleton { animation: none !important; }
+}
