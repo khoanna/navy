@@ -1,5 +1,6 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { MerchantService } from './merchant.service';
+import { MerchantStatsService } from './merchant-stats.service';
 import { NavyTokenService } from '../auth/navy-token.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtGuard } from '../auth/jwt.guard';
@@ -29,7 +30,15 @@ export class MerchantController {
     private readonly merchants: MerchantService,
     private readonly tokens: NavyTokenService,
     private readonly audit: AuditService,
+    private readonly stats: MerchantStatsService,
   ) {}
+
+  @Get('merchant/stats')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('merchant')
+  async merchantStats(@Req() req: any) {
+    return this.stats.forMerchant(req.user.sub);
+  }
 
   @Post('auth/merchant/signup')
   async signup(@Body() dto: SignupDto) {
