@@ -1,10 +1,12 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { computeInvoiceTotals } from '@/lib/invoice-totals';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
+import { Icon } from '@/ui/Icon';
 import { colors, space, radius } from '@/ui/theme';
 
 const inputStyle: React.CSSProperties = { background: colors.bgElevated, border: `1px solid ${colors.borderStrong}`, borderRadius: radius.md, color: colors.text, padding: '12px 14px', outline: 'none', width: '100%' };
@@ -19,6 +21,7 @@ const EXPIRY_PRESETS: { label: string; seconds: number }[] = [
 ];
 
 export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
@@ -77,9 +80,15 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
 
   if (products.length === 0) {
     return (
-      <div style={{ display: 'grid', gap: space.md, justifyItems: 'start' }}>
-        <Text variant="body" dim>You need a product before you can invoice.</Text>
-        <Link href="/merchant/products"><Text variant="bodyStrong" color={colors.accent}>Go to Products →</Text></Link>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: space.md, padding: `${space.lg}px ${space.sm}px` }}>
+        <div style={{ width: 52, height: 52, borderRadius: radius.xl, background: colors.bgElevated, border: `1px solid ${colors.border}`, display: 'grid', placeItems: 'center' }}>
+          <Icon name="store" size={24} color={colors.textDim} />
+        </div>
+        <div style={{ display: 'grid', gap: space.xs, maxWidth: 300 }}>
+          <Text variant="bodyStrong" color={colors.textHi}>No products yet</Text>
+          <Text variant="caption" dim>Invoices are built from your catalog. Add a product to get started.</Text>
+        </div>
+        <Button label="Go to Products" icon="plus" full={false} onPress={() => router.push('/merchant/products')} />
       </div>
     );
   }

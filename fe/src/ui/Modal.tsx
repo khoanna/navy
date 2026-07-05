@@ -1,5 +1,6 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { colors, space, radius } from './theme';
 import { Text } from './Text';
 
@@ -20,6 +21,13 @@ export function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  // Render into <body> so the fixed scrim escapes AppShell's <main>, which is a
+  // containing block for position:fixed (it carries the navy-fade-in transform
+  // animation). Without the portal the scrim clips to the content area, not the
+  // viewport. `mounted` avoids touching document during SSR.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -29,9 +37,9 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -69,6 +77,7 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
