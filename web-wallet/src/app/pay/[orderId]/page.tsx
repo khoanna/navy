@@ -14,7 +14,10 @@ import { Button } from '@/ui/Button';
 import { Card } from '@/ui/Card';
 import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
-import { IconBadge, Pill, Divider } from '@/ui/Bits';
+import { IconBadge, Pill, Divider, Field } from '@/ui/Bits';
+import { Sheet } from '@/ui/Sheet';
+import { SlideToConfirm } from '@/ui/SlideToConfirm';
+import { SuccessCheck } from '@/ui/SuccessCheck';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
@@ -41,6 +44,8 @@ export default function PayScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [paid, setPaid] = useState(false);
 
   useEffect(() => {
     if (!validId) { setNotFound(true); return; }
@@ -59,7 +64,8 @@ export default function PayScreen() {
       // this embedded wallet can sign — refuses a tx built for a different payer.
       const res = await payInvoice({ orderId, navyAccessToken: token, client, signTransaction: sign, expectedSigner: address });
       toast(`Payment sent: ${res.txSignature.slice(0, 16)}…`);
-      router.replace('/home');
+      setConfirming(false);
+      setPaid(true);
     } catch (e) {
       toast(`Payment failed: ${(e as Error).message}`);
     } finally {
@@ -100,6 +106,27 @@ export default function PayScreen() {
           <Text dim style={{ marginTop: `${space.md}px` }}>
             Loading invoice…
           </Text>
+        </div>
+      </Screen>
+    );
+  }
+
+  const amountText = usdcBaseToDisplay(order.amount);
+  const succeeded = paid || order.status === 'paid';
+
+  if (succeeded) {
+    return (
+      <Screen>
+        <div className="navy-fade-in" style={styles.center}>
+          <SuccessCheck />
+          <Text variant="h2" color={colors.textHi} center style={{ marginTop: `${space.lg}px` }}>
+            Paid {amountText} USDC
+          </Text>
+          <Card glass style={{ width: '100%', marginTop: `${space.xl}px`, marginBottom: `${space.xl}px` }}>
+            <Field label="Status" value="Confirmed on-chain" valueColor={colors.aqua} />
+            <Field label="Fee paid by you" value="$0.00" />
+          </Card>
+          <Button label="Done" onPress={() => router.push('/home')} />
         </div>
       </Screen>
     );
@@ -177,15 +204,38 @@ export default function PayScreen() {
             </Text>
           )}
           <Button
-            label={payable ? `Pay ${usdcBaseToDisplay(order.amount)} USDC` : 'Unavailable'}
+            label={payable ? `Pay ${amountText} USDC` : 'Unavailable'}
             icon={payable ? 'check' : undefined}
             loading={busy}
             disabled={!payable}
-            onPress={pay}
+            onPress={() => setConfirming(true)}
           />
           <Button label="Cancel" variant="ghost" onPress={close} style={{ marginTop: `${space.md}px` }} />
         </div>
       </div>
+
+      {/* Confirm sheet — the slide invokes the same pay() build→sign→submit handler */}
+      <Sheet open={confirming} onClose={() => setConfirming(false)}>
+        <div style={styles.confirmHead}>
+          <IconBadge name="shield" color={colors.aqua} size={48} />
+          <Text variant="bodyStrong" color={colors.textHi} style={{ maxWidth: '70%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {order.reference}
+          </Text>
+        </div>
+        <div style={styles.confirmAmt}>
+          <Text variant="display" numeric color={colors.textHi}>
+            {amountText}
+          </Text>
+          <Text variant="h2" color={colors.textDim} style={{ marginBottom: '6px' }}>
+            USDC
+          </Text>
+        </div>
+        <Card glass compact style={{ marginBottom: `${space.lg}px` }}>
+          <Field label="Network fee" value="Sponsored · Gasless" valueColor={colors.aqua} />
+          <Field label="You pay" value={`${amountText} USDC`} />
+        </Card>
+        <SlideToConfirm label="Slide to pay" onConfirm={pay} disabled={busy} />
+      </Sheet>
     </Screen>
   );
 }
@@ -263,5 +313,19 @@ const styles = {
   },
   footer: {
     paddingBottom: `${space.sm}px`,
+  },
+  confirmHead: {
+    display: 'flex',
+    flexDirection: 'row' as const,
+    alignItems: 'center',
+    gap: `${space.md}px`,
+    marginBottom: `${space.lg}px`,
+  },
+  confirmAmt: {
+    display: 'flex',
+    flexDirection: 'row' as const,
+    alignItems: 'flex-end',
+    gap: `${space.sm}px`,
+    marginBottom: `${space.lg}px`,
   },
 } satisfies Record<string, React.CSSProperties>;
