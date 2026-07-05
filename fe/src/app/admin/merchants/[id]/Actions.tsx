@@ -1,6 +1,9 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Button } from '@/ui/Button';
+import { Text } from '@/ui/Text';
+import { colors, space } from '@/ui/theme';
 
 export default function Actions({ id, canApprove }: { id: string; canApprove: boolean }) {
   const router = useRouter();
@@ -19,12 +22,30 @@ export default function Actions({ id, canApprove }: { id: string; canApprove: bo
   }
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 16 }}>
-      <button disabled={!canApprove || busy} onClick={() => call('approve')} title={canApprove ? '' : 'Merchant must set a payout address first'}>
-        Approve
-      </button>
-      <button disabled={busy} onClick={() => call('reject', prompt('Rejection reason?') ?? undefined)}>Reject</button>
-      {error && <span style={{ color: 'crimson' }}>{error}</span>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space.md, marginTop: space.xl }}>
+      <div style={{ display: 'flex', gap: space.md, alignItems: 'center' }}>
+        <div style={{ minWidth: 180 }}>
+          <Button
+            label="Approve"
+            variant="primary"
+            loading={busy}
+            disabled={!canApprove || busy}
+            onPress={() => call('approve')}
+          />
+        </div>
+        <div style={{ minWidth: 180 }}>
+          <Button
+            label="Reject"
+            variant="danger"
+            disabled={busy}
+            onPress={() => call('reject', prompt('Rejection reason?') ?? undefined)}
+          />
+        </div>
+      </div>
+      {!canApprove && (
+        <Text variant="caption" dim>Merchant must set a payout address first.</Text>
+      )}
+      {error && <Text variant="caption" color={colors.danger}>{error}</Text>}
     </div>
   );
 }
