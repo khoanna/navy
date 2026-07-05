@@ -8,5 +8,6 @@ export const ADMIN_NAV: NavItem[] = [
 export const MERCHANT_NAV: NavItem[] = [
   { href: '/merchant', label: 'Overview', icon: 'chart' },
   { href: '/merchant/orders', label: 'Orders', icon: 'orders' },
+  { href: '/merchant/products', label: 'Products', icon: 'store' },
   { href: '/merchant/settings', label: 'Settings', icon: 'settings' },
 ];
