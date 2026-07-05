@@ -21,7 +21,17 @@ import { SuccessCheck } from '@/ui/SuccessCheck';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
-type Order = { amount: string; reference: string; status: string };
+type OrderItem = { name: string; unitPrice: string; quantity: number };
+type OrderCharge = { name: string; amount: string };
+type Order = {
+  amount: string;
+  reference: string;
+  status: string;
+  subtotal?: string | null;
+  description?: string | null;
+  items?: OrderItem[];
+  charges?: OrderCharge[];
+};
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   awaiting_payment: 'warning',
@@ -154,6 +164,29 @@ export default function PayScreen() {
 
         {/* Body */}
         <div style={styles.body}>
+          {/* Itemized breakdown */}
+          {(order.items?.length ?? 0) > 0 && (
+            <div style={{ width: '100%', marginBottom: `${space.lg}px` }}>
+              {order.items?.map((it, i) => (
+                <div key={`item-${i}`} style={styles.breakdownRow}>
+                  <Text dim>{it.name} × {it.quantity}</Text>
+                  <Text numeric>{usdcBaseToDisplay(it.unitPrice)} USDC each</Text>
+                </div>
+              ))}
+              {order.charges?.map((c, i) => (
+                <div key={`charge-${i}`} style={styles.breakdownRow}>
+                  <Text dim>{c.name}</Text>
+                  <Text numeric>{usdcBaseToDisplay(c.amount)} USDC</Text>
+                </div>
+              ))}
+            </div>
+          )}
+          {order.description && (
+            <Text dim center style={{ marginBottom: `${space.md}px`, display: 'block' }}>
+              {order.description}
+            </Text>
+          )}
+
           {/* Amount focal point */}
           <Gradient colors={gradients.ocean} glow style={styles.amountCard}>
             <Text variant="label" color="rgba(4,17,31,0.65)" upper>
@@ -312,6 +345,13 @@ const styles = {
     flexDirection: 'row' as const,
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  breakdownRow: {
+    display: 'flex',
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: `${space.xs}px`,
   },
   footer: {
     paddingBottom: `${space.sm}px`,

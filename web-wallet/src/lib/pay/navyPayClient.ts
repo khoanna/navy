@@ -1,4 +1,15 @@
-export interface OrderSummary { orderId: string; status: string; amount: string; reference: string; }
+export interface OrderItem { name: string; unitPrice: string; quantity: number; }
+export interface OrderCharge { name: string; mode?: string; value?: string; amount: string; }
+export interface OrderSummary {
+  orderId: string;
+  status: string;
+  amount: string;
+  reference: string;
+  subtotal?: string | null;
+  description?: string | null;
+  items?: OrderItem[];
+  charges?: OrderCharge[];
+}
 export interface Payment { orderId: string; reference: string; amount: string; status: string; paidAt: string | null; txSignature: string | null; merchant: string | null; }
 
 export class NavyPayClient {
