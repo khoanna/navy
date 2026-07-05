@@ -36,15 +36,15 @@ export class AdminStatsService {
       this.prisma.order.count(),
       this.prisma.order.aggregate({ _sum: { amount: true }, where: { status: 'paid' } }),
       this.prisma.order.findMany({ where: { status: 'paid', paidAt: { gte: since } }, select: { paidAt: true, amount: true } }),
-      this.prisma.merchant.findMany({ where: { approvalStatus: 'pending' }, orderBy: { createdAt: 'desc' }, take: 5 }),
-      this.prisma.order.findMany({ where: { status: 'paid' }, orderBy: { paidAt: 'desc' }, take: 6 }),
+      this.prisma.merchant.findMany({ where: { approvalStatus: 'pending' }, orderBy: { createdAt: 'desc' }, take: 5, select: { id: true, businessName: true, email: true, createdAt: true } }),
+      this.prisma.order.findMany({ where: { status: 'paid' }, orderBy: { paidAt: 'desc' }, take: 6, select: { id: true, reference: true, amount: true, status: true, paidAt: true, payer: true } }),
     ]);
     return {
       merchantsTotal, pending, approved, rejected, onchainRegistered, ordersTotal,
       volumeTotal: (agg._sum.amount ?? 0n).toString(),
       series: buildDailySeries(seriesRows, now, WINDOW_DAYS),
-      recentPending: recentPending.map((m: any) => ({ id: m.id, businessName: m.businessName, email: m.email, createdAt: m.createdAt })),
-      recentPayments: recentPayments.map((o: any) => ({
+      recentPending: recentPending.map((m) => ({ id: m.id, businessName: m.businessName, email: m.email, createdAt: m.createdAt })),
+      recentPayments: recentPayments.map((o) => ({
         id: o.id, reference: o.reference, amount: o.amount.toString(), status: o.status, paidAt: o.paidAt ?? null, payer: o.payer ?? null,
       })),
     };
