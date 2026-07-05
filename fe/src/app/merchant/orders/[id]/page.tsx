@@ -78,7 +78,7 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
                     {(order.items ?? []).map((it, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: space.xs }}>
                         <Text variant="body">{it.name} &times; {it.quantity}</Text>
-                        <Text variant="body" numeric>{formatUsdc(it.unitPrice)} USDC</Text>
+                        <Text variant="body" numeric>{formatUsdc((BigInt(it.unitPrice) * BigInt(it.quantity)).toString())} USDC</Text>
                       </div>
                     ))}
                     {(order.charges ?? []).length > 0 && (order.items ?? []).length > 0 && (

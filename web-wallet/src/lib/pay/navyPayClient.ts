@@ -1,5 +1,5 @@
 export interface OrderItem { name: string; unitPrice: string; quantity: number; }
-export interface OrderCharge { name: string; mode?: string; value?: string; amount: string; }
+export interface OrderCharge { name: string; mode?: string; value?: number; amount: string; }
 export interface OrderSummary {
   orderId: string;
   status: string;
