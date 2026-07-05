@@ -22,12 +22,14 @@ export default function AdminLogin() {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busyRef.current) return;
     busyRef.current = true;
+    setBusy(true);
     try {
       setError('');
       const res = await fetch('/api/auth/admin', {
@@ -38,6 +40,7 @@ export default function AdminLogin() {
       else setError('Invalid credentials or TOTP');
     } finally {
       busyRef.current = false;
+      setBusy(false);
     }
   }
 
@@ -47,7 +50,7 @@ export default function AdminLogin() {
         <input style={inputStyle} placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input style={inputStyle} placeholder="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         <input style={inputStyle} placeholder="TOTP code" value={totp} onChange={(e) => setTotp(e.target.value)} />
-        <Button label="Sign in" />
+        <Button label="Sign in" loading={busy} />
         {error && <Text variant="caption" color={colors.danger} center>{error}</Text>}
       </form>
     </AuthCard>

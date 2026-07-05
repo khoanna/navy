@@ -23,12 +23,14 @@ export default function MerchantLogin() {
   const [password, setPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busyRef.current) return;
     busyRef.current = true;
+    setBusy(true);
     try {
       setError('');
       const url = mode === 'login' ? '/api/auth/merchant' : '/api/auth/merchant/signup';
@@ -38,6 +40,7 @@ export default function MerchantLogin() {
       else setError(mode === 'login' ? 'Invalid credentials' : 'Signup failed');
     } finally {
       busyRef.current = false;
+      setBusy(false);
     }
   }
 
@@ -49,7 +52,7 @@ export default function MerchantLogin() {
         {mode === 'signup' && (
           <input style={inputStyle} placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
         )}
-        <Button label={mode === 'login' ? 'Sign in' : 'Create account'} />
+        <Button label={mode === 'login' ? 'Sign in' : 'Create account'} loading={busy} />
         {error && <Text variant="caption" color={colors.danger} center>{error}</Text>}
       </form>
       <button

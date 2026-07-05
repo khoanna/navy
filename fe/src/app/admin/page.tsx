@@ -61,7 +61,7 @@ export default function AdminOverview() {
         <StatCard label="Merchants" value={String(s?.merchantsTotal ?? 0)} icon="store" />
         <StatCard label="Pending" value={String(s?.pending ?? 0)} icon="clock" onClick={() => router.push('/admin/merchants?status=pending')} />
         <StatCard label="Approved / on-chain" value={`${s?.approved ?? 0} / ${s?.onchainRegistered ?? 0}`} icon="shield" />
-        <StatCard featured label="Total volume" value={`${formatUsdc(s?.volumeTotal ?? '0')} USDC`} delta={s ? `${s.ordersTotal} orders` : null} />
+        <StatCard label="Total volume" value={`${formatUsdc(s?.volumeTotal ?? '0')} USDC`} icon="chart" delta={s ? `${s.ordersTotal} orders` : null} />
       </div>
       <div style={{ marginBottom: space.xl }}>
         <TrendChart title="Platform volume · last 30 days" series={series} />

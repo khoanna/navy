@@ -56,7 +56,7 @@ export default function MerchantOverview() {
       <TopBar eyebrow="Merchant" title="Overview" />
       {err && <div style={{ marginBottom: space.lg }}><Text variant="caption" color={colors.danger}>Couldn’t load metrics — showing what we have.</Text></div>}
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: space.lg, marginBottom: space.xl }}>
-        <StatCard featured label="Total revenue" value={`${formatUsdc(stats?.totalRevenue ?? '0')} USDC`} delta={stats ? `${stats.paidCount} paid` : null} />
+        <StatCard label="Total revenue" value={`${formatUsdc(stats?.totalRevenue ?? '0')} USDC`} icon="wallet" delta={stats ? `${stats.paidCount} paid` : null} />
         <StatCard label="Paid" value={String(stats?.paidCount ?? 0)} icon="check" />
         <StatCard label="Awaiting" value={String(stats?.awaitingCount ?? 0)} icon="clock" />
         <StatCard label="Expired" value={String(stats?.expiredCount ?? 0)} icon="bolt" />

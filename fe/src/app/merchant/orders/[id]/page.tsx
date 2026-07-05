@@ -60,7 +60,7 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
       ) : (
         <div style={{ maxWidth: 560 }}>
           <Card>
-            <Field label="Amount (USDC)" value={`${formatUsdc(order.amount)} USDC`} numeric />
+            <Field label="Amount" value={`${formatUsdc(order.amount)} USDC`} numeric />
             <Divider />
             <div style={{ paddingTop: space.sm, paddingBottom: space.sm }}>
               <Text variant="label" muted upper>Status</Text>

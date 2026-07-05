@@ -6,6 +6,7 @@ import { TopBar } from '@/ui/TopBar';
 import { DataTable, Column } from '@/ui/DataTable';
 import { Text } from '@/ui/Text';
 import { Pill } from '@/ui/Bits';
+import { Icon } from '@/ui/Icon';
 import { colors, space, radius } from '@/ui/theme';
 import { ADMIN_NAV } from '@/ui/nav';
 import { statusTone } from '@/lib/dashboard/status';
@@ -44,7 +45,10 @@ export default function MerchantsView({ merchants, status }: { merchants: Mercha
       header: 'Payout',
       render: (m) =>
         m.payoutAddress ? (
-          <Text variant="body" color={colors.success}>✓ registered</Text>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: space.xs }}>
+            <Icon name="check" size={16} color={colors.success} />
+            <Text variant="body" color={colors.success}>registered</Text>
+          </span>
         ) : (
           <Text variant="body" dim>—</Text>
         ),

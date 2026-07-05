@@ -28,9 +28,9 @@ export default function ApiKeyPanel() {
     <Card glass compact>
       <div style={{ display: 'flex', alignItems: 'center', gap: space.md, marginBottom: space.lg }}>
         <IconBadge name="key" color={colors.textDim} size={38} />
-        <div>
-          <Text variant="label" upper dim>API credentials</Text>
-          <Text variant="caption" dim>Server-to-server key for the payments API</Text>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Text variant="label" upper dim style={{ display: 'block' }}>API credentials</Text>
+          <Text variant="caption" dim style={{ display: 'block' }}>Server-to-server key for the payments API</Text>
         </div>
       </div>
       <Button label="Generate API key" variant="secondary" icon="key" loading={busy} onPress={create} />
