@@ -8,10 +8,12 @@ import { DataTable, Column } from '@/ui/DataTable';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
 import { Pill } from '@/ui/Bits';
+import { Modal } from '@/ui/Modal';
 import { colors, space, radius } from '@/ui/theme';
 import { MERCHANT_NAV } from '@/ui/nav';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
+import { NewInvoiceForm } from './NewInvoiceForm';
 
 interface Order { id: string; reference: string; amount: string; status: string; createdAt: string; }
 
@@ -21,6 +23,12 @@ export default function Orders() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [status, setStatus] = useState('all');
+  const [showNew, setShowNew] = useState(false);
+
+  const reload = async () => {
+    const res = await fetch(`/api/merchant/orders?status=${status}`);
+    if (res.ok) setOrders(await res.json());
+  };
 
   useEffect(() => {
     let active = true;
@@ -56,7 +64,7 @@ export default function Orders() {
         title="Orders"
         right={
           <div style={{ minWidth: 160 }}>
-            <Button label="New invoice" icon="plus" full onPress={() => router.push('/merchant/orders/new')} />
+            <Button label="New invoice" icon="plus" full onPress={() => setShowNew(true)} />
           </div>
         }
       />
@@ -82,6 +90,9 @@ export default function Orders() {
         })}
       </nav>
       <DataTable columns={cols} rows={orders} empty="No orders." />
+      <Modal open={showNew} title="New invoice" subtitle="Create a payment request and share its QR." onClose={() => setShowNew(false)}>
+        <NewInvoiceForm onCreated={reload} />
+      </Modal>
     </AppShell>
   );
 }

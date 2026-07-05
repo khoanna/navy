@@ -12,8 +12,6 @@ import { colors, space } from '@/ui/theme';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
 import { MERCHANT_NAV } from '@/ui/nav';
-import ApiKeyPanel from './ApiKeyPanel';
-import WalletConnectClient from './WalletConnectClient';
 
 interface Stats { totalRevenue: string; paidCount: number; awaitingCount: number; expiredCount: number; series: { date: string; amount: string }[]; }
 interface Order { id: string; reference: string; amount: string; status: string; }
@@ -67,10 +65,6 @@ export default function MerchantOverview() {
       <div style={{ marginBottom: space.xl }}>
         <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Recent orders</Text>
         <DataTable columns={cols} rows={orders} empty="No orders yet" />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.lg }}>
-        <ApiKeyPanel />
-        <WalletConnectClient />
       </div>
     </AppShell>
   );

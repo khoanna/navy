@@ -34,7 +34,6 @@ function PayoutInner() {
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       <WalletMultiButton />
-      <button onClick={setPayout} disabled={!connected}>Sign & set payout address</button>
       {status && <p>{status}</p>}
     </div>
   );
