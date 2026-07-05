@@ -1,5 +1,5 @@
 'use client';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { colors, gradients, radius } from './theme';
 import { Text } from './Text';
 import { Gradient } from './Gradient';
@@ -12,14 +12,17 @@ export interface SlideToConfirmProps {
   label: string;
   onConfirm: () => void;
   disabled?: boolean;
+  resetKey?: number | string;
 }
 
 /** Drag-to-confirm control for money-moving actions. Snaps back if released early. */
-export function SlideToConfirm({ label, onConfirm, disabled }: SlideToConfirmProps) {
+export function SlideToConfirm({ label, onConfirm, disabled, resetKey }: SlideToConfirmProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [done, setDone] = useState(false);
+
+  useEffect(() => { setOffset(0); setDragging(false); setDone(false); }, [resetKey]);
 
   const trackPx = () => (trackRef.current?.offsetWidth ?? 0) - KNOB - 8;
 

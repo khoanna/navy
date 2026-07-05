@@ -46,6 +46,7 @@ export default function PayScreen() {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [paid, setPaid] = useState(false);
+  const [slideReset, setSlideReset] = useState(0);
 
   useEffect(() => {
     if (!validId) { setNotFound(true); return; }
@@ -68,6 +69,7 @@ export default function PayScreen() {
       setPaid(true);
     } catch (e) {
       toast(`Payment failed: ${(e as Error).message}`);
+      setSlideReset((n) => n + 1);
     } finally {
       setBusy(false);
     }
@@ -234,7 +236,7 @@ export default function PayScreen() {
           <Field label="Network fee" value="Sponsored · Gasless" valueColor={colors.aqua} />
           <Field label="You pay" value={`${amountText} USDC`} />
         </Card>
-        <SlideToConfirm label="Slide to pay" onConfirm={pay} disabled={busy} />
+        <SlideToConfirm label="Slide to pay" onConfirm={pay} disabled={busy} resetKey={slideReset} />
       </Sheet>
     </Screen>
   );

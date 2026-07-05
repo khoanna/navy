@@ -87,7 +87,7 @@ export default function Receive() {
         variant="caption"
         dim
         center
-        style={{ marginTop: `${space.lg}px` }}
+        style={{ marginTop: `${space.lg}px`, display: 'block' }}
       >
         Your Navy address
       </Text>
