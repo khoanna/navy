@@ -14,8 +14,8 @@ html, body { margin: 0; padding: 0; height: 100%; }
 
 body {
   background:
-    radial-gradient(55% 40% at 12% 0%, rgba(79,140,255,0.20), transparent),
-    radial-gradient(50% 35% at 95% 22%, rgba(47,224,194,0.14), transparent),
+    radial-gradient(130% 55% at 85% -5%, rgba(18,58,122,0.55), transparent 45%),
+    radial-gradient(120% 50% at 0% 22%, rgba(10,90,107,0.45), transparent 50%),
     var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -34,7 +34,7 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
-  background: var(--bg);
+  background: transparent;
   overflow: hidden;
   box-shadow: 0 0 60px rgba(0,0,0,0.5);
 }
