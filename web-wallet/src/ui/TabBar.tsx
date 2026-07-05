@@ -7,7 +7,7 @@ import { Text } from './Text';
 
 const TABS: { href: string; label: string; icon: IconName }[] = [
   { href: '/home', label: 'Wallet', icon: 'home' },
-  { href: '/scan', label: 'Scan', icon: 'scan' },
+  { href: '/scan', label: 'Pay', icon: 'scan' },
   { href: '/farming', label: 'Earn', icon: 'sprout' },
   { href: '/history', label: 'Activity', icon: 'clock' },
 ];
