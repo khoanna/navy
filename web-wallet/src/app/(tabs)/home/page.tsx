@@ -13,7 +13,6 @@ import { Gradient } from '@/ui/Gradient';
 import { Card } from '@/ui/Card';
 import { Icon, IconName } from '@/ui/Icon';
 import { IconBadge, Pill, PressRow } from '@/ui/Bits';
-import { useToast } from '@/ui/Toast';
 import { Skeleton } from '@/ui/Skeleton';
 import { colors, gradients, radius, space } from '@/ui/theme';
 import { earnTip } from '@/lib/wallet/tips';
@@ -27,7 +26,6 @@ export default function Home() {
   const { signOut, session } = useNavySession();
   const { address } = useWebSigner();
   const token = session?.tokens.accessToken;
-  const toast = useToast();
 
   const [sol, setSol] = useState('—');
   const [usdc, setUsdc] = useState('—');
@@ -65,12 +63,6 @@ export default function Home() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
-  };
-
-  const copy = async () => {
-    if (!address) return;
-    await navigator.clipboard.writeText(address);
-    toast('Wallet address copied');
   };
 
   const handleSignOut = () => {
