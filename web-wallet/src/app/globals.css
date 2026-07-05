@@ -67,3 +67,9 @@ input { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .navy-fade-in, .navy-skeleton { animation: none !important; }
 }
+
+@keyframes navy-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes navy-scrim-in { from { opacity: 0; } to { opacity: 1; } }
