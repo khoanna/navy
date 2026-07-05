@@ -2,34 +2,56 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 
 describe('OrdersService', () => {
-  function make() {
-    const order = {
-      id: '00112233-4455-6677-8899-aabbccddeeff', merchantId: 'm1', reference: 'INV-1',
-      amount: 1_000_000n, feeBps: 100, status: 'awaiting_payment',
-      onchainInvoiceId: '00112233445566778899aabbccddeeff', expiresAt: new Date(Date.now() + 600000),
+  let prisma: any;
+  let charges: any;
+  let svc: OrdersService;
+  beforeEach(() => {
+    prisma = {
+      merchant: { findUnique: jest.fn() },
+      product: { findMany: jest.fn() },
+      order: { create: jest.fn(), findUnique: jest.fn() },
     };
-    const prisma = { order: { create: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue(order) } } as any;
+    charges = { activeForMerchant: jest.fn() };
     const audit = { record: jest.fn() } as any;
-    return { svc: new OrdersService(prisma, audit, 'https://pay.navy/pay', 100), prisma, order };
-  }
-  it('creates an order: snapshots fee, derives invoice_id, sets pay url + QR', async () => {
-    const { svc, prisma } = make();
-    const res = await svc.create('m1', { amount: 1_000_000n, reference: 'INV-1', expiresInSec: 600 });
+    svc = new OrdersService(prisma, audit, 'https://pay.navy/pay', 100, charges);
+  });
+
+  it('creates an order from line items, snapshotting price + applying charges', async () => {
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'p1', merchantId: 'm1', name: 'Tee', unitPrice: 1_000_000n, active: true },
+    ]);
+    charges.activeForMerchant.mockResolvedValue([{ name: 'VAT', mode: 'percent', value: 1000, active: true }]);
+    prisma.order.create.mockResolvedValue({ id: 'o1', reference: 'ORD-XXXXXXXX', amount: 1_100_000n, expiresAt: new Date(), status: 'awaiting_payment' });
+
+    const res = await svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] });
+
     const data = prisma.order.create.mock.calls[0][0].data;
-    expect(data.merchantId).toBe('m1');
-    expect(data.feeBps).toBe(100);
-    expect(data.onchainInvoiceId).toMatch(/^[0-9a-f]{32}$/);
-    expect(data.status).toBe('awaiting_payment');
-    expect(res.payUrl).toMatch(/^https:\/\/pay\.navy\/pay\//);
-    expect(res.qr).toMatch(/^data:image\/png;base64,/);
+    expect(data.amount).toBe(1_100_000n);
+    expect(data.subtotal).toBe(1_000_000n);
+    expect(data.reference).toMatch(/^ORD-/);
+    expect(data.items.create).toEqual([{ productId: 'p1', name: 'Tee', unitPrice: 1_000_000n, quantity: 1 }]);
+    expect(data.charges.create).toEqual([{ name: 'VAT', mode: 'percent', value: 1000, amount: 100_000n }]);
+    expect(res.orderId).toBe('o1');
   });
-  it('rejects a zero amount', async () => {
-    const { svc } = make();
-    await expect(svc.create('m1', { amount: 0n, reference: 'x' })).rejects.toThrow(/amount/i);
+
+  it('rejects items referencing a product not owned or inactive', async () => {
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.product.findMany.mockResolvedValue([]);
+    charges.activeForMerchant.mockResolvedValue([]);
+    await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toThrow(/product/i);
   });
-  it('rejects an amount below the on-chain minimum (10_000)', async () => {
-    const { svc } = make();
-    await expect(svc.create('m1', { amount: 9_999n, reference: 'x' })).rejects.toThrow(/at least 10000/i);
+
+  it('rejects an empty items list', async () => {
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    await expect(svc.createForMerchant('m1', { items: [] })).rejects.toThrow(/at least one/i);
+  });
+
+  it('rejects when total is below MIN_INVOICE_AMOUNT', async () => {
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.product.findMany.mockResolvedValue([{ id: 'p1', merchantId: 'm1', name: 'Cheap', unitPrice: 100n, active: true }]);
+    charges.activeForMerchant.mockResolvedValue([]);
+    await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toThrow(/at least/i);
   });
 });
 
@@ -37,22 +59,24 @@ describe('OrdersService merchant-scoped', () => {
   function make(merchant: any, orders: any[] = []) {
     const prisma = {
       merchant: { findUnique: jest.fn().mockResolvedValue(merchant) },
+      product: { findMany: jest.fn().mockResolvedValue([{ id: 'p1', merchantId: 'm1', name: 'Tee', unitPrice: 1_000_000n, active: true }]) },
       order: {
-        create: jest.fn().mockResolvedValue({ id: 'o1', amount: 1000000n, status: 'awaiting_payment', expiresAt: new Date() }),
+        create: jest.fn().mockResolvedValue({ id: 'o1', reference: 'ORD-XXXXXXXX', amount: 1000000n, status: 'awaiting_payment', expiresAt: new Date() }),
         findMany: jest.fn().mockResolvedValue(orders),
         findFirst: jest.fn().mockResolvedValue(orders[0] ?? null),
       },
     } as any;
+    const charges = { activeForMerchant: jest.fn().mockResolvedValue([]) } as any;
     const audit = { record: jest.fn() } as any;
-    return { svc: new OrdersService(prisma, audit, 'https://pay.navy/pay', 100), prisma };
+    return { svc: new OrdersService(prisma, audit, 'https://pay.navy/pay', 100, charges), prisma };
   }
   it('createForMerchant rejects an unapproved merchant with 409', async () => {
     const { svc } = make({ id: 'm1', approvalStatus: 'pending' });
-    await expect(svc.createForMerchant('m1', { amount: 1000000n, reference: 'R' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toBeInstanceOf(ConflictException);
   });
   it('createForMerchant creates when approved', async () => {
     const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved' });
-    const res = await svc.createForMerchant('m1', { amount: 1000000n, reference: 'R' });
+    const res = await svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] });
     expect(prisma.order.create).toHaveBeenCalled();
     expect(res.orderId).toBe('o1');
   });
@@ -85,8 +109,9 @@ describe('OrdersService.listForPayer', () => {
   it("returns the payer's paid orders, scoped + serialized", async () => {
     const rows = [{ id: 'o1', reference: 'R1', amount: 990000n, status: 'paid', paidAt: new Date(), txSignature: 'sig', merchant: { businessName: 'Acme' } }];
     const prisma = { order: { findMany: jest.fn().mockResolvedValue(rows) } } as any;
+    const charges = { activeForMerchant: jest.fn().mockResolvedValue([]) } as any;
     const audit = { record: jest.fn() } as any;
-    const svc = new OrdersService(prisma, audit, 'https://pay.navy/pay', 100);
+    const svc = new OrdersService(prisma, audit, 'https://pay.navy/pay', 100, charges);
     const out = await svc.listForPayer('PAYER', { take: 50, skip: 0 });
     expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { payer: 'PAYER', status: 'paid' }, orderBy: { paidAt: 'desc' },

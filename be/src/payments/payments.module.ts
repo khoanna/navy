@@ -11,11 +11,13 @@ import { OrderAuthService } from './order-auth.service';
 import { OrderAuthGuard } from './order-auth.guard';
 import { SecretLookupService } from './secret-lookup.service';
 import { ApiKeyService } from '../merchant/api-key.service';
+import { MerchantModule } from '../merchant/merchant.module';
+import { MerchantChargesService } from '../merchant/merchant-charges.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
 @Module({
-  imports: [OnchainModule],
+  imports: [OnchainModule, MerchantModule],
   controllers: [OrdersController, MerchantOrdersController, UserPaymentsController],
   providers: [
     ApiKeyService,
@@ -26,9 +28,9 @@ import { AuditService } from '../audit/audit.service';
     SecretLookupService,
     {
       provide: OrdersService,
-      inject: [PrismaService, AuditService],
-      useFactory: (p: PrismaService, a: AuditService) =>
-        new OrdersService(p, a, process.env.NAVY_PAY_BASE_URL ?? 'https://pay.navy/pay', parseInt(process.env.NAVY_FEE_BPS ?? '100', 10)),
+      inject: [PrismaService, AuditService, MerchantChargesService],
+      useFactory: (p: PrismaService, a: AuditService, c: MerchantChargesService) =>
+        new OrdersService(p, a, process.env.NAVY_PAY_BASE_URL ?? 'https://pay.navy/pay', parseInt(process.env.NAVY_FEE_BPS ?? '100', 10), c),
     },
     {
       provide: ChainWatcherService,
