@@ -20,13 +20,13 @@ export function readEnv(extra: RawExtra): NavyEnv {
   };
 }
 
-// NEXT_PUBLIC_* are statically inlined by Next — must be referenced by literal name.
+// EXPO_PUBLIC_* are inlined by Expo's Metro bundler at build time — reference by literal name.
 export function getEnv(): NavyEnv {
   return readEnv({
-    privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
-    privyClientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
-    navyApiUrl: process.env.NEXT_PUBLIC_NAVY_API_URL,
-    solanaRpc: process.env.NEXT_PUBLIC_SOLANA_RPC,
-    usdcMint: process.env.NEXT_PUBLIC_USDC_MINT,
+    privyAppId: process.env.EXPO_PUBLIC_PRIVY_APP_ID,
+    privyClientId: process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID,
+    navyApiUrl: process.env.EXPO_PUBLIC_NAVY_API_URL,
+    solanaRpc: process.env.EXPO_PUBLIC_SOLANA_RPC,
+    usdcMint: process.env.EXPO_PUBLIC_USDC_MINT,
   });
 }
