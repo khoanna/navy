@@ -174,11 +174,11 @@ In `expo-wallet/app.json` under `expo`, set:
   "expo-router",
   "expo-secure-store",
   "expo-web-browser",
-  ["expo-camera", { "cameraPermission": "Scan a Navy pay QR code to pay." }],
-  ["@privy-io/expo", {}]
+  ["expo-camera", { "cameraPermission": "Scan a Navy pay QR code to pay." }]
 ]
 ```
-> Replace `PRIVY_RP_ID_PLACEHOLDER` with the passkey RP ID from the Privy dashboard once known; passkeys are verified last. Confirm the exact `@privy-io/expo` plugin key/args from its docs output in Step 1.
+> Replace `PRIVY_RP_ID_PLACEHOLDER` with the passkey RP ID from the Privy dashboard once known; passkeys are verified last.
+> **CORRECTION (verified during impl):** `@privy-io/expo@0.70.0` ships **no** Expo config plugin — do NOT add `["@privy-io/expo", ...]` to `plugins` (it crashes `expo prebuild`). Privy works via autolinked native modules + the `expo-secure-store`/`expo-web-browser` plugins already listed. The dev-client is still required (third-party native modules `react-native-passkeys`, `react-native-webview` aren't in Expo Go). Reanimated v4 uses `react-native-worklets/plugin` (not `react-native-reanimated/plugin`) and needs the `react-native-worklets` package.
 
 - [ ] **Step 4: Reanimated babel plugin**
 
