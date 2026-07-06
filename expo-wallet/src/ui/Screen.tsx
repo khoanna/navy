@@ -2,6 +2,7 @@ import React from 'react';
 import {
   View,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   StyleProp,
   ViewStyle,
@@ -24,9 +25,6 @@ export interface ScreenProps {
  * Page shell for Expo/React Native. Applies phone-frame padding via SafeAreaView
  * and optionally wraps content in a ScrollView. Faithfully ports the web Screen
  * prop API (scroll, tabSafe, padded, contentStyle, onRefresh, refreshing).
- *
- * onRefresh/refreshing are passed to ScrollView's RefreshControl in a later task
- * if needed; the prop is accepted here to keep the API stable.
  */
 export function Screen({
   children,
@@ -34,6 +32,8 @@ export function Screen({
   tabSafe,
   padded = true,
   contentStyle,
+  onRefresh,
+  refreshing = false,
 }: ScreenProps) {
   const contentPad: ViewStyle = {
     paddingTop: space.lg,
@@ -53,6 +53,16 @@ export function Screen({
           style={styles.scrollView}
           contentContainerStyle={[contentPad, contentStyle]}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={colors.aqua}
+                colors={[colors.aqua]}
+              />
+            ) : undefined
+          }
         >
           {children}
         </ScrollView>
