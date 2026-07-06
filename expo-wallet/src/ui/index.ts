@@ -13,4 +13,8 @@ export * from './Skeleton';
 export * from './Splash';
 export * from './SuccessCheck';
 
-// Interactive components (OtpInput, SlideToConfirm, Sheet, Toast) — ported in a later task.
+// Interactive primitives
+export * from './OtpInput';
+export * from './SlideToConfirm';
+export * from './Sheet';
+export * from './Toast';
