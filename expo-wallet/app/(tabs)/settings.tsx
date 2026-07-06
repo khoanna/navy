@@ -8,7 +8,13 @@ import {
   useUnlinkEmail,
   useUnlinkOAuth,
   useUnlinkPasskey,
+  useMfaEnrollment,
 } from '@privy-io/expo';
+import { useLinkWithPasskey } from '@privy-io/expo/passkey';
+import { RELYING_PARTY } from '@/lib/config/privy';
+import { LinkEmailSheet } from '@/features/settings/LinkEmailSheet';
+import { MfaEnrollSheet } from '@/features/settings/MfaEnrollSheet';
+import { mfaMethodLabel } from '@/lib/account/mfa';
 
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
@@ -98,8 +104,11 @@ export default function Settings() {
   const { unlinkEmail } = useUnlinkEmail();
   const { unlinkOAuth } = useUnlinkOAuth();
   const { unlink: unlinkPasskey } = useUnlinkPasskey();
+  const { linkWithPasskey } = useLinkWithPasskey();
+  const { unenrollMfa } = useMfaEnrollment();
 
-  const [confirm, setConfirm] = useState<null | 'logout'>(null);
+  const [confirm, setConfirm] = useState<null | 'logout' | 'mfa-off'>(null);
+  const [sheet, setSheet] = useState<null | 'email' | 'mfa'>(null);
   const [copied, setCopied] = useState(false);
 
   const rows = describeLinkedAccounts(user);
@@ -111,6 +120,10 @@ export default function Settings() {
   const [avA, avB] = avatarColors(address);
   const primaryEmail = user?.linked_accounts.find((a) => a.type === 'email');
   const primary = primaryEmail?.type === 'email' ? primaryEmail.address : short(address);
+
+  // Enrolled-MFA status: derived from user.mfa_methods (TotpMfaMethod has type === 'totp')
+  const totpEnrolled = (user?.mfa_methods ?? []).some((m) => m.type === 'totp');
+  const hasEmail = rows.some((r) => r.provider === 'email');
 
   const copyAddress = async () => {
     if (!address) return;
@@ -145,6 +158,26 @@ export default function Settings() {
     setConfirm(null);
     await signOut();
     router.replace('/login');
+  };
+
+  const addPasskey = async () => {
+    try {
+      await linkWithPasskey({ relyingParty: RELYING_PARTY });
+      toast('Passkey added');
+    } catch (e) {
+      toast(`Could not add passkey: ${(e as Error).message}`);
+    }
+  };
+
+  const removeMfa = async () => {
+    try {
+      await unenrollMfa({ method: 'totp' });
+      toast('Two-factor authentication removed');
+    } catch (e) {
+      toast(`Could not remove 2FA: ${(e as Error).message}`);
+    } finally {
+      setConfirm(null);
+    }
   };
 
   return (
@@ -204,6 +237,41 @@ export default function Settings() {
             trailing={<Icon name="plus" size={18} color={colors.textMute} />}
           />
         ))}
+        {!hasEmail && (
+          <Row
+            icon="mail"
+            title="Link email"
+            onPress={() => setSheet('email')}
+            trailing={<Icon name="plus" size={18} color={colors.textMute} />}
+          />
+        )}
+        <Row
+          icon="key"
+          title="Add a passkey"
+          onPress={addPasskey}
+          trailing={<Icon name="plus" size={18} color={colors.textMute} />}
+        />
+      </Card>
+
+      {/* Two-factor authentication */}
+      <SectionTitle>Security</SectionTitle>
+      <Card glass compact style={styles.listCard}>
+        {totpEnrolled ? (
+          <Row
+            icon="shield"
+            title="Two-factor authentication"
+            subtitle={`${mfaMethodLabel('totp')} · On`}
+            onPress={() => setConfirm('mfa-off')}
+          />
+        ) : (
+          <Row
+            icon="shield"
+            title="Two-factor authentication"
+            subtitle="Off"
+            onPress={() => setSheet('mfa')}
+            trailing={<Icon name="plus" size={18} color={colors.textMute} />}
+          />
+        )}
       </Card>
 
       {/* About */}
@@ -236,6 +304,24 @@ export default function Settings() {
           <Button label="Cancel" variant="ghost" onPress={() => setConfirm(null)} />
         </View>
       </Sheet>
+
+      {/* Confirm: remove 2FA */}
+      <Sheet open={confirm === 'mfa-off'} onClose={() => setConfirm(null)}>
+        <Text variant="h3" color={colors.textHi}>
+          Remove two-factor authentication?
+        </Text>
+        <Text variant="caption" muted style={styles.sheetBody}>
+          Your account will be less secure without a second factor.
+        </Text>
+        <View style={styles.sheetActions}>
+          <Button label="Remove" variant="danger" onPress={removeMfa} />
+          <Button label="Cancel" variant="ghost" onPress={() => setConfirm(null)} />
+        </View>
+      </Sheet>
+
+      {/* Flow sheets */}
+      <LinkEmailSheet open={sheet === 'email'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
+      <MfaEnrollSheet open={sheet === 'mfa'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
     </Screen>
   );
 }
