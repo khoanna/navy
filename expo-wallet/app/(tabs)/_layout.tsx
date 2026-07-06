@@ -97,6 +97,11 @@ export default function TabsLayout() {
           ),
         }}
       />
+
+      {/* Receive — reachable from Home (e.g. the "Receive" action), NOT a bottom
+          tab. Matches web-wallet, where receive/ lives under the tab group but is
+          absent from TabBar. href:null keeps the route navigable while hidden. */}
+      <Tabs.Screen name="receive" options={{ href: null }} />
     </Tabs>
   );
 }
