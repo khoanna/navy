@@ -13,6 +13,7 @@ import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
 import { OtpInput } from '@/ui/OtpInput';
 import { isComplete } from '@/lib/ui/otp';
+import { RELYING_PARTY } from '@/lib/config/privy';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
 export default function Login() {
@@ -58,7 +59,7 @@ export default function Login() {
   // On Expo this triggers the native passkey sheet.
   const passkey = () =>
     run(async () => {
-      await loginWithPasskey({ relyingParty: 'navy.app' });
+      await loginWithPasskey({ relyingParty: RELYING_PARTY });
       await finish();
     }, 'Passkey login failed');
 
