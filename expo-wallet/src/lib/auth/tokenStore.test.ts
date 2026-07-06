@@ -1,4 +1,4 @@
-import { TokenStore, SecureBackend } from './tokenStore';
+import { TokenStore, SecureBackend, secureStoreBackend } from './tokenStore';
 
 function memBackend(): SecureBackend {
   const m = new Map<string, string>();
@@ -29,4 +29,11 @@ describe('TokenStore', () => {
     await s.clear();
     expect(await s.load()).toBeNull();
   });
+});
+
+it('secureStoreBackend exposes the SecureBackend interface', () => {
+  const b = secureStoreBackend();
+  expect(typeof b.getItemAsync).toBe('function');
+  expect(typeof b.setItemAsync).toBe('function');
+  expect(typeof b.deleteItemAsync).toBe('function');
 });

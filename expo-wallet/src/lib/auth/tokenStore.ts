@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import { NavyTokens } from './types';
 
 export interface SecureBackend {
@@ -32,12 +33,11 @@ export class TokenStore {
   }
 }
 
-// Browser localStorage backend. SSR-safe: no-ops when window is undefined.
-export function localStorageBackend(): SecureBackend {
-  const ls = (): Storage | null => (typeof window !== 'undefined' ? window.localStorage : null);
+// expo-secure-store already matches the SecureBackend interface 1:1.
+export function secureStoreBackend(): SecureBackend {
   return {
-    getItemAsync: async (k) => ls()?.getItem(k) ?? null,
-    setItemAsync: async (k, v) => { ls()?.setItem(k, v); },
-    deleteItemAsync: async (k) => { ls()?.removeItem(k); },
+    getItemAsync: (k) => SecureStore.getItemAsync(k),
+    setItemAsync: (k, v) => SecureStore.setItemAsync(k, v),
+    deleteItemAsync: (k) => SecureStore.deleteItemAsync(k),
   };
 }
