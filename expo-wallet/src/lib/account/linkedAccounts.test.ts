@@ -1,9 +1,10 @@
-import type { User } from '@privy-io/react-auth';
+import type { User } from '@privy-io/expo';
 import { describeLinkedAccounts, linkableProviders, canUnlink } from './linkedAccounts';
 
-// Minimal User fixtures — only the fields our functions read.
-function user(linkedAccounts: any[], extra: Partial<User> = {}): User {
-  return { id: 'did', createdAt: new Date(0), linkedAccounts, ...extra } as unknown as User;
+// Minimal User fixtures — only the fields our functions read. The Expo Privy
+// `User` (re-exported from @privy-io/api-types) uses snake_case `linked_accounts`.
+function user(linked_accounts: any[], extra: Partial<User> = {}): User {
+  return { id: 'did', created_at: 0, linked_accounts, ...extra } as unknown as User;
 }
 
 describe('describeLinkedAccounts', () => {
@@ -16,7 +17,7 @@ describe('describeLinkedAccounts', () => {
       { type: 'email', address: 'me@x.com' },
       { type: 'google_oauth', subject: 'g-sub', email: 'me@gmail.com' },
       { type: 'apple_oauth', subject: 'a-sub', email: 'me@icloud.com' },
-      { type: 'passkey', credentialId: 'cred-1', authenticatorName: 'iCloud Keychain' },
+      { type: 'passkey', credential_id: 'cred-1', authenticator_name: 'iCloud Keychain' },
     ]);
     expect(describeLinkedAccounts(u)).toEqual([
       { key: 'email:me@x.com', provider: 'email', icon: 'mail', label: 'Email', subtitle: 'me@x.com', unlinkId: 'me@x.com' },
@@ -35,7 +36,7 @@ describe('describeLinkedAccounts', () => {
   });
 
   it('falls back when a passkey has no authenticator name', () => {
-    const u = user([{ type: 'passkey', credentialId: 'c' }]);
+    const u = user([{ type: 'passkey', credential_id: 'c' }]);
     expect(describeLinkedAccounts(u)[0].subtitle).toBe('Passkey');
   });
 });
@@ -47,7 +48,7 @@ describe('linkableProviders', () => {
   it('omits already-linked providers (passkey handled separately)', () => {
     const u = user([
       { type: 'email', address: 'me@x.com' },
-      { type: 'passkey', credentialId: 'c' },
+      { type: 'passkey', credential_id: 'c' },
     ]);
     expect(linkableProviders(u)).toEqual(['google', 'apple']);
   });

@@ -1,4 +1,4 @@
-import type { User } from '@privy-io/react-auth';
+import type { User } from '@privy-io/expo';
 import type { IconName } from '@/ui/Icon';
 
 /** Providers this wallet surfaces (matches the login screen's set). */
@@ -22,11 +22,11 @@ const META: Record<ProviderId, { icon: IconName; label: string }> = {
   passkey: { icon: 'key', label: 'Passkey' },
 };
 
-/** Map `user.linkedAccounts` to display rows for the providers we surface. */
+/** Map `user.linked_accounts` to display rows for the providers we surface. */
 export function describeLinkedAccounts(user: User | null): LinkedAccountRow[] {
   if (!user) return [];
   const rows: LinkedAccountRow[] = [];
-  for (const acc of user.linkedAccounts) {
+  for (const acc of user.linked_accounts) {
     switch (acc.type) {
       case 'email':
         rows.push({ key: `email:${acc.address}`, provider: 'email', ...META.email, subtitle: acc.address, unlinkId: acc.address });
@@ -38,7 +38,7 @@ export function describeLinkedAccounts(user: User | null): LinkedAccountRow[] {
         rows.push({ key: `apple:${acc.subject}`, provider: 'apple', ...META.apple, subtitle: acc.email ?? 'Apple account', unlinkId: acc.subject });
         break;
       case 'passkey':
-        rows.push({ key: `passkey:${acc.credentialId}`, provider: 'passkey', ...META.passkey, subtitle: acc.authenticatorName ?? 'Passkey', unlinkId: acc.credentialId });
+        rows.push({ key: `passkey:${acc.credential_id}`, provider: 'passkey', ...META.passkey, subtitle: acc.authenticator_name ?? 'Passkey', unlinkId: acc.credential_id });
         break;
       default:
         break; // wallet / smart_wallet / other socials: not surfaced
@@ -57,5 +57,5 @@ export function linkableProviders(user: User | null): Exclude<ProviderId, 'passk
 
 /** Privy requires >=1 account to remain, so unlink is only offered above that. */
 export function canUnlink(user: User | null): boolean {
-  return !!user && user.linkedAccounts.length > 1;
+  return !!user && user.linked_accounts.length > 1;
 }
