@@ -5,6 +5,7 @@ import {
   Pressable,
   StatusBar,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView } from 'expo-camera';
@@ -75,7 +76,9 @@ export default function ScanScreen() {
           <View style={{ marginTop: space.xl, alignSelf: 'stretch' }}>
             <Button
               label={permission.canAskAgain ? 'Grant access' : 'Open settings'}
-              onPress={requestPermission}
+              onPress={
+                permission.canAskAgain ? requestPermission : () => Linking.openSettings()
+              }
             />
           </View>
         </View>
