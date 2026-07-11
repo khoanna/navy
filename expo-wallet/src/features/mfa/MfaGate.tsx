@@ -7,10 +7,13 @@ import type { MfaMethod } from '@/lib/account/mfa';
 import { initialMfaPrompt, selectMethod, setCode, type MfaPromptState } from '@/lib/account/mfaFlow';
 import { RELYING_PARTY } from '@/lib/config/privy';
 
-// The SDK does not supply a continuation/resolve callback — instead it awaits
-// the async `onMfaRequired` callback itself. We use a deferred-promise pattern:
-// when the listener fires we store the resolve/reject so the sheet's submit/
-// cancel can settle it, unblocking Privy's internal await.
+// `useRegisterMfaListener`'s `onMfaRequired: (methods) => void | Promise<void>`
+// is AWAITED by Privy — returning a Promise pauses the gated wallet operation
+// until it resolves or rejects. We exploit this with a deferred-promise pattern:
+// onMfaRequired returns a new Promise and stores its resolve/reject in deferredRef
+// so the sheet's submit/cancel can settle it later.
+// resolve() → Privy proceeds with the original operation (e.g. signTransaction).
+// reject() → Privy aborts the gated operation (user cancelled or superseded).
 type Deferred = { resolve: () => void; reject: (e: unknown) => void };
 
 // Filter SDK MfaMethod (which is 'sms'|'totp'|'passkey') down to our local
