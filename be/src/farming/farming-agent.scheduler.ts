@@ -6,6 +6,7 @@ import { FarmingService } from './farming.service';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_ONCHAIN } from '../onchain/onchain.module';
 import type { NavyOnchain } from '../onchain/onchain.module';
+import { DelegationService } from './delegation.service';
 
 export interface FarmBounds { rentBuffer: number; minDeposit: number; maxDeposit: number; }
 export const FARM_BOUNDS = Symbol('FARM_BOUNDS');
@@ -18,6 +19,7 @@ export class FarmingAgentScheduler {
     @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
     private readonly audit: AuditService,
     @Inject(FARM_BOUNDS) private readonly bounds: FarmBounds,
+    private readonly delegation: DelegationService,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -28,6 +30,9 @@ export class FarmingAgentScheduler {
     for (const sw of subs) {
       try {
         const idle = await this.chain.connection.getBalance(new PublicKey(sw.pubkey));
+        if (idle < this.bounds.minDeposit) {
+          await this.delegation.autoFundSubwallet({ id: sw.id, pubkey: sw.pubkey, userId: sw.userId });
+        }
         const depositable = idle - this.bounds.rentBuffer;
         if (depositable >= this.bounds.minDeposit) {
           const amount = BigInt(Math.min(depositable, this.bounds.maxDeposit));

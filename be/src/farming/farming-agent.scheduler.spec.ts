@@ -6,7 +6,8 @@ function make(idleLamports: number) {
   const farming = { depositSubwallet: jest.fn().mockResolvedValue({ txSignature: 'sig' }), refreshSubwallet: jest.fn().mockResolvedValue({}) };
   const chain = { connection: { getBalance: jest.fn().mockResolvedValue(idleLamports) } };
   const audit = { record: jest.fn() };
-  return { sched: new FarmingAgentScheduler(prisma, farming as any, chain as any, audit as any, { rentBuffer: 2_000_000, minDeposit: 1_000_000, maxDeposit: 1_000_000_000 }), farming };
+  const delegation = { autoFundSubwallet: jest.fn().mockResolvedValue({ skipped: 'not enabled' }) } as any;
+  return { sched: new FarmingAgentScheduler(prisma, farming as any, chain as any, audit as any, { rentBuffer: 2_000_000, minDeposit: 1_000_000, maxDeposit: 1_000_000_000 }, delegation), farming };
 }
 
 describe('FarmingAgentScheduler.tickOnce', () => {
@@ -25,5 +26,20 @@ describe('FarmingAgentScheduler.tickOnce', () => {
     const { sched, farming } = make(10_000_000_000);
     await sched.tickOnce();
     expect(farming.depositSubwallet.mock.calls[0][1]).toBe(1_000_000_000n);
+  });
+});
+
+describe('FarmingAgentScheduler auto-fund', () => {
+  it('auto-funds a low subwallet before depositing', async () => {
+    const sw = { id: 's1', pubkey: '11111111111111111111111111111111', userId: 'u1', status: 'active' };
+    const prisma = { farmingSubwallet: { findMany: jest.fn().mockResolvedValue([sw]) } } as any;
+    const farming = { depositSubwallet: jest.fn().mockResolvedValue({}), refreshSubwallet: jest.fn().mockResolvedValue({}) } as any;
+    const chain = { connection: { getBalance: jest.fn().mockResolvedValue(1_000_000) } } as any; // idle below minDeposit
+    const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
+    const bounds = { rentBuffer: 2_000_000, minDeposit: 10_000_000, maxDeposit: 1_000_000_000 };
+    const delegation = { autoFundSubwallet: jest.fn().mockResolvedValue({ txSignature: 'sig' }) } as any;
+    const agent = new FarmingAgentScheduler(prisma, farming, chain, audit, bounds, delegation);
+    await agent.tickOnce();
+    expect(delegation.autoFundSubwallet).toHaveBeenCalledWith(expect.objectContaining({ id: 's1', pubkey: '11111111111111111111111111111111', userId: 'u1' }));
   });
 });
