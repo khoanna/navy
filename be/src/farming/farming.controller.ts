@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { FarmingService } from './farming.service';
+import { DelegationService } from './delegation.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -17,7 +18,10 @@ class WithdrawDto {
 @UseGuards(JwtGuard, RolesGuard)
 @Roles('user')
 export class FarmingController {
-  constructor(private readonly farming: FarmingService) {}
+  constructor(
+    private readonly farming: FarmingService,
+    private readonly delegation: DelegationService,
+  ) {}
 
   @Post('subwallet')
   create(@Req() req: any) { return this.farming.createSubwallet(req.user.sub, req.user.walletAddress); }
@@ -33,4 +37,16 @@ export class FarmingController {
 
   @Get('history')
   history(@Req() req: any) { return this.farming.listHistory(req.user.sub); }
+
+  @Get('delegation')
+  delegationStatus(@Req() req: any) { return this.delegation.status(req.user.sub); }
+
+  @Post('delegation')
+  enableDelegation(@Req() req: any) { return this.delegation.enable(req.user.sub); }
+
+  @Delete('delegation')
+  disableDelegation(@Req() req: any) { return this.delegation.disable(req.user.sub); }
+
+  @Post('fund-now')
+  fundNow(@Req() req: any) { return this.delegation.fundNow(req.user.sub); }
 }
