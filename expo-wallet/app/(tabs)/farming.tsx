@@ -6,6 +6,7 @@ import * as Clipboard from 'expo-clipboard';
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { FarmingClient, formatSol, Position } from '@/lib/farming/farmingClient';
+import { AutoFarmToggle } from '@/features/farming/AutoFarmToggle';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
@@ -131,6 +132,8 @@ export default function Farming() {
           Save · devnet
         </Text>
       </View>
+
+      <AutoFarmToggle />
 
       {loading ? (
         /* Loading hero */
