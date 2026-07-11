@@ -1,11 +1,14 @@
 import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PrivyProvider } from '@privy-io/expo';
+import { PrivyElements } from '@privy-io/expo/ui';
 import { Slot } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getEnv } from '@/lib/config/env';
 import { SessionProvider } from '@/lib/auth/SessionContext';
 import { ToastProvider } from '@/ui/Toast';
+import { MfaGate } from '@/features/mfa/MfaGate';
+import { RecoveryGate } from '@/features/mfa/RecoveryGate';
 
 export default function Root() {
   const env = getEnv();
@@ -24,6 +27,9 @@ export default function Root() {
           <SessionProvider>
             <ToastProvider>
               <Slot />
+              <MfaGate />
+              <RecoveryGate />
+              <PrivyElements />
             </ToastProvider>
           </SessionProvider>
         </PrivyProvider>
