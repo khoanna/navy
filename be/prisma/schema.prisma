@@ -7,12 +7,14 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  privyDid      String   @unique
-  primaryWallet String?
-  status        String   @default("active")
-  createdAt     DateTime @default(now())
-  subwallets    FarmingSubwallet[]
+  id                      String    @id @default(uuid())
+  privyDid                String    @unique
+  primaryWallet           String?
+  status                  String    @default("active")
+  createdAt               DateTime  @default(now())
+  farmDelegationWalletId  String?
+  farmDelegationEnabledAt DateTime?
+  subwallets              FarmingSubwallet[]
 }
 
 model Merchant {
