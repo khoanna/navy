@@ -23,6 +23,12 @@ export function FundButton({
     } catch (e: unknown) {
       // User cancelled the funding flow — no error toast needed
       if (e instanceof PrivyUIError && e.code === 'funding_flow_cancelled') return;
+      // On devnet, MoonPay/Coinbase etc. don't operate — Privy throws chain_not_supported
+      // or asset_not_supported instead of opening the on-ramp sheet.
+      if (e instanceof PrivyUIError && (e.code === 'chain_not_supported' || e.code === 'asset_not_supported')) {
+        toast('On-ramp funding isn\'t available on devnet');
+        return;
+      }
       toast(`Could not open funding: ${e instanceof Error ? e.message : 'unavailable'}`);
     } finally {
       setBusy(false);
