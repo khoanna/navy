@@ -23,6 +23,7 @@ export interface DecodedIx {
   kind: IxKind;
   destination?: string; // set for transfers (destination pubkey) and token-close (keys[1])
   rawOpcode?: number;
+  lamports?: bigint;
 }
 
 export interface TxSummary {
@@ -39,7 +40,8 @@ function decodeSystem(ix: TransactionInstruction, data: Buffer, programId: strin
   if (data.length < 4) return { programId, kind: 'unknown' };
   const opcode = data.readUInt32LE(0);
   if (opcode === 2) {
-    return { programId, kind: 'system-transfer', destination: keyAt(ix, 1) };
+    const lamports = data.length >= 12 ? data.readBigUInt64LE(4) : undefined;
+    return { programId, kind: 'system-transfer', destination: keyAt(ix, 1), lamports };
   }
   if (opcode === 0 || opcode === 1) {
     return { programId, kind: 'system-create' };

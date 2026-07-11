@@ -180,3 +180,15 @@ describe('deriveTxSummary', () => {
     expect(instructions[0].rawOpcode).toBe(250);
   });
 });
+
+describe('deriveTxSummary system-transfer lamports', () => {
+  it('decodes the transfer amount as a bigint', () => {
+    const from = Keypair.generate().publicKey;
+    const to = Keypair.generate().publicKey;
+    const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: 12345 }));
+    const summary = deriveTxSummary(tx);
+    expect(summary.instructions[0].kind).toBe('system-transfer');
+    expect(summary.instructions[0].destination).toBe(to.toBase58());
+    expect(summary.instructions[0].lamports).toBe(12345n);
+  });
+});
