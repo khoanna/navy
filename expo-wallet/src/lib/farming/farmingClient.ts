@@ -17,4 +17,8 @@ export class FarmingClient {
   deposit(token: string, amountLamports: string): Promise<{ txSignature: string }> { return this.json('/farming/deposit', token, { method: 'POST', body: JSON.stringify({ amountLamports }) }); }
   withdraw(token: string, amount: 'all' | string): Promise<{ txSignature: string }> { return this.json('/farming/withdraw', token, { method: 'POST', body: JSON.stringify({ amount }) }); }
   history(token: string): Promise<any[]> { return this.json('/farming/history', token); }
+  getDelegation(token: string): Promise<{ available: boolean; enabled: boolean }> { return this.json('/farming/delegation', token); }
+  enableDelegation(token: string): Promise<{ available: boolean; enabled: boolean }> { return this.json('/farming/delegation', token, { method: 'POST' }); }
+  disableDelegation(token: string): Promise<{ available: boolean; enabled: boolean }> { return this.json('/farming/delegation', token, { method: 'DELETE' }); }
+  fundNow(token: string): Promise<{ txSignature: string } | { skipped: string }> { return this.json('/farming/fund-now', token, { method: 'POST' }); }
 }
