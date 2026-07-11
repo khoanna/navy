@@ -34,7 +34,7 @@ export class DelegationService {
     if (!this.cfg.privyAuthorizationKey) throw new ServiceUnavailableException('Delegated signing not configured');
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new BadRequestException('User not found');
-    const dw = await this.privy.getDelegatedWallet(user.privyDid);
+    const dw = await this.resolveDelegatedWithRetry(user.privyDid);
     if (!dw) throw new BadRequestException('Wallet is not delegated');
     await this.prisma.user.update({
       where: { id: userId },
@@ -70,6 +70,16 @@ export class DelegationService {
       return { skipped: 'not enabled' };
     }
     return this._fund(user, sw);
+  }
+
+  private async resolveDelegatedWithRetry(privyDid: string): Promise<{ walletId?: string; address: string } | null> {
+    const delays = [0, 600, 1500]; // ms; total ~2.1s
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
+      const dw = await this.privy.getDelegatedWallet(privyDid);
+      if (dw) return dw;
+    }
+    return null;
   }
 
   private async _fund(

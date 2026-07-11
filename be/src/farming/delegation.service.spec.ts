@@ -42,10 +42,23 @@ describe('DelegationService', () => {
     }));
   });
 
-  it('enable rejects when the wallet is not delegated', async () => {
+  it('enable rejects when the wallet is not delegated (all retries exhausted)', async () => {
     const { svc, privy } = build('k');
-    privy.getDelegatedWallet.mockResolvedValueOnce(null);
+    privy.getDelegatedWallet.mockResolvedValue(null); // always null across all retries
     await expect(svc.enable('u1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('enable succeeds when getDelegatedWallet returns null on the first call but a wallet on the second (retry)', async () => {
+    const { svc, privy, prisma } = build('k');
+    const USER_ADDR = '11111111111111111111111111111111';
+    privy.getDelegatedWallet
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ walletId: 'w', address: USER_ADDR });
+    const result = await svc.enable('u1');
+    expect(result).toEqual({ available: true, enabled: true });
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ farmDelegationWalletId: 'w' }),
+    }));
   });
 
   it('fundNow funds the subwallet with the computed amount', async () => {
