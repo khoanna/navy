@@ -58,6 +58,7 @@ export function MfaGate() {
     if (deferredRef.current) {
       deferredRef.current.reject(new Error('MFA superseded by a newer request'));
       deferredRef.current = null;
+      setBusy(false);
     }
     return new Promise<void>((resolve, reject) => {
       deferredRef.current = { resolve, reject };
@@ -71,6 +72,10 @@ export function MfaGate() {
   // Not wrapped in useCallback — must capture the latest state.code / state.selected each render.
   const submit = async () => {
     if (!state.selected) return;
+    // Capture the deferred at call time. If a supersede fires while mfa.submit
+    // is in-flight, deferredRef.current will point at the NEW deferred; we must
+    // resolve only the one we started with and leave the new one untouched.
+    const deferred = deferredRef.current;
     setBusy(true);
     try {
       if (state.selected === 'passkey') {
@@ -91,9 +96,14 @@ export function MfaGate() {
           await mfa.submit({ method: 'totp', mfaCode: state.code });
         }
       }
-      deferredRef.current?.resolve();
-      deferredRef.current = null;
-      close();
+      // Resolve the deferred we captured — if a supersede swapped it out mid-
+      // flight, the captured one was already rejected by the supersede branch,
+      // so this resolve() is a harmless no-op. Never touch the new deferred.
+      deferred?.resolve();
+      if (deferredRef.current === deferred) {
+        deferredRef.current = null;
+        close();
+      }
     } catch (e: unknown) {
       toast(`Verification failed: ${e instanceof Error ? e.message : 'try again'}`);
       setBusy(false);

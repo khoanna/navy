@@ -48,6 +48,9 @@ export function RecoveryGate() {
     setOpen(false);
     setPass('');
     setBusy(false);
+    // Clear the stale continuation so a dismissed prompt can't accidentally
+    // trigger the caller's post-recovery logic on a future open.
+    onRecoveredRef.current = null;
   }, []);
 
   // Called by the SDK when the wallet needs recovery.
