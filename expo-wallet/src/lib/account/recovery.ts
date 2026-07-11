@@ -27,7 +27,7 @@ export function recoveryMethodLabel(method: RecoveryMethod): string {
 export function currentRecoveryState(user: User | null): { isSet: boolean; method: RecoveryMethod | null } {
   if (!user) return { isSet: false, method: null };
   const wallet = user.linked_accounts.find(
-    (a: any) => a.type === 'wallet' && a.wallet_client_type === 'privy',
+    (a: any) => a.type === 'wallet' && a.wallet_client_type === 'privy' && a.chain_type === 'solana',
   ) as any;
   const rm = wallet?.recovery_method as string | undefined;
   if (rm === 'user-passcode' || rm === 'icloud' || rm === 'google-drive') {
@@ -36,8 +36,11 @@ export function currentRecoveryState(user: User | null): { isSet: boolean; metho
   return { isSet: false, method: null };
 }
 
+/** Privy requires ≥6 chars for user-passcode recovery; we enforce ≥8 as a product minimum. */
+const MIN_PASSCODE_LENGTH = 8;
+
 export function isValidPasscode(passcode: string): boolean {
-  return passcode.length >= 8;
+  return passcode.length >= MIN_PASSCODE_LENGTH;
 }
 
 export function passcodesMatch(a: string, b: string): boolean {
