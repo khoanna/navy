@@ -70,4 +70,44 @@ describe('DelegationService', () => {
     expect(funding.fundSubwalletFromUser).not.toHaveBeenCalled();
     expect(res).toEqual({ skipped: 'insufficient balance' });
   });
+
+  it('fundNow throws ServiceUnavailableException when built without an auth key', async () => {
+    const { svc } = build(undefined);
+    await expect(svc.fundNow('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('autoFundSubwallet returns skipped when user delegation is not enabled', async () => {
+    const { svc } = build('k');
+    // default mock has farmDelegationEnabledAt: null
+    const sw = { id: 's1', pubkey: '11111111111111111111111111111111', userId: 'u1' };
+    const res = await svc.autoFundSubwallet(sw);
+    expect(res).toEqual({ skipped: 'not enabled' });
+  });
+
+  it('autoFundSubwallet returns skipped when there is no auth key even if user looks enabled', async () => {
+    const { svc } = build(undefined);
+    const USER_ADDR = '11111111111111111111111111111111';
+    (svc as any).prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', privyDid: 'did:1', primaryWallet: USER_ADDR,
+      farmDelegationEnabledAt: new Date(), farmDelegationWalletId: 'wallet-123',
+    });
+    const sw = { id: 's1', pubkey: '11111111111111111111111111111111', userId: 'u1' };
+    const res = await svc.autoFundSubwallet(sw);
+    expect(res).toEqual({ skipped: 'not enabled' });
+  });
+
+  it('autoFundSubwallet calls fundSubwalletFromUser and returns its result when fully enabled', async () => {
+    const { svc, funding } = build('k');
+    const USER_ADDR = '11111111111111111111111111111111';
+    (svc as any).prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', privyDid: 'did:1', primaryWallet: USER_ADDR,
+      farmDelegationEnabledAt: new Date(), farmDelegationWalletId: 'wallet-123',
+    });
+    const sw = { id: 's1', pubkey: '11111111111111111111111111111111', userId: 'u1' };
+    const res = await svc.autoFundSubwallet(sw);
+    expect(funding.fundSubwalletFromUser).toHaveBeenCalledWith(
+      expect.objectContaining({ subwalletPubkey: '11111111111111111111111111111111' }),
+    );
+    expect(res).toEqual({ txSignature: 'sig-1' });
+  });
 });

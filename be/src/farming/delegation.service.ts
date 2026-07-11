@@ -50,6 +50,7 @@ export class DelegationService {
   }
 
   async fundNow(userId: string): Promise<{ txSignature: string } | { skipped: string }> {
+    if (!this.cfg.privyAuthorizationKey) throw new ServiceUnavailableException('Delegated signing not configured');
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user?.farmDelegationEnabledAt) throw new BadRequestException('Auto-farm not enabled');
     if (!user.primaryWallet) throw new BadRequestException('No embedded wallet on file');
