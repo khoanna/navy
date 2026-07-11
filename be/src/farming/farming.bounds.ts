@@ -1,0 +1,1 @@
+export const FARM_FUNDING_BOUNDS = Symbol('FARM_FUNDING_BOUNDS');
