@@ -33,8 +33,7 @@ export function otpauthSecretGroups(secret: string): string {
  * (The Settings screen already reads user.mfa_methods for TOTP status.)
  */
 export function enrolledMfaMethods(user: User | null): MfaMethod[] {
-  // `mfa_methods` isn't stably exposed on the installed @privy-io/expo User type; read defensively.
-  const raw = ((user as any)?.mfa_methods ?? []) as Array<{ type?: string }>;
+  const raw = (user?.mfa_methods ?? []) as Array<{ type?: string }>;
   return raw
     .map((m) => m.type)
     .filter((t): t is MfaMethod => !!t && (KNOWN_MFA_METHODS as string[]).includes(t));
