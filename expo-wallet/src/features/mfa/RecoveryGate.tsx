@@ -8,6 +8,9 @@ import { useToast } from '@/ui/Toast';
 import { colors, space, radius } from '@/ui/theme';
 import { isValidPasscode } from '@/lib/account/recovery';
 
+const UNSUPPORTED_METHOD_MESSAGE =
+  "This wallet uses a recovery method this app can't restore. Contact support.";
+
 /**
  * Root-mounted invisible gate.
  *
@@ -19,8 +22,10 @@ import { isValidPasscode } from '@/lib/account/recovery';
  *   - `recoveryMethod` — the method the wallet was set up with
  *   - `onRecovered`   — **must** be called after `recover()` resolves
  *
- * Cloud methods (icloud / google-drive) are one-tap; user-passcode shows an
- * input field. All other method values fall back to passcode entry.
+ * Supported methods: `user-passcode` (shows passcode input), `icloud` and
+ * `google-drive` (one-tap cloud restore). Any other value (`recovery-encryption-key`,
+ * `privy`, `privy-v2`, …) is considered unsupported — the sheet explains this
+ * instead of attempting a passcode recovery that would always fail.
  */
 export function RecoveryGate() {
   const { recover } = useRecoverEmbeddedWallet();
@@ -34,8 +39,10 @@ export function RecoveryGate() {
   const methodRef = useRef<string>('user-passcode');
   const onRecoveredRef = useRef<(() => void) | null>(null);
 
-  const isCloud =
-    methodRef.current === 'icloud' || methodRef.current === 'google-drive';
+  const method = methodRef.current;
+  const isCloud = method === 'icloud' || method === 'google-drive';
+  const supported =
+    method === 'user-passcode' || method === 'icloud' || method === 'google-drive';
 
   const close = useCallback(() => {
     setOpen(false);
@@ -58,14 +65,17 @@ export function RecoveryGate() {
   const run = async () => {
     setBusy(true);
     try {
-      const method = methodRef.current;
       if (method === 'icloud') {
         await recover({ recoveryMethod: 'icloud' });
       } else if (method === 'google-drive') {
         await recover({ recoveryMethod: 'google-drive' });
-      } else {
-        // user-passcode, recovery-encryption-key, privy, privy-v2, unknown — fall back to passcode
+      } else if (method === 'user-passcode') {
         await recover({ recoveryMethod: 'user-passcode', password: pass });
+      } else {
+        // recovery-encryption-key, privy, privy-v2, or unknown — cannot recover here.
+        toast(UNSUPPORTED_METHOD_MESSAGE);
+        setBusy(false);
+        return;
       }
       onRecoveredRef.current?.();
       toast('Wallet recovered');
@@ -83,11 +93,13 @@ export function RecoveryGate() {
           Recover your wallet
         </Text>
         <Text variant="caption" color={colors.textDim}>
-          {isCloud
-            ? 'Restore your wallet from your secure cloud backup to continue.'
-            : 'Enter your recovery passcode to restore your wallet.'}
+          {!supported
+            ? UNSUPPORTED_METHOD_MESSAGE
+            : isCloud
+              ? 'Restore your wallet from your secure cloud backup to continue.'
+              : 'Enter your recovery passcode to restore your wallet.'}
         </Text>
-        {!isCloud && (
+        {supported && !isCloud && (
           <TextInput
             style={styles.input}
             placeholder="Recovery passcode"
@@ -97,12 +109,16 @@ export function RecoveryGate() {
             onChangeText={setPass}
           />
         )}
-        <Button
-          label={isCloud ? 'Restore from backup' : 'Recover'}
-          onPress={run}
-          loading={busy}
-          disabled={!isCloud && !isValidPasscode(pass)}
-        />
+        {supported ? (
+          <Button
+            label={isCloud ? 'Restore from backup' : 'Recover'}
+            onPress={run}
+            loading={busy}
+            disabled={!isCloud && !isValidPasscode(pass)}
+          />
+        ) : (
+          <Button label="Close" onPress={close} />
+        )}
       </View>
     </Sheet>
   );
