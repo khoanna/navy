@@ -29,9 +29,12 @@ export class FarmingAgentScheduler {
     const subs = await this.prisma.farmingSubwallet.findMany({ where: { status: 'active' } });
     for (const sw of subs) {
       try {
-        const idle = await this.chain.connection.getBalance(new PublicKey(sw.pubkey));
+        let idle = await this.chain.connection.getBalance(new PublicKey(sw.pubkey));
         if (idle < this.bounds.minDeposit) {
-          await this.delegation.autoFundSubwallet({ id: sw.id, pubkey: sw.pubkey, userId: sw.userId });
+          const funded = await this.delegation.autoFundSubwallet({ id: sw.id, pubkey: sw.pubkey, userId: sw.userId });
+          if (funded && 'txSignature' in funded) {
+            idle = await this.chain.connection.getBalance(new PublicKey(sw.pubkey));
+          }
         }
         const depositable = idle - this.bounds.rentBuffer;
         if (depositable >= this.bounds.minDeposit) {
