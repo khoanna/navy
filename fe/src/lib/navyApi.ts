@@ -6,7 +6,22 @@ export interface IssuedApiKey { apiKey: string; apiSecret: string; }
 export interface PayoutInput { address: string; message: string; signature: string; }
 
 export class NavyApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); this.name = 'NavyApiError'; }
+  // `detail` is the human-readable reason from the backend (e.g. a validation
+  // message), safe to surface to the user; `message` stays the generic label.
+  constructor(message: string, readonly status: number, readonly detail?: string) {
+    super(message);
+    this.name = 'NavyApiError';
+  }
+}
+
+// Nest's ValidationPipe returns `message` as a string OR string[]; other errors
+// use a plain `message` string. Flatten to one line, ignore anything else.
+function extractDetail(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const m = (body as { message?: unknown }).message;
+  if (typeof m === 'string') return m;
+  if (Array.isArray(m)) return m.filter((x) => typeof x === 'string').join(', ') || undefined;
+  return undefined;
 }
 
 export class NavyApi {
@@ -16,7 +31,10 @@ export class NavyApi {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (bearer) headers.Authorization = `Bearer ${bearer}`;
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
-    if (!res.ok) throw new NavyApiError(`Navy API ${path} failed (HTTP ${res.status})`, res.status);
+    if (!res.ok) {
+      const detail = extractDetail(await res.json().catch(() => undefined));
+      throw new NavyApiError(`Navy API ${path} failed (HTTP ${res.status})`, res.status, detail);
+    }
     return (await res.json()) as T;
   }
 

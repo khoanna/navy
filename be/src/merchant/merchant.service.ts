@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,8 +16,17 @@ export class MerchantService {
   ) {}
 
   async signup(email: string, password: string, businessName: string) {
+    // Reject duplicates with a clear 409 instead of leaking Prisma's P2002 as a
+    // raw 500. `email` is @unique, so the DB is the final guard against races.
+    const existing = await this.prisma.merchant.findUnique({ where: { email } });
+    if (existing) throw new ConflictException('Email already registered');
     const passwordHash = await argon2.hash(password);
-    return this.prisma.merchant.create({ data: { email, passwordHash, businessName } });
+    try {
+      return await this.prisma.merchant.create({ data: { email, passwordHash, businessName } });
+    } catch (e) {
+      if ((e as { code?: string }).code === 'P2002') throw new ConflictException('Email already registered');
+      throw e;
+    }
   }
 
   async login(email: string, password: string) {

@@ -46,8 +46,15 @@ export default function MerchantLogin() {
       const url = mode === 'login' ? '/api/auth/merchant' : '/api/auth/merchant/signup';
       const body = mode === 'login' ? { email, password } : { email, password, businessName };
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (res.ok) router.replace('/merchant');
-      else setError(mode === 'login' ? 'Invalid credentials' : 'Signup failed');
+      if (res.ok) {
+        router.replace('/merchant');
+        return;
+      }
+      // Surface the backend's reason (e.g. "password must be longer than or
+      // equal to 8 characters") instead of a generic label.
+      const data = await res.json().catch(() => null);
+      const fallback = mode === 'login' ? 'Invalid credentials' : 'Signup failed';
+      setError((data && typeof data.error === 'string' && data.error) || fallback);
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -58,7 +65,7 @@ export default function MerchantLogin() {
     <AuthCard title={mode === 'login' ? 'Sign in' : 'Create merchant account'} subtitle="Payments back-office">
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: space.md }}>
         <input style={inputStyle} placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input style={inputStyle} placeholder="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input style={inputStyle} placeholder={mode === 'signup' ? 'Password (min 8 characters)' : 'Password'} type="password" minLength={8} required autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} />
         {mode === 'signup' && (
           <input style={inputStyle} placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
         )}

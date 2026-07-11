@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (e) {
     const status = e instanceof NavyApiError ? e.status : 500;
-    return NextResponse.json({ ok: false, error: 'Signup failed' }, { status });
+    const error = (e instanceof NavyApiError && e.detail) || 'Signup failed';
+    return NextResponse.json({ ok: false, error }, { status });
   }
 }
