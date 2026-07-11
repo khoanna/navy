@@ -14,7 +14,9 @@ import { useLinkWithPasskey } from '@privy-io/expo/passkey';
 import { RELYING_PARTY } from '@/lib/config/privy';
 import { LinkEmailSheet } from '@/features/settings/LinkEmailSheet';
 import { MfaEnrollSheet } from '@/features/settings/MfaEnrollSheet';
-import { mfaMethodLabel } from '@/lib/account/mfa';
+import { RecoverySheet } from '@/features/settings/RecoverySheet';
+import { currentRecoveryState, recoveryMethodLabel } from '@/lib/account/recovery';
+import { enrolledMfaMethods, mfaMethodLabel } from '@/lib/account/mfa';
 
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
@@ -108,7 +110,7 @@ export default function Settings() {
   const { unenrollMfa } = useMfaEnrollment();
 
   const [confirm, setConfirm] = useState<null | 'logout' | 'mfa-off'>(null);
-  const [sheet, setSheet] = useState<null | 'email' | 'mfa'>(null);
+  const [sheet, setSheet] = useState<null | 'email' | 'mfa' | 'recovery'>(null);
   const [copied, setCopied] = useState(false);
 
   const rows = describeLinkedAccounts(user);
@@ -121,9 +123,11 @@ export default function Settings() {
   const primaryEmail = user?.linked_accounts.find((a) => a.type === 'email');
   const primary = primaryEmail?.type === 'email' ? primaryEmail.address : short(address);
 
-  // Enrolled-MFA status: derived from user.mfa_methods (TotpMfaMethod has type === 'totp')
-  const totpEnrolled = (user?.mfa_methods ?? []).some((m) => m.type === 'totp');
+  // Enrolled-MFA status: all enrolled methods for the per-method list.
+  const enrolledMfa = enrolledMfaMethods(user);
   const hasEmail = rows.some((r) => r.provider === 'email');
+  // Recovery state
+  const recoveryState = currentRecoveryState(user);
 
   const copyAddress = async () => {
     if (!address) return;
@@ -253,25 +257,35 @@ export default function Settings() {
         />
       </Card>
 
-      {/* Two-factor authentication */}
+      {/* Security */}
       <SectionTitle>Security</SectionTitle>
       <Card glass compact style={styles.listCard}>
-        {totpEnrolled ? (
+        <Row
+          icon="shield"
+          title="Wallet recovery"
+          subtitle={
+            recoveryState.isSet && recoveryState.method
+              ? recoveryMethodLabel(recoveryState.method)
+              : 'Not set'
+          }
+          onPress={() => setSheet('recovery')}
+          trailing={<Chevron />}
+        />
+        {enrolledMfa.map((m) => (
           <Row
-            icon="shield"
-            title="Two-factor authentication"
-            subtitle={`${mfaMethodLabel('totp')} · On`}
-            onPress={() => setConfirm('mfa-off')}
+            key={m}
+            icon="key"
+            title={mfaMethodLabel(m)}
+            subtitle="On"
+            onPress={m === 'totp' ? () => setConfirm('mfa-off') : undefined}
           />
-        ) : (
-          <Row
-            icon="shield"
-            title="Two-factor authentication"
-            subtitle="Off"
-            onPress={() => setSheet('mfa')}
-            trailing={<Icon name="plus" size={18} color={colors.textMute} />}
-          />
-        )}
+        ))}
+        <Row
+          icon="key"
+          title="Add two-factor method"
+          onPress={() => setSheet('mfa')}
+          trailing={<Icon name="plus" size={18} color={colors.textMute} />}
+        />
       </Card>
 
       {/* About */}
@@ -322,6 +336,7 @@ export default function Settings() {
       {/* Flow sheets */}
       <LinkEmailSheet open={sheet === 'email'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
       <MfaEnrollSheet open={sheet === 'mfa'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
+      <RecoverySheet open={sheet === 'recovery'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
     </Screen>
   );
 }
