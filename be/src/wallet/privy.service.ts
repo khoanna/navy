@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrivyClient } from '@privy-io/server-auth';
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { NavyConfigService } from '../config/config.service';
@@ -15,6 +15,7 @@ export interface VerifiedPrivyUser { userId: string; wallet?: string }
 
 @Injectable()
 export class PrivyService {
+  private readonly logger = new Logger(PrivyService.name);
   private client: PrivyClient;
 
   constructor(private readonly cfg: NavyConfigService) {
@@ -51,6 +52,9 @@ export class PrivyService {
     idempotencyKey?: string;
   }): Promise<Transaction> {
     if (!this.cfg.privyAuthorizationKey) throw new Error('Delegated signing not configured');
+    if (!args.walletId) {
+      this.logger.warn(`Delegated sign using deprecated address fallback (no walletId) for address ${args.address}`);
+    }
     const target = args.walletId
       ? { walletId: args.walletId }
       : { address: args.address, chainType: 'solana' as const };
