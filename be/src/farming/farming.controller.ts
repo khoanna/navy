@@ -4,6 +4,7 @@ import { DelegationService } from './delegation.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { Throttle } from '@nestjs/throttler';
 import { IsString, Matches } from 'class-validator';
 import { parsePositiveAmount } from '../common/amount.util';
 
@@ -42,11 +43,13 @@ export class FarmingController {
   delegationStatus(@Req() req: any) { return this.delegation.status(req.user.sub); }
 
   @Post('delegation')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   enableDelegation(@Req() req: any) { return this.delegation.enable(req.user.sub); }
 
   @Delete('delegation')
   disableDelegation(@Req() req: any) { return this.delegation.disable(req.user.sub); }
 
   @Post('fund-now')
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   fundNow(@Req() req: any) { return this.delegation.fundNow(req.user.sub); }
 }
