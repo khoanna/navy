@@ -169,7 +169,7 @@ export default function Home() {
           </View>
 
           <View style={{ marginTop: space.lg }}>
-            <FundButton address={address} variant="secondary" />
+            <FundButton address={address} variant="ghost" />
           </View>
         </Gradient>
 
