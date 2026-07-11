@@ -34,6 +34,7 @@ export class NavyConfigService {
   get masterKey(): Buffer { return Buffer.from(this.req('SUBWALLET_MASTER_KEY'), 'hex'); }
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
+  get privyAuthorizationKey(): string | undefined { return this.env.PRIVY_AUTHORIZATION_KEY || undefined; }
   get adminMaxTotpFails(): number { return parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10); }
   /** How long an admin stays locked after hitting the TOTP fail limit. Env NAVY_ADMIN_LOCK_WINDOW_MS; default 15 min. */
   get adminLockWindowMs(): number {

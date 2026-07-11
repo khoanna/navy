@@ -39,3 +39,26 @@ describe('NavyConfigService', () => {
       .toThrow(/SUBWALLET_MASTER_KEY/);
   });
 });
+
+const BASE = {
+  SUBWALLET_MASTER_KEY: '11'.repeat(32),
+  NETWORK: 'devnet',
+  SOLANA_RPC_DEVNET: 'https://api.devnet.solana.com',
+  NAVY_JWT_SECRET: 'x'.repeat(32),
+  NAVY_JWT_ACCESS_TTL: '900',
+  NAVY_JWT_REFRESH_TTL: '2592000',
+  PRIVY_APP_ID: 'app',
+  PRIVY_APP_SECRET: 'secret',
+  ADMIN_MAX_TOTP_FAILS: '5',
+} as NodeJS.ProcessEnv;
+
+describe('NavyConfigService.privyAuthorizationKey', () => {
+  it('is undefined when the env var is absent', () => {
+    const cfg = new NavyConfigService({ ...BASE });
+    expect(cfg.privyAuthorizationKey).toBeUndefined();
+  });
+  it('returns the key when present', () => {
+    const cfg = new NavyConfigService({ ...BASE, PRIVY_AUTHORIZATION_KEY: 'wallet-auth-priv' });
+    expect(cfg.privyAuthorizationKey).toBe('wallet-auth-priv');
+  });
+});
