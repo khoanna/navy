@@ -5,6 +5,7 @@ import { NavyConfigService } from '../config/config.service';
 import { PrivyService } from '../wallet/privy.service';
 import { DelegatedFundingService } from './delegated-funding.service';
 import { FarmingService } from './farming.service';
+import { AuditService } from '../audit/audit.service';
 import { NAVY_ONCHAIN } from '../onchain/onchain.module';
 import type { NavyOnchain } from '../onchain/onchain.module';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
@@ -20,6 +21,7 @@ export class DelegationService {
     private readonly privy: PrivyService,
     private readonly funding: DelegatedFundingService,
     private readonly farming: FarmingService,
+    private readonly audit: AuditService,
     @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
     @Inject(FARM_FUNDING_BOUNDS) private readonly bounds: FundingBounds,
   ) {}
@@ -110,6 +112,11 @@ export class DelegationService {
         });
         throw new BadRequestException('Wallet delegation was revoked; please re-enable auto-farm');
       }
+      await this.audit.record({
+        actor: `user:${user.id}`,
+        action: 'farming.delegated.fund.error',
+        metadata: { subwallet: sw.pubkey, error: (err as Error)?.message?.slice(0, 300) },
+      });
       throw err;
     }
   }

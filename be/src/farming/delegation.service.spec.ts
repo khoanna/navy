@@ -16,10 +16,11 @@ function build(authKey?: string) {
   const privy = { getDelegatedWallet: jest.fn().mockResolvedValue({ walletId: 'wallet-123', address: USER_ADDR }) } as any;
   const funding = { fundSubwalletFromUser: jest.fn().mockResolvedValue({ txSignature: 'sig-1' }) } as any;
   const farming = { createSubwallet: jest.fn().mockResolvedValue({ subwalletId: 's1', address: 'SubAddr' }) } as any;
+  const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
   const chain = { connection: { getBalance: jest.fn().mockResolvedValue(25_000_000) } } as any;
   const bounds = { reserve: 5_000_000n, fundMin: 10_000_000n, fundMax: 1_000_000_000n };
-  const svc = new DelegationService(prisma, cfg, privy, funding, farming, chain, bounds);
-  return { svc, prisma, privy, funding, farming };
+  const svc = new DelegationService(prisma, cfg, privy, funding, farming, audit, chain, bounds);
+  return { svc, prisma, privy, funding, farming, audit };
 }
 
 describe('DelegationService', () => {
@@ -143,5 +144,27 @@ describe('DelegationService', () => {
       where: { id: 'u1' },
       data: { farmDelegationWalletId: null, farmDelegationEnabledAt: null },
     });
+  });
+
+  it('fundNow records farming.delegated.fund.error and rethrows when signing fails but wallet is still delegated', async () => {
+    const { svc, funding, privy, audit } = build('k');
+    const USER_ADDR = '11111111111111111111111111111111';
+    const SUB_ADDR  = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf8Ss623VQ5DA';
+    (svc as any).prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', privyDid: 'did:1', primaryWallet: USER_ADDR,
+      farmDelegationEnabledAt: new Date(), farmDelegationWalletId: 'wallet-123',
+    });
+    (svc as any).prisma.farmingSubwallet.findFirst.mockResolvedValue({ id: 's1', pubkey: SUB_ADDR, userId: 'u1' });
+    const fundError = new Error('RPC timeout');
+    funding.fundSubwalletFromUser.mockRejectedValueOnce(fundError);
+    // Wallet is still delegated (not revoked)
+    privy.getDelegatedWallet.mockResolvedValueOnce({ walletId: 'wallet-123', address: USER_ADDR });
+
+    await expect(svc.fundNow('u1')).rejects.toThrow('RPC timeout');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      actor: 'user:u1',
+      action: 'farming.delegated.fund.error',
+      metadata: expect.objectContaining({ subwallet: SUB_ADDR, error: 'RPC timeout' }),
+    }));
   });
 });
