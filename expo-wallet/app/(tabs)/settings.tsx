@@ -109,7 +109,7 @@ export default function Settings() {
   const { linkWithPasskey } = useLinkWithPasskey();
   const { unenrollMfa } = useMfaEnrollment();
 
-  const [confirm, setConfirm] = useState<null | 'logout' | 'mfa-off'>(null);
+  const [confirm, setConfirm] = useState<null | 'logout' | 'mfa-off' | 'mfa-passkey-off'>(null);
   const [sheet, setSheet] = useState<null | 'email' | 'mfa' | 'recovery'>(null);
   const [copied, setCopied] = useState(false);
 
@@ -179,6 +179,17 @@ export default function Settings() {
       toast('Two-factor authentication removed');
     } catch (e) {
       toast(`Could not remove 2FA: ${(e as Error).message}`);
+    } finally {
+      setConfirm(null);
+    }
+  };
+
+  const removePasskeyMfa = async () => {
+    try {
+      await unenrollMfa({ method: 'passkey', removeForLogin: false });
+      toast('Passkey two-factor removed');
+    } catch (e) {
+      toast(`Could not remove passkey 2FA: ${(e as Error).message}`);
     } finally {
       setConfirm(null);
     }
@@ -277,7 +288,16 @@ export default function Settings() {
             icon="key"
             title={mfaMethodLabel(m)}
             subtitle="On"
-            onPress={m === 'totp' ? () => setConfirm('mfa-off') : undefined}
+            onPress={
+              m === 'totp'
+                ? () => setConfirm('mfa-off')
+                : m === 'passkey'
+                  ? () => setConfirm('mfa-passkey-off')
+                  : undefined
+            }
+            trailing={
+              m === 'totp' || m === 'passkey' ? <Chevron /> : undefined
+            }
           />
         ))}
         <Row
@@ -329,6 +349,21 @@ export default function Settings() {
         </Text>
         <View style={styles.sheetActions}>
           <Button label="Remove" variant="danger" onPress={removeMfa} />
+          <Button label="Cancel" variant="ghost" onPress={() => setConfirm(null)} />
+        </View>
+      </Sheet>
+
+      {/* Confirm: remove passkey 2FA */}
+      <Sheet open={confirm === 'mfa-passkey-off'} onClose={() => setConfirm(null)}>
+        <Text variant="h3" color={colors.textHi}>
+          Remove passkey two-factor?
+        </Text>
+        <Text variant="caption" muted style={styles.sheetBody}>
+          Your passkey will stay usable for login — only its role as a second
+          factor will be removed.
+        </Text>
+        <View style={styles.sheetActions}>
+          <Button label="Remove" variant="danger" onPress={removePasskeyMfa} />
           <Button label="Cancel" variant="ghost" onPress={() => setConfirm(null)} />
         </View>
       </Sheet>
