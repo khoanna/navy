@@ -15,6 +15,7 @@ import { PressRow } from '@/ui/Bits';
 import { Skeleton } from '@/ui/Skeleton';
 import { useToast } from '@/ui/Toast';
 import { colors, space } from '@/ui/theme';
+import { FundButton } from '@/features/wallet/FundButton';
 
 export default function Receive() {
   const router = useRouter();
@@ -104,6 +105,11 @@ export default function Receive() {
         <View style={styles.actionBtn}>
           <Button label="Copy address" icon="copy" onPress={copy} />
         </View>
+      </View>
+
+      {/* Add funds */}
+      <View style={{ marginTop: space.lg }}>
+        <FundButton address={address} />
       </View>
 
       {/* Chain hint */}

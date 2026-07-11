@@ -26,6 +26,7 @@ import { Card } from '@/ui/Card';
 import { Icon, IconName } from '@/ui/Icon';
 import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
 import { colors, gradients, radius, space } from '@/ui/theme';
+import { FundButton } from '@/features/wallet/FundButton';
 
 export default function Home() {
   const router = useRouter();
@@ -165,6 +166,10 @@ export default function Home() {
             <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={styles.solLine}>
               ≈ {sol} SOL
             </Text>
+          </View>
+
+          <View style={{ marginTop: space.lg }}>
+            <FundButton address={address} variant="secondary" />
           </View>
         </Gradient>
 
