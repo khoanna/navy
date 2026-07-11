@@ -1,4 +1,5 @@
-import { mfaMethodLabel, isValidEnrollCode, otpauthSecretGroups } from './mfa';
+import { mfaMethodLabel, isValidEnrollCode, otpauthSecretGroups, enrolledMfaMethods } from './mfa';
+import type { User } from '@privy-io/expo';
 
 describe('mfaMethodLabel', () => {
   it('maps known methods to labels', () => {
@@ -30,5 +31,28 @@ describe('otpauthSecretGroups', () => {
   });
   it('returns empty string for empty input', () => {
     expect(otpauthSecretGroups('')).toBe('');
+  });
+});
+
+function userWithMfa(methods: string[]): User {
+  return {
+    id: 'did',
+    created_at: 0,
+    linked_accounts: [],
+    mfa_methods: methods.map((type) => ({ type })),
+  } as unknown as User;
+}
+
+describe('enrolledMfaMethods', () => {
+  it('returns [] for a null user or no methods', () => {
+    expect(enrolledMfaMethods(null)).toEqual([]);
+    expect(enrolledMfaMethods(userWithMfa([]))).toEqual([]);
+  });
+  it('maps known mfa method types, dropping unknowns', () => {
+    expect(enrolledMfaMethods(userWithMfa(['totp', 'passkey', 'sms', 'weird']))).toEqual([
+      'totp',
+      'passkey',
+      'sms',
+    ]);
   });
 });

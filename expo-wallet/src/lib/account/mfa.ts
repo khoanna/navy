@@ -1,4 +1,5 @@
 import { isComplete } from '@/lib/ui/otp';
+import type { User } from '@privy-io/expo';
 
 export type MfaMethod = 'totp' | 'sms' | 'passkey';
 
@@ -23,4 +24,16 @@ export function otpauthSecretGroups(secret: string): string {
   const clean = secret.replace(/\s+/g, '').toUpperCase();
   if (!clean) return '';
   return (clean.match(/.{1,4}/g) ?? []).join(' ');
+}
+
+/**
+ * Reads the user's enrolled MFA methods, filtered to the ones we support.
+ * (The Settings screen already reads user.mfa_methods for TOTP status.)
+ */
+export function enrolledMfaMethods(user: User | null): MfaMethod[] {
+  const known: MfaMethod[] = ['totp', 'sms', 'passkey'];
+  const raw = ((user as any)?.mfa_methods ?? []) as Array<{ type?: string }>;
+  return raw
+    .map((m) => m.type)
+    .filter((t): t is MfaMethod => !!t && (known as string[]).includes(t));
 }
