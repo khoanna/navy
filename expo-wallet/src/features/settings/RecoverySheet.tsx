@@ -95,7 +95,7 @@ export function RecoverySheet({
             <TextInput
               style={styles.input}
               placeholder="Recovery passcode (min 8 chars)"
-              placeholderTextColor={colors.textMute}
+              placeholderTextColor={colors.textDim}
               secureTextEntry
               value={pass}
               onChangeText={setPass}
@@ -103,7 +103,7 @@ export function RecoverySheet({
             <TextInput
               style={styles.input}
               placeholder="Confirm passcode"
-              placeholderTextColor={colors.textMute}
+              placeholderTextColor={colors.textDim}
               secureTextEntry
               value={confirm}
               onChangeText={setConfirm}
@@ -123,7 +123,7 @@ export function RecoverySheet({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: space.lg },
+  wrap: { gap: space.md },
   methods: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
   methodPill: {
     paddingHorizontal: space.lg,
