@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PublicKey } from '@solana/web3.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
@@ -12,6 +12,8 @@ import { computeFundAmount, type FundingBounds } from './funding.util';
 
 @Injectable()
 export class DelegationService {
+  private readonly logger = new Logger(DelegationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cfg: NavyConfigService,
@@ -77,13 +79,28 @@ export class DelegationService {
     const balance = await this.chain.connection.getBalance(new PublicKey(user.primaryWallet!));
     const amount = computeFundAmount(BigInt(balance), this.bounds);
     if (amount === null) return { skipped: 'insufficient balance' };
-    return this.funding.fundSubwalletFromUser({
-      userId: user.id,
-      privyDid: user.privyDid,
-      walletId: user.farmDelegationWalletId ?? undefined,
-      userAddress: user.primaryWallet!,
-      subwalletPubkey: sw.pubkey,
-      amountLamports: amount,
-    });
+    try {
+      return await this.funding.fundSubwalletFromUser({
+        userId: user.id,
+        privyDid: user.privyDid,
+        walletId: user.farmDelegationWalletId ?? undefined,
+        userAddress: user.primaryWallet!,
+        subwalletPubkey: sw.pubkey,
+        amountLamports: amount,
+      });
+    } catch (err) {
+      // If delegated signing fails, check whether the wallet was un-delegated from the
+      // Privy side. If so, clear the stale flags and surface a clear error.
+      const stillDelegated = await this.privy.getDelegatedWallet(user.privyDid);
+      if (stillDelegated === null) {
+        this.logger.warn(`Clearing stale delegation for user ${user.id}: wallet no longer delegated`);
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { farmDelegationWalletId: null, farmDelegationEnabledAt: null },
+        });
+        throw new BadRequestException('Wallet delegation was revoked; please re-enable auto-farm');
+      }
+      throw err;
+    }
   }
 }

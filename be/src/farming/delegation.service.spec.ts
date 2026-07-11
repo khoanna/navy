@@ -110,4 +110,25 @@ describe('DelegationService', () => {
     );
     expect(res).toEqual({ txSignature: 'sig-1' });
   });
+
+  it('fundNow clears delegation flags and throws BadRequestException when signing fails and wallet is no longer delegated', async () => {
+    const { svc, funding, privy, prisma } = build('k');
+    const USER_ADDR = '11111111111111111111111111111111';
+    const SUB_ADDR  = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf8Ss623VQ5DA';
+    (svc as any).prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', privyDid: 'did:1', primaryWallet: USER_ADDR,
+      farmDelegationEnabledAt: new Date(), farmDelegationWalletId: 'wallet-123',
+    });
+    (svc as any).prisma.farmingSubwallet.findFirst.mockResolvedValue({ id: 's1', pubkey: SUB_ADDR, userId: 'u1' });
+    // Privy signing fails (e.g. delegation revoked on their side)
+    funding.fundSubwalletFromUser.mockRejectedValueOnce(new Error('Delegated signing did not return a user signature'));
+    // Privy now reports the wallet is no longer delegated
+    privy.getDelegatedWallet.mockResolvedValueOnce(null);
+
+    await expect(svc.fundNow('u1')).rejects.toThrow(/delegation was revoked/i);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { farmDelegationWalletId: null, farmDelegationEnabledAt: null },
+    });
+  });
 });
