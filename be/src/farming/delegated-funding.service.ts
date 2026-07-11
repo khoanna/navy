@@ -60,6 +60,12 @@ export class DelegatedFundingService {
       idempotencyKey,
     });
 
+    const userSig = signed.signatures.find((s) => s.publicKey.equals(new PublicKey(args.userAddress)));
+    if (!userSig || userSig.signature === null) {
+      await this.audit.record({ actor: `user:${args.userId}`, action: 'farming.delegated.fund.unsigned', metadata: { subwallet: args.subwalletPubkey } });
+      throw new Error('Delegated signing did not return a user signature');
+    }
+
     const raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
     const sig = await this.chain.connection.sendRawTransaction(raw);
     await this.chain.connection.confirmTransaction(sig, 'confirmed');
