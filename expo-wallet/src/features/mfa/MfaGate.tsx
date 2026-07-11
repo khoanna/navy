@@ -51,6 +51,14 @@ export function MfaGate() {
   // The SDK awaits this callback; we return a Promise that resolves/rejects
   // only when the user submits successfully or cancels.
   const onMfaRequired = useCallback((methods: PrivyMfaMethod[]) => {
+    // A new step-up supersedes any still-pending one; abort the older gated
+    // action rather than orphaning its awaited promise. Privy is holding an
+    // `await` on the promise it received, so the rejection is always caught
+    // by its internal handler — no unhandled-rejection crash is possible.
+    if (deferredRef.current) {
+      deferredRef.current.reject(new Error('MFA superseded by a newer request'));
+      deferredRef.current = null;
+    }
     return new Promise<void>((resolve, reject) => {
       deferredRef.current = { resolve, reject };
       setState(initialMfaPrompt(toLocalMethods(methods)));
@@ -60,6 +68,7 @@ export function MfaGate() {
 
   useRegisterMfaListener({ onMfaRequired });
 
+  // Not wrapped in useCallback — must capture the latest state.code / state.selected each render.
   const submit = async () => {
     if (!state.selected) return;
     setBusy(true);
