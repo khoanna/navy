@@ -1,2 +1,7 @@
 .claude/
 .superpowers/
+
+# Claude Code skill tooling artifacts
+.adal/
+.agents/
+skills-lock.json
