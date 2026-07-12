@@ -22,7 +22,7 @@ export function FeatureGrid() {
   );
 
   return (
-    <section ref={root} style={{ position: 'relative', zIndex: 1, background: colors.bg, padding: '110px 28px' }}>
+    <section ref={root} style={{ position: 'relative', zIndex: 1, background: 'linear-gradient(180deg, rgba(6,11,23,0.45) 0%, rgba(6,11,23,0.85) 50%, rgba(6,11,23,0.72) 100%)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', padding: '110px 28px' }}>
       <span style={{ fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', color: colors.aqua }}>One ecosystem</span>
       <h2 style={{ margin: '10px 0 40px', fontSize: 'clamp(28px, 4vw, 44px)', color: colors.textHi, letterSpacing: '-0.02em' }}>Everything on board.</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 16, maxWidth: 1040 }}>

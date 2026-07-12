@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import { resolveLinks } from '@/lib/landing/links';
 import { useCapableDevice } from './useCapableDevice';
 import { Nav } from './Nav';
+import { OceanBackdrop } from './OceanBackdrop';
 import { VoyageBeats, StaticStory } from './VoyageBeats';
 import { FeatureGrid } from './FeatureGrid';
 import { FinalCta } from './FinalCta';
@@ -37,6 +38,7 @@ export function LandingClient() {
   return (
     <main>
       <LoadingScreen />
+      <OceanBackdrop />
       <VoyageCanvas />
       <Nav links={links} />
       <section id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '480vh' }}>

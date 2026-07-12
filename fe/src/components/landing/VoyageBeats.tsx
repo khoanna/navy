@@ -108,7 +108,10 @@ export function VoyageBeats({ links }: { links: CtaLinks }) {
         tl.to(beats[i - 1], { autoAlpha: 0, y: -40, duration: 0.6, ease: 'power1.inOut' }, i)
           .fromTo(beats[i], { autoAlpha: 0, y: 40 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: 'power1.inOut' }, i);
       }
-      tl.to({}, { duration: 0.4 }); // small tail so the last beat holds at the end
+      // Fade the final beat out before the pin releases, so no copy lingers over
+      // the feature section / nav as the stage scrolls away.
+      tl.to(beats[beats.length - 1], { autoAlpha: 0, y: -40, duration: 0.6, ease: 'power1.inOut' }, beats.length);
+      tl.to({}, { duration: 0.3 });
 
       // Scroll progress bar along the bottom.
       gsap.fromTo(

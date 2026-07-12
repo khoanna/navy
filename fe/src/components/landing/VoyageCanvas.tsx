@@ -7,6 +7,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import * as THREE from 'three';
 import { Vessel } from './Vessel';
+import { Ocean } from './Ocean';
 import { interpolateScene } from '@/lib/landing/scenes';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -32,11 +33,14 @@ function Rig({ progress }: { progress: React.RefObject<number> }) {
 
   return (
     <>
+      {/* Atmospheric depth — objects fade into the deep-navy horizon. */}
+      <fog attach="fog" args={['#050a14', 9, 26]} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[5, 6, 4]} intensity={1.4} color="#dff0ff" />
       <directionalLight position={[-4, 2, -3]} intensity={0.6} color="#2FE0C2" />
       <Suspense fallback={null}>
         <Vessel ref={vessel} />
+        <Ocean />
         <Environment preset="night" />
       </Suspense>
     </>
@@ -71,7 +75,7 @@ export function VoyageCanvas() {
 
   return (
     <div ref={container} style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
-      <Canvas dpr={[1, 1.5]} camera={{ fov: 42, position: [0, 1.2, 6.5] }} gl={{ antialias: true }}>
+      <Canvas dpr={[1, 1.5]} camera={{ fov: 42, position: [0, 1.2, 6.5] }} gl={{ antialias: true, alpha: true }}>
         <Suspense fallback={null}>
           <Rig progress={progress} />
         </Suspense>
