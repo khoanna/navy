@@ -5,7 +5,7 @@
 export type Vec3 = readonly [number, number, number];
 
 export interface SceneKeyframe {
-  id: 'sail' | 'port' | 'sea' | 'treasure';
+  id: 'sail' | 'port' | 'sea' | 'treasure' | 'ecosystem' | 'finale';
   camPos: Vec3;
   camTarget: Vec3;
   vesselPos: Vec3;
@@ -19,13 +19,18 @@ export interface VoyageFrame {
   vesselRotY: number;
 }
 
-/** The four pinned beats. Tuned so the vessel reframes: front hero -> dolly to
- *  starboard -> side profile travelling -> crane down onto the harbour. */
+/** The six pinned beats. Tuned so the vessel reframes through the voyage: front
+ *  hero -> dolly to starboard (port) -> side profile travelling (open sea) ->
+ *  crane down (treasure) -> pull back so the ecosystem grid reads -> wide hero as
+ *  it sails on (finale). Each keyframe lines up 1:1 with a copy slide in
+ *  VoyageBeats so camera + copy transition together. */
 export const SCENES: readonly SceneKeyframe[] = [
-  { id: 'sail',     camPos: [0, 1.2, 6.5],  camTarget: [0, 0.6, 0],  vesselPos: [0, 0, 0],      vesselRotY: 0.4 },
-  { id: 'port',     camPos: [3.2, 1.0, 4.2], camTarget: [0.4, 0.4, 0], vesselPos: [-0.3, 0, 0],  vesselRotY: 1.2 },
-  { id: 'sea',      camPos: [6.0, 0.8, 0.5], camTarget: [0, 0.4, 0],  vesselPos: [0, -0.1, 0],   vesselRotY: 1.9 },
-  { id: 'treasure', camPos: [1.5, 3.4, 4.0], camTarget: [0, -0.2, 0], vesselPos: [0, -0.3, 0.4], vesselRotY: 2.6 },
+  { id: 'sail',      camPos: [0, 1.2, 6.5],   camTarget: [0, 0.6, 0],   vesselPos: [0, 0, 0],       vesselRotY: 0.4 },
+  { id: 'port',      camPos: [3.2, 1.0, 4.2], camTarget: [0.4, 0.4, 0], vesselPos: [-0.3, 0, 0],    vesselRotY: 1.2 },
+  { id: 'sea',       camPos: [6.0, 0.8, 0.5], camTarget: [0, 0.4, 0],   vesselPos: [0, -0.1, 0],    vesselRotY: 1.9 },
+  { id: 'treasure',  camPos: [1.5, 3.4, 4.0], camTarget: [0, -0.2, 0],  vesselPos: [0, -0.3, 0.4],  vesselRotY: 2.6 },
+  { id: 'ecosystem', camPos: [0, 2.0, 9.2],   camTarget: [0, 0.1, 0],   vesselPos: [0, -0.35, -0.6], vesselRotY: 3.3 },
+  { id: 'finale',    camPos: [0, 1.3, 7.4],   camTarget: [0, 0.5, 0],   vesselPos: [0, -0.1, -1.2], vesselRotY: 4.0 },
 ] as const;
 
 export function clamp(v: number, min: number, max: number): number {

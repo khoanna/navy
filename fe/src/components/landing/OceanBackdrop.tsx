@@ -30,6 +30,14 @@ const MOODS: string[] = [
   'radial-gradient(130% 90% at 70% -10%, rgba(255,200,97,0.24), transparent 55%),' +
     'radial-gradient(120% 100% at 20% 120%, rgba(255,107,131,0.16), transparent 55%),' +
     'linear-gradient(180deg, #0d1020 0%, #070a16 100%)',
+  // ecosystem · calm deep teal-navy
+  'radial-gradient(130% 90% at 50% -15%, rgba(47,224,194,0.14), transparent 55%),' +
+    'radial-gradient(120% 100% at 50% 120%, rgba(31,64,201,0.20), transparent 55%),' +
+    'linear-gradient(180deg, #071019 0%, #050d16 100%)',
+  // finale · aqua horizon
+  'radial-gradient(140% 80% at 50% -20%, rgba(47,224,194,0.22), transparent 55%),' +
+    'radial-gradient(120% 100% at 50% 125%, rgba(79,140,255,0.24), transparent 55%),' +
+    'linear-gradient(180deg, #061320 0%, #040b15 100%)',
 ];
 
 export function OceanBackdrop() {
@@ -45,11 +53,13 @@ export function OceanBackdrop() {
       const tl = gsap.timeline({
         scrollTrigger: { trigger: '#voyage-pin', start: 'top top', end: 'bottom bottom', scrub: 1 },
       });
+      // Same 1:1 sync as VoyageBeats: mood i settles at position i (== progress
+      // i/(n-1)), so the sky/sea mood turns over together with the copy + camera.
       for (let i = 1; i < layers.length; i++) {
-        tl.to(layers[i - 1], { opacity: 0, duration: 0.6, ease: 'none' }, i)
-          .to(layers[i], { opacity: 1, duration: 0.6, ease: 'none' }, i);
+        const at = i - 0.5;
+        tl.to(layers[i - 1], { opacity: 0, duration: 0.5, ease: 'none' }, at)
+          .to(layers[i], { opacity: 1, duration: 0.5, ease: 'none' }, at);
       }
-      tl.to({}, { duration: 0.4 });
     },
     { scope: root },
   );

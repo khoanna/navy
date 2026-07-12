@@ -4,6 +4,7 @@ import { resolveLinks } from '@/lib/landing/links';
 import { useCapableDevice } from './useCapableDevice';
 import { Nav } from './Nav';
 import { OceanBackdrop } from './OceanBackdrop';
+import { TideScrollbar } from './TideScrollbar';
 import { VoyageBeats, StaticStory } from './VoyageBeats';
 import { FeatureGrid } from './FeatureGrid';
 import { FinalCta } from './FinalCta';
@@ -31,23 +32,23 @@ export function LandingClient() {
     );
   }
 
-  // Full path: one fixed 3D canvas + a pinned full-screen stage whose four beats
-  // cross-fade in lockstep with the camera as you scroll #voyage-pin, then normal
-  // flow resumes. #voyage-pin is the scroll runway; the sticky stage holds the
-  // viewport while the timeline transforms it.
+  // Full path: one fixed 3D canvas + a single pinned full-screen stage whose six
+  // beats (story + ecosystem + finale) all cross-fade in lockstep with the camera
+  // as you scroll #voyage-pin — every section uses the same transition. Only the
+  // footer resumes normal flow afterwards. #voyage-pin is the scroll runway; the
+  // sticky stage holds the viewport while the timeline transforms it.
   return (
     <main>
       <LoadingScreen />
       <OceanBackdrop />
       <VoyageCanvas />
       <Nav links={links} />
-      <section id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '480vh' }}>
+      <TideScrollbar />
+      <section id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '620vh' }}>
         <div style={{ position: 'sticky', top: 0, height: '100vh', overflow: 'hidden' }}>
           <VoyageBeats links={links} />
         </div>
       </section>
-      <FeatureGrid />
-      <FinalCta links={links} />
       <Footer links={links} />
     </main>
   );

@@ -4,7 +4,7 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import { colors } from '@/ui/theme';
-import { SCENE_COPY, type SceneCopyItem } from '@/lib/landing/copy';
+import { SCENE_COPY, FEATURES, type SceneCopyItem } from '@/lib/landing/copy';
 import type { CtaLinks } from '@/lib/landing/links';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -41,13 +41,7 @@ function Beat({ c, align, links, hero = false }: { c: SceneCopyItem; align: 'lef
   const right = align === 'right';
   const ctas = beatCta(c.id, links);
   return (
-    <div
-      style={{
-        maxWidth: 540, display: 'flex', flexDirection: 'column',
-        alignItems: right ? 'flex-end' : 'flex-start',
-        textAlign: right ? 'right' : 'left',
-      }}
-    >
+    <div style={{ maxWidth: 540, display: 'flex', flexDirection: 'column', alignItems: right ? 'flex-end' : 'flex-start', textAlign: right ? 'right' : 'left' }}>
       <span style={{ fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: colors.aqua }}>{c.eyebrow}</span>
       {hero ? (
         <h1 style={{ margin: '12px 0 16px', fontSize: 'clamp(40px, 6.4vw, 74px)', lineHeight: 1.0, letterSpacing: '-0.03em', color: colors.textHi }}>{c.title}</h1>
@@ -76,25 +70,74 @@ function Beat({ c, align, links, hero = false }: { c: SceneCopyItem; align: 'lef
   );
 }
 
-/** Beats alternate sides so they clear the centred vessel and give scroll rhythm. */
+/** Beat 5: the ecosystem grid, styled to cross-fade in like the story beats. */
+function EcosystemBeat() {
+  return (
+    <div style={{ maxWidth: 1060, width: '100%' }}>
+      <span style={{ fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: colors.aqua }}>One ecosystem</span>
+      <h2 style={{ margin: '12px 0 32px', fontSize: 'clamp(32px, 4.8vw, 56px)', lineHeight: 1.03, letterSpacing: '-0.025em', color: colors.textHi }}>Everything on board.</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {FEATURES.map((f) => (
+          <div key={f.title} style={{ border: `1px solid ${colors.borderStrong}`, background: 'rgba(10,18,32,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', borderRadius: 16, padding: '22px 20px' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 17, color: colors.textHi }}>{f.title}</h3>
+            <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: colors.textDim }}>{f.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Beat 6: the closing call-to-action. */
+function FinaleBeat({ links }: { links: CtaLinks }) {
+  return (
+    <div style={{ width: '100%', textAlign: 'center' }}>
+      <span style={{ fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: colors.aqua }}>Set sail</span>
+      <h2 style={{ margin: '12px 0 26px', fontSize: 'clamp(38px, 6vw, 68px)', lineHeight: 1.0, letterSpacing: '-0.03em', color: colors.textHi }}>Set sail with Navy.</h2>
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <a href={links.wallet} style={primaryBtn}>Get the wallet</a>
+        <a href={links.merchant} style={secondaryBtn}>For merchants</a>
+      </div>
+    </div>
+  );
+}
+
+/** Story beats alternate sides so they clear the centred vessel. */
 const ALIGN: Array<'left' | 'right'> = ['left', 'right', 'left', 'right'];
 
+/** All slides in order; the 4 story beats then the ecosystem + finale beats.
+ *  Count MUST equal SCENES.length so the crossfade lines up with the camera. */
+function slideNodes(links: CtaLinks) {
+  const story = SCENE_COPY.map((c, i) => ({
+    key: c.id,
+    justify: ALIGN[i] === 'right' ? 'flex-end' : 'flex-start',
+    node: <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />,
+  }));
+  return [
+    ...story,
+    { key: 'ecosystem', justify: 'flex-start', node: <EcosystemBeat /> },
+    { key: 'finale', justify: 'center', node: <FinaleBeat links={links} /> },
+  ];
+}
+
 /**
- * The pinned storytelling layer. All four beats are stacked absolutely inside a
- * sticky full-screen stage; a single scrubbed GSAP timeline cross-fades exactly
- * one beat visible at a time — the "full-screen transform" as you scroll. Runs
- * in lockstep with VoyageCanvas (both scrub the same #voyage-pin range), so the
- * copy and the 3D camera stay in sync.
+ * The pinned storytelling layer. Every slide (story beats + ecosystem + finale)
+ * is stacked absolutely inside the sticky full-screen stage; one scrubbed GSAP
+ * timeline cross-fades exactly one at a time — the full-screen transform. Each
+ * crossfade completes exactly at the matching SCENES camera keyframe (crossfade
+ * i ends at timeline position i, and scrub maps position i -> progress i/(n-1)),
+ * so copy and 3D camera move together. So the SAME transition style applies to
+ * "Everything on board" and the finale as to the story beats.
  */
 export function VoyageBeats({ links }: { links: CtaLinks }) {
   const stage = useRef<HTMLDivElement>(null);
+  const slides = slideNodes(links);
 
   useGSAP(
     () => {
       const beats = gsap.utils.toArray<HTMLElement>('.voyage-beat');
       if (beats.length === 0) return;
 
-      // Start state: first beat shown, the rest hidden (autoAlpha = opacity + visibility).
       gsap.set(beats, { autoAlpha: 0, y: 40 });
       gsap.set(beats[0], { autoAlpha: 1, y: 0 });
 
@@ -102,49 +145,35 @@ export function VoyageBeats({ links }: { links: CtaLinks }) {
         scrollTrigger: { trigger: '#voyage-pin', start: 'top top', end: 'bottom bottom', scrub: 1 },
       });
 
-      // One transition per gap between beats, each on its own integer slot so the
-      // active beat gets a clear "hold" before the next crossfade.
+      // Crossfade i finishes at position i (== camera keyframe i). Total timeline
+      // length is exactly (n-1) so position i maps to scroll progress i/(n-1).
       for (let i = 1; i < beats.length; i++) {
-        tl.to(beats[i - 1], { autoAlpha: 0, y: -40, duration: 0.6, ease: 'power1.inOut' }, i)
-          .fromTo(beats[i], { autoAlpha: 0, y: 40 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: 'power1.inOut' }, i);
+        const at = i - 0.5;
+        tl.to(beats[i - 1], { autoAlpha: 0, y: -40, duration: 0.5, ease: 'power1.inOut' }, at)
+          .fromTo(beats[i], { autoAlpha: 0, y: 40 }, { autoAlpha: 1, y: 0, duration: 0.5, ease: 'power1.inOut' }, at);
       }
-      // Fade the final beat out before the pin releases, so no copy lingers over
-      // the feature section / nav as the stage scrolls away.
-      tl.to(beats[beats.length - 1], { autoAlpha: 0, y: -40, duration: 0.6, ease: 'power1.inOut' }, beats.length);
-      tl.to({}, { duration: 0.3 });
-
-      // Scroll progress bar along the bottom.
-      gsap.fromTo(
-        '.voyage-progress',
-        { scaleX: 0 },
-        { scaleX: 1, ease: 'none', transformOrigin: 'left', scrollTrigger: { trigger: '#voyage-pin', start: 'top top', end: 'bottom bottom', scrub: true } },
-      );
     },
     { scope: stage },
   );
 
   return (
     <div ref={stage} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-      {SCENE_COPY.map((c, i) => (
+      {slides.map((s) => (
         <div
-          key={c.id}
+          key={s.key}
           className="voyage-beat"
-          style={{
-            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-            justifyContent: ALIGN[i] === 'right' ? 'flex-end' : 'flex-start',
-            padding: '0 clamp(28px, 7vw, 120px)',
-          }}
+          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: s.justify, padding: '0 clamp(28px, 7vw, 120px)' }}
         >
-          <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />
+          {s.node}
         </div>
       ))}
-      <div className="voyage-progress" style={{ position: 'absolute', left: 0, bottom: 0, height: 2, width: '100%', transform: 'scaleX(0)', transformOrigin: 'left', background: `linear-gradient(90deg, ${colors.accent}, ${colors.aqua})` }} />
     </div>
   );
 }
 
-/** Non-animated fallback for reduced-motion / mobile / no-WebGL: the same beats
- *  stacked as ordinary full-height sections (no pin, no crossfade). */
+/** Non-animated fallback for reduced-motion / mobile / no-WebGL: the story beats
+ *  stacked as ordinary full-height sections (ecosystem + finale are rendered by
+ *  the standalone FeatureGrid / FinalCta components on that path). */
 export function StaticStory({ links }: { links: CtaLinks }) {
   return (
     <>

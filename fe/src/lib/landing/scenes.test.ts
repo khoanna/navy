@@ -14,13 +14,16 @@ describe('math helpers', () => {
 });
 
 describe('SCENES', () => {
-  it('has four ordered beats', () => {
-    expect(SCENES).toHaveLength(4);
-    expect(SCENES.map((s) => s.id)).toEqual(['sail', 'port', 'sea', 'treasure']);
+  it('has six ordered beats', () => {
+    expect(SCENES).toHaveLength(6);
+    expect(SCENES.map((s) => s.id)).toEqual(['sail', 'port', 'sea', 'treasure', 'ecosystem', 'finale']);
   });
 });
 
 describe('interpolateScene', () => {
+  const last = SCENES.length - 1;
+  const seg = SCENES.length - 1; // segments between keyframes
+
   it('returns the first keyframe at progress 0', () => {
     const f = interpolateScene(0);
     expect(f.camPos).toEqual(SCENES[0].camPos);
@@ -28,14 +31,14 @@ describe('interpolateScene', () => {
   });
   it('returns the last keyframe at progress 1', () => {
     const f = interpolateScene(1);
-    expect(f.camPos).toEqual(SCENES[3].camPos);
+    expect(f.camPos).toEqual(SCENES[last].camPos);
   });
   it('clamps out-of-range progress', () => {
     expect(interpolateScene(-5).camPos).toEqual(SCENES[0].camPos);
-    expect(interpolateScene(9).camPos).toEqual(SCENES[3].camPos);
+    expect(interpolateScene(9).camPos).toEqual(SCENES[last].camPos);
   });
   it('lands exactly on an interior keyframe at its boundary', () => {
-    const f = interpolateScene(1 / 3);
+    const f = interpolateScene(1 / seg); // first interior keyframe
     expect(f.camPos[0]).toBeCloseTo(SCENES[1].camPos[0]);
     expect(f.camPos[1]).toBeCloseTo(SCENES[1].camPos[1]);
     expect(f.camPos[2]).toBeCloseTo(SCENES[1].camPos[2]);
