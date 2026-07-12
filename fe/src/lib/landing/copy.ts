@@ -65,7 +65,18 @@ export function mediaAlignFor(id: SceneCopyItem['id']): 'left' | 'right' {
 /** Static, plausible devnet content for the per-beat product mocks. Strings live
  *  beside the rest of the landing copy so they're editable without touching JSX. */
 export const PRODUCT_MOCKS = {
-  sail: { balance: '$1,248.50', unit: 'USDC · Solana', actions: ['Send', 'Scan', 'Farm'] },
+  sail: {
+    balance: '$1,248.50',
+    wallet: 'Main wallet',
+    network: 'Devnet',
+    change: '+$18.20 · 1.4% today',
+    spark: [8, 11, 9, 13, 12, 17, 15, 21, 19, 24],
+    actions: ['Send', 'Scan', 'Farm'],
+    activity: [
+      { icon: '↓', label: 'Received', sub: 'from 7bF…q2', amount: '+120.00' },
+      { icon: '✦', label: 'Farm yield', sub: 'Save · devnet', amount: '+1.84' },
+    ],
+  },
   port: { merchant: 'Ocean Coffee', amount: '12.00', unit: 'USDC', badges: ['Gasless', '1% fee'], cta: 'Pay 12.00 USDC' },
   sea: {
     event: 'InvoicePaid', sig: '5Qx7…8Kd', status: 'Confirmed',
