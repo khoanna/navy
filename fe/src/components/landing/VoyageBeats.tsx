@@ -70,20 +70,24 @@ function Beat({ c, align, links, hero = false }: { c: SceneCopyItem; align: 'lef
   );
 }
 
-/** Beat 5: the ecosystem grid, styled to cross-fade in like the story beats. */
+/** Beat 5: the ecosystem, as a left-aligned vertical list (clears the vessel and
+ *  keeps the side-aligned rhythm of the story beats). */
 function EcosystemBeat() {
   return (
-    <div style={{ maxWidth: 1060, width: '100%' }}>
+    <div style={{ maxWidth: 460, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       <span style={{ fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: colors.aqua }}>One ecosystem</span>
-      <h2 style={{ margin: '12px 0 32px', fontSize: 'clamp(32px, 4.8vw, 56px)', lineHeight: 1.03, letterSpacing: '-0.025em', color: colors.textHi }}>Everything on board.</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-        {FEATURES.map((f) => (
-          <div key={f.title} style={{ border: `1px solid ${colors.borderStrong}`, background: 'rgba(10,18,32,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', borderRadius: 16, padding: '22px 20px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 17, color: colors.textHi }}>{f.title}</h3>
-            <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: colors.textDim }}>{f.body}</p>
-          </div>
+      <h2 style={{ margin: '12px 0 24px', fontSize: 'clamp(32px, 4.8vw, 56px)', lineHeight: 1.03, letterSpacing: '-0.025em', color: colors.textHi }}>Everything on board.</h2>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, width: '100%', border: `1px solid ${colors.border}`, borderRadius: 16, background: 'rgba(10,18,32,0.5)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
+        {FEATURES.map((f, i) => (
+          <li key={f.title} style={{ display: 'flex', gap: 16, padding: '18px 20px', borderTop: i === 0 ? 'none' : `1px solid ${colors.border}` }}>
+            <span style={{ flex: 'none', fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', color: colors.aqua, fontVariantNumeric: 'tabular-nums', paddingTop: 2 }}>{String(i + 1).padStart(2, '0')}</span>
+            <div>
+              <h3 style={{ margin: '0 0 4px', fontSize: 16, color: colors.textHi }}>{f.title}</h3>
+              <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: colors.textDim }}>{f.body}</p>
+            </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
