@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Raw uncompressed 3D source (ship the optimized navy-opt.glb instead)
+public/navy.glb
