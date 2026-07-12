@@ -38,7 +38,8 @@ export const Vessel = forwardRef<THREE.Group>(function Vessel(_props, ref) {
 
   return (
     <group ref={ref} dispose={null}>
-      <primitive object={cloned} />
+      {/* Scale up so the hero vessel reads large on screen (tunable). */}
+      <primitive object={cloned} scale={1.7} />
     </group>
   );
 });

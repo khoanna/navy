@@ -1,11 +1,9 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { colors } from '@/ui/theme';
 import { resolveLinks } from '@/lib/landing/links';
 import { useCapableDevice } from './useCapableDevice';
 import { Nav } from './Nav';
-import { Hero } from './Hero';
-import { SceneCopy } from './SceneCopy';
+import { VoyageBeats, StaticStory } from './VoyageBeats';
 import { FeatureGrid } from './FeatureGrid';
 import { FinalCta } from './FinalCta';
 import { Footer } from './Footer';
@@ -20,19 +18,11 @@ export function LandingClient() {
   const links = resolveLinks({ walletOrigin: process.env.NEXT_PUBLIC_WEB_WALLET_ORIGIN });
 
   if (!capable) {
-    // Static path: poster hero + plain stacked sections, no canvas/scroll rig.
+    // Static path: the story beats stacked as ordinary full-height sections.
     return (
       <main>
         <Nav links={links} />
-        <div
-          style={{
-            minHeight: '100vh',
-            backgroundImage: `linear-gradient(180deg, rgba(6,11,23,0.2), ${colors.bg}), url(/navy-poster.webp)`,
-            backgroundSize: 'cover', backgroundPosition: 'center',
-          }}
-        >
-          <Hero links={links} />
-        </div>
+        <StaticStory links={links} />
         <FeatureGrid />
         <FinalCta links={links} />
         <Footer links={links} />
@@ -40,18 +30,20 @@ export function LandingClient() {
     );
   }
 
-  // Full path: pinned canvas behind the four beats, then normal flow.
+  // Full path: one fixed 3D canvas + a pinned full-screen stage whose four beats
+  // cross-fade in lockstep with the camera as you scroll #voyage-pin, then normal
+  // flow resumes. #voyage-pin is the scroll runway; the sticky stage holds the
+  // viewport while the timeline transforms it.
   return (
     <main>
       <LoadingScreen />
       <VoyageCanvas />
       <Nav links={links} />
-      <div id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '400vh' }}>
-        <div style={{ position: 'sticky', top: 0 }}>
-          <Hero links={links} />
+      <section id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '480vh' }}>
+        <div style={{ position: 'sticky', top: 0, height: '100vh', overflow: 'hidden' }}>
+          <VoyageBeats links={links} />
         </div>
-        <SceneCopy />
-      </div>
+      </section>
       <FeatureGrid />
       <FinalCta links={links} />
       <Footer links={links} />
