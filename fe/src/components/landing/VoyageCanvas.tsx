@@ -12,7 +12,7 @@ import { interpolateScene } from '@/lib/landing/scenes';
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 /** Drives the camera + vessel from a shared scroll-progress ref each frame. */
-function Rig({ progress }: { progress: React.MutableRefObject<number> }) {
+function Rig({ progress }: { progress: React.RefObject<number> }) {
   const vessel = useRef<THREE.Group>(null);
   const { camera } = useThree();
   const target = useRef(new THREE.Vector3());
