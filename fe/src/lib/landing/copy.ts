@@ -51,3 +51,25 @@ export const FEATURES: readonly Feature[] = [
   { title: 'Farming', body: 'Put idle balance to work with guarded, non-custodial yield.' },
   { title: 'Security', body: 'Envelope-encrypted keys, authoritative on-chain policy checks.' },
 ] as const;
+
+/** Which side the copy sits on per story beat (index-aligned to SCENE_COPY).
+ *  Lives here so both VoyageBeats and mediaAlignFor share one source of truth. */
+export const ALIGN: ReadonlyArray<'left' | 'right'> = ['left', 'right', 'left', 'right'];
+
+/** The product mock floats on the edge OPPOSITE the copy, clearing the vessel. */
+export function mediaAlignFor(id: SceneCopyItem['id']): 'left' | 'right' {
+  const i = SCENE_COPY.findIndex((c) => c.id === id);
+  return (ALIGN[i] ?? 'left') === 'left' ? 'right' : 'left';
+}
+
+/** Static, plausible devnet content for the per-beat product mocks. Strings live
+ *  beside the rest of the landing copy so they're editable without touching JSX. */
+export const PRODUCT_MOCKS = {
+  sail: { balance: '$1,248.50', unit: 'USDC · Solana', actions: ['Send', 'Scan', 'Farm'] },
+  port: { merchant: 'Ocean Coffee', amount: '12.00', unit: 'USDC', badges: ['Gasless', '1% fee'], cta: 'Pay 12.00 USDC' },
+  sea: {
+    event: 'InvoicePaid', sig: '5Qx7…8Kd', status: 'Confirmed',
+    rows: [['Amount', '12.00 USDC'], ['Fee', '0.12 USDC'], ['Payer', '9aF2…tuv']],
+  },
+  treasure: { protocol: 'Save · devnet', apy: '5.2%', principal: '820.00 USDC', badges: ['Non-custodial', 'Policy-guarded'] },
+} as const;
