@@ -4,8 +4,9 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import { colors } from '@/ui/theme';
-import { SCENE_COPY, FEATURES, type SceneCopyItem } from '@/lib/landing/copy';
+import { SCENE_COPY, FEATURES, ALIGN, mediaAlignFor, type SceneCopyItem } from '@/lib/landing/copy';
 import type { CtaLinks } from '@/lib/landing/links';
+import { ProductMock } from './product/ProductMock';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -92,9 +93,10 @@ function EcosystemBeat() {
   );
 }
 
-/** Beat 6: the closing call-to-action. Copy lives in the upper third so the
- *  vessel (brought forward + lower in the finale keyframe) reads as the hero
- *  beneath it, rather than colliding with the text. */
+/** Beat 6: the closing call-to-action. Copy is centred in the upper band (see
+ *  the finale slide's bottom padding) so the vessel — framed on the waterline in
+ *  the lower third — reads as the hero beneath it, rather than colliding with the
+ *  text. */
 function FinaleBeat({ links }: { links: CtaLinks }) {
   return (
     <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', textAlign: 'center' }}>
@@ -109,23 +111,43 @@ function FinaleBeat({ links }: { links: CtaLinks }) {
   );
 }
 
-/** Story beats alternate sides so they clear the centred vessel. */
-const ALIGN: Array<'left' | 'right'> = ['left', 'right', 'left', 'right'];
+/** A story beat plus its product mock. The copy stays exactly as before (edge-
+ *  aligned by the slide container); the mock is an absolutely-positioned layer on
+ *  the OPPOSITE edge, so it clears the centred vessel and collapses out below
+ *  1024px (.voyage-media hide rule) leaving today's single-column layout intact. */
+function BeatWithMedia({ c, align, links, hero = false }: { c: SceneCopyItem; align: 'left' | 'right'; links: CtaLinks; hero?: boolean }) {
+  const mediaSide = mediaAlignFor(c.id);
+  return (
+    <>
+      <Beat c={c} align={align} links={links} hero={hero} />
+      <div
+        className="voyage-media"
+        style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', [mediaSide]: 'clamp(28px, 7vw, 120px)' }}
+      >
+        <ProductMock id={c.id} />
+      </div>
+    </>
+  );
+}
 
 /** All slides in order; the 4 story beats then the ecosystem + finale beats.
  *  Count MUST equal SCENES.length so the crossfade lines up with the camera. */
 function slideNodes(links: CtaLinks) {
+  const sidePad = '0 clamp(28px, 7vw, 120px)';
   const story = SCENE_COPY.map((c, i) => ({
     key: c.id,
     justify: ALIGN[i] === 'right' ? 'flex-end' : 'flex-start',
     items: 'center',
-    node: <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />,
+    pad: sidePad,
+    node: <BeatWithMedia c={c} align={ALIGN[i]} links={links} hero={i === 0} />,
   }));
   return [
     ...story,
-    { key: 'ecosystem', justify: 'flex-start', items: 'center', node: <EcosystemBeat /> },
-    // Finale copy sits high so the hero vessel has the lower half of the frame.
-    { key: 'finale', justify: 'center', items: 'flex-start', node: <FinaleBeat links={links} /> },
+    { key: 'ecosystem', justify: 'flex-start', items: 'center', pad: sidePad, node: <EcosystemBeat /> },
+    // Finale copy is centred within the UPPER band of the frame (big bottom pad
+    // reserves the lower half for the hero vessel), so it breathes below the nav
+    // and clears the mast rather than colliding with it or pinning to the top.
+    { key: 'finale', justify: 'center', items: 'center', pad: '0 clamp(28px, 7vw, 120px) 48vh', node: <FinaleBeat links={links} /> },
   ];
 }
 
@@ -171,7 +193,7 @@ export function VoyageBeats({ links }: { links: CtaLinks }) {
         <div
           key={s.key}
           className="voyage-beat"
-          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: s.items, justifyContent: s.justify, padding: s.items === 'flex-start' ? '8vh clamp(28px, 7vw, 120px) 0' : '0 clamp(28px, 7vw, 120px)' }}
+          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: s.items, justifyContent: s.justify, padding: s.pad }}
         >
           {s.node}
         </div>
@@ -198,7 +220,10 @@ export function StaticStory({ links }: { links: CtaLinks }) {
               : { background: colors.bg }),
           }}
         >
-          <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 32, alignItems: ALIGN[i] === 'right' ? 'flex-end' : 'flex-start' }}>
+            <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />
+            <ProductMock id={c.id} />
+          </div>
         </section>
       ))}
     </>
