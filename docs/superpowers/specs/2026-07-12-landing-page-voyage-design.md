@@ -27,11 +27,11 @@ Success = a premium, on-brand hero experience that (a) feels like one product wi
 - **Known issues, fixed in-engine (Path A — no regeneration):**
   1. Hull underside is off-brand lime-green → **retint that material** at load to deep navy with an aqua waterline.
   2. Sail can read flat from some angles → give the sail material a subtle **emissive aqua** so the glow holds through a 360° scroll.
-- **Asset weight — optimize, but quality-first:** the raw GLB is **79 MB**, too heavy to ship, but we must NOT crush quality (the premium look is the point). A build/prep step optimizes it *without visible degradation*:
-  - Run **gltf-transform**: geometry via **meshopt** (`EXT_meshopt_compression` — better quality/ratio than Draco for detailed hulls) + **KTX2/Basis** textures at **2048** (drop to 1024 only if a texture shows no visible loss at hero size), `dedupe`, `prune`, `weld`, `instance`.
-  - **Target: ~6–12 MB** committed as `fe/public/navy-opt.glb`. This is a quality budget, not a hard cap — favour keeping crisp textures over hitting a smaller number. The 79 MB raw is NOT shipped (gitignore / remove after optimizing).
-  - Compare optimized vs raw side-by-side before accepting; if hull/sail detail visibly softens, back off compression on that pass.
-  - Load with drei `useGLTF` + the matching decoder (`MeshoptDecoder`); `useGLTF.preload`.
+- **Asset weight — quality-first, light optimization only:** the raw GLB is **79 MB**. Per explicit direction, we keep quality high and only lightly optimize — **target ~40–50 MB** committed as `fe/public/navy-opt.glb`.
+  - Run **gltf-transform** with *conservative* settings: `dedupe`, `prune`, `weld`, `instance`, and **meshopt** geometry compression (lossless-feeling). Keep textures at their native/2048 resolution — do NOT downscale or heavily recompress textures (that's where visible quality is lost).
+  - Compare optimized vs raw side-by-side; if anything softens, ease off. Size is the low-priority knob here.
+  - **Tradeoff (accepted):** ~40–50 MB means a real first-load wait (~10–40s depending on connection). This is deliberately covered by the branded loading screen (below) + `useGLTF.preload` + HTTP caching so repeat visits are instant. The 79 MB raw is NOT shipped (gitignore / remove after optimizing).
+  - Load with drei `useGLTF` + `MeshoptDecoder`; `useGLTF.preload`.
 - Optional idle sail flutter is done in-engine (gentle transform/shader), not a baked rig.
 
 ## 4. Page structure (six beats)
@@ -95,6 +95,6 @@ Scenes **1–4 share one pinned `<canvas>`**; ScrollTrigger scrub interpolates t
 
 ## 9. Risks
 
-- **GLB weight (primary).** Mitigated by the quality-first optimization (~6–12 MB), the branded loading screen that covers the wait gracefully, and the poster fallback on non-capable devices. Quality is prioritized over size; on mobile the static poster path avoids the heavy download entirely.
+- **GLB weight (primary, accepted).** ~40–50 MB by choice (quality over size). Mitigated by the branded loading screen that covers the first-load wait, `useGLTF.preload` + HTTP caching for instant repeat visits, and the static poster fallback on non-capable/mobile devices (which skip the heavy download entirely).
 - **r3f/three + Next 16 bundling** (Buffer/WebGL). Mitigated by `ssr:false` dynamic import and the `pnpm build` runtime gate (same lesson as web-wallet).
 - **Scroll jank on weak devices.** Mitigated by the capability gate + `dpr` cap.
