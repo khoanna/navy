@@ -21,8 +21,9 @@ export interface VoyageFrame {
 
 /** The six pinned beats. Tuned so the vessel reframes through the voyage: front
  *  hero -> dolly to starboard (port) -> side profile travelling (open sea) ->
- *  crane down (treasure) -> pull back so the ecosystem grid reads -> wide hero as
- *  it sails on (finale). Each keyframe lines up 1:1 with a copy slide in
+ *  crane down (treasure) -> pull back so the ecosystem grid reads -> wide hero,
+ *  vessel on the waterline in the lower third, as it sails on (finale). Each
+ *  keyframe lines up 1:1 with a copy slide in
  *  VoyageBeats so camera + copy transition together. */
 export const SCENES: readonly SceneKeyframe[] = [
   { id: 'sail',      camPos: [0, 1.2, 6.5],   camTarget: [0, 0.6, 0],   vesselPos: [0, 0, 0],       vesselRotY: 0.4 },
@@ -30,7 +31,7 @@ export const SCENES: readonly SceneKeyframe[] = [
   { id: 'sea',       camPos: [6.0, 0.8, 0.5], camTarget: [0, 0.4, 0],   vesselPos: [0, -0.1, 0],    vesselRotY: 1.9 },
   { id: 'treasure',  camPos: [1.5, 3.4, 4.0], camTarget: [0, -0.2, 0],  vesselPos: [0, -0.3, 0.4],  vesselRotY: 2.6 },
   { id: 'ecosystem', camPos: [0, 2.0, 9.2],   camTarget: [0, 0.1, 0],   vesselPos: [0, -0.35, -0.6], vesselRotY: 3.3 },
-  { id: 'finale',    camPos: [0, 2.2, 5.8],   camTarget: [0, -1.3, 0],  vesselPos: [0, -1.6, 0.2], vesselRotY: 4.0 },
+  { id: 'finale',    camPos: [0, 1.5, 7.4],   camTarget: [0, 1.0, 0],   vesselPos: [0, -0.15, 0.2], vesselRotY: 4.0 },
 ] as const;
 
 export function clamp(v: number, min: number, max: number): number {

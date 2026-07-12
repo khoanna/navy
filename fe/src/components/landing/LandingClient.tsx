@@ -1,4 +1,5 @@
 'use client';
+import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { resolveLinks } from '@/lib/landing/links';
 import { useCapableDevice } from './useCapableDevice';
@@ -10,6 +11,7 @@ import { FeatureGrid } from './FeatureGrid';
 import { FinalCta } from './FinalCta';
 import { Footer } from './Footer';
 import { LoadingScreen } from './LoadingScreen';
+import { VoyageLoader } from './VoyageLoader';
 
 // Canvas is client-only + code-split so the heavy 3D bundle never ships to the
 // static path (mobile / reduced-motion / no-WebGL).
@@ -19,11 +21,30 @@ export function LandingClient() {
   const capable = useCapableDevice();
   const links = resolveLinks({ walletOrigin: process.env.NEXT_PUBLIC_WEB_WALLET_ORIGIN });
 
+  // The full path renders its own TideScrollbar, so suppress the native document
+  // scrollbar there (scoped to this page — dashboards keep theirs).
+  useEffect(() => {
+    if (!capable) return;
+    document.documentElement.classList.add('landing-no-scrollbar');
+    return () => document.documentElement.classList.remove('landing-no-scrollbar');
+  }, [capable]);
+
+  if (capable === null) {
+    // Undetermined: device capability can only be probed on the client, so this
+    // is what SSR + first paint render. Show the branded loader (not the static
+    // page) so there's no flash before we know which path to take.
+    return (
+      <main>
+        <VoyageLoader indeterminate />
+      </main>
+    );
+  }
+
   if (!capable) {
     // Static path: the story beats stacked as ordinary full-height sections.
     return (
       <main>
-        <Nav links={links} />
+        <Nav />
         <StaticStory links={links} />
         <FeatureGrid />
         <FinalCta links={links} />
@@ -42,7 +63,7 @@ export function LandingClient() {
       <LoadingScreen />
       <OceanBackdrop />
       <VoyageCanvas />
-      <Nav links={links} />
+      <Nav />
       <TideScrollbar />
       <section id="voyage-pin" style={{ position: 'relative', zIndex: 1, height: '620vh' }}>
         <div style={{ position: 'sticky', top: 0, height: '100vh', overflow: 'hidden' }}>

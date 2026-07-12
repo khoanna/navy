@@ -1,13 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-/** Returns true only when the device should run the full 3D/scroll experience:
- *  a wide-enough viewport, no reduced-motion preference, and working WebGL.
- *  Returns false during SSR/first paint so the static path renders first, then
- *  upgrades on the client if capable (avoids shipping the heavy canvas to
- *  phones / reduced-motion users). */
-export function useCapableDevice(): boolean {
-  const [capable, setCapable] = useState(false);
+/** Returns whether the device should run the full 3D/scroll experience: a
+ *  wide-enough viewport, no reduced-motion preference, and working WebGL.
+ *
+ *  Returns `null` during SSR/first paint — capability can only be probed on the
+ *  client, so callers must render a neutral loader for `null` rather than
+ *  assuming the static path. Assuming `false` up front renders the static page
+ *  into the SSR HTML, which then flashes before upgrading to the canvas path. */
+export function useCapableDevice(): boolean | null {
+  const [capable, setCapable] = useState<boolean | null>(null);
 
   useEffect(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
