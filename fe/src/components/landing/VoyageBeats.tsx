@@ -92,12 +92,15 @@ function EcosystemBeat() {
   );
 }
 
-/** Beat 6: the closing call-to-action. */
+/** Beat 6: the closing call-to-action. Copy lives in the upper third so the
+ *  vessel (brought forward + lower in the finale keyframe) reads as the hero
+ *  beneath it, rather than colliding with the text. */
 function FinaleBeat({ links }: { links: CtaLinks }) {
   return (
-    <div style={{ width: '100%', textAlign: 'center' }}>
+    <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', textAlign: 'center' }}>
       <span style={{ fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: colors.aqua }}>Set sail</span>
-      <h2 style={{ margin: '12px 0 26px', fontSize: 'clamp(38px, 6vw, 68px)', lineHeight: 1.0, letterSpacing: '-0.03em', color: colors.textHi }}>Set sail with Navy.</h2>
+      <h2 style={{ margin: '14px 0 18px', fontSize: 'clamp(40px, 6.6vw, 78px)', lineHeight: 1.0, letterSpacing: '-0.03em', color: colors.textHi }}>Set sail with Navy.</h2>
+      <p style={{ margin: '0 auto 28px', maxWidth: 460, fontSize: 17, lineHeight: 1.5, color: colors.text }}>Your payments, wallet, and yield — all aboard one voyage.</p>
       <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
         <a href={links.wallet} style={primaryBtn}>Get the wallet</a>
         <a href={links.merchant} style={secondaryBtn}>For merchants</a>
@@ -115,12 +118,14 @@ function slideNodes(links: CtaLinks) {
   const story = SCENE_COPY.map((c, i) => ({
     key: c.id,
     justify: ALIGN[i] === 'right' ? 'flex-end' : 'flex-start',
+    items: 'center',
     node: <Beat c={c} align={ALIGN[i]} links={links} hero={i === 0} />,
   }));
   return [
     ...story,
-    { key: 'ecosystem', justify: 'flex-start', node: <EcosystemBeat /> },
-    { key: 'finale', justify: 'center', node: <FinaleBeat links={links} /> },
+    { key: 'ecosystem', justify: 'flex-start', items: 'center', node: <EcosystemBeat /> },
+    // Finale copy sits high so the hero vessel has the lower half of the frame.
+    { key: 'finale', justify: 'center', items: 'flex-start', node: <FinaleBeat links={links} /> },
   ];
 }
 
@@ -166,7 +171,7 @@ export function VoyageBeats({ links }: { links: CtaLinks }) {
         <div
           key={s.key}
           className="voyage-beat"
-          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: s.justify, padding: '0 clamp(28px, 7vw, 120px)' }}
+          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: s.items, justifyContent: s.justify, padding: s.items === 'flex-start' ? '8vh clamp(28px, 7vw, 120px) 0' : '0 clamp(28px, 7vw, 120px)' }}
         >
           {s.node}
         </div>
