@@ -23,11 +23,11 @@ function short(a: string) {
 }
 
 export default function Farming() {
-  const { session } = useNavySession();
+  const { session, authedFetch } = useNavySession();
   const { address } = useMobileSigner();
   const toast = useToast();
   const token = session?.tokens.accessToken;
-  const client = new FarmingClient(getEnv().navyApiUrl);
+  const client = new FarmingClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
 
   const [pos, setPos] = useState<Position | null>(null);
   const [busy, setBusy] = useState(false);

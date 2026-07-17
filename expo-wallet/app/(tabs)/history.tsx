@@ -85,7 +85,7 @@ type ListItem =
 // ── screen ─────────────────────────────────────────────────────────────────
 
 export default function History() {
-  const { session } = useNavySession();
+  const { session, authedFetch } = useNavySession();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -98,7 +98,7 @@ export default function History() {
     if (!token) return;
     try {
       setPayments(
-        await new NavyPayClient(getEnv().navyApiUrl).getUserPayments(token),
+        await new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined).getUserPayments(token),
       );
     } catch {
       setPayments([]);

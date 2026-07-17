@@ -30,7 +30,7 @@ import { FundButton } from '@/features/wallet/FundButton';
 
 export default function Home() {
   const router = useRouter();
-  const { session } = useNavySession();
+  const { session, authedFetch } = useNavySession();
   const { address } = useMobileSigner();
   const token = session?.tokens.accessToken;
 
@@ -56,7 +56,7 @@ export default function Home() {
     }
     if (token) {
       try {
-        const list = await new NavyPayClient(getEnv().navyApiUrl).getUserPayments(token);
+        const list = await new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined).getUserPayments(token);
         setRecent(list.slice(0, 3));
       } catch {
         setRecent([]);
