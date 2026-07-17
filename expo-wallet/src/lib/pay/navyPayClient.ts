@@ -38,7 +38,19 @@ export interface PaymentAuthorization {
 }
 
 export class NavyPayClient {
-  constructor(private readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {}
+  /**
+   * @param baseUrl       - Navy API base URL.
+   * @param fetchImpl     - Underlying fetch (injected in tests; defaults to global fetch).
+   * @param authedFetchFn - Optional pre-wired authed fetch returned by `makeAuthedFetch`.
+   *                        When provided, authenticated endpoints route through it so the
+   *                        Navy access token is auto-refreshed on 401.  When omitted the
+   *                        caller-supplied bearer token is used as-is (legacy / test path).
+   */
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly authedFetchFn?: (url: string, init?: RequestInit) => Promise<Response>,
+  ) {}
 
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init });
@@ -56,7 +68,38 @@ export class NavyPayClient {
     return (await res.json()) as T;
   }
 
+  /**
+   * Perform an authenticated request, using the auto-refresh helper when available.
+   * The `navyAccessToken` arg is the *current* token — it is passed to the non-wired
+   * path so existing callers and tests continue to work without change.
+   */
+  private async authedJson<T>(path: string, navyAccessToken: string, init?: RequestInit): Promise<T> {
+    if (this.authedFetchFn) {
+      // The authedFetchFn injects the Authorization header itself; strip any stale one.
+      const { Authorization: _a, authorization: _b, ...restHeaders } =
+        (init?.headers as Record<string, string> | undefined) ?? {};
+      const res = await this.authedFetchFn(`${this.baseUrl}${path}`, { ...init, headers: restHeaders });
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const body = await res.json();
+          detail = (body && (body.message || body.error)) ? `: ${body.message ?? body.error}` : '';
+        } catch {
+          try { const t = (await res.text()).trim(); if (t) detail = `: ${t}`; } catch { /* ignore */ }
+        }
+        throw new Error(`Navy API ${path} failed (HTTP ${res.status})${detail}`);
+      }
+      return (await res.json()) as T;
+    }
+    // Legacy path (no authedFetchFn): forward the token as a header directly.
+    return this.json<T>(path, {
+      ...init,
+      headers: { ...(init?.headers as Record<string, string> | undefined), Authorization: `Bearer ${navyAccessToken}` },
+    });
+  }
+
   getOrder(id: string): Promise<OrderSummary> {
+    // Public endpoint — no auth required.
     return this.json(`/v1/orders/${encodeURIComponent(id)}`);
   }
   /**
@@ -64,19 +107,17 @@ export class NavyPayClient {
    * The backend derives the payer (`message.from`) from the Navy user token.
    */
   getPaymentAuthorization(id: string, navyAccessToken: string): Promise<PaymentAuthorization> {
-    return this.json(`/v1/orders/${encodeURIComponent(id)}/payment-authorization`, {
-      headers: { Authorization: `Bearer ${navyAccessToken}` },
-    });
+    return this.authedJson(`/v1/orders/${encodeURIComponent(id)}/payment-authorization`, navyAccessToken);
   }
   /** Submit the 65-byte (0x…) EIP-712 signature; the relayer broadcasts the tx. */
   submitSignature(id: string, signature: string, navyAccessToken: string): Promise<{ txHash: string; status: string }> {
-    return this.json(`/v1/orders/${encodeURIComponent(id)}/submit`, {
+    return this.authedJson(`/v1/orders/${encodeURIComponent(id)}/submit`, navyAccessToken, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${navyAccessToken}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ signature }),
     });
   }
   getUserPayments(navyAccessToken: string): Promise<Payment[]> {
-    return this.json('/user/payments', { headers: { Authorization: `Bearer ${navyAccessToken}` } });
+    return this.authedJson('/user/payments', navyAccessToken);
   }
 }

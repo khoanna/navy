@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useHeadlessDelegatedActions } from '@privy-io/expo';
 
@@ -15,9 +15,15 @@ import { IconBadge } from '@/ui/Bits';
 import { colors, space } from '@/ui/theme';
 
 export function AutoFarmToggle() {
-  const { session } = useNavySession();
+  const { session, authedFetch } = useNavySession();
   const token = session?.tokens.accessToken;
-  const client = new FarmingClient(getEnv().navyApiUrl);
+  // Wire the FarmingClient with the session's auto-refresh fetcher so any call
+  // that hits a 401 (expired access token) transparently refreshes and retries.
+  const client = useMemo(
+    () => new FarmingClient(getEnv().navyApiUrl, globalThis.fetch.bind(globalThis), authedFetch ?? undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [authedFetch],
+  );
 
   const { address } = useMobileSigner();
   const { delegateWallet, revokeWallets } = useHeadlessDelegatedActions();

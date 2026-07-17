@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState,
 import { usePrivy } from '@privy-io/expo';
 import { getEnv } from '@/lib/config/env';
 import { NavyClient } from '@/lib/api/navyClient';
+import { makeAuthedFetch } from '@/lib/api/authedFetch';
 import { TokenStore, secureStoreBackend } from './tokenStore';
 import { SessionManager } from './session';
 import { NavySession } from './types';
@@ -11,6 +12,14 @@ interface SessionContextValue {
   initializing: boolean;
   establishFromPrivy: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * A bound fetch function that automatically attaches the Navy bearer token
+   * and retries with a refreshed token on 401.  Pass this (as `authedFetchFn`)
+   * to `NavyPayClient` and `FarmingClient` constructors for session-aware clients.
+   *
+   * `null` when there is no active session (no tokens yet).
+   */
+  authedFetch: ((url: string, init?: RequestInit) => Promise<Response>) | null;
 }
 
 const Ctx = createContext<SessionContextValue | null>(null);
@@ -20,16 +29,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   // authentication is derived from `user != null` (UsePrivy: { user, isReady, getAccessToken, logout }).
   const { isReady, user, getAccessToken, logout } = usePrivy();
   const authenticated = !!user;
+
+  const env = useMemo(() => getEnv(), []);
+
   const manager = useMemo(() => {
-    const env = getEnv();
     return new SessionManager(new NavyClient(env.navyApiUrl), new TokenStore(secureStoreBackend()));
-  }, []);
+  }, [env]);
+
+  const store = useMemo(() => new TokenStore(secureStoreBackend()), []);
 
   const [session, setSession] = useState<NavySession | null>(null);
   const [initializing, setInitializing] = useState(true);
   // Latched once we begin/complete an auto-establish for the current Privy auth,
   // so a failed establish does not hot-loop. Reset only when Privy auth drops.
   const establishingRef = useRef(false);
+
+  // Stable ref to the latest session tokens so the authed-fetch callbacks always
+  // read the current value without needing the session in their dependency arrays.
+  const sessionRef = useRef<NavySession | null>(null);
+  sessionRef.current = session;
 
   useEffect(() => {
     let active = true;
@@ -80,8 +98,37 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isReady, authenticated, session, manager]);
 
+  /**
+   * A bound authed-fetch helper that:
+   *  1. Reads the CURRENT access/refresh tokens from the session ref (not a stale closure).
+   *  2. On 401, calls POST /auth/refresh to rotate tokens.
+   *  3. Persists the new tokens to SecureStore and updates the in-memory session state.
+   *  4. Retries the original request with the new access token.
+   *  5. On refresh failure, signs the user out.
+   *
+   * Recreated only when the env changes (stable across re-renders).
+   */
+  const authedFetchFn = useMemo<((url: string, init?: RequestInit) => Promise<Response>) | null>(() => {
+    return makeAuthedFetch({
+      fetchImpl: globalThis.fetch.bind(globalThis),
+      baseUrl: env.navyApiUrl,
+      getAccessToken: () => sessionRef.current?.tokens.accessToken ?? '',
+      getRefreshToken: () => sessionRef.current?.tokens.refreshToken ?? '',
+      onTokens: async (accessToken, refreshToken) => {
+        const newSession: NavySession = { tokens: { accessToken, refreshToken } };
+        await store.save(newSession.tokens);
+        setSession(newSession);
+      },
+      onSignOut: async () => {
+        await manager.clear();
+        await logout();
+        setSession(null);
+      },
+    });
+  }, [env, store, manager, logout]);
+
   return (
-    <Ctx.Provider value={{ session, initializing, establishFromPrivy, signOut }}>
+    <Ctx.Provider value={{ session, initializing, establishFromPrivy, signOut, authedFetch: authedFetchFn }}>
       {children}
     </Ctx.Provider>
   );
