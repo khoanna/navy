@@ -8,7 +8,7 @@ import {
 } from './recovery';
 
 function userWith(recovery_method: string | undefined): User {
-  const wallet: any = { type: 'wallet', wallet_client_type: 'privy', chain_type: 'solana' };
+  const wallet: any = { type: 'wallet', wallet_client_type: 'privy', chain_type: 'ethereum' };
   if (recovery_method !== undefined) wallet.recovery_method = recovery_method;
   return { id: 'did', created_at: 0, linked_accounts: [wallet] } as unknown as User;
 }

@@ -27,7 +27,7 @@ export function recoveryMethodLabel(method: RecoveryMethod): string {
 export function currentRecoveryState(user: User | null): { isSet: boolean; method: RecoveryMethod | null } {
   if (!user) return { isSet: false, method: null };
   const wallet = user.linked_accounts.find(
-    (a: any) => a.type === 'wallet' && a.wallet_client_type === 'privy' && a.chain_type === 'solana',
+    (a: any) => a.type === 'wallet' && a.wallet_client_type === 'privy' && a.chain_type === 'ethereum',
   ) as any;
   const rm = wallet?.recovery_method as string | undefined;
   if (rm === 'user-passcode' || rm === 'icloud' || rm === 'google-drive') {
