@@ -14,7 +14,7 @@ export const SCENE_COPY: readonly SceneCopyItem[] = [
     id: 'sail',
     eyebrow: 'Set sail',
     title: 'Payments, set to sea.',
-    body: 'A Solana payment ecosystem — the gateway, the wallet, and yield, in one voyage.',
+    body: 'An EVM payment ecosystem — the gateway, the wallet, and yield, in one voyage.',
     points: [],
   },
   {
@@ -22,11 +22,11 @@ export const SCENE_COPY: readonly SceneCopyItem[] = [
     eyebrow: 'Port of trade · Merchants',
     title: 'Get paid in seconds.',
     body: 'Accept digital dollars with a gasless, replay-proof checkout.',
-    points: ['USDC on Solana', '1% flat fee', 'Gasless for payers', 'Instant settlement + webhook'],
+    points: ['USDC on Ethereum', '1% flat fee', 'Gasless for payers', 'Instant settlement + webhook'],
   },
   {
     id: 'sea',
-    eyebrow: 'Open sea · Solana',
+    eyebrow: 'Open sea · Ethereum',
     title: 'Settled on-chain, fast.',
     body: 'Every order settles only after its on-chain payment event is confirmed.',
     points: ['Sub-second finality', 'On-chain proof', 'Amount + payer reconciled'],

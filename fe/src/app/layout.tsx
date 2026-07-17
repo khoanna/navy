@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'Navy — Payments, set to sea',
-  description: 'A Solana payment ecosystem: gateway, wallet, and yield in one voyage.',
+  description: 'An EVM payment ecosystem: gateway, wallet, and yield in one voyage.',
 };
 
 export default function RootLayout({
