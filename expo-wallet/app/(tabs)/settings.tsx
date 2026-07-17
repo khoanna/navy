@@ -314,8 +314,8 @@ export default function Settings() {
         <Row
           icon="shield"
           title="Network"
-          subtitle="Solana devnet"
-          trailing={<Text variant="caption" muted>Devnet</Text>}
+          subtitle="Ethereum Sepolia"
+          trailing={<Text variant="caption" muted>Sepolia</Text>}
         />
         <Row icon="key" title="Version" subtitle="Navy Wallet 1.0.0" />
       </Card>

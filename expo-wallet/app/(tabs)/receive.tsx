@@ -115,7 +115,7 @@ export default function Receive() {
       {/* Chain hint */}
       <Card glass compact style={styles.hint}>
         <Text variant="caption" color={colors.text}>
-          Only send SOL or USDC (SPL) on Solana devnet to this address.
+          Only send ETH or USDC (ERC-20) on Ethereum Sepolia to this address.
         </Text>
       </Card>
     </Screen>

@@ -85,6 +85,11 @@ export default function PayScreen() {
         signTypedData,
         expectedSigner: address,
       });
+      if (res.status === 'failed') {
+        toast('Payment failed on-chain');
+        setSlideReset((n) => n + 1);
+        return;
+      }
       toast(`Payment sent: ${res.txHash.slice(0, 16)}…`);
       setConfirming(false);
       setPaid(true);
