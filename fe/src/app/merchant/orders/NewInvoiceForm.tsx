@@ -30,11 +30,13 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
   const [result, setResult] = useState<{ orderId: string; reference: string; qr: string; payUrl: string } | null>(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [payoutConfigured, setPayoutConfigured] = useState<boolean | null>(null);
   const submittingRef = useRef(false);
 
   useEffect(() => {
     fetch('/api/merchant/products').then((r) => r.ok ? r.json() : []).then((all: Product[]) => setProducts(all.filter((p) => p.active)));
     fetch('/api/merchant/charges').then((r) => r.ok ? r.json() : []).then((c: Charge[]) => setCharges(c));
+    fetch('/api/merchant/stats').then((r) => r.ok ? r.json() : {}).then((s: { payoutConfigured?: boolean }) => setPayoutConfigured(!!s.payoutConfigured));
   }, []);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -74,6 +76,21 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
         <img src={result.qr} alt="payment QR" width={220} height={220} style={{ borderRadius: radius.md, background: '#fff', padding: space.sm }} />
         <div style={{ wordBreak: 'break-all' }}><Text variant="mono" color={colors.text}>{result.payUrl}</Text></div>
         <Link href={`/merchant/orders/${result.orderId}`}><Text variant="bodyStrong" color={colors.accent}>Track this order →</Text></Link>
+      </div>
+    );
+  }
+
+  if (payoutConfigured === false) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: space.md, padding: `${space.lg}px ${space.sm}px` }}>
+        <div style={{ width: 52, height: 52, borderRadius: radius.xl, background: colors.bgElevated, border: `1px solid ${colors.border}`, display: 'grid', placeItems: 'center' }}>
+          <Icon name="wallet" size={24} color={colors.textDim} />
+        </div>
+        <div style={{ display: 'grid', gap: space.xs, maxWidth: 320 }}>
+          <Text variant="bodyStrong" color={colors.textHi}>Configure your payout wallet first</Text>
+          <Text variant="caption" dim>Payments go directly to your wallet, so you must set a payout address before creating invoices.</Text>
+        </div>
+        <Button label="Go to Settings" icon="wallet" full={false} onPress={() => router.push('/merchant/settings')} />
       </div>
     );
   }

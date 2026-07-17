@@ -10,6 +10,7 @@ export interface MerchantStats {
   paidCount: number;
   awaitingCount: number;
   expiredCount: number;
+  payoutConfigured: boolean;
   series: SeriesBucket[];
 }
 
@@ -19,7 +20,7 @@ export class MerchantStatsService {
 
   async forMerchant(merchantId: string, now: Date = new Date()): Promise<MerchantStats> {
     const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-    const [agg, paidCount, awaitingCount, expiredCount, paidRows] = await Promise.all([
+    const [agg, paidCount, awaitingCount, expiredCount, paidRows, merchant] = await Promise.all([
       this.prisma.order.aggregate({ _sum: { amount: true }, where: { merchantId, status: 'paid' } }),
       this.prisma.order.count({ where: { merchantId, status: 'paid' } }),
       this.prisma.order.count({ where: { merchantId, status: 'awaiting_payment' } }),
@@ -28,12 +29,14 @@ export class MerchantStatsService {
         where: { merchantId, status: 'paid', paidAt: { gte: since } },
         select: { paidAt: true, amount: true },
       }),
+      this.prisma.merchant.findUnique({ where: { id: merchantId }, select: { payoutAddress: true } }),
     ]);
     return {
       totalRevenue: (agg._sum.amount ?? 0n).toString(),
       paidCount,
       awaitingCount,
       expiredCount,
+      payoutConfigured: !!merchant?.payoutAddress,
       series: buildDailySeries(paidRows, now, WINDOW_DAYS),
     };
   }

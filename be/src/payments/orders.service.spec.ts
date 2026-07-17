@@ -17,7 +17,7 @@ describe('OrdersService', () => {
   });
 
   it('creates an order from line items, snapshotting price + applying charges', async () => {
-    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' });
     prisma.product.findMany.mockResolvedValue([
       { id: 'p1', merchantId: 'm1', name: 'Tee', unitPrice: 1_000_000n, active: true },
     ]);
@@ -36,19 +36,19 @@ describe('OrdersService', () => {
   });
 
   it('rejects items referencing a product not owned or inactive', async () => {
-    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' });
     prisma.product.findMany.mockResolvedValue([]);
     charges.activeForMerchant.mockResolvedValue([]);
     await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toThrow(/product/i);
   });
 
   it('rejects an empty items list', async () => {
-    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' });
     await expect(svc.createForMerchant('m1', { items: [] })).rejects.toThrow(/at least one/i);
   });
 
   it('rejects when total is below MIN_INVOICE_AMOUNT', async () => {
-    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved' });
+    prisma.merchant.findUnique.mockResolvedValue({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' });
     prisma.product.findMany.mockResolvedValue([{ id: 'p1', merchantId: 'm1', name: 'Cheap', unitPrice: 100n, active: true }]);
     charges.activeForMerchant.mockResolvedValue([]);
     await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toThrow(/at least/i);
@@ -75,31 +75,36 @@ describe('OrdersService merchant-scoped', () => {
     await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toBeInstanceOf(ConflictException);
   });
   it('createForMerchant creates when approved', async () => {
-    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved' });
+    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' });
     const res = await svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] });
     expect(prisma.order.create).toHaveBeenCalled();
     expect(res.orderId).toBe('o1');
   });
+  it('createForMerchant rejects when the payout wallet is not configured', async () => {
+    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: null });
+    await expect(svc.createForMerchant('m1', { items: [{ productId: 'p1', quantity: 1 }] })).rejects.toThrow(/configure your payout wallet/i);
+    expect(prisma.order.create).not.toHaveBeenCalled();
+  });
   it('listForMerchant scopes by merchantId and serializes amount to string', async () => {
     const row = { id: 'o1', reference: 'R', amount: 1000000n, status: 'paid', createdAt: new Date(), paidAt: new Date() };
-    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved' }, [row]);
+    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' }, [row]);
     const out = await svc.listForMerchant('m1', { take: 50, skip: 0 });
     expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { merchantId: 'm1' } }));
     expect(out[0].amount).toBe('1000000');
   });
   it('listForMerchant adds a status filter when provided', async () => {
-    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved' }, []);
+    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' }, []);
     await svc.listForMerchant('m1', { status: 'paid', take: 50, skip: 0 });
     expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { merchantId: 'm1', status: 'paid' } }));
   });
   it('getForMerchant returns the order serialized when owned', async () => {
     const row = { id: 'o1', merchantId: 'm1', reference: 'R', amount: 1000000n, status: 'awaiting_payment', createdAt: new Date(), paidAt: null, payer: null, txSignature: null };
-    const { svc } = make({ id: 'm1', approvalStatus: 'approved' }, [row]);
+    const { svc } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' }, [row]);
     const out = await svc.getForMerchant('m1', 'o1');
     expect(out!.amount).toBe('1000000');
   });
   it('getForMerchant throws 404 when not owned/missing', async () => {
-    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved' }, []);
+    const { svc, prisma } = make({ id: 'm1', approvalStatus: 'approved', payoutAddress: '0x1111111111111111111111111111111111111111' }, []);
     prisma.order.findFirst.mockResolvedValue(null);
     await expect(svc.getForMerchant('m1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
   });

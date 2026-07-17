@@ -90,6 +90,11 @@ export class OrdersService {
     if (!merchant || merchant.approvalStatus !== 'approved') {
       throw new ConflictException('Merchant is not approved');
     }
+    // Payout wallet must be configured before invoicing: the on-chain payout goes DIRECTLY to
+    // merchant.payoutAddress, so without it a paid invoice would have nowhere to send funds.
+    if (!merchant.payoutAddress) {
+      throw new BadRequestException('Configure your payout wallet before creating invoices');
+    }
     return this.create(merchantId, input);
   }
 

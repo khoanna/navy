@@ -14,6 +14,7 @@ function deps() {
         { paidAt: new Date('2026-07-05T10:00:00Z'), amount: 1500n },
       ]),
     },
+    merchant: { findUnique: jest.fn().mockResolvedValue({ payoutAddress: '0x1111111111111111111111111111111111111111' }) },
   } as any;
   return { svc: new MerchantStatsService(prisma), prisma };
 }
@@ -28,6 +29,7 @@ describe('MerchantStatsService', () => {
     expect(out.paidCount).toBe(3);
     expect(out.awaitingCount).toBe(2);
     expect(out.expiredCount).toBe(1);
+    expect(out.payoutConfigured).toBe(true);
     expect(out.series).toHaveLength(30);
     expect(out.series[29]).toEqual({ date: '2026-07-05', amount: '1500' });
 
