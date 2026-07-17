@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { NAVY_ONCHAIN, type NavyOnchain } from '../onchain/onchain.module';
+import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
 
 interface HealthResult {
   status: 'ok' | 'degraded';
@@ -16,7 +16,7 @@ interface HealthResult {
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(NAVY_ONCHAIN) private readonly onchain: NavyOnchain,
+    @Inject(NAVY_EVM) private readonly evm: NavyEvm,
   ) {}
 
   @Get()
@@ -37,7 +37,7 @@ export class HealthController {
 
   private async checkRpc(): Promise<boolean> {
     try {
-      await this.onchain.connection.getVersion();
+      await this.evm.provider.getBlockNumber();
       return true;
     } catch {
       return false;

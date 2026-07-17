@@ -4,12 +4,12 @@ function make(dbOk: boolean, rpcOk: boolean) {
   const prisma = {
     $queryRaw: dbOk ? jest.fn().mockResolvedValue([{ '?column?': 1 }]) : jest.fn().mockRejectedValue(new Error('db down')),
   } as any;
-  const onchain = {
-    connection: {
-      getVersion: rpcOk ? jest.fn().mockResolvedValue({ 'solana-core': '1.18' }) : jest.fn().mockRejectedValue(new Error('rpc down')),
+  const evm = {
+    provider: {
+      getBlockNumber: rpcOk ? jest.fn().mockResolvedValue(12345) : jest.fn().mockRejectedValue(new Error('rpc down')),
     },
   } as any;
-  return new HealthController(prisma, onchain);
+  return new HealthController(prisma, evm);
 }
 
 describe('HealthController GET /health', () => {
