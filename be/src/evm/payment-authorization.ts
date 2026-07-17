@@ -7,7 +7,9 @@ export interface UsdcDomain {
   verifyingContract: string;
 }
 
-export const RECEIVE_WITH_AUTHORIZATION_TYPES = {
+export type Eip712Types = Record<string, Array<{ name: string; type: string }>>;
+
+export const RECEIVE_WITH_AUTHORIZATION_TYPES: Eip712Types = {
   ReceiveWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },
@@ -16,11 +18,11 @@ export const RECEIVE_WITH_AUTHORIZATION_TYPES = {
     { name: 'validBefore', type: 'uint256' },
     { name: 'nonce', type: 'bytes32' },
   ],
-} as const;
+};
 
 export interface AuthorizationTypedData {
   domain: UsdcDomain;
-  types: typeof RECEIVE_WITH_AUTHORIZATION_TYPES;
+  types: Eip712Types;
   primaryType: 'ReceiveWithAuthorization';
   message: {
     from: string;
