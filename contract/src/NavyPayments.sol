@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IEIP3009} from "./interfaces/IEIP3009.sol";
+import {IUsdcPermit} from "./interfaces/IUsdcPermit.sol";
 
-/// @title NavyPayments — EIP-3009 gasless invoice payments with an enforced fee split.
+/// @title NavyPayments — EIP-2612 gasless invoice payments with an enforced fee split.
 contract NavyPayments {
     uint16 public constant MAX_FEE_BPS = 1000; // 10% ceiling
     uint256 public constant MIN_INVOICE_AMOUNT = 10_000; // 0.01 USDC (6 decimals)
 
     address public owner;
     address public treasury;
-    IEIP3009 public usdc;
+    IUsdcPermit public usdc;
     uint16 public feeBps;
 
     mapping(address => bool) public relayers;
@@ -58,7 +58,7 @@ contract NavyPayments {
 
     constructor(address _usdc, address _treasury, uint16 _feeBps, address _owner) {
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
-        usdc = IEIP3009(_usdc);
+        usdc = IUsdcPermit(_usdc);
         treasury = _treasury;
         feeBps = _feeBps;
         owner = _owner;
@@ -96,8 +96,7 @@ contract NavyPayments {
         bytes16 merchantId,
         bytes16 invoiceId,
         uint256 amount,
-        uint256 validAfter,
-        uint256 validBefore,
+        uint256 deadline,
         address payer,
         uint8 v,
         bytes32 r,
@@ -110,10 +109,12 @@ contract NavyPayments {
         if (!m.exists || !m.active) revert MerchantInactive();
         if (amount < MIN_INVOICE_AMOUNT) revert AmountTooSmall();
 
-        // Effects before interactions. `key` is the EIP-3009 nonce, binding the
-        // payer's signature to this merchant + invoice + amount + expiry.
+        // Effects before interactions. The invoice key is the on-chain replay
+        // nonce; the payer's EIP-2612 permit authorizes the exact `amount` and
+        // `deadline` (its own per-token nonce prevents signature replay).
         invoicePaid[key] = true;
-        usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, key, v, r, s);
+        usdc.permit(payer, address(this), amount, deadline, v, r, s); // gasless approval
+        usdc.transferFrom(payer, address(this), amount); // pull
 
         uint256 fee = (amount * feeBps) / 10000; // floors
         usdc.transfer(m.payout, amount - fee);
