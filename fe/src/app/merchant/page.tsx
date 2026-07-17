@@ -26,11 +26,14 @@ export default function MerchantOverview() {
     let alive = true;
     const load = async () => {
       try {
-        const [s, o] = await Promise.all([
-          fetch('/api/merchant/stats').then((r) => (r.ok ? r.json() : Promise.reject())),
-          fetch('/api/merchant/orders?status=all&take=6').then((r) => (r.ok ? r.json() : [])),
+        const [statsRes, ordersRes] = await Promise.all([
+          fetch('/api/merchant/stats'),
+          fetch('/api/merchant/orders?status=all&take=6'),
         ]);
         if (!alive) return;
+        if (statsRes.status === 401 || ordersRes.status === 401) { router.replace('/merchant/login'); return; }
+        if (!statsRes.ok) { setErr(true); return; }
+        const [s, o] = await Promise.all([statsRes.json(), ordersRes.ok ? ordersRes.json() : []]);
         setStats(s); setOrders(o);
       } catch { if (alive) setErr(true); }
     };

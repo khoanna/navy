@@ -30,8 +30,11 @@ export default function AdminOverview() {
     let alive = true;
     const load = async () => {
       try {
-        const data = await fetch('/api/admin/stats').then((r) => (r.ok ? r.json() : Promise.reject()));
-        if (alive) setS(data);
+        const res = await fetch('/api/admin/stats');
+        if (!alive) return;
+        if (res.status === 401) { router.replace('/admin/login'); return; }
+        if (!res.ok) { setErr(true); return; }
+        setS(await res.json());
       } catch { if (alive) setErr(true); }
     };
     load();

@@ -27,6 +27,7 @@ export default function Orders() {
 
   const reload = async () => {
     const res = await fetch(`/api/merchant/orders?status=${status}`);
+    if (res.status === 401) { router.replace('/merchant/login'); return; }
     if (res.ok) setOrders(await res.json());
   };
 
@@ -34,12 +35,14 @@ export default function Orders() {
     let active = true;
     const load = async () => {
       const res = await fetch(`/api/merchant/orders?status=${status}`);
-      if (active && res.ok) setOrders(await res.json());
+      if (!active) return;
+      if (res.status === 401) { router.replace('/merchant/login'); return; }
+      if (res.ok) setOrders(await res.json());
     };
     load();
     const t = setInterval(load, 4000);
     return () => { active = false; clearInterval(t); };
-  }, [status]);
+  }, [status, router]);
 
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
