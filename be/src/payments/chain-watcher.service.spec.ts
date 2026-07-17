@@ -42,7 +42,7 @@ describe('ChainWatcherService (EVM)', () => {
     const w = webhooks();
     const svc = new ChainWatcherService(prisma, w, secrets(), chain);
     await svc.confirmOrder(ORDER_ID);
-    expect(prisma.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: ORDER_ID, status: { not: 'paid' } } }));
+    expect(prisma.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: ORDER_ID, status: 'confirming' } }));
     expect(w.deliver).toHaveBeenCalled();
     const payload = w.deliver.mock.calls[0][3];
     expect(payload.payer).toBe(PAYER);
@@ -72,6 +72,17 @@ describe('ChainWatcherService (EVM)', () => {
 
   it('confirmOrder does not settle when no matching InvoicePaid log is present', async () => {
     const chain = makeChain({ status: 1, logs: [] });
+    const prisma = makePrisma(baseOrder);
+    const w = webhooks();
+    const svc = new ChainWatcherService(prisma, w, secrets(), chain);
+    await svc.confirmOrder(ORDER_ID);
+    expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    expect(w.deliver).not.toHaveBeenCalled();
+  });
+
+  it('confirmOrder refuses to settle when the InvoicePaid amount != the order amount', async () => {
+    const log = invoicePaidLog(999_999n, 10_000n); // wrong amount vs order.amount = 1_000_000n
+    const chain = makeChain({ status: 1, logs: [{ topics: log.topics, data: log.data }] });
     const prisma = makePrisma(baseOrder);
     const w = webhooks();
     const svc = new ChainWatcherService(prisma, w, secrets(), chain);

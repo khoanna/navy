@@ -9,7 +9,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { Throttle } from '@nestjs/throttler';
-import { IsArray, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, IsUrl, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class OrderLineDto {
@@ -19,7 +19,8 @@ class OrderLineDto {
 class CreateOrderDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsString() callbackUrl?: string;
+  // https-only, real TLD — an SSRF guard against loopback/link-local/private webhook targets.
+  @IsOptional() @IsUrl({ protocols: ['https'], require_tld: true }) callbackUrl?: string;
   @IsInt() @IsPositive() @IsOptional() expiresInSec?: number;
 }
 class SubmitDto {

@@ -22,9 +22,10 @@ export class ChainWatcherService {
   async markPaid(orderId: string, info: { payer: string; txHash: string; fee?: bigint }): Promise<void> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.status === 'paid') return;
-    // Atomic guarded write: only ONE concurrent caller (submit fast-path vs. sweep) flips → paid.
+    // Atomic guarded write: only a `confirming` order flips → paid, so exactly ONE concurrent caller
+    // (submit fast-path vs. sweep) wins and we never resurrect an expired/failed order.
     const claimed = await this.prisma.order.updateMany({
-      where: { id: orderId, status: { not: 'paid' } },
+      where: { id: orderId, status: 'confirming' },
       data: { status: 'paid', payer: info.payer, txSignature: info.txHash, paidAt: new Date() },
     });
     if (claimed.count !== 1) return; // another caller already settled — do not fire the webhook
@@ -56,6 +57,14 @@ export class ChainWatcherService {
     }
     const event = this.findInvoicePaid(order.merchantId, order.id, receipt.logs ?? []);
     if (!event) return; // don't settle without the event; a sweep retries
+    // Defense in depth: the on-chain paid amount MUST equal what we issued. A mismatch means the
+    // event was tampered/misdecoded — never settle; log + skip (leaves the order in `confirming`).
+    if (event.amount !== order.amount) {
+      this.logger.warn(
+        `confirmOrder(${orderId}): InvoicePaid amount ${event.amount} != order amount ${order.amount}; refusing to settle`,
+      );
+      return;
+    }
     await this.markPaid(orderId, { payer: event.payer, txHash: order.txSignature, fee: event.fee });
   }
 

@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { IsNotEmpty, IsString } from 'class-validator';
 import { NavyTokenService } from './navy-token.service';
 import { JwtGuard } from './jwt.guard';
@@ -12,6 +13,7 @@ export class AuthController {
   constructor(private readonly tokens: NavyTokenService) {}
 
   @Post('refresh')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   async refresh(@Body() dto: RefreshDto) {
     return this.tokens.refresh(dto.refreshToken);
   }

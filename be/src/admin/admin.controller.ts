@@ -1,13 +1,13 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { IsEmail, IsString, Matches, MinLength } from 'class-validator';
+import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { AdminService } from './admin.service';
 import { NavyTokenService } from '../auth/navy-token.service';
 import { AuditService } from '../audit/audit.service';
 
 class AdminLoginDto {
   @IsEmail() email!: string;
-  @IsString() @MinLength(8) password!: string;
+  @IsString() @MinLength(8) @MaxLength(128) password!: string;
   @IsString() @Matches(/^\d{6}$/) totp!: string;
 }
 

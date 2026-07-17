@@ -3,6 +3,7 @@ import { OrdersService } from './orders.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { parsePageSize, parseOffset } from '../common/amount.util';
 
 @Controller('user/payments')
 @UseGuards(JwtGuard, RolesGuard)
@@ -11,9 +12,9 @@ export class UserPaymentsController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get()
-  list(@Req() req: any, @Query('take') take = '50', @Query('skip') skip = '0') {
+  list(@Req() req: any, @Query('take') take?: string, @Query('skip') skip?: string) {
     const payer = req.user.walletAddress;
     if (!payer) return [];
-    return this.orders.listForPayer(payer, { take: parseInt(take, 10), skip: parseInt(skip, 10) });
+    return this.orders.listForPayer(payer, { take: parsePageSize(take), skip: parseOffset(skip) });
   }
 }

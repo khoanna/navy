@@ -4,6 +4,9 @@ import { authenticator } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
 
+// Allow ±1 step (±30s) of clock skew between the authenticator app and the server.
+authenticator.options = { window: 1 };
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService, private readonly cfg: NavyConfigService) {}

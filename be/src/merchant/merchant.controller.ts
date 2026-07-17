@@ -7,16 +7,16 @@ import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Throttle } from '@nestjs/throttler';
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
 
 class SignupDto {
   @IsEmail() email!: string;
-  @IsString() @MinLength(8) password!: string;
+  @IsString() @MinLength(8) @MaxLength(128) password!: string;
   @IsString() @IsNotEmpty() businessName!: string;
 }
 class LoginDto {
   @IsEmail() email!: string;
-  @IsString() @MinLength(8) password!: string;
+  @IsString() @MinLength(8) @MaxLength(128) password!: string;
 }
 class PayoutDto {
   @IsString() @IsNotEmpty() address!: string;
@@ -41,6 +41,7 @@ export class MerchantController {
   }
 
   @Post('auth/merchant/signup')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   async signup(@Body() dto: SignupDto) {
     const m = await this.merchants.signup(dto.email, dto.password, dto.businessName);
     await this.audit.record({ actor: `merchant:${m.id}`, action: 'merchant.signup' });

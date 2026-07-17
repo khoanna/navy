@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { IsOptional, IsString } from 'class-validator';
 import { toMerchantDto } from '../common/serialize';
+import { parsePageSize, parseOffset } from '../common/amount.util';
 
 class RejectDto {
   @IsOptional() @IsString() reason?: string;
@@ -17,8 +18,8 @@ export class AdminMerchantsController {
   constructor(private readonly merchants: AdminMerchantsService) {}
 
   @Get()
-  async list(@Query('status') status = 'pending', @Query('take') take = '50', @Query('skip') skip = '0') {
-    const merchants = await this.merchants.list(status, parseInt(take, 10), parseInt(skip, 10));
+  async list(@Query('status') status = 'pending', @Query('take') take?: string, @Query('skip') skip?: string) {
+    const merchants = await this.merchants.list(status, parsePageSize(take), parseOffset(skip));
     return toMerchantDto(merchants);
   }
 

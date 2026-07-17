@@ -28,7 +28,13 @@ export class NavyConfigService {
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
   get privyAuthorizationKey(): string | undefined { return this.env.PRIVY_AUTHORIZATION_KEY || undefined; }
-  get adminMaxTotpFails(): number { return parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10); }
+  get adminMaxTotpFails(): number {
+    const n = parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`ADMIN_MAX_TOTP_FAILS must be a positive integer; got "${this.env.ADMIN_MAX_TOTP_FAILS}"`);
+    }
+    return n;
+  }
   /** How long an admin stays locked after hitting the TOTP fail limit. Env NAVY_ADMIN_LOCK_WINDOW_MS; default 15 min. */
   get adminLockWindowMs(): number {
     const n = parseInt(this.env.NAVY_ADMIN_LOCK_WINDOW_MS ?? '', 10);

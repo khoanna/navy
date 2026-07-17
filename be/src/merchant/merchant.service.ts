@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,13 +6,17 @@ import { ApiKeyService } from './api-key.service';
 import { verifyWalletSignature, isEvmAddress } from '../common/evm-signature.util';
 import { CIPHER } from '../crypto/cipher.interface';
 import type { Cipher } from '../crypto/cipher.interface';
+import { EvmRegistrarService } from '../evm/evm-registrar.service';
 
 @Injectable()
 export class MerchantService {
+  private readonly logger = new Logger(MerchantService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly apiKeys: ApiKeyService,
     @Inject(CIPHER) private readonly cipher: Cipher,
+    private readonly registrar: EvmRegistrarService,
   ) {}
 
   async signup(email: string, password: string, businessName: string) {
@@ -95,6 +99,20 @@ export class MerchantService {
     });
     if (consumed.count !== 1) throw new BadRequestException('Challenge already used');
 
-    return this.prisma.merchant.update({ where: { id: merchantId }, data: { payoutAddress: address } });
+    const updated = await this.prisma.merchant.update({ where: { id: merchantId }, data: { payoutAddress: address } });
+
+    // If the merchant is already registered on-chain (approved), keep the on-chain payout in sync.
+    // Best-effort: an RPC failure must NOT roll back the (authoritative) DB write — log + surface a warning.
+    if (updated.approvalStatus === 'approved') {
+      try {
+        await this.registrar.setPayout({ id: merchantId, payoutAddress: address });
+      } catch (e) {
+        this.logger.warn(
+          `On-chain payout sync failed for merchant ${merchantId}; DB updated but chain is stale. ${String((e as Error)?.message ?? e)}`,
+        );
+      }
+    }
+
+    return updated;
   }
 }

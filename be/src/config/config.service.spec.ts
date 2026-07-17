@@ -14,6 +14,21 @@ describe('NavyConfigService', () => {
     expect(() => new NavyConfigService({ ...base, SUBWALLET_MASTER_KEY: 'abcd' } as any))
       .toThrow(/SUBWALLET_MASTER_KEY/);
   });
+
+  it('rejects a non-numeric ADMIN_MAX_TOTP_FAILS (NaN)', () => {
+    const cfg = new NavyConfigService({ ...base, ADMIN_MAX_TOTP_FAILS: 'nope' } as any);
+    expect(() => cfg.adminMaxTotpFails).toThrow(/ADMIN_MAX_TOTP_FAILS/);
+  });
+
+  it('rejects a non-positive ADMIN_MAX_TOTP_FAILS', () => {
+    const cfg = new NavyConfigService({ ...base, ADMIN_MAX_TOTP_FAILS: '0' } as any);
+    expect(() => cfg.adminMaxTotpFails).toThrow(/ADMIN_MAX_TOTP_FAILS/);
+  });
+
+  it('accepts a valid positive ADMIN_MAX_TOTP_FAILS', () => {
+    const cfg = new NavyConfigService({ ...base, ADMIN_MAX_TOTP_FAILS: '5' } as any);
+    expect(cfg.adminMaxTotpFails).toBe(5);
+  });
 });
 
 const BASE = {

@@ -146,7 +146,12 @@
           "internalType": "uint256"
         },
         {
-          "name": "deadline",
+          "name": "validAfter",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "validBefore",
           "type": "uint256",
           "internalType": "uint256"
         },
@@ -304,7 +309,7 @@
         {
           "name": "",
           "type": "address",
-          "internalType": "contract IUsdcPermit"
+          "internalType": "contract IEIP3009"
         }
       ],
       "stateMutability": "view"
@@ -474,12 +479,22 @@
     },
     {
       "type": "error",
+      "name": "MerchantUnknown",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "NotOwner",
       "inputs": []
     },
     {
       "type": "error",
       "name": "NotRelayer",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroAddress",
       "inputs": []
     }
   ]
