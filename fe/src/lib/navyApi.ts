@@ -44,4 +44,5 @@ export class NavyApi {
   refresh(refreshToken: string): Promise<NavyTokens> { return this.post('/auth/refresh', { refreshToken }); }
   createApiKey(bearer: string): Promise<IssuedApiKey> { return this.post('/merchant/api-keys', {}, bearer); }
   setPayout(bearer: string, p: PayoutInput): Promise<{ payoutAddress: string }> { return this.post('/merchant/payout', p, bearer); }
+  requestPayoutChallenge(bearer: string): Promise<{ challenge: string; nonce: string; expiresAt: string }> { return this.post('/merchant/payout/challenge', {}, bearer); }
 }

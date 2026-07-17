@@ -1,28 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { ACCESS_COOKIE, decodeJwtRole } from '@/lib/session';
-import { buildPayoutMessage } from '@/lib/payoutMessage';
-import { guardOrigin, parseJson } from '@/lib/request-guards';
+import { NavyApi, NavyApiError } from '@/lib/navyApi';
+import { serverEnv } from '@/lib/env';
+import { guardOrigin } from '@/lib/request-guards';
 
-function subFromToken(token: string): string | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try { return (JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { sub?: string }).sub ?? null; }
-  catch { return null; }
-}
-
+// Fetch the backend's single-use payout challenge (stored server-side with a nonce + expiry).
+// The merchant signs THIS exact string with their EVM wallet; setPayout matches it against the
+// stored challenge, so we must return the backend's challenge — not a locally-built message.
 export async function POST(req: NextRequest) {
   const rejected = guardOrigin(req);
   if (rejected) return rejected;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value ?? '';
   if (decodeJwtRole(token) !== 'merchant') return NextResponse.json({ ok: false }, { status: 401 });
-  const merchantId = subFromToken(token);
-  if (!merchantId) return NextResponse.json({ ok: false }, { status: 401 });
-  const parsed = await parseJson<{ address: string }>(req);
-  if (!parsed.ok) return parsed.response;
-  const { address } = parsed.body;
-  const nonce = globalThis.crypto.randomUUID();
-  const issuedAt = new Date().toISOString();
-  const message = buildPayoutMessage({ merchantId, address, nonce, issuedAt });
-  return NextResponse.json({ ok: true, message });
+  const api = new NavyApi(serverEnv().navyApiUrl);
+  try {
+    const { challenge } = await api.requestPayoutChallenge(token);
+    return NextResponse.json({ ok: true, message: challenge });
+  } catch (e) {
+    const status = e instanceof NavyApiError ? e.status : 500;
+    return NextResponse.json({ ok: false, error: 'Could not prepare payout' }, { status });
+  }
 }
