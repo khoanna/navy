@@ -49,9 +49,9 @@ export default function PayScreen() {
   const router = useRouter();
   const { orderId } = useLocalSearchParams<{ orderId: string }>();
   const { address, signTypedData } = useMobileSigner();
-  const { session } = useNavySession();
+  const { session, authedFetch } = useNavySession();
   const toast = useToast();
-  const client = new NavyPayClient(getEnv().navyApiUrl);
+  const client = new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
 
   // Guard hand-typed /pay/<x> URLs: the QR path validates, a typed URL does not.
   const validId = Boolean(orderId) && isUuid(orderId);
