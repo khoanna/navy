@@ -4,7 +4,7 @@ import { Cron, CronExpression, Interval } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from './webhook.service';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
-import { merchantIdHex, invoiceIdHexFromOrderId } from '../evm/payment-authorization';
+import { merchantIdHex, invoiceIdHexFromOrderId, invoiceKey } from '../evm/payment-authorization';
 
 export interface SecretLookup { secretForMerchant(merchantId: string): Promise<string | null>; }
 
@@ -124,5 +124,118 @@ export class ChainWatcherService {
     for (const o of stale) {
       await this.prisma.order.update({ where: { id: o.id }, data: { status: 'expired' } });
     }
+  }
+
+  /**
+   * Recover the crash-window "consumed-but-unrecorded" orders (settlement gap).
+   *
+   * `RelayerService.verifyAndSubmit` consumes the single-use nonce (sets `issuedTxConsumedAt`) and
+   * broadcasts `payInvoice` BEFORE it persists `{status:'confirming', txSignature}`. A crash in that
+   * window strands the order at `awaiting_payment` with `issuedTxConsumedAt != null` and
+   * `txSignature = null` — invisible to `sweepConfirming` (scans `confirming`) and skipped by
+   * `expireStale` (skips consumed nonces). If the broadcast actually landed, funds moved with NO
+   * settlement/webhook. This sweep is the sole recovery path for those orders.
+   *
+   * For each stranded order we read the authoritative on-chain guard `invoicePaid(key)`:
+   *   - TRUE  → the payment landed. Find the InvoicePaid event to reconstruct payer/amount/fee + the
+   *             tx hash, record `txSignature`, move the order to `confirming`, then `confirmOrder`
+   *             settles it (fires the webhook).
+   *   - FALSE + expired → no funds moved; clear the consumed nonce so the order can be re-authorized
+   *             (or later expired by `expireStale` once the nonce is un-consumed).
+   */
+  @Interval(45000)
+  async recoverConsumedOrders(): Promise<void> {
+    const stranded = await this.prisma.order.findMany({
+      where: { status: 'awaiting_payment', issuedTxConsumedAt: { not: null }, txSignature: null },
+    });
+    for (const o of stranded) {
+      try {
+        await this.recoverConsumedOrder(o);
+      } catch (e) {
+        this.logger.warn(`recoverConsumedOrders: recover(${o.id}) failed: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  private async recoverConsumedOrder(order: {
+    id: string;
+    merchantId: string;
+    issuedTxExpiresAt: Date | null;
+    expiresAt: Date;
+  }): Promise<void> {
+    let key: string;
+    try {
+      key = invoiceKey(merchantIdHex(order.merchantId), invoiceIdHexFromOrderId(order.id));
+    } catch (e) {
+      this.logger.warn(`recoverConsumedOrder(${order.id}): bad invoice key: ${(e as Error).message}`);
+      return;
+    }
+
+    const paid: boolean = await this.chain.payments.invoicePaid(key);
+    if (paid) {
+      // The payment landed on-chain but we never recorded it. Reconstruct the settlement from the
+      // InvoicePaid event so `confirmOrder` can verify the receipt + amount and settle/webhook.
+      const found = await this.findPaidEvent(order.merchantId, order.id);
+      if (!found) {
+        // invoicePaid() says paid but we can't locate the event/tx yet (log range, RPC lag). Leave
+        // the order stranded and retry next tick — do NOT settle without the on-chain proof.
+        this.logger.warn(
+          `recoverConsumedOrder(${order.id}): invoicePaid=true but no InvoicePaid event located yet; will retry`,
+        );
+        return;
+      }
+      // Guarded transition: only flip a still-stranded row (status unchanged, txSignature still null)
+      // so we never race sweepConfirming or resurrect a row another sweep already advanced.
+      const claimed = await this.prisma.order.updateMany({
+        where: { id: order.id, status: 'awaiting_payment', txSignature: null },
+        data: { status: 'confirming', txSignature: found.txHash },
+      });
+      this.logger.warn(
+        `recoverConsumedOrder(${order.id}): recovered crash-window payment tx=${found.txHash}; settling`,
+      );
+      if (claimed.count === 1) await this.confirmOrder(order.id);
+      return;
+    }
+
+    // Not paid on-chain: no funds moved. If the issued authorization window has passed, un-consume the
+    // nonce so the order returns to a clean re-payable state (expireStale will terminate it if stale).
+    const deadline = order.issuedTxExpiresAt ?? order.expiresAt;
+    if (deadline < new Date()) {
+      await this.prisma.order.updateMany({
+        where: { id: order.id, status: 'awaiting_payment', txSignature: null },
+        data: { issuedTxConsumedAt: null, issuedTxHash: null },
+      });
+      this.logger.warn(
+        `recoverConsumedOrder(${order.id}): invoicePaid=false + expired; reset consumed nonce (no funds moved)`,
+      );
+    }
+  }
+
+  /** Locate the InvoicePaid event for this order via a topic-filtered log query; returns payer/amount/fee + tx hash. */
+  private async findPaidEvent(
+    merchantUuid: string,
+    orderId: string,
+  ): Promise<{ payer: string; amount: bigint; fee: bigint; txHash: string } | null> {
+    let wantMerchant: string, wantInvoice: string;
+    try {
+      wantMerchant = merchantIdHex(merchantUuid);
+      wantInvoice = invoiceIdHexFromOrderId(orderId);
+    } catch {
+      return null;
+    }
+    // merchantId + invoiceId are indexed → an exact topic filter. Scan a bounded recent window so a
+    // busy chain doesn't force a full-history query on every tick.
+    const filter = this.chain.payments.filters.InvoicePaid(wantMerchant, wantInvoice);
+    const latest = await this.chain.provider.getBlockNumber();
+    const fromBlock = Math.max(0, latest - 50_000);
+    const events = await this.chain.payments.queryFilter(filter, fromBlock, latest);
+    const ev = events[events.length - 1] as ethers.EventLog | undefined;
+    if (!ev || !('args' in ev) || !ev.args) return null;
+    return {
+      payer: String(ev.args.payer),
+      amount: BigInt(ev.args.amount.toString()),
+      fee: BigInt(ev.args.fee.toString()),
+      txHash: ev.transactionHash,
+    };
   }
 }

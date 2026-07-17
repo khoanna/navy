@@ -101,6 +101,96 @@ describe('ChainWatcherService (EVM)', () => {
     expect(w.deliver).not.toHaveBeenCalled();
   });
 
+  describe('recoverConsumedOrders (crash-window settlement gap)', () => {
+    // Order stranded at awaiting_payment: nonce consumed, but no txSignature was ever persisted.
+    const stranded = { id: ORDER_ID, merchantId: MERCHANT_UUID, status: 'awaiting_payment', txSignature: null, amount: 1_000_000n, feeBps: 100, reference: 'ORD-1', callbackUrl: 'https://cb', paidAt: null, issuedTxConsumedAt: new Date(), issuedTxHash: '0xdigest', issuedTxExpiresAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() - 60_000) };
+
+    function recoverChain(opts: { paid: boolean; events?: any[]; receipt?: any }) {
+      return {
+        provider: {
+          getTransactionReceipt: jest.fn().mockResolvedValue(opts.receipt ?? null),
+          getBlockNumber: jest.fn().mockResolvedValue(100_000),
+        },
+        payments: {
+          interface: iface,
+          invoicePaid: jest.fn().mockResolvedValue(opts.paid),
+          filters: { InvoicePaid: jest.fn().mockReturnValue({}) },
+          queryFilter: jest.fn().mockResolvedValue(opts.events ?? []),
+        },
+      } as any;
+    }
+
+    it('settles the order when invoicePaid=true (recovers the crash-window payment + fires webhook)', async () => {
+      const paidEvent = { args: { payer: PAYER, amount: 1_000_000n, fee: 10_000n }, transactionHash: '0xrecovered' };
+      // confirmOrder needs a mined receipt with a matching InvoicePaid log.
+      const log = invoicePaidLog(1_000_000n, 10_000n);
+      const chain = recoverChain({ paid: true, events: [paidEvent], receipt: { status: 1, logs: [{ topics: log.topics, data: log.data }] } });
+      // order rows: findMany (stranded) then per-order reads in confirmOrder/markPaid.
+      const confirmingOrder = { ...stranded, status: 'confirming', txSignature: '0xrecovered' };
+      const updated = { ...confirmingOrder, status: 'paid', paidAt: new Date() };
+      const prisma = { order: {
+        findMany: jest.fn().mockResolvedValue([stranded]),
+        findUnique: jest.fn().mockResolvedValueOnce(confirmingOrder).mockResolvedValueOnce(confirmingOrder).mockResolvedValue(updated),
+        update: jest.fn().mockResolvedValue(updated),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      } } as any;
+      const w = webhooks();
+      const svc = new ChainWatcherService(prisma, w, secrets(), chain);
+      await svc.recoverConsumedOrders();
+      expect(chain.payments.invoicePaid).toHaveBeenCalled();
+      // moved awaiting_payment -> confirming with the recovered tx hash
+      expect(prisma.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: ORDER_ID, status: 'awaiting_payment', txSignature: null },
+        data: { status: 'confirming', txSignature: '0xrecovered' },
+      }));
+      // settled + webhook fired
+      expect(w.deliver).toHaveBeenCalled();
+      expect(w.deliver.mock.calls[0][3].status).toBe('paid');
+    });
+
+    it('resets the consumed nonce when invoicePaid=false and the order is expired (no funds moved)', async () => {
+      const chain = recoverChain({ paid: false });
+      const prisma = { order: {
+        findMany: jest.fn().mockResolvedValue([stranded]),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      } } as any;
+      const w = webhooks();
+      const svc = new ChainWatcherService(prisma, w, secrets(), chain);
+      await svc.recoverConsumedOrders();
+      expect(prisma.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: ORDER_ID, status: 'awaiting_payment', txSignature: null },
+        data: { issuedTxConsumedAt: null, issuedTxHash: null },
+      }));
+      expect(w.deliver).not.toHaveBeenCalled();
+    });
+
+    it('does NOT reset the nonce when invoicePaid=false but the order is still within its window', async () => {
+      const live = { ...stranded, issuedTxExpiresAt: new Date(Date.now() + 60_000), expiresAt: new Date(Date.now() + 60_000) };
+      const chain = recoverChain({ paid: false });
+      const prisma = { order: {
+        findMany: jest.fn().mockResolvedValue([live]),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      } } as any;
+      const svc = new ChainWatcherService(prisma, webhooks(), secrets(), chain);
+      await svc.recoverConsumedOrders();
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('queries only awaiting_payment orders with a consumed nonce and no txSignature', async () => {
+      const chain = recoverChain({ paid: false });
+      const prisma = { order: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() } } as any;
+      const svc = new ChainWatcherService(prisma, webhooks(), secrets(), chain);
+      await svc.recoverConsumedOrders();
+      expect(prisma.order.findMany).toHaveBeenCalledWith({
+        where: { status: 'awaiting_payment', issuedTxConsumedAt: { not: null }, txSignature: null },
+      });
+    });
+  });
+
   it('expireStale queries only awaiting_payment orders with an un-consumed nonce (skips submitted orders)', async () => {
     const prisma = { order: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() } } as any;
     const svc = new ChainWatcherService(prisma, webhooks(), secrets(), makeChain(null));
