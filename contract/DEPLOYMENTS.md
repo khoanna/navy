@@ -13,12 +13,12 @@
 
 **Unified on Circle's USDC.** Payments and farming both use Circle's canonical Sepolia USDC. Farming supplies it to **Compound III (Comet)** `0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e` (whose `baseToken()` is this USDC). Get test USDC from **faucet.circle.com** (Ethereum Sepolia). Set `NAVY_PAYMENTS_ADDRESS` in `be/.env`.
 
-`payInvoice` uses EIP-2612 `permit` + `transferFrom` (Circle USDC supports both permit and EIP-3009; permit is used). USDC EIP-712 domain: `name="USDC"`, `version="2"`.
+`payInvoice` uses EIP-3009 `receiveWithAuthorization` (Circle USDC supports both permit and EIP-3009; EIP-3009 is used because its nonce = `keccak256(merchantId, invoiceId)` binds merchant + invoice + amount + payer + expiry into the signature, and `msg.sender == to` restricts redemption to this contract — a binding permit cannot provide). USDC EIP-712 domain: `name="USDC"`, `version="2"`.
 
 _Superseded: `0xC3FE…672f` (EIP-3009/Circle), `0xdce5…0f20` (permit/Aave test USDC)._
 
 ### End-to-end proof (`be/scripts/evm-e2e.mjs`)
-Fund payer with Circle USDC → payer signs an EIP-712 `Permit` → relayer submits `payInvoice` (gasless: `permit` + `transferFrom`) → **99/1 split** → `InvoicePaid` → replay rejected.
+Fund payer with Circle USDC → payer signs an EIP-712 `ReceiveWithAuthorization` (nonce = `keccak256(merchantId, invoiceId)`) → relayer submits `payInvoice` (gasless: `receiveWithAuthorization`) → **99/1 split** → `InvoicePaid` → replay rejected.
 - plain-EOA payer: `0xd9eeab93ca6e8bf353a0b0ce0e79385578b511f269e4240c588d1e40d70958f4`
 - former-7702 (now plain-EOA) payer `0xd5de…`: `0x7d1eb0d16f4bb1a6157063c4abfb4f18cec431a434f48fa03fc5047f88102076`
 
