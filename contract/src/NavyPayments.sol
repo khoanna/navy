@@ -91,4 +91,35 @@ contract NavyPayments {
         merchants[merchantId].payout = payout;
         emit MerchantPayoutSet(merchantId, payout);
     }
+
+    function payInvoice(
+        bytes16 merchantId,
+        bytes16 invoiceId,
+        uint256 amount,
+        uint256 validAfter,
+        uint256 validBefore,
+        address payer,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external onlyRelayer {
+        bytes32 key = keccak256(abi.encodePacked(merchantId, invoiceId));
+        if (invoicePaid[key]) revert AlreadyPaid();
+
+        Merchant memory m = merchants[merchantId];
+        if (!m.exists || !m.active) revert MerchantInactive();
+        if (amount < MIN_INVOICE_AMOUNT) revert AmountTooSmall();
+
+        // Effects before interactions. `key` is the EIP-3009 nonce, binding the
+        // payer's signature to this merchant + invoice + amount + expiry.
+        invoicePaid[key] = true;
+        usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, key, v, r, s);
+
+        uint256 fee = (amount * feeBps) / 10000; // floors
+        usdc.transfer(m.payout, amount - fee);
+        if (fee > 0) {
+            usdc.transfer(treasury, fee);
+        }
+        emit InvoicePaid(merchantId, invoiceId, payer, amount, fee, block.timestamp);
+    }
 }
