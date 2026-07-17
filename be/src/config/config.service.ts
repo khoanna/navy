@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ethers } from 'ethers';
 
 export type Network = 'devnet' | 'mainnet';
 
@@ -45,5 +46,25 @@ export class NavyConfigService {
   get relayerMinBalanceLamports(): number {
     const sol = parseFloat(this.env.NAVY_RELAYER_MIN_BALANCE_SOL ?? '0.05');
     return Math.floor((Number.isNaN(sol) ? 0.05 : sol) * 1e9);
+  }
+
+  // --- EVM (Sepolia) ---
+  get evmRpcUrl(): string { return this.req('SEPOLIA_RPC_URL'); }
+  get evmChainId(): number {
+    const n = parseInt(this.env.EVM_CHAIN_ID ?? '11155111', 10);
+    return Number.isFinite(n) ? n : 11155111;
+  }
+  get paymentsAddress(): string { return this.req('NAVY_PAYMENTS_ADDRESS'); }
+  get usdcAddress(): string { return this.req('NAVY_USDC_ADDRESS'); }
+  get treasuryAddress(): string { return this.req('NAVY_TREASURY_ADDRESS'); }
+  get relayerPrivateKey(): string { return this.req('NAVY_RELAYER_PRIVATE_KEY'); }
+  get ownerPrivateKey(): string { return this.req('NAVY_OWNER_PRIVATE_KEY'); }
+  /** USDC EIP-712 domain name/version. Circle Sepolia USDC is name "USDC", version "2"; overridable + verify against chain. */
+  get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USDC'; }
+  get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '2'; }
+  /** Min relayer ETH balance (wei) required before submitting a payment. Env is ETH; default 0.02. */
+  get relayerMinBalanceWei(): bigint {
+    const eth = this.env.NAVY_RELAYER_MIN_BALANCE_ETH ?? '0.02';
+    try { return ethers.parseEther(eth); } catch { return ethers.parseEther('0.02'); }
   }
 }
