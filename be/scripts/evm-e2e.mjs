@@ -33,7 +33,7 @@ loadEnv(join(beRoot, '..', 'contract', 'e2e-actors.env'));
 function req(k) { const v = process.env[k]; if (!v) throw new Error(`Missing env ${k}`); return v; }
 
 const CHAIN_ID = parseInt(process.env.EVM_CHAIN_ID ?? '11155111', 10);
-const AMOUNT = 500_000n; // 0.5 USDC (6 decimals)
+const AMOUNT = BigInt(process.env.E2E_AMOUNT_BASE ?? '500000'); // default 0.5 USDC (6 decimals)
 
 // --- helpers mirroring be/src/evm/payment-authorization.ts ---
 function uuidToBytes16Hex(uuid) {
