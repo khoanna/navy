@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,7 +16,11 @@ const usdcIface = new ethers.Interface(['function balanceOf(address owner) view 
 
 @Injectable()
 export class FarmingAgentScheduler {
+  private readonly logger = new Logger(FarmingAgentScheduler.name);
   private readonly usdc: ethers.Contract;
+  // In-flight guard: a slow tick must not overlap the next cron fire, else a subwallet could be
+  // double-funded / double-deposited before the first run's balance reads settle.
+  private running = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -31,7 +35,18 @@ export class FarmingAgentScheduler {
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
-  async tick() { await this.tickOnce(); }
+  async tick() {
+    if (this.running) {
+      this.logger.warn('farming tick still running; skipping this fire to avoid double-fund/deposit');
+      return;
+    }
+    this.running = true;
+    try {
+      await this.tickOnce();
+    } finally {
+      this.running = false;
+    }
+  }
 
   private async usdcBalance(address: string): Promise<number> {
     const bal: bigint = await this.usdc.balanceOf(address);

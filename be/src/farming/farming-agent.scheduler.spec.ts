@@ -67,3 +67,24 @@ describe('FarmingAgentScheduler auto-fund', () => {
     expect(farming.depositSubwallet).not.toHaveBeenCalled();
   });
 });
+
+describe('FarmingAgentScheduler.tick re-entrancy guard', () => {
+  it('a second concurrent tick() is a no-op while the first is in flight', async () => {
+    const { sched } = makeAgent({ balanceMock: jest.fn().mockResolvedValue(0n) });
+    // Make tickOnce hang until we release it, so both ticks overlap.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const tickOnce = jest.spyOn(sched, 'tickOnce').mockImplementation(() => gate);
+
+    const first = sched.tick();        // acquires the lock, awaits the gate
+    await sched.tick();                // overlapping fire — must return immediately (no-op)
+    expect(tickOnce).toHaveBeenCalledTimes(1);
+
+    release();
+    await first;
+
+    // Once the first finished, the lock is released and a fresh tick runs again.
+    await sched.tick();
+    expect(tickOnce).toHaveBeenCalledTimes(2);
+  });
+});

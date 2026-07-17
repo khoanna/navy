@@ -28,6 +28,8 @@ describe('DelegatedFundingService.fundSubwalletFromUser', () => {
     // The call is a real ERC-20 transfer(subwallet, amount) to Circle USDC.
     const arg = privy.sendDelegatedTransaction.mock.calls[0][0];
     expect(arg).toEqual(expect.objectContaining({ walletId: 'wallet-123', address: USER, to: USDC, chainId: 11155111 }));
+    // Idempotency key is derived from stable inputs (subwallet + amount), never wall-clock.
+    expect(arg.idempotencyKey).toBe(`fund:${SUB.toLowerCase()}:20000000`);
     const iface = new ethers.Interface(['function transfer(address to, uint256 value)']);
     const [to, value] = iface.decodeFunctionData('transfer', arg.data);
     expect(ethers.getAddress(to)).toBe(SUB);

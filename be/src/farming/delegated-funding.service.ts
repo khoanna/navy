@@ -55,7 +55,10 @@ export class DelegatedFundingService {
       throw new ForbiddenException(`Delegated funding denied: ${verdict.reason}`);
     }
 
-    const idempotencyKey = `fund:${args.subwalletPubkey}:${Math.floor(Date.now() / 60000)}`;
+    // Idempotency key derived from STABLE inputs (subwallet + intended amount), never wall-clock:
+    // concurrent/retried triggers for the same top-up dedupe instead of both broadcasting across a
+    // time-bucket boundary (which would over-fund).
+    const idempotencyKey = `fund:${args.subwalletPubkey.toLowerCase()}:${args.amountBase.toString()}`;
     const { hash } = await this.privy.sendDelegatedTransaction({
       walletId: args.walletId,
       address: args.userAddress,
