@@ -1,100 +1,98 @@
-import { createHash } from 'crypto';
+import { ethers } from 'ethers';
 import { Inject, Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
-import { PublicKey, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
-import { NAVY_ONCHAIN } from '../onchain/onchain.module';
-import type { NavyOnchain } from '../onchain/onchain.module';
-import { buildPayInvoiceTx } from '../onchain/payments-client';
+import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
-import { orderIdToInvoiceId } from './invoice-id';
+import {
+  buildAuthorizationTypedData,
+  invoiceKey,
+  invoiceIdHexFromOrderId,
+  recoverAuthorizationSigner,
+  authorizationDigest,
+  type AuthorizationTypedData,
+} from '../evm/payment-authorization';
+
+export interface AuthorizationResult {
+  typedData: AuthorizationTypedData;
+  invoice: { merchant: string; amount: string; reference?: string; expiresAt: Date };
+}
 
 @Injectable()
 export class RelayerService {
   constructor(
-    @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
+    @Inject(NAVY_EVM) private readonly chain: NavyEvm,
     private readonly prisma: PrismaService,
     private readonly cfg: NavyConfigService,
   ) {}
 
-  /** Builds the relayer-fee-paid, relayer-partial-signed pay_invoice tx (server-authoritative). */
-  private async buildTx(
-    order: { id: string; amount: bigint; expiresAt: Date },
-    merchantId: number[],
-    payoutWallet: PublicKey,
-    payer: PublicKey,
-  ): Promise<Transaction> {
-    const payout = await getAssociatedTokenAddress(this.chain.usdcMint, payoutWallet);
-    const tx = await buildPayInvoiceTx(this.chain.program, {
-      merchantId,
-      payout,
-      treasury: this.chain.treasury,
-      usdcMint: this.chain.usdcMint,
-      invoiceId: orderIdToInvoiceId(order.id),
-      amount: order.amount,
-      expiry: Math.floor(order.expiresAt.getTime() / 1000),
-      payer,
-      relayer: this.chain.relayer.publicKey,
-    });
-    tx.recentBlockhash = (await this.chain.connection.getLatestBlockhash()).blockhash;
-    tx.feePayer = this.chain.relayer.publicKey;
-    tx.partialSign(this.chain.relayer);
-    return tx;
-  }
-
-  async buildPaymentTx(
-    order: { id: string; amount: bigint; expiresAt: Date },
-    merchantId: number[],
-    payoutWallet: PublicKey,
-    payer: PublicKey,
-  ): Promise<string> {
-    // Guardrail: the relayer is fee payer + Invoice-rent payer for every payment. If it's low on
-    // SOL, fail fast + loudly (503) instead of issuing an unfundable tx that fails confusingly.
-    const balance = await this.chain.connection.getBalance(this.chain.relayer.publicKey);
-    if (balance < this.cfg.relayerMinBalanceLamports) {
+  /** Build the EIP-712 ReceiveWithAuthorization the wallet signs, and persist its digest as a durable single-use nonce. */
+  async buildAuthorization(
+    order: { id: string; amount: bigint; expiresAt: Date; reference?: string },
+    merchantIdHex16: string,
+    payer: string,
+  ): Promise<AuthorizationResult> {
+    // Guardrail: the relayer pays gas for every payInvoice. If it's low on ETH, fail fast (503).
+    const balance = await this.chain.provider.getBalance(this.chain.relayer.address);
+    if (balance < this.cfg.relayerMinBalanceWei) {
       throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
     }
-    const tx = await this.buildTx(order, merchantId, payoutWallet, payer);
-    // Persist the issued message as a durable, single-use nonce on the order row so verify
-    // survives restarts / works across instances (replaces the process-local Map).
-    const issuedTxHash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
+    const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
+    const validBefore = Math.floor(order.expiresAt.getTime() / 1000);
+    const typedData = buildAuthorizationTypedData({
+      domain: this.chain.usdcDomain,
+      payer,
+      to: this.chain.paymentsAddress,
+      amount: order.amount,
+      validAfter: 0,
+      validBefore,
+      nonce: invoiceKey(merchantIdHex16, invoiceIdHex16),
+    });
+    const issuedTxHash = authorizationDigest(typedData);
     await this.prisma.order.update({
       where: { id: order.id },
       data: { issuedTxHash, issuedTxExpiresAt: order.expiresAt, issuedTxConsumedAt: null },
     });
-    return tx.serialize({ requireAllSignatures: false }).toString('base64');
+    return { typedData, invoice: { merchant: '', amount: order.amount.toString(), reference: order.reference, expiresAt: order.expiresAt } };
   }
 
+  /** Recover the payer from the signature, atomically consume the nonce, then relay payInvoice and pay gas. */
   async verifyAndSubmit(
     orderId: string,
-    signedTxB64: string,
-  ): Promise<{ signature: string; payer: string; err: unknown }> {
+    signature: string,
+    expectedPayer: string,
+  ): Promise<{ txHash: string; payer: string; err: unknown }> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!order?.issuedTxHash) throw new BadRequestException('No issued transaction for this order');
-    if (order.issuedTxConsumedAt) throw new BadRequestException('Transaction already submitted');
+    if (!order?.issuedTxHash) throw new BadRequestException('No issued authorization for this order');
+    if (order.issuedTxConsumedAt) throw new BadRequestException('Authorization already submitted');
     if (order.issuedTxExpiresAt && order.issuedTxExpiresAt < new Date()) {
-      throw new BadRequestException('Issued transaction expired');
+      throw new BadRequestException('Issued authorization expired');
     }
-    const tx = Transaction.from(Buffer.from(signedTxB64, 'base64'));
-    const submittedHash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
-    if (submittedHash !== order.issuedTxHash) {
-      throw new BadRequestException('Submitted transaction does not match issued');
+    // The persisted digest is exactly what the wallet signed; recover the signer via raw ecrecover.
+    let signer: string;
+    try {
+      signer = ethers.recoverAddress(order.issuedTxHash, signature);
+    } catch {
+      throw new BadRequestException('Invalid signature');
     }
-    // The real payer is the signer that isn't the relayer (gasless two-signer model).
-    const relayer = this.chain.relayer.publicKey;
-    const payerSig = tx.signatures.find((s) => !s.publicKey.equals(relayer) && s.signature != null);
-    if (!payerSig) throw new BadRequestException('Submitted transaction is missing the payer signature');
-    const payer = payerSig.publicKey.toBase58();
-    // Optimistic single-use consume: claim the message ATOMICALLY before sending so a concurrent
-    // second submit is rejected here (not in the multi-second window after confirmTransaction).
+    if (signer.toLowerCase() !== expectedPayer.toLowerCase()) {
+      throw new BadRequestException('Signature does not match the authenticated payer');
+    }
+    // Optimistic single-use consume BEFORE submitting, so a concurrent second submit is rejected here.
     const consumed = await this.prisma.order.updateMany({
       where: { id: orderId, issuedTxConsumedAt: null },
       data: { issuedTxConsumedAt: new Date() },
     });
-    if (consumed.count !== 1) throw new BadRequestException('Transaction already submitted');
-    const sig = await this.chain.connection.sendRawTransaction(tx.serialize());
-    // confirmTransaction resolves once the tx lands; value.err says whether it SUCCEEDED.
-    const conf = await this.chain.connection.confirmTransaction(sig, 'confirmed');
-    return { signature: sig, payer, err: conf.value.err };
+    if (consumed.count !== 1) throw new BadRequestException('Authorization already submitted');
+
+    // Reconstruct the exact payInvoice args from the order (the on-chain USDC re-verifies the sig against these).
+    const merchantIdHex16 = '0x' + order.merchantId.replace(/-/g, '').toLowerCase();
+    const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
+    const validBefore = Math.floor(order.issuedTxExpiresAt!.getTime() / 1000);
+    const sig = ethers.Signature.from(signature);
+    const tx = await this.chain.payments.payInvoice(
+      merchantIdHex16, invoiceIdHex16, order.amount, 0, validBefore, signer, sig.v, sig.r, sig.s,
+    );
+    const receipt = await tx.wait();
+    return { txHash: tx.hash, payer: signer, err: receipt && receipt.status === 1 ? null : 'reverted' };
   }
 }

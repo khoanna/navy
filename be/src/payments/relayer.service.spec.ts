@@ -1,160 +1,133 @@
-import { createHash } from 'crypto';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ethers } from 'ethers';
+import { ServiceUnavailableException, BadRequestException } from '@nestjs/common';
 import { RelayerService } from './relayer.service';
-import { Transaction, Keypair, SystemProgram, PublicKey } from '@solana/web3.js';
+import { buildAuthorizationTypedData, invoiceKey, merchantIdHex, invoiceIdHexFromOrderId, authorizationDigest, type UsdcDomain } from '../evm/payment-authorization';
 
-/** A signed tx from the payer, fee-paid + partially signed by the relayer (gasless two-signer). */
-function issuedSignedTx(relayer: Keypair, payer: Keypair): Transaction {
-  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: PublicKey.default, lamports: 1 }));
-  tx.feePayer = relayer.publicKey;
-  tx.recentBlockhash = '11111111111111111111111111111111';
-  tx.partialSign(relayer);
-  tx.partialSign(payer);
-  return tx;
+const DOMAIN: UsdcDomain = { name: 'USDC', version: '2', chainId: 11155111, verifyingContract: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' };
+const PAYMENTS = '0x1111111111111111111111111111111111111111';
+const MERCHANT_UUID = '11111111-2222-3333-4444-555555555555';
+const ORDER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+function makeChain(balance = 10n ** 18n, payInvoice = jest.fn()) {
+  return {
+    provider: { getBalance: jest.fn().mockResolvedValue(balance) },
+    payments: { payInvoice },
+    relayer: { address: '0x9999999999999999999999999999999999999999' },
+    paymentsAddress: PAYMENTS,
+    usdcDomain: DOMAIN,
+    treasury: '0x2222222222222222222222222222222222222222',
+  } as any;
+}
+function makePrisma(order: any, consumeCount = 1) {
+  return { order: {
+    findUnique: jest.fn().mockResolvedValue(order),
+    update: jest.fn().mockResolvedValue(order),
+    updateMany: jest.fn().mockResolvedValue({ count: consumeCount }),
+  } } as any;
+}
+function makeCfg(minWei = 20000000000000000n) { return { relayerMinBalanceWei: minWei } as any; }
+
+async function signFor(wallet: ethers.HDNodeWallet, amount: bigint, expiresAt: Date) {
+  const nonce = invoiceKey(merchantIdHex(MERCHANT_UUID), invoiceIdHexFromOrderId(ORDER_ID));
+  const td = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, to: PAYMENTS, amount, validAfter: 0, validBefore: Math.floor(expiresAt.getTime() / 1000), nonce });
+  return { sig: await wallet.signTypedData(td.domain, td.types, td.message), digest: authorizationDigest(td) };
 }
 
-/** Minimal NavyConfigService stub exposing just the getter RelayerService reads. */
-function makeCfg(min = 50_000_000) {
-  return { relayerMinBalanceLamports: min } as any;
-}
-
-describe('RelayerService issued-tx store (durable, single-use)', () => {
-  const relayer = Keypair.generate();
-  const payer = Keypair.generate();
-
-  function makeChain(balance = 1_000_000_000) {
-    return {
-      relayer,
-      connection: {
-        getBalance: jest.fn().mockResolvedValue(balance),
-        getLatestBlockhash: jest.fn().mockResolvedValue({ blockhash: '11111111111111111111111111111111' }),
-        sendRawTransaction: jest.fn().mockResolvedValue('sig-123'),
-        confirmTransaction: jest.fn().mockResolvedValue({ value: { err: null } }),
-      },
-    } as any;
-  }
-
-  function makePrisma(order: any, consumeCount = 1) {
-    return {
-      order: {
-        findUnique: jest.fn().mockResolvedValue(order),
-        update: jest.fn().mockResolvedValue(order),
-        updateMany: jest.fn().mockResolvedValue({ count: consumeCount }),
-      },
-    } as any;
-  }
-
-  it('buildPaymentTx persists issuedTxHash (sha256 of the serialized message) + expiresAt', async () => {
+describe('RelayerService (EVM)', () => {
+  it('buildAuthorization persists the digest as the single-use nonce + returns typed data', async () => {
     const chain = makeChain();
-    const prisma = makePrisma({ id: 'o1' });
+    const prisma = makePrisma({ id: ORDER_ID });
     const svc = new RelayerService(chain, prisma, makeCfg());
-    // Stub the tx builder so we control the serialized message deterministically.
-    const tx = issuedSignedTx(relayer, payer);
-    jest.spyOn(svc as any, 'buildTx').mockResolvedValue(tx);
-
     const expiresAt = new Date(Date.now() + 600_000);
-    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey);
+    const payer = ethers.Wallet.createRandom().address;
 
-    const expectedHash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
+    const out = await svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt }, merchantIdHex(MERCHANT_UUID), payer);
+
+    expect(out.typedData.message.from).toBe(payer);
+    expect(out.typedData.message.value).toBe('1000000');
+    const expectedDigest = authorizationDigest(out.typedData);
     expect(prisma.order.update).toHaveBeenCalledWith({
-      where: { id: 'o1' },
-      data: { issuedTxHash: expectedHash, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null },
+      where: { id: ORDER_ID },
+      data: { issuedTxHash: expectedDigest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null },
     });
   });
 
-  it('buildPaymentTx throws ServiceUnavailableException when relayer balance is below the min, and does NOT persist', async () => {
-    const chain = makeChain(49_999_999); // just under the 50_000_000 min
-    const prisma = makePrisma({ id: 'o1' });
-    const svc = new RelayerService(chain, prisma, makeCfg(50_000_000));
-    const buildSpy = jest.spyOn(svc as any, 'buildTx');
-
-    const expiresAt = new Date(Date.now() + 600_000);
-    await expect(
-      svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey),
-    ).rejects.toThrow(ServiceUnavailableException);
-
-    expect(chain.connection.getBalance).toHaveBeenCalledWith(relayer.publicKey);
-    expect(buildSpy).not.toHaveBeenCalled();
+  it('buildAuthorization throws 503 when relayer ETH is below min, and does NOT persist', async () => {
+    const chain = makeChain(19999999999999999n); // just under 0.02 ETH
+    const prisma = makePrisma({ id: ORDER_ID });
+    const svc = new RelayerService(chain, prisma, makeCfg(20000000000000000n));
+    await expect(svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt: new Date(Date.now() + 600_000) }, merchantIdHex(MERCHANT_UUID), '0x1234567890123456789012345678901234567890'))
+      .rejects.toThrow(ServiceUnavailableException);
     expect(prisma.order.update).not.toHaveBeenCalled();
   });
 
-  it('buildPaymentTx proceeds when the relayer balance meets the min', async () => {
-    const chain = makeChain(50_000_000); // exactly at the min → OK
-    const prisma = makePrisma({ id: 'o1' });
-    const svc = new RelayerService(chain, prisma, makeCfg(50_000_000));
-    const tx = issuedSignedTx(relayer, payer);
-    jest.spyOn(svc as any, 'buildTx').mockResolvedValue(tx);
-
+  it('verifyAndSubmit happy path: recovers payer, consumes atomically before submit, returns {txHash,payer,err:null}', async () => {
+    const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    await svc.buildPaymentTx({ id: 'o1', amount: 1_000_000n, expiresAt }, Array.from(Buffer.alloc(16, 1)), relayer.publicKey, payer.publicKey);
-
-    expect(chain.connection.getBalance).toHaveBeenCalledWith(relayer.publicKey);
-    expect(prisma.order.update).toHaveBeenCalled();
-  });
-
-  it('verifyAndSubmit rejects an order with no issued tx', async () => {
-    const svc = new RelayerService(makeChain(), makePrisma({ id: 'o1', issuedTxHash: null }), makeCfg());
-    const tx = issuedSignedTx(relayer, payer);
-    await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/no issued transaction/i);
-  });
-
-  it('verifyAndSubmit rejects a concurrent second submit: atomic consume returns count 0, does not send', async () => {
-    const tx = issuedSignedTx(relayer, payer);
-    const hash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
-    const chain = makeChain();
-    // The optimistic consume loses the race → updateMany count 0 → reject before sending.
-    const prisma = makePrisma({ id: 'o1', issuedTxHash: hash, issuedTxExpiresAt: new Date(Date.now() + 600_000), issuedTxConsumedAt: null }, 0);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const wait = jest.fn().mockResolvedValue({ status: 1 });
+    const payInvoice = jest.fn().mockResolvedValue({ hash: '0xtxhash', wait });
+    const chain = makeChain(10n ** 18n, payInvoice);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
+    const prisma = makePrisma(order);
     const svc = new RelayerService(chain, prisma, makeCfg());
 
-    await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/already submitted/i);
-    expect(prisma.order.updateMany).toHaveBeenCalledWith({
-      where: { id: 'o1', issuedTxConsumedAt: null },
-      data: { issuedTxConsumedAt: expect.any(Date) },
-    });
-    expect(chain.connection.sendRawTransaction).not.toHaveBeenCalled();
-  });
+    const res = await svc.verifyAndSubmit(ORDER_ID, sig, wallet.address);
 
-  it('verifyAndSubmit rejects an expired issued tx', async () => {
-    const tx = issuedSignedTx(relayer, payer);
-    const hash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
-    const svc = new RelayerService(
-      makeChain(),
-      makePrisma({ id: 'o1', issuedTxHash: hash, issuedTxExpiresAt: new Date(Date.now() - 1_000), issuedTxConsumedAt: null }),
-      makeCfg(),
-    );
-    await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/expired/i);
-  });
-
-  it('verifyAndSubmit rejects a tx whose message hash does not match the stored hash', async () => {
-    const svc = new RelayerService(
-      makeChain(),
-      makePrisma({ id: 'o1', issuedTxHash: 'deadbeef', issuedTxExpiresAt: new Date(Date.now() + 600_000), issuedTxConsumedAt: null }),
-      makeCfg(),
-    );
-    const tx = issuedSignedTx(relayer, payer);
-    await expect(svc.verifyAndSubmit('o1', tx.serialize().toString('base64'))).rejects.toThrow(/does not match/i);
-  });
-
-  it('verifyAndSubmit happy path: submits, marks consumed, returns {signature,payer,err}', async () => {
-    const tx = issuedSignedTx(relayer, payer);
-    const hash = createHash('sha256').update(tx.serializeMessage()).digest('hex');
-    const chain = makeChain();
-    const prisma = makePrisma({ id: 'o1', issuedTxHash: hash, issuedTxExpiresAt: new Date(Date.now() + 600_000), issuedTxConsumedAt: null });
-    const svc = new RelayerService(chain, prisma, makeCfg());
-
-    const res = await svc.verifyAndSubmit('o1', tx.serialize().toString('base64'));
-
-    expect(chain.connection.sendRawTransaction).toHaveBeenCalled();
-    expect(res.signature).toBe('sig-123');
-    expect(res.payer).toBe(payer.publicKey.toBase58());
-    expect(res.err).toBeNull();
-    // The message is consumed atomically BEFORE sending (optimistic single-use).
-    expect(prisma.order.updateMany).toHaveBeenCalledWith({
-      where: { id: 'o1', issuedTxConsumedAt: null },
-      data: { issuedTxConsumedAt: expect.any(Date) },
-    });
+    expect(res).toEqual({ txHash: '0xtxhash', payer: wallet.address, err: null });
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({ where: { id: ORDER_ID, issuedTxConsumedAt: null }, data: { issuedTxConsumedAt: expect.any(Date) } });
     const consumeOrder = prisma.order.updateMany.mock.invocationCallOrder[0];
-    const sendOrder = chain.connection.sendRawTransaction.mock.invocationCallOrder[0];
-    expect(consumeOrder).toBeLessThan(sendOrder);
+    const submitOrder = payInvoice.mock.invocationCallOrder[0];
+    expect(consumeOrder).toBeLessThan(submitOrder);
+    // payInvoice called with (merchantIdHex, invoiceIdHex, amount, validAfter, validBefore, payer, v, r, s)
+    const args = payInvoice.mock.calls[0];
+    expect(args[0]).toBe(merchantIdHex(MERCHANT_UUID));
+    expect(args[1]).toBe(invoiceIdHexFromOrderId(ORDER_ID));
+    expect(args[2]).toBe(1_000_000n);
+    expect(args[5]).toBe(wallet.address);
+  });
+
+  it('verifyAndSubmit rejects when the recovered signer != expected payer', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const expiresAt = new Date(Date.now() + 600_000);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
+    const svc = new RelayerService(makeChain(), makePrisma(order), makeCfg());
+    await expect(svc.verifyAndSubmit(ORDER_ID, sig, '0x0000000000000000000000000000000000000001')).rejects.toThrow(/signature/i);
+  });
+
+  it('verifyAndSubmit rejects a concurrent second submit (atomic consume count 0) without submitting', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const expiresAt = new Date(Date.now() + 600_000);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const payInvoice = jest.fn();
+    const chain = makeChain(10n ** 18n, payInvoice);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
+    const prisma = makePrisma(order, 0);
+    const svc = new RelayerService(chain, prisma, makeCfg());
+    await expect(svc.verifyAndSubmit(ORDER_ID, sig, wallet.address)).rejects.toThrow(/already submitted/i);
+    expect(payInvoice).not.toHaveBeenCalled();
+  });
+
+  it('verifyAndSubmit rejects an expired issued authorization', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const past = new Date(Date.now() - 1000);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, past);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: past, issuedTxConsumedAt: null };
+    const svc = new RelayerService(makeChain(), makePrisma(order), makeCfg());
+    await expect(svc.verifyAndSubmit(ORDER_ID, sig, wallet.address)).rejects.toThrow(/expired/i);
+  });
+
+  it('verifyAndSubmit maps a reverted receipt to err', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const expiresAt = new Date(Date.now() + 600_000);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const payInvoice = jest.fn().mockResolvedValue({ hash: '0xrevert', wait: jest.fn().mockResolvedValue({ status: 0 }) });
+    const chain = makeChain(10n ** 18n, payInvoice);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
+    const svc = new RelayerService(chain, makePrisma(order), makeCfg());
+    const res = await svc.verifyAndSubmit(ORDER_ID, sig, wallet.address);
+    expect(res.txHash).toBe('0xrevert');
+    expect(res.err).toBeTruthy();
   });
 });
