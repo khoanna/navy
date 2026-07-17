@@ -1,17 +1,18 @@
 import { ethers } from 'ethers';
 import { ServiceUnavailableException, BadRequestException } from '@nestjs/common';
 import { RelayerService } from './relayer.service';
-import { buildAuthorizationTypedData, invoiceKey, merchantIdHex, invoiceIdHexFromOrderId, authorizationDigest, type UsdcDomain } from '../evm/payment-authorization';
+import { buildAuthorizationTypedData, merchantIdHex, invoiceIdHexFromOrderId, authorizationDigest, type UsdcDomain } from '../evm/payment-authorization';
 
-const DOMAIN: UsdcDomain = { name: 'USDC', version: '2', chainId: 11155111, verifyingContract: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' };
+const DOMAIN: UsdcDomain = { name: 'USDC', version: '1', chainId: 11155111, verifyingContract: '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8' };
 const PAYMENTS = '0x1111111111111111111111111111111111111111';
 const MERCHANT_UUID = '11111111-2222-3333-4444-555555555555';
 const ORDER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
-function makeChain(balance = 10n ** 18n, payInvoice = jest.fn()) {
+function makeChain(balance = 10n ** 18n, payInvoice = jest.fn(), nonce = 0n) {
   return {
     provider: { getBalance: jest.fn().mockResolvedValue(balance) },
     payments: { payInvoice },
+    usdc: { nonces: jest.fn().mockResolvedValue(nonce) },
     relayer: { address: '0x9999999999999999999999999999999999999999' },
     paymentsAddress: PAYMENTS,
     usdcDomain: DOMAIN,
@@ -27,14 +28,13 @@ function makePrisma(order: any, consumeCount = 1) {
 }
 function makeCfg(minWei = 20000000000000000n) { return { relayerMinBalanceWei: minWei } as any; }
 
-async function signFor(wallet: ethers.HDNodeWallet, amount: bigint, expiresAt: Date) {
-  const nonce = invoiceKey(merchantIdHex(MERCHANT_UUID), invoiceIdHexFromOrderId(ORDER_ID));
-  const td = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, to: PAYMENTS, amount, validAfter: 0, validBefore: Math.floor(expiresAt.getTime() / 1000), nonce });
+async function signFor(wallet: ethers.HDNodeWallet, amount: bigint, expiresAt: Date, nonce = 0n) {
+  const td = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, spender: PAYMENTS, amount, nonce, deadline: Math.floor(expiresAt.getTime() / 1000) });
   return { sig: await wallet.signTypedData(td.domain, td.types, td.message), digest: authorizationDigest(td) };
 }
 
 describe('RelayerService (EVM)', () => {
-  it('buildAuthorization persists the digest as the single-use nonce + returns typed data', async () => {
+  it('buildAuthorization persists the digest as the single-use nonce, queries the token nonce, + returns typed data', async () => {
     const chain = makeChain();
     const prisma = makePrisma({ id: ORDER_ID });
     const svc = new RelayerService(chain, prisma, makeCfg());
@@ -43,8 +43,10 @@ describe('RelayerService (EVM)', () => {
 
     const out = await svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt }, merchantIdHex(MERCHANT_UUID), payer);
 
-    expect(out.typedData.message.from).toBe(payer);
+    expect(chain.usdc.nonces).toHaveBeenCalledWith(payer);
+    expect(out.typedData.message.owner).toBe(payer);
     expect(out.typedData.message.value).toBe('1000000');
+    expect(out.typedData.message.nonce).toBe('0');
     const expectedDigest = authorizationDigest(out.typedData);
     expect(prisma.order.update).toHaveBeenCalledWith({
       where: { id: ORDER_ID },
@@ -79,12 +81,18 @@ describe('RelayerService (EVM)', () => {
     const consumeOrder = prisma.order.updateMany.mock.invocationCallOrder[0];
     const submitOrder = payInvoice.mock.invocationCallOrder[0];
     expect(consumeOrder).toBeLessThan(submitOrder);
-    // payInvoice called with (merchantIdHex, invoiceIdHex, amount, validAfter, validBefore, payer, v, r, s)
+    // payInvoice called with (merchantIdHex, invoiceIdHex, amount, deadline, payer, v, r, s) — 8 args, deadline in slot 3, payer in slot 4
     const args = payInvoice.mock.calls[0];
+    expect(args).toHaveLength(8);
     expect(args[0]).toBe(merchantIdHex(MERCHANT_UUID));
     expect(args[1]).toBe(invoiceIdHexFromOrderId(ORDER_ID));
     expect(args[2]).toBe(1_000_000n);
-    expect(args[5]).toBe(wallet.address);
+    expect(args[3]).toBe(Math.floor(expiresAt.getTime() / 1000));
+    expect(args[4]).toBe(wallet.address);
+    const sigParts = ethers.Signature.from(sig);
+    expect(args[5]).toBe(sigParts.v);
+    expect(args[6]).toBe(sigParts.r);
+    expect(args[7]).toBe(sigParts.s);
   });
 
   it('verifyAndSubmit rejects when the recovered signer != expected payer', async () => {
