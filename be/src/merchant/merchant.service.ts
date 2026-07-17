@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeyService } from './api-key.service';
-import { verifyWalletSignature } from '../common/solana.util';
+import { verifyWalletSignature, isEvmAddress } from '../common/evm-signature.util';
 import { CIPHER } from '../crypto/cipher.interface';
 import type { Cipher } from '../crypto/cipher.interface';
 
@@ -73,6 +73,9 @@ export class MerchantService {
     // merchant on-chain. So this only requires the merchant to exist, not to be approved.
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new UnauthorizedException('Merchant not found');
+
+    // The payout wallet is an EVM address (0x…); reject anything else before touching the challenge.
+    if (!isEvmAddress(address)) throw new BadRequestException('Payout address must be a valid EVM address');
 
     // The signed message MUST be a live, unconsumed challenge we issued to this merchant.
     // This binds the signature to a single-use nonce + expiry (defeats replay of any signed blob).

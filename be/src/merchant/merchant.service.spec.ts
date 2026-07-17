@@ -1,7 +1,5 @@
 import * as argon2 from 'argon2';
-import { Keypair } from '@solana/web3.js';
-import nacl from 'tweetnacl';
-import bs58 from 'bs58';
+import { Wallet } from 'ethers';
 import { MerchantService } from './merchant.service';
 import { ApiKeyService } from './api-key.service';
 
@@ -46,10 +44,10 @@ describe('MerchantService', () => {
   });
 
   it('registers a payout address only with a valid wallet signature against a live challenge', async () => {
-    const kp = Keypair.generate();
-    const address = kp.publicKey.toBase58();
+    const wallet = Wallet.createRandom();
+    const address = wallet.address;
     const message = 'Navy payout authorization\nmerchant: m1\nnonce: abc\nexpires: 2099-01-01T00:00:00.000Z';
-    const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
+    const signature = await wallet.signMessage(message);
     const challenge = { id: 'ch1', merchantId: 'm1', challenge: message, consumedAt: null, expiresAt: new Date(Date.now() + 60000) };
     const prisma = prismaMock({ id: 'm1', approvalStatus: 'approved' }, { challenge });
     const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
@@ -62,10 +60,10 @@ describe('MerchantService', () => {
   });
 
   it('rejects a payout when no live challenge matches the signed message', async () => {
-    const kp = Keypair.generate();
-    const address = kp.publicKey.toBase58();
+    const wallet = Wallet.createRandom();
+    const address = wallet.address;
     const message = 'Navy payout authorization\nmerchant: m1\nnonce: abc\nexpires: 2099-01-01T00:00:00.000Z';
-    const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
+    const signature = await wallet.signMessage(message);
     const prisma = prismaMock({ id: 'm1', approvalStatus: 'approved' });
     const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
     await expect(svc.setPayoutAddress('m1', address, message, signature)).rejects.toThrow(/No valid payout challenge/);
@@ -73,10 +71,10 @@ describe('MerchantService', () => {
   });
 
   it('rejects a payout when the challenge was already consumed (replay)', async () => {
-    const kp = Keypair.generate();
-    const address = kp.publicKey.toBase58();
+    const wallet = Wallet.createRandom();
+    const address = wallet.address;
     const message = 'Navy payout authorization\nmerchant: m1\nnonce: abc\nexpires: 2099-01-01T00:00:00.000Z';
-    const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
+    const signature = await wallet.signMessage(message);
     const challenge = { id: 'ch1', merchantId: 'm1', challenge: message, consumedAt: null, expiresAt: new Date(Date.now() + 60000) };
     const prisma = prismaMock({ id: 'm1', approvalStatus: 'approved' }, { challenge });
     // Simulate the atomic consume losing the race: updateMany affects 0 rows.
@@ -87,13 +85,24 @@ describe('MerchantService', () => {
   });
 
   it('rejects a payout address with a bad signature', async () => {
-    const kp = Keypair.generate();
+    const wallet = Wallet.createRandom();
     const message = 'msg';
     const challenge = { id: 'ch1', merchantId: 'm1', challenge: message, consumedAt: null, expiresAt: new Date(Date.now() + 60000) };
     const svc = new MerchantService(prismaMock({ id: 'm1', approvalStatus: 'approved' }, { challenge }), new ApiKeyService(), cipherStub());
     await expect(
-      svc.setPayoutAddress('m1', kp.publicKey.toBase58(), message, bs58.encode(Buffer.alloc(64))),
+      svc.setPayoutAddress('m1', wallet.address, message, '0x' + '00'.repeat(65)),
     ).rejects.toThrow(/signature/);
+  });
+
+  it('rejects a non-EVM payout address before consuming a challenge', async () => {
+    const message = 'Navy payout authorization\nmerchant: m1\nnonce: abc\nexpires: 2099-01-01T00:00:00.000Z';
+    const challenge = { id: 'ch1', merchantId: 'm1', challenge: message, consumedAt: null, expiresAt: new Date(Date.now() + 60000) };
+    const prisma = prismaMock({ id: 'm1', approvalStatus: 'approved' }, { challenge });
+    const svc = new MerchantService(prisma, new ApiKeyService(), cipherStub());
+    await expect(
+      svc.setPayoutAddress('m1', '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', message, '0x00'),
+    ).rejects.toThrow(/EVM address/);
+    expect(prisma.payoutChallenge.updateMany).not.toHaveBeenCalled();
   });
 
   it('denies API key issuance for an unapproved (pending) merchant', async () => {
@@ -110,14 +119,10 @@ describe('MerchantService', () => {
     // Onboarding order is signup -> set payout -> admin approve. approve() registers the
     // merchant on-chain using the payout ATA, so payout MUST be settable while still pending;
     // requiring approval here would deadlock onboarding.
-    const { Keypair } = require('@solana/web3.js');
-    const nacl = require('tweetnacl');
-    const bs58mod = require('bs58');
-    const bs58enc = bs58mod.default ?? bs58mod;
-    const kp = Keypair.generate();
-    const address = kp.publicKey.toBase58();
+    const wallet = Wallet.createRandom();
+    const address = wallet.address;
     const message = 'Navy payout authorization\nmerchant: m1\nnonce: xyz\nexpires: 2099-01-01T00:00:00.000Z';
-    const signature = bs58enc.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
+    const signature = await wallet.signMessage(message);
     const challenge = { id: 'ch1', merchantId: 'm1', challenge: message, consumedAt: null, expiresAt: new Date(Date.now() + 60000) };
     const prisma = {
       merchant: {
