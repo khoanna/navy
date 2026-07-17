@@ -31,12 +31,15 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [payoutConfigured, setPayoutConfigured] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
   const submittingRef = useRef(false);
 
   useEffect(() => {
-    fetch('/api/merchant/products').then((r) => r.ok ? r.json() : []).then((all: Product[]) => setProducts(all.filter((p) => p.active)));
-    fetch('/api/merchant/charges').then((r) => r.ok ? r.json() : []).then((c: Charge[]) => setCharges(c));
-    fetch('/api/merchant/stats').then((r) => r.ok ? r.json() : {}).then((s: { payoutConfigured?: boolean }) => setPayoutConfigured(!!s.payoutConfigured));
+    Promise.all([
+      fetch('/api/merchant/products').then((r) => r.ok ? r.json() : []).then((all: Product[]) => setProducts(all.filter((p) => p.active))),
+      fetch('/api/merchant/charges').then((r) => r.ok ? r.json() : []).then((c: Charge[]) => setCharges(c)),
+      fetch('/api/merchant/stats').then((r) => r.ok ? r.json() : {}).then((s: { payoutConfigured?: boolean }) => setPayoutConfigured(!!s.payoutConfigured)),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -53,19 +56,23 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
     e?.preventDefault();
     if (submittingRef.current) return;
     submittingRef.current = true;
+    setError(''); setResult(null);
+    if (lines.length === 0) { setError('Add at least one product'); return; }
+    setSubmitting(true);
     try {
-      setError(''); setResult(null);
-      if (lines.length === 0) { setError('Add at least one product'); return; }
-      setSubmitting(true);
       const res = await fetch('/api/merchant/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: lines, description: description || undefined, expiresInSec }),
       });
       const body = await res.json();
-      setSubmitting(false);
       if (res.ok) { setResult({ orderId: body.orderId, reference: body.reference, qr: body.qr, payUrl: body.payUrl }); onCreated?.(); }
       else setError(body.error ?? (res.status === 409 ? 'Your account is not approved yet' : `Failed (${res.status})`));
-    } finally { submittingRef.current = false; }
+    } catch (err) {
+      setError((err as Error).message ?? 'Network error — please try again');
+    } finally {
+      setSubmitting(false);
+      submittingRef.current = false;
+    }
   }
 
   if (result) {
@@ -79,6 +86,8 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
       </div>
     );
   }
+
+  if (loading) return null;
 
   if (payoutConfigured === false) {
     return (
