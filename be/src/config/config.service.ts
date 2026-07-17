@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ethers } from 'ethers';
 
-export type Network = 'devnet' | 'mainnet';
-
 @Injectable()
 export class NavyConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {
@@ -14,12 +12,6 @@ export class NavyConfigService {
     const v = this.env[k];
     if (!v) throw new Error(`Missing required env var: ${k}`);
     return v;
-  }
-  get network(): Network { return this.req('NETWORK') as Network; }
-  get rpcUrl(): string {
-    return this.network === 'mainnet'
-      ? this.req('SOLANA_RPC_MAINNET')
-      : this.req('SOLANA_RPC_DEVNET');
   }
   get jwtSecret(): string { return this.req('NAVY_JWT_SECRET'); }
   get accessTtl(): number { return this.posIntTtl('NAVY_JWT_ACCESS_TTL'); }
@@ -42,12 +34,6 @@ export class NavyConfigService {
     const n = parseInt(this.env.NAVY_ADMIN_LOCK_WINDOW_MS ?? '', 10);
     return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
   }
-  /** Min relayer SOL balance (lamports) required before co-signing a payment. Env is SOL; default 0.05. */
-  get relayerMinBalanceLamports(): number {
-    const sol = parseFloat(this.env.NAVY_RELAYER_MIN_BALANCE_SOL ?? '0.05');
-    return Math.floor((Number.isNaN(sol) ? 0.05 : sol) * 1e9);
-  }
-
   // --- EVM (Sepolia) ---
   get evmRpcUrl(): string { return this.req('SEPOLIA_RPC_URL'); }
   get evmChainId(): number {
