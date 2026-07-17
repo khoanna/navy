@@ -1,15 +1,17 @@
 import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { PublicKey } from '@solana/web3.js';
+import { ethers } from 'ethers';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
 import { PrivyService } from '../wallet/privy.service';
 import { DelegatedFundingService } from './delegated-funding.service';
 import { FarmingService } from './farming.service';
 import { AuditService } from '../audit/audit.service';
-import { NAVY_ONCHAIN } from '../onchain/onchain.module';
-import type { NavyOnchain } from '../onchain/onchain.module';
+import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
+import { FARM_USDC } from './aave-yield-adapter';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
 import { computeFundAmount, type FundingBounds } from './funding.util';
+
+const usdcIface = new ethers.Interface(['function balanceOf(address owner) view returns (uint256)']);
 
 @Injectable()
 export class DelegationService {
@@ -22,9 +24,19 @@ export class DelegationService {
     private readonly funding: DelegatedFundingService,
     private readonly farming: FarmingService,
     private readonly audit: AuditService,
-    @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
+    @Inject(NAVY_EVM) private readonly evm: NavyEvm,
     @Inject(FARM_FUNDING_BOUNDS) private readonly bounds: FundingBounds,
   ) {}
+
+  private _usdc?: ethers.Contract;
+  private get usdc(): ethers.Contract {
+    return (this._usdc ??= new ethers.Contract(FARM_USDC, usdcIface, this.evm.provider));
+  }
+
+  /** The user's main-wallet USDC balance (base units), the source for auto-funding. */
+  private async usdcBalance(address: string): Promise<bigint> {
+    return (await this.usdc.balanceOf(address)) as bigint;
+  }
 
   async status(userId: string): Promise<{ available: boolean; enabled: boolean }> {
     const available = !!this.cfg.privyAuthorizationKey;
@@ -88,8 +100,8 @@ export class DelegationService {
     user: { id: string; privyDid: string; primaryWallet: string | null; farmDelegationWalletId: string | null },
     sw: { id: string; pubkey: string },
   ): Promise<{ txSignature: string } | { skipped: string }> {
-    const balance = await this.chain.connection.getBalance(new PublicKey(user.primaryWallet!));
-    const amount = computeFundAmount(BigInt(balance), this.bounds);
+    const balance = await this.usdcBalance(user.primaryWallet!);
+    const amount = computeFundAmount(balance, this.bounds);
     if (amount === null) return { skipped: 'insufficient balance' };
     try {
       return await this.funding.fundSubwalletFromUser({

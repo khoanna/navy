@@ -1,24 +1,33 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
+import { ethers } from 'ethers';
 import { PrivyService } from '../wallet/privy.service';
 import { DelegatedPolicyValidator } from '../wallet/delegated-policy.validator';
-import { deriveTxSummary } from '../wallet/tx-summary';
+import { deriveTxSummary, type EvmCall } from '../wallet/tx-summary';
 import { AuditService } from '../audit/audit.service';
-import { NAVY_ONCHAIN } from '../onchain/onchain.module';
-import type { NavyOnchain } from '../onchain/onchain.module';
+import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
+import { FARM_USDC } from './aave-yield-adapter';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
 import type { FundingBounds } from './funding.util';
+
+const usdcIface = new ethers.Interface(['function transfer(address to, uint256 value)']);
 
 @Injectable()
 export class DelegatedFundingService {
   constructor(
     private readonly privy: PrivyService,
-    @Inject(NAVY_ONCHAIN) private readonly chain: NavyOnchain,
+    @Inject(NAVY_EVM) private readonly evm: NavyEvm,
     private readonly audit: AuditService,
     private readonly policy: DelegatedPolicyValidator,
     @Inject(FARM_FUNDING_BOUNDS) private readonly bounds: FundingBounds,
   ) {}
 
+  /**
+   * Move `amountLamports` (USDC base units) from the user's delegated main wallet into
+   * their farming subwallet via an ERC-20 transfer. The tx is built server-side, its
+   * summary is derived from the ACTUAL calldata (never trusted from the caller) and
+   * bounded by the DelegatedPolicyValidator, then Privy broadcasts it from the user's
+   * delegated wallet.
+   */
   async fundSubwalletFromUser(args: {
     userId: string;
     privyDid: string;
@@ -27,17 +36,12 @@ export class DelegatedFundingService {
     subwalletPubkey: string;
     amountLamports: bigint;
   }): Promise<{ txSignature: string }> {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: new PublicKey(args.userAddress),
-        toPubkey: new PublicKey(args.subwalletPubkey),
-        lamports: args.amountLamports,
-      }),
-    );
-    tx.feePayer = this.chain.relayer.publicKey;
-    tx.recentBlockhash = (await this.chain.connection.getLatestBlockhash()).blockhash;
+    const call: EvmCall = {
+      to: FARM_USDC,
+      data: usdcIface.encodeFunctionData('transfer', [args.subwalletPubkey, args.amountLamports]),
+    };
 
-    const verdict = this.policy.check(deriveTxSummary(tx), {
+    const verdict = this.policy.check(deriveTxSummary([call]), {
       subwallet: args.subwalletPubkey,
       minLamports: this.bounds.fundMin,
       maxLamports: this.bounds.fundMax,
@@ -51,30 +55,27 @@ export class DelegatedFundingService {
       throw new ForbiddenException(`Delegated funding denied: ${verdict.reason}`);
     }
 
-    tx.partialSign(this.chain.relayer);
     const idempotencyKey = `fund:${args.subwalletPubkey}:${Math.floor(Date.now() / 60000)}`;
-    const signed = await this.privy.signDelegatedTransaction({
+    const { hash } = await this.privy.sendDelegatedTransaction({
       walletId: args.walletId,
       address: args.userAddress,
-      tx,
+      to: call.to,
+      data: call.data,
+      chainId: this.evm.usdcDomain.chainId,
       idempotencyKey,
     });
 
-    const userSig = signed.signatures.find((s) => s.publicKey.equals(new PublicKey(args.userAddress)));
-    if (!userSig || userSig.signature === null) {
+    if (!hash) {
       await this.audit.record({ actor: `user:${args.userId}`, action: 'farming.delegated.fund.unsigned', metadata: { subwallet: args.subwalletPubkey } });
-      throw new Error('Delegated signing did not return a user signature');
+      throw new Error('Delegated signing did not return a transaction hash');
     }
 
-    const raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
-    const sig = await this.chain.connection.sendRawTransaction(raw);
-    await this.chain.connection.confirmTransaction(sig, 'confirmed');
     await this.audit.record({
       actor: `user:${args.userId}`,
       action: 'farming.delegated.fund',
       target: args.subwalletPubkey,
-      metadata: { amount: args.amountLamports.toString(), signature: sig },
+      metadata: { amount: args.amountLamports.toString(), signature: hash },
     });
-    return { txSignature: sig };
+    return { txSignature: hash };
   }
 }

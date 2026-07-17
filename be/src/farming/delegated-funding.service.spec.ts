@@ -1,69 +1,56 @@
-import { Keypair, PublicKey } from '@solana/web3.js';
+import { ethers } from 'ethers';
 import { DelegatedFundingService } from './delegated-funding.service';
 import { DelegatedPolicyValidator } from '../wallet/delegated-policy.validator';
+import { FARM_USDC } from './aave-yield-adapter';
 
-const FAKE_SIG = Buffer.alloc(64, 1);
+const SUB = ethers.Wallet.createRandom().address;
+const USER = ethers.Wallet.createRandom().address;
 
 function build() {
-  const relayer = Keypair.generate();
-  const sub = Keypair.generate().publicKey.toBase58();
-  const userKeypair = Keypair.generate();
-  const userAddr = userKeypair.publicKey.toBase58();
-  const chain = {
-    relayer,
-    connection: {
-      getLatestBlockhash: jest.fn().mockResolvedValue({ blockhash: '11111111111111111111111111111111' }),
-      sendRawTransaction: jest.fn().mockResolvedValue('sig-123'),
-      confirmTransaction: jest.fn().mockResolvedValue({ value: { err: null } }),
-    },
-  } as any;
-  // Happy-path mock: add a fake user signature to the tx so the assertion passes.
-  const privy = {
-    signDelegatedTransaction: jest.fn(async ({ tx, address }) => {
-      tx.addSignature(new PublicKey(address), FAKE_SIG);
-      return tx;
-    }),
-  } as any;
+  const evm = { usdcDomain: { chainId: 11155111 }, provider: {} } as any;
+  // Happy-path: Privy broadcasts and returns a hash.
+  const privy = { sendDelegatedTransaction: jest.fn().mockResolvedValue({ hash: '0xhash' }) } as any;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
   const bounds = { reserve: 5_000_000n, fundMin: 10_000_000n, fundMax: 1_000_000_000n };
-  const svc = new DelegatedFundingService(privy, chain, audit, new DelegatedPolicyValidator(), bounds);
-  return { svc, privy, audit, chain, sub, userAddr };
+  const svc = new DelegatedFundingService(privy, evm, audit, new DelegatedPolicyValidator(), bounds);
+  return { svc, privy, audit };
 }
 
 describe('DelegatedFundingService.fundSubwalletFromUser', () => {
-  it('builds a bounded transfer to the subwallet, policy-checks, delegated-signs, submits, audits', async () => {
-    const { svc, privy, audit, chain, sub, userAddr } = build();
+  it('builds a bounded USDC transfer to the subwallet, policy-checks, delegated-sends, audits', async () => {
+    const { svc, privy, audit } = build();
     const res = await svc.fundSubwalletFromUser({
       userId: 'u1', privyDid: 'did:1', walletId: 'wallet-123',
-      userAddress: userAddr, subwalletPubkey: sub, amountLamports: 20_000_000n,
+      userAddress: USER, subwalletPubkey: SUB, amountLamports: 20_000_000n,
     });
-    expect(res).toEqual({ txSignature: 'sig-123' });
-    expect(privy.signDelegatedTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ walletId: 'wallet-123', address: userAddr }),
-    );
-    expect(chain.connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ txSignature: '0xhash' });
+    // The call is a real ERC-20 transfer(subwallet, amount) to FARM_USDC.
+    const arg = privy.sendDelegatedTransaction.mock.calls[0][0];
+    expect(arg).toEqual(expect.objectContaining({ walletId: 'wallet-123', address: USER, to: FARM_USDC, chainId: 11155111 }));
+    const iface = new ethers.Interface(['function transfer(address to, uint256 value)']);
+    const [to, value] = iface.decodeFunctionData('transfer', arg.data);
+    expect(ethers.getAddress(to)).toBe(SUB);
+    expect(value).toBe(20_000_000n);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'farming.delegated.fund' }));
   });
 
   it('denies + audits + throws when the amount is out of bounds (defense-in-depth)', async () => {
-    const { svc, privy, audit, sub, userAddr } = build();
+    const { svc, privy, audit } = build();
     await expect(svc.fundSubwalletFromUser({
-      userId: 'u1', privyDid: 'did:1', walletId: 'w', userAddress: userAddr, subwalletPubkey: sub,
+      userId: 'u1', privyDid: 'did:1', walletId: 'w', userAddress: USER, subwalletPubkey: SUB,
       amountLamports: 2_000_000_000n,
     })).rejects.toThrow(/out of bounds|denied/i);
-    expect(privy.signDelegatedTransaction).not.toHaveBeenCalled();
+    expect(privy.sendDelegatedTransaction).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'farming.delegated.fund.denied' }));
   });
 
-  it('throws and audits when Privy returns tx without the user signature', async () => {
-    const { svc, privy, audit, chain, sub, userAddr } = build();
-    // Override: return the tx without adding the user signature
-    privy.signDelegatedTransaction.mockImplementationOnce(async ({ tx }) => tx);
+  it('throws and audits when Privy returns no transaction hash', async () => {
+    const { svc, privy, audit } = build();
+    privy.sendDelegatedTransaction.mockResolvedValueOnce({ hash: undefined });
     await expect(svc.fundSubwalletFromUser({
       userId: 'u1', privyDid: 'did:1', walletId: 'wallet-123',
-      userAddress: userAddr, subwalletPubkey: sub, amountLamports: 20_000_000n,
-    })).rejects.toThrow(/did not return a user signature/);
-    expect(chain.connection.sendRawTransaction).not.toHaveBeenCalled();
+      userAddress: USER, subwalletPubkey: SUB, amountLamports: 20_000_000n,
+    })).rejects.toThrow(/did not return a transaction hash/);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'farming.delegated.fund.unsigned' }));
   });
 });

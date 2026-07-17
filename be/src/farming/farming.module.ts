@@ -1,19 +1,18 @@
 import { Module } from '@nestjs/common';
-import { OnchainModule } from '../onchain/onchain.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { FarmingService } from './farming.service';
 import { FarmingController } from './farming.controller';
-import { SaveYieldAdapter } from './save-yield-adapter';
+import { AaveYieldAdapter } from './aave-yield-adapter';
 import { FarmingAgentScheduler, FARM_BOUNDS } from './farming-agent.scheduler';
 import { DelegatedFundingService } from './delegated-funding.service';
 import { DelegationService } from './delegation.service';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
 
 @Module({
-  imports: [OnchainModule, WalletModule],
+  imports: [WalletModule],
   controllers: [FarmingController],
   providers: [
-    SaveYieldAdapter, FarmingService, FarmingAgentScheduler,
+    AaveYieldAdapter, FarmingService, FarmingAgentScheduler,
     { provide: FARM_BOUNDS, useValue: {
       rentBuffer: parseInt(process.env.NAVY_FARM_RENT_BUFFER ?? '2000000', 10),
       minDeposit: parseInt(process.env.NAVY_FARM_MIN_DEPOSIT ?? '10000000', 10),

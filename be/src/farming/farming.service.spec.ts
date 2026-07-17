@@ -1,48 +1,53 @@
+import { ethers } from 'ethers';
 import { FarmingService } from './farming.service';
-import { PublicKey, Transaction } from '@solana/web3.js';
+
+const OWNER = ethers.Wallet.createRandom().address;
+const SUB = ethers.Wallet.createRandom().address;
 
 function deps() {
-  const sw = { id: 's1', userId: 'u1', pubkey: PublicKey.default.toBase58(), ownerMainWallet: PublicKey.default.toBase58(), status: 'active', principalLamports: 0n, currentValueLamports: 0n };
+  const sw = { id: 's1', userId: 'u1', pubkey: SUB, ownerMainWallet: OWNER, status: 'active', principalLamports: 0n, currentValueLamports: 0n };
   const prisma = {
     farmingSubwallet: { findFirst: jest.fn().mockResolvedValue(sw), update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...sw, ...data })) },
     farmingEvent: { create: jest.fn().mockResolvedValue({ id: 'e1' }), findMany: jest.fn().mockResolvedValue([]) },
   } as any;
-  const subwallets = { provision: jest.fn().mockResolvedValue({ id: 's1', pubkey: PublicKey.default.toBase58() }) };
+  const subwallets = { provision: jest.fn().mockResolvedValue({ id: 's1', pubkey: SUB }) };
   const adapter = {
-    buildDeposit: jest.fn().mockResolvedValue(new Transaction()),
-    buildWithdraw: jest.fn().mockResolvedValue(new Transaction()),
+    buildDeposit: jest.fn().mockResolvedValue([{ to: '0xusdc', data: '0x1' }, { to: '0xpool', data: '0x2' }]),
+    buildWithdraw: jest.fn().mockResolvedValue([{ to: '0xpool', data: '0x3' }]),
     getPosition: jest.fn().mockResolvedValue({ principalLamports: 100n, currentValueLamports: 105n, cTokenAmount: 100n }),
     policyAllowlist: jest.fn().mockResolvedValue({ programIds: ['P'], destinations: ['D'] }),
   };
-  // a real signed Transaction is serialize-able; the stub returns a lightweight serializable object
-  const signing = { signTransaction: jest.fn().mockResolvedValue({ serialize: () => Buffer.from('signed-tx') }) };
-  const chain = { connection: { sendRawTransaction: jest.fn().mockResolvedValue('sig'), confirmTransaction: jest.fn().mockResolvedValue({}), getBalance: jest.fn().mockResolvedValue(0) } };
+  // signAndSend returns a tx hash per call.
+  const signing = { signAndSend: jest.fn().mockResolvedValue('0xhash') };
+  const evm = { provider: {} } as any;
   const audit = { record: jest.fn() };
-  return { svc: new FarmingService(prisma, subwallets as any, adapter as any, signing as any, chain as any, audit as any), prisma, subwallets, adapter, signing, sw };
+  return { svc: new FarmingService(prisma, subwallets as any, adapter as any, signing as any, evm, audit as any), prisma, subwallets, adapter, signing, sw };
 }
 
 describe('FarmingService', () => {
   it('createSubwallet provisions then stores the adapter policy + owner', async () => {
     const { svc, subwallets, adapter, prisma } = deps();
-    const out = await svc.createSubwallet('u1', PublicKey.default.toBase58());
+    const out = await svc.createSubwallet('u1', OWNER);
     expect(subwallets.provision).toHaveBeenCalled();
-    expect(adapter.policyAllowlist).toHaveBeenCalled();
+    expect(adapter.policyAllowlist).toHaveBeenCalledWith(SUB, OWNER);
     const upd = prisma.farmingSubwallet.update.mock.calls[0][0].data;
-    expect(upd.ownerMainWallet).toBe(PublicKey.default.toBase58());
+    expect(upd.ownerMainWallet).toBe(OWNER);
     expect(upd.policyJson).toEqual({ allowedProgramIds: ['P'], allowedDestinations: ['D'] });
     expect(out.address).toBeDefined();
   });
-  it('deposit builds, signs via SigningService, submits, records a deposit event', async () => {
+  it('deposit builds calls, sends each via SigningService, records a deposit event', async () => {
     const { svc, adapter, signing, prisma } = deps();
     await svc.deposit('u1', 100n);
-    expect(adapter.buildDeposit).toHaveBeenCalled();
-    expect(signing.signTransaction).toHaveBeenCalledWith('s1', expect.any(Transaction));
+    expect(adapter.buildDeposit).toHaveBeenCalledWith(SUB, 100n);
+    // Two calls (approve + supply) → two signAndSend invocations.
+    expect(signing.signAndSend).toHaveBeenCalledTimes(2);
+    expect(signing.signAndSend).toHaveBeenCalledWith('s1', { to: '0xusdc', data: '0x1' });
     expect(prisma.farmingEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: 'deposit' }) }));
   });
-  it('withdraw builds an owner-targeted tx and records a withdraw event', async () => {
+  it('withdraw builds an owner-targeted call and records a withdraw event', async () => {
     const { svc, adapter, prisma } = deps();
     await svc.withdraw('u1', 'all');
-    expect(adapter.buildWithdraw).toHaveBeenCalledWith(expect.any(PublicKey), expect.any(PublicKey), 'all');
+    expect(adapter.buildWithdraw).toHaveBeenCalledWith(SUB, OWNER, 'all');
     expect(prisma.farmingEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: 'withdraw' }) }));
   });
   it('getPosition refreshes from the adapter and persists', async () => {
@@ -54,7 +59,7 @@ describe('FarmingService', () => {
   it('depositSubwallet(sw, amount) deposits for a specific row (used by the scheduler)', async () => {
     const { svc, adapter, signing, sw } = deps();
     await svc.depositSubwallet(sw as any, 50n);
-    expect(adapter.buildDeposit).toHaveBeenCalledWith(expect.any(PublicKey), 50n);
-    expect(signing.signTransaction).toHaveBeenCalledWith('s1', expect.any(Transaction));
+    expect(adapter.buildDeposit).toHaveBeenCalledWith(SUB, 50n);
+    expect(signing.signAndSend).toHaveBeenCalledTimes(2);
   });
 });
