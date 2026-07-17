@@ -1,4 +1,4 @@
-import { toMerchantDto, toOrderDto, toFarmingEventDto } from './serialize';
+import { toMerchantDto, toOrderDto, toFarmingEventDto, type MerchantDto, type OrderDto, type FarmingEventDto } from './serialize';
 
 describe('toMerchantDto', () => {
   const raw = {
@@ -16,13 +16,13 @@ describe('toMerchantDto', () => {
   };
 
   it('omits passwordHash and totpSecret', () => {
-    const dto = toMerchantDto(raw) as Record<string, unknown>;
+    const dto = toMerchantDto(raw) as unknown as Record<string, unknown>;
     expect(dto).not.toHaveProperty('passwordHash');
     expect(dto).not.toHaveProperty('totpSecret');
   });
 
   it('keeps email and businessName', () => {
-    const dto = toMerchantDto(raw)!;
+    const dto = toMerchantDto(raw) as MerchantDto;
     expect(dto.email).toBe('a@b.com');
     expect(dto.businessName).toBe('Acme');
   });
@@ -55,13 +55,13 @@ describe('toOrderDto', () => {
   };
 
   it('returns amount as a string from a BigInt input', () => {
-    const dto = toOrderDto(raw)!;
+    const dto = toOrderDto(raw) as OrderDto;
     expect(dto.amount).toBe('1000000');
     expect(typeof dto.amount).toBe('string');
   });
 
   it('exposes orderId alias for id', () => {
-    expect(toOrderDto(raw)!.orderId).toBe('o1');
+    expect((toOrderDto(raw) as OrderDto).orderId).toBe('o1');
   });
 
   it('returns null for null input', () => {
@@ -80,7 +80,7 @@ describe('toFarmingEventDto', () => {
   };
 
   it('returns amount as a string', () => {
-    const dto = toFarmingEventDto(raw)!;
+    const dto = toFarmingEventDto(raw) as FarmingEventDto;
     expect(dto.amount).toBe('500');
     expect(typeof dto.amount).toBe('string');
   });

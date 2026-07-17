@@ -6,7 +6,7 @@ describe('MerchantController POST /auth/merchant', () => {
     const merchants = { login: jest.fn().mockResolvedValue({ id: 'm1' }) };
     const tokens = { issue: jest.fn().mockResolvedValue({ accessToken: 'a', refreshToken: 'r' }) };
     const audit = { record: jest.fn() };
-    const ctrl = new MerchantController(merchants as any, tokens as any, audit as any);
+    const ctrl = new MerchantController(merchants as any, tokens as any, audit as any, {} as any);
 
     const res = await ctrl.login({ email: 'm@x.com', password: 'pw-secret' });
 
@@ -17,7 +17,7 @@ describe('MerchantController POST /auth/merchant', () => {
   it('audits a failed login with the email as target and no password', async () => {
     const merchants = { login: jest.fn().mockRejectedValue(new UnauthorizedException('Invalid credentials')) };
     const audit = { record: jest.fn() };
-    const ctrl = new MerchantController(merchants as any, {} as any, audit as any);
+    const ctrl = new MerchantController(merchants as any, {} as any, audit as any, {} as any);
 
     await expect(ctrl.login({ email: 'm@x.com', password: 'pw-secret' })).rejects.toThrow();
     expect(audit.record).toHaveBeenCalledWith(
