@@ -87,22 +87,14 @@ contract NavyPaymentsTest is Test {
         return keccak256(abi.encodePacked(merchantId, invoiceId));
     }
 
-    function _signInvoice(bytes16 merchantId, bytes16 invoiceId, uint256 amount, uint256 validBefore)
+    /// @dev Sign an EIP-2612 permit authorizing the NavyPayments contract to pull `amount`.
+    function _signPermit(uint256 amount, uint256 deadline)
         internal
         view
         returns (uint8 v, bytes32 r, bytes32 s)
     {
-        bytes32 nonce = _invoiceKey(merchantId, invoiceId);
         bytes32 structHash = keccak256(
-            abi.encode(
-                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
-                _payer(),
-                address(navy),
-                amount,
-                uint256(0),
-                validBefore,
-                nonce
-            )
+            abi.encode(usdc.PERMIT_TYPEHASH(), _payer(), address(navy), amount, usdc.nonces(_payer()), deadline)
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));
         return vm.sign(payerPk, digest);
@@ -121,14 +113,14 @@ contract NavyPaymentsTest is Test {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"22222222222222222222222222222222");
         uint256 amount = 1_000_000; // 1 USDC
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, amount, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(amount, deadline);
 
         vm.expectEmit(true, true, true, true);
         emit NavyPayments.InvoicePaid(MID, invoiceId, _payer(), amount, 10_000, block.timestamp);
 
         vm.prank(relayer);
-        navy.payInvoice(MID, invoiceId, amount, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, amount, deadline, _payer(), v, r, s);
 
         assertEq(usdc.balanceOf(merchantPayout), 990_000);
         assertEq(usdc.balanceOf(treasury), 10_000);
@@ -142,11 +134,11 @@ contract NavyPaymentsTest is Test {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"33333333333333333333333333333333");
         uint256 amount = 500_000;
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, amount, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(amount, deadline);
 
         vm.prank(relayer);
-        navy.payInvoice(MID, invoiceId, amount, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, amount, deadline, _payer(), v, r, s);
 
         assertEq(usdc.balanceOf(merchantPayout), 500_000);
         assertEq(usdc.balanceOf(treasury), 0);
@@ -155,26 +147,27 @@ contract NavyPaymentsTest is Test {
     function test_payInvoice_onlyRelayer() public {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"44444444444444444444444444444444");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
         vm.expectRevert(NavyPayments.NotRelayer.selector);
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, 500_000, deadline, _payer(), v, r, s);
     }
 
     function test_payInvoice_rejectsReplay() public {
         _setup_merchant_relayer_funds();
         usdc.mint(_payer(), 1_000_000); // top up for the (never-completed) second attempt
         bytes16 invoiceId = bytes16(hex"55555555555555555555555555555555");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
         vm.prank(relayer);
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, 500_000, deadline, _payer(), v, r, s);
 
+        // The invoice replay guard trips before the permit is re-checked.
         vm.prank(relayer);
         vm.expectRevert(NavyPayments.AlreadyPaid.selector);
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, 500_000, deadline, _payer(), v, r, s);
     }
 
     function test_payInvoice_rejectsInactiveMerchant() public {
@@ -182,73 +175,58 @@ contract NavyPaymentsTest is Test {
         vm.prank(owner);
         navy.setMerchantActive(MID, false);
         bytes16 invoiceId = bytes16(hex"66666666666666666666666666666666");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
         vm.prank(relayer);
         vm.expectRevert(NavyPayments.MerchantInactive.selector);
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, 500_000, deadline, _payer(), v, r, s);
     }
 
     function test_payInvoice_rejectsUnknownMerchant() public {
         _setup_merchant_relayer_funds();
         bytes16 unknown = bytes16(hex"99999999999999999999999999999999");
         bytes16 invoiceId = bytes16(hex"77777777777777777777777777777777");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(unknown, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
         vm.prank(relayer);
         vm.expectRevert(NavyPayments.MerchantInactive.selector);
-        navy.payInvoice(unknown, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(unknown, invoiceId, 500_000, deadline, _payer(), v, r, s);
     }
 
     function test_payInvoice_rejectsBelowMinimum() public {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"88888888888888888888888888888888");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 9_999, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(9_999, deadline);
 
         vm.prank(relayer);
         vm.expectRevert(NavyPayments.AmountTooSmall.selector);
-        navy.payInvoice(MID, invoiceId, 9_999, 0, validBefore, _payer(), v, r, s);
+        navy.payInvoice(MID, invoiceId, 9_999, deadline, _payer(), v, r, s);
     }
 
-    function test_payInvoice_rejectsExpired() public {
+    function test_payInvoice_rejectsExpiredDeadline() public {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
-        vm.warp(validBefore + 1); // now past expiry
+        vm.warp(deadline + 1); // now past the permit deadline
         vm.prank(relayer);
-        vm.expectRevert(bytes("authorization expired"));
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        vm.expectRevert(bytes("permit expired"));
+        navy.payInvoice(MID, invoiceId, 500_000, deadline, _payer(), v, r, s);
     }
 
     function test_payInvoice_rejectsAmountTamper() public {
         _setup_merchant_relayer_funds();
         bytes16 invoiceId = bytes16(hex"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        uint256 validBefore = block.timestamp + 3600;
-        // Sign for 500_000 but submit 900_000: USDC signature verification must reject.
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        // Sign a permit for 500_000 but submit 900_000: permit signature verification must reject.
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(500_000, deadline);
 
         vm.prank(relayer);
-        vm.expectRevert(bytes("invalid signature"));
-        navy.payInvoice(MID, invoiceId, 900_000, 0, validBefore, _payer(), v, r, s);
-    }
-
-    function test_payInvoice_rejectsWrongMerchantBinding() public {
-        _setup_merchant_relayer_funds();
-        bytes16 other = bytes16(hex"cccccccccccccccccccccccccccccccc");
-        vm.prank(owner);
-        navy.registerMerchant(other, address(0xABCD));
-        bytes16 invoiceId = bytes16(hex"dddddddddddddddddddddddddddddddd");
-        uint256 validBefore = block.timestamp + 3600;
-        // Sign the authorization bound to `other`, but submit it against MID.
-        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(other, invoiceId, 500_000, validBefore);
-
-        vm.prank(relayer);
-        vm.expectRevert(bytes("invalid signature"));
-        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+        vm.expectRevert(bytes("invalid permit signature"));
+        navy.payInvoice(MID, invoiceId, 900_000, deadline, _payer(), v, r, s);
     }
 }

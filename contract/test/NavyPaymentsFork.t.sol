@@ -3,12 +3,12 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {NavyPayments} from "../src/NavyPayments.sol";
-import {IEIP3009} from "../src/interfaces/IEIP3009.sol";
+import {IUsdcPermit} from "../src/interfaces/IUsdcPermit.sol";
 
-/// @dev Exercises the REAL Circle USDC receiveWithAuthorization on a Sepolia fork.
+/// @dev Exercises the REAL Aave Sepolia USDC EIP-2612 permit on a Sepolia fork.
 /// Skips automatically when SEPOLIA_RPC_URL is not set.
 contract NavyPaymentsForkTest is Test {
-    address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address constant USDC = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
 
     NavyPayments navy;
     address owner = address(0x0111);
@@ -32,53 +32,51 @@ contract NavyPaymentsForkTest is Test {
     }
 
     function _domainSeparator() internal view returns (bytes32) {
-        // FiatTokenV2_2 exposes DOMAIN_SEPARATOR().
+        // Aave USDC (EIP-2612) exposes DOMAIN_SEPARATOR(); read it from chain to be safe.
         (bool ok, bytes memory out) = USDC.staticcall(abi.encodeWithSignature("DOMAIN_SEPARATOR()"));
         require(ok, "no DOMAIN_SEPARATOR");
         return abi.decode(out, (bytes32));
     }
 
-    function _signFork(address payer, bytes16 invoiceId, uint256 amount, uint256 validBefore)
+    function _signPermit(address payer, uint256 amount, uint256 deadline)
         internal
         view
         returns (uint8 v, bytes32 r, bytes32 s)
     {
-        bytes32 nonce = keccak256(abi.encodePacked(MID, invoiceId));
-        bytes32 typeHash = keccak256(
-            "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
-        );
-        bytes32 structHash =
-            keccak256(abi.encode(typeHash, payer, address(navy), amount, uint256(0), validBefore, nonce));
+        bytes32 typeHash =
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+        uint256 nonce = IUsdcPermit(USDC).nonces(payer);
+        bytes32 structHash = keccak256(abi.encode(typeHash, payer, address(navy), amount, nonce, deadline));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
         return vm.sign(payerPk, digest);
     }
 
-    function test_fork_realUsdcReceiveWithAuthorization() public {
+    function test_fork_realUsdcPermit() public {
         if (address(navy) == address(0)) {
             emit log("SKIP: set SEPOLIA_RPC_URL to run the fork test");
             return;
         }
         address payer = vm.addr(payerPk);
-        // EIP-3009 requires the payer be a plain EOA: Circle USDC treats a signer WITH code as a
-        // contract and routes to EIP-1271, rejecting a raw ECDSA sig. If this fixture address has
-        // code on the current fork state, skip (the live e2e proves the real flow with a real EOA).
+        // Permit uses plain ecrecover, so it *should* work even for a 7702 account; but if this
+        // fixture address has code on the current fork state, skip for safety (the live e2e proves
+        // the real flow with a real EOA).
         if (payer.code.length != 0) {
-            emit log("SKIP: fork fixture payer has code (7702/contract); EIP-3009 needs a plain EOA");
+            emit log("SKIP: fork fixture payer has code (7702/contract)");
             vm.skip(true);
             return;
         }
         uint256 amount = 1_000_000;
-        // Give the payer USDC by cheating balance via `deal` (works on forked ERC-20s).
+        // Give the payer Aave USDC by cheating balance via `deal` (works on forked ERC-20s).
         deal(USDC, payer, amount);
 
         bytes16 invoiceId = bytes16(hex"22222222222222222222222222222222");
-        uint256 validBefore = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signFork(payer, invoiceId, amount, validBefore);
+        uint256 deadline = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(payer, amount, deadline);
 
         vm.prank(relayer);
-        navy.payInvoice(MID, invoiceId, amount, 0, validBefore, payer, v, r, s);
+        navy.payInvoice(MID, invoiceId, amount, deadline, payer, v, r, s);
 
-        assertEq(IEIP3009(USDC).balanceOf(merchantPayout), 990_000);
-        assertEq(IEIP3009(USDC).balanceOf(treasury), 10_000);
+        assertEq(IUsdcPermit(USDC).balanceOf(merchantPayout), 990_000);
+        assertEq(IUsdcPermit(USDC).balanceOf(treasury), 10_000);
     }
 }

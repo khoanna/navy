@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @dev Minimal EIP-3009 token mirroring Circle USDC's receiveWithAuthorization for local tests.
+/// @dev Minimal EIP-2612 permit token mirroring Aave Sepolia USDC (name "USDC", version "1")
+/// for local tests. Uses plain ecrecover (mirrors OZ ERC20Permit), so a 7702 account signer works.
 contract MockUSDC {
     string public constant name = "USDC";
-    string public constant version = "2";
+    string public constant version = "1";
     uint8 public constant decimals = 6;
 
     bytes32 public immutable DOMAIN_SEPARATOR;
-    bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH = keccak256(
-        "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
-    );
+    bytes32 public constant PERMIT_TYPEHASH =
+        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
 
     mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(bytes32 => bool)) public authorizationState;
+    mapping(address => uint256) public nonces;
+    mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
 
     constructor() {
         DOMAIN_SEPARATOR = keccak256(
@@ -35,35 +36,37 @@ contract MockUSDC {
         emit Transfer(address(0), to, amount);
     }
 
+    function approve(address spender, uint256 value) external returns (bool) {
+        allowance[msg.sender][spender] = value;
+        emit Approval(msg.sender, spender, value);
+        return true;
+    }
+
     function transfer(address to, uint256 value) external returns (bool) {
         _transfer(msg.sender, to, value);
         return true;
     }
 
-    function receiveWithAuthorization(
-        address from,
-        address to,
-        uint256 value,
-        uint256 validAfter,
-        uint256 validBefore,
-        bytes32 nonce,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external {
-        require(to == msg.sender, "caller must be the payee");
-        require(block.timestamp > validAfter, "authorization not yet valid");
-        require(block.timestamp < validBefore, "authorization expired");
-        require(!authorizationState[from][nonce], "authorization used");
-
-        bytes32 structHash =
-            keccak256(abi.encode(RECEIVE_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-        require(ecrecover(digest, v, r, s) == from, "invalid signature");
-
-        authorizationState[from][nonce] = true;
-        emit AuthorizationUsed(from, nonce);
+    function transferFrom(address from, address to, uint256 value) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        require(allowed >= value, "insufficient allowance");
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - value;
+        }
         _transfer(from, to, value);
+        return true;
+    }
+
+    function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+    {
+        require(block.timestamp <= deadline, "permit expired");
+        bytes32 structHash =
+            keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        require(ecrecover(digest, v, r, s) == owner, "invalid permit signature");
+        allowance[owner][spender] = value;
+        emit Approval(owner, spender, value);
     }
 
     function _transfer(address from, address to, uint256 value) internal {
