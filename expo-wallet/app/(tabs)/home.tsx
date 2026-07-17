@@ -10,11 +10,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { JsonRpcProvider } from 'ethers';
 
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
-import { fetchBalances, lamportsToSol, usdcBaseToDisplay } from '@/lib/wallet/balances';
+import { fetchBalances, weiToEth, usdcBaseToDisplay, makeUsdcReader } from '@/lib/wallet/balances';
 import { NavyPayClient, Payment } from '@/lib/pay/navyPayClient';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { short, avatarColors } from '@/lib/wallet/identicon';
@@ -34,7 +34,7 @@ export default function Home() {
   const { address } = useMobileSigner();
   const token = session?.tokens.accessToken;
 
-  const [sol, setSol] = useState('—');
+  const [eth, setEth] = useState('—');
   const [usdc, setUsdc] = useState('—');
   const [recent, setRecent] = useState<Payment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,16 +44,13 @@ export default function Home() {
     const env = getEnv();
     if (address) {
       try {
-        const connection = new Connection(env.solanaRpc, 'confirmed');
-        const b = await fetchBalances(
-          connection,
-          new PublicKey(address),
-          new PublicKey(env.usdcMint),
-        );
-        setSol(lamportsToSol(b.solLamports));
+        const provider = new JsonRpcProvider(env.sepoliaRpc);
+        const usdcReader = makeUsdcReader(provider, env.usdcAddress);
+        const b = await fetchBalances(provider, address, usdcReader);
+        setEth(weiToEth(b.ethWei));
         setUsdc(usdcBaseToDisplay(b.usdcBase));
       } catch {
-        setSol('0');
+        setEth('0');
         setUsdc('0');
       }
     }
@@ -164,7 +161,7 @@ export default function Home() {
               </View>
             )}
             <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={styles.solLine}>
-              ≈ {sol} SOL
+              ≈ {eth} ETH
             </Text>
           </View>
 

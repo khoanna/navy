@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Connection, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import * as Clipboard from 'expo-clipboard';
 
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
-import { FarmingClient, formatSol, Position } from '@/lib/farming/farmingClient';
+import { FarmingClient, formatUsdc, Position } from '@/lib/farming/farmingClient';
 import { AutoFarmToggle } from '@/features/farming/AutoFarmToggle';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { Screen } from '@/ui/Screen';
@@ -19,15 +18,13 @@ import { Skeleton } from '@/ui/Skeleton';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
-const FUND_LAMPORTS = 100_000_000; // 0.1 SOL
-
 function short(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-6)}`;
 }
 
 export default function Farming() {
   const { session } = useNavySession();
-  const { address, sign } = useMobileSigner();
+  const { address } = useMobileSigner();
   const toast = useToast();
   const token = session?.tokens.accessToken;
   const client = new FarmingClient(getEnv().navyApiUrl);
@@ -80,22 +77,13 @@ export default function Farming() {
 
   const fund = () =>
     guard(async () => {
-      if (!pos || !address) return;
-      const env = getEnv();
-      const connection = new Connection(env.solanaRpc, 'confirmed');
-      const from = new PublicKey(address);
-      const tx = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: from,
-          toPubkey: new PublicKey(pos.address),
-          lamports: FUND_LAMPORTS,
-        }),
-      );
-      tx.feePayer = from;
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      const signed = await sign(tx);
-      await connection.sendRawTransaction(signed.serialize());
-      toast('Funded: Sent 0.1 SOL to your farming subwallet.');
+      if (!pos) return;
+      // On EVM, moving USDC main→subwallet is done server-side via delegated signing
+      // (the Privy authorization key) — the embedded wallet only signs EIP-712 payment
+      // authorizations, not arbitrary transfers. `fund-now` computes the spare balance
+      // and tops up the subwallet (or skips when there's nothing to move).
+      const r = await client.fundNow(token!);
+      toast('skipped' in r ? `Nothing to fund (${r.skipped})` : 'Funded your farming subwallet.');
     }, 'Funding failed');
 
   const withdraw = () =>
@@ -114,8 +102,8 @@ export default function Farming() {
     }
   };
 
-  const principal = pos ? Number(formatSol(pos.principalLamports)) : 0;
-  const current = pos ? Number(formatSol(pos.currentValueLamports)) : 0;
+  const principal = pos ? Number(formatUsdc(pos.principalLamports)) : 0;
+  const current = pos ? Number(formatUsdc(pos.currentValueLamports)) : 0;
   const gain = current - principal;
   const gainPct = principal > 0 ? (gain / principal) * 100 : 0;
 
@@ -129,7 +117,7 @@ export default function Farming() {
           Earn
         </Text>
         <Text variant="caption" dim>
-          Save · devnet
+          Aave · Sepolia
         </Text>
       </View>
 
@@ -179,12 +167,12 @@ export default function Farming() {
                 {current.toFixed(4)}
               </Text>
               <Text variant="h3" color="rgba(255,255,255,0.62)" style={styles.heroUnit}>
-                SOL
+                USDC
               </Text>
             </View>
             <Text variant="caption" color="rgba(255,255,255,0.82)">
               {gain >= 0 ? '+' : ''}
-              {gain.toFixed(4)} SOL earned ({gainPct >= 0 ? '+' : ''}
+              {gain.toFixed(4)} USDC earned ({gainPct >= 0 ? '+' : ''}
               {gainPct.toFixed(2)}%)
             </Text>
           </Gradient>
@@ -193,7 +181,7 @@ export default function Farming() {
           <View style={styles.btnRow}>
             <View style={styles.btnItem}>
               <Button
-                label="Deposit 0.1 SOL"
+                label="Fund from wallet"
                 icon="plus"
                 loading={busy}
                 onPress={fund}
@@ -216,7 +204,7 @@ export default function Farming() {
           </Text>
           <Card glass compact style={styles.howCard}>
             <Text variant="caption" color={colors.text}>
-              Your SOL is deposited into Save's SOL reserve via a Navy-secured
+              Your USDC is supplied to Aave's USDC reserve via a Navy-secured
               subwallet. Keys stay encrypted — the agent can never move funds
               off-policy.
             </Text>
@@ -228,7 +216,7 @@ export default function Farming() {
               <IconBadge name="sprout" color={colors.aqua} />
               <View style={styles.posMid}>
                 <Text variant="bodyStrong" color={colors.textHi}>
-                  SOL reserve
+                  USDC reserve
                 </Text>
                 <PressRow onPress={copySubwallet} style={styles.copyRow}>
                   <Text variant="mono" color={colors.textDim}>
@@ -238,17 +226,17 @@ export default function Farming() {
                 </PressRow>
               </View>
               <Text variant="bodyStrong" numeric color={colors.textHi}>
-                {current.toFixed(4)} SOL
+                {current.toFixed(4)} USDC
               </Text>
             </View>
           </Card>
 
           {/* Devnet note */}
           <View style={styles.noteRow}>
-            <Pill label="Devnet" />
+            <Pill label="Sepolia" />
             <Text variant="caption" muted style={styles.noteText}>
-              Depositing signs a transfer from your main wallet. Withdraw
-              returns principal + yield to your wallet.
+              Funding moves USDC from your main wallet into the subwallet.
+              Withdraw returns principal + yield to your wallet.
             </Text>
           </View>
         </>

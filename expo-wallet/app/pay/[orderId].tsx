@@ -48,7 +48,7 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
 export default function PayScreen() {
   const router = useRouter();
   const { orderId } = useLocalSearchParams<{ orderId: string }>();
-  const { address, sign } = useMobileSigner();
+  const { address, signTypedData } = useMobileSigner();
   const { session } = useNavySession();
   const toast = useToast();
   const client = new NavyPayClient(getEnv().navyApiUrl);
@@ -76,16 +76,16 @@ export default function PayScreen() {
     if (!address) { toast('Payment failed: no wallet available'); return; }
     setBusy(true);
     try {
-      // expectedSigner asserts the server-built tx (payer derived from our token) is one
-      // this embedded wallet can sign — refuses a tx built for a different payer.
+      // expectedSigner asserts the server-built authorization (payer derived from our token)
+      // is one this embedded wallet can sign — refuses typed data built for a different payer.
       const res = await payInvoice({
         orderId,
         navyAccessToken: token,
         client,
-        signTransaction: sign,
+        signTypedData,
         expectedSigner: address,
       });
-      toast(`Payment sent: ${res.txSignature.slice(0, 16)}…`);
+      toast(`Payment sent: ${res.txHash.slice(0, 16)}…`);
       setConfirming(false);
       setPaid(true);
     } catch (e) {
