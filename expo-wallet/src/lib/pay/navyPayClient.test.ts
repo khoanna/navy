@@ -16,25 +16,25 @@ describe('NavyPayClient', () => {
     expect(await c.getOrder('o1')).toEqual(expect.objectContaining({ orderId: 'o1' }));
     expect(f).toHaveBeenCalledWith('http://api/v1/orders/o1', expect.anything());
   });
-  it('getPaymentTx sends the Navy bearer token and encodes the id', async () => {
-    const f = mockFetch(200, { tx: 'BASE64', invoice: {} });
+  it('getPaymentAuthorization sends the Navy bearer token and encodes the id', async () => {
+    const f = mockFetch(200, { typedData: { domain: {}, types: {}, primaryType: 'ReceiveWithAuthorization', message: {} }, invoice: {} });
     const c = new NavyPayClient('http://api', f);
-    const out = await c.getPaymentTx('o1', 'navy-jwt');
-    expect(f).toHaveBeenCalledWith('http://api/v1/orders/o1/payment-tx', expect.objectContaining({
+    const out = await c.getPaymentAuthorization('o1', 'navy-jwt');
+    expect(f).toHaveBeenCalledWith('http://api/v1/orders/o1/payment-authorization', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer navy-jwt' }),
     }));
-    expect(out.tx).toBe('BASE64');
+    expect(out.typedData.primaryType).toBe('ReceiveWithAuthorization');
   });
-  it('submitSignedTx posts the signed tx with the bearer token', async () => {
-    const f = mockFetch(200, { txSignature: 'sig', status: 'confirming' });
+  it('submitSignature posts the signature with the bearer token', async () => {
+    const f = mockFetch(200, { txHash: '0xabc', status: 'confirming' });
     const c = new NavyPayClient('http://api', f);
-    const out = await c.submitSignedTx('o1', 'SIGNED', 'navy-jwt');
+    const out = await c.submitSignature('o1', '0xsig', 'navy-jwt');
     expect(f).toHaveBeenCalledWith('http://api/v1/orders/o1/submit', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ signedTx: 'SIGNED' }),
+      body: JSON.stringify({ signature: '0xsig' }),
       headers: expect.objectContaining({ 'Content-Type': 'application/json', Authorization: 'Bearer navy-jwt' }),
     }));
-    expect(out.txSignature).toBe('sig');
+    expect(out.txHash).toBe('0xabc');
   });
   it('getUserPayments sends the Navy bearer token', async () => {
     const f = mockFetch(200, [{ orderId: 'o1' }]);
@@ -50,7 +50,7 @@ describe('NavyPayClient', () => {
   });
   it('includes the server error message in the thrown error', async () => {
     const c = new NavyPayClient('http://api', mockFetch(400, { message: 'order expired' }));
-    await expect(c.getPaymentTx('o1', 'navy-jwt')).rejects.toThrow(/order expired/);
+    await expect(c.getPaymentAuthorization('o1', 'navy-jwt')).rejects.toThrow(/order expired/);
   });
   it('encodes the id in the path', async () => {
     const f = mockFetch(200, { orderId: 'a/b', status: 's', amount: '1', reference: 'R' });

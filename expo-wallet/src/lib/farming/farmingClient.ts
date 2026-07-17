@@ -1,7 +1,12 @@
+// The farming backend (be/src/farming) kept its Solana-era wire field names after the
+// EVM migration — the amounts are now USDC base units (6 decimals), but the JSON keys are
+// still `amountLamports` / `principalLamports` / `currentValueLamports` / `cTokenAmount` /
+// `txSignature`. We match those keys exactly and only change the *interpretation* (1e6, USDC).
 export interface Position { address: string; principalLamports: string; currentValueLamports: string; cTokenAmount: string; }
 
-export function formatSol(lamports: string | number): string {
-  return (Number(lamports) / 1_000_000_000).toString();
+/** Format USDC base units (6 decimals) to a plain decimal string. */
+export function formatUsdc(base: string | number): string {
+  return (Number(base) / 1_000_000).toString();
 }
 
 export class FarmingClient {
@@ -14,7 +19,7 @@ export class FarmingClient {
   }
   createSubwallet(token: string): Promise<{ subwalletId: string; address: string }> { return this.json('/farming/subwallet', token, { method: 'POST' }); }
   getPosition(token: string): Promise<Position> { return this.json('/farming', token); }
-  deposit(token: string, amountLamports: string): Promise<{ txSignature: string }> { return this.json('/farming/deposit', token, { method: 'POST', body: JSON.stringify({ amountLamports }) }); }
+  deposit(token: string, amountBase: string): Promise<{ txSignature: string }> { return this.json('/farming/deposit', token, { method: 'POST', body: JSON.stringify({ amountLamports: amountBase }) }); }
   withdraw(token: string, amount: 'all' | string): Promise<{ txSignature: string }> { return this.json('/farming/withdraw', token, { method: 'POST', body: JSON.stringify({ amount }) }); }
   history(token: string): Promise<any[]> { return this.json('/farming/history', token); }
   getDelegation(token: string): Promise<{ available: boolean; enabled: boolean }> { return this.json('/farming/delegation', token); }

@@ -5,9 +5,8 @@
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
     "@privy-io/expo": "^0.70.0",
-    "@solana/spl-token": "^0.4.14",
-    "@solana/web3.js": "1.98.4",
     "buffer": "^6.0.3",
+    "ethers": "^6.17.0",
     "expo": "~54.0.35",
     "expo-apple-authentication": "~8.0.8",
     "expo-application": "~7.0.8",

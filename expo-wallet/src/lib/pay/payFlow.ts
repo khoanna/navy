@@ -1,32 +1,31 @@
-import { Transaction } from '@solana/web3.js';
-import { NavyPayClient } from './navyPayClient';
+import { Eip712TypedData, NavyPayClient } from './navyPayClient';
 
 export interface PayInvoiceArgs {
   orderId: string;
   /** Navy USER access token — the backend derives the payer from it (both pay calls require it). */
   navyAccessToken: string;
   client: NavyPayClient;
-  signTransaction: (tx: Transaction) => Promise<Transaction>;
   /**
-   * The wallet address we intend to sign with. Asserted to be a required signer on the
-   * server-built tx, so we never sign a tx built for a different payer than our wallet.
+   * Sign the EIP-712 typed data with the embedded EVM wallet (eth_signTypedData_v4)
+   * and return the 65-byte 0x signature.
+   */
+  signTypedData: (typedData: Eip712TypedData) => Promise<string>;
+  /**
+   * The wallet address we intend to sign with. Asserted to equal the typed-data
+   * `message.from`, so we never sign an authorization built for a different payer.
    */
   expectedSigner?: string;
 }
 
-/** Fetch the relayer-partial-signed tx, add the user signature, submit it. */
-export async function payInvoice(a: PayInvoiceArgs): Promise<{ txSignature: string; status: string }> {
-  const { tx } = await a.client.getPaymentTx(a.orderId, a.navyAccessToken);
-  const txBytes = Uint8Array.from(atob(tx), (c) => c.charCodeAt(0));
-  const unsigned = Transaction.from(txBytes);
+/** Fetch the payment-authorization typed data, sign it, submit the signature. */
+export async function payInvoice(a: PayInvoiceArgs): Promise<{ txHash: string; status: string }> {
+  const { typedData } = await a.client.getPaymentAuthorization(a.orderId, a.navyAccessToken);
   if (a.expectedSigner) {
-    const signers = unsigned.signatures.map((s) => s.publicKey.toBase58());
-    if (!signers.includes(a.expectedSigner)) {
+    const from = typedData.message.from;
+    if (typeof from !== 'string' || from.toLowerCase() !== a.expectedSigner.toLowerCase()) {
       throw new Error('This invoice was built for a different wallet');
     }
   }
-  const signed = await a.signTransaction(unsigned);
-  const signedBytes = signed.serialize({ requireAllSignatures: false });
-  const signedB64 = btoa(String.fromCharCode(...signedBytes));
-  return a.client.submitSignedTx(a.orderId, signedB64, a.navyAccessToken);
+  const signature = await a.signTypedData(typedData);
+  return a.client.submitSignature(a.orderId, signature, a.navyAccessToken);
 }

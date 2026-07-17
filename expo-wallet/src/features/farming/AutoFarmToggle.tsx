@@ -44,7 +44,7 @@ export function AutoFarmToggle() {
     if (!address || !token) return;
     setBusy(true);
     try {
-      await delegateWallet({ address, chainType: 'solana' });
+      await delegateWallet({ address, chainType: 'ethereum' });
       await client.enableDelegation(token);
       const funded = await client.fundNow(token);
       toast('skipped' in funded ? `Auto-farm on (${funded.skipped})` : 'Auto-farm on — funded');

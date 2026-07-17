@@ -10,7 +10,32 @@ export interface OrderSummary {
   items?: OrderItem[];
   charges?: OrderCharge[];
 }
+// The `user/payments` list keeps the DB column name `txSignature` (it now holds the EVM tx hash).
 export interface Payment { orderId: string; reference: string; amount: string; status: string; paidAt: string | null; txSignature: string | null; merchant: string | null; }
+
+/** EIP-712 typed-data payload as returned by the backend for a payment authorization. */
+export interface Eip712TypedData {
+  domain: {
+    name?: string;
+    version?: string;
+    chainId?: number;
+    verifyingContract?: string;
+    salt?: string;
+  };
+  types: Record<string, Array<{ name: string; type: string }>>;
+  primaryType: string;
+  message: Record<string, unknown>;
+}
+
+export interface PaymentAuthorization {
+  typedData: Eip712TypedData;
+  invoice: {
+    merchant?: string | null;
+    amount?: string;
+    reference?: string;
+    expiresAt?: string | null;
+  };
+}
 
 export class NavyPayClient {
   constructor(private readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {}
@@ -34,17 +59,21 @@ export class NavyPayClient {
   getOrder(id: string): Promise<OrderSummary> {
     return this.json(`/v1/orders/${encodeURIComponent(id)}`);
   }
-  getPaymentTx(id: string, navyAccessToken: string): Promise<{ tx: string; invoice: unknown }> {
-    // The backend derives the payer from the Navy user token (the `?payer=` param is ignored).
-    return this.json(`/v1/orders/${encodeURIComponent(id)}/payment-tx`, {
+  /**
+   * Fetch the EIP-712 typed data (ReceiveWithAuthorization) the user must sign.
+   * The backend derives the payer (`message.from`) from the Navy user token.
+   */
+  getPaymentAuthorization(id: string, navyAccessToken: string): Promise<PaymentAuthorization> {
+    return this.json(`/v1/orders/${encodeURIComponent(id)}/payment-authorization`, {
       headers: { Authorization: `Bearer ${navyAccessToken}` },
     });
   }
-  submitSignedTx(id: string, signedTx: string, navyAccessToken: string): Promise<{ txSignature: string; status: string }> {
+  /** Submit the 65-byte (0x…) EIP-712 signature; the relayer broadcasts the tx. */
+  submitSignature(id: string, signature: string, navyAccessToken: string): Promise<{ txHash: string; status: string }> {
     return this.json(`/v1/orders/${encodeURIComponent(id)}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${navyAccessToken}` },
-      body: JSON.stringify({ signedTx }),
+      body: JSON.stringify({ signature }),
     });
   }
   getUserPayments(navyAccessToken: string): Promise<Payment[]> {

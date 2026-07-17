@@ -5,7 +5,6 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
-    '^uuid$': require.resolve('uuid'),
     '^expo-secure-store$': '<rootDir>/__mocks__/expo-secure-store.js',
   },
   testMatch: ['<rootDir>/src/lib/**/*.test.ts'],

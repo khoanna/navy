@@ -1,50 +1,77 @@
-import { Transaction, Keypair, SystemProgram, PublicKey } from '@solana/web3.js';
+import { Wallet, verifyTypedData } from 'ethers';
 import { payInvoice } from './payFlow';
+import type { Eip712TypedData } from './navyPayClient';
 
-function sampleTx(): { b64: string; signer: string } {
-  const kp = Keypair.generate();
-  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: kp.publicKey, toPubkey: PublicKey.default, lamports: 1 }));
-  tx.feePayer = kp.publicKey; tx.recentBlockhash = '11111111111111111111111111111111';
-  return { b64: tx.serialize({ requireAllSignatures: false }).toString('base64'), signer: kp.publicKey.toBase58() };
+// A deterministic test wallet (well-known Hardhat account #0 key).
+const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+const wallet = new Wallet(KEY);
+
+const TYPES = {
+  ReceiveWithAuthorization: [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' },
+    { name: 'nonce', type: 'bytes32' },
+  ],
+};
+
+function sampleTypedData(from: string): Eip712TypedData {
+  return {
+    domain: { name: 'USD Coin', version: '2', chainId: 11155111, verifyingContract: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' },
+    types: TYPES,
+    primaryType: 'ReceiveWithAuthorization',
+    message: {
+      from,
+      to: '0x000000000000000000000000000000000000dEaD',
+      value: '1000000',
+      validAfter: '0',
+      validBefore: '9999999999',
+      nonce: '0x' + '11'.repeat(32),
+    },
+  };
 }
 
-function sampleTxBase64(): string { return sampleTx().b64; }
+// Real eth_signTypedData_v4 ≈ wallet.signTypedData(domain, types-without-EIP712Domain, message).
+const realSigner = async (td: Eip712TypedData) => wallet.signTypedData(td.domain as any, td.types as any, td.message as any);
 
 describe('payInvoice', () => {
-  it('fetches the tx, signs it, and submits the signed tx', async () => {
+  it('fetches the typed data, signs it, and submits the signature', async () => {
+    const td = sampleTypedData(wallet.address);
     const client = {
-      getPaymentTx: jest.fn().mockResolvedValue({ tx: sampleTxBase64(), invoice: {} }),
-      submitSignedTx: jest.fn().mockResolvedValue({ txSignature: 'sig', status: 'confirming' }),
+      getPaymentAuthorization: jest.fn().mockResolvedValue({ typedData: td, invoice: {} }),
+      submitSignature: jest.fn().mockResolvedValue({ txHash: '0xabc', status: 'confirming' }),
     } as any;
-    const signTransaction = jest.fn().mockImplementation(async (tx: Transaction) => tx);
-    const out = await payInvoice({ orderId: 'o1', navyAccessToken: 'navy-jwt', client, signTransaction });
-    expect(client.getPaymentTx).toHaveBeenCalledWith('o1', 'navy-jwt');
-    expect(signTransaction).toHaveBeenCalled();
-    expect(client.submitSignedTx).toHaveBeenCalledWith('o1', expect.any(String), 'navy-jwt');
-    expect(out.txSignature).toBe('sig');
+    const out = await payInvoice({ orderId: 'o1', navyAccessToken: 'navy-jwt', client, signTypedData: realSigner });
+    expect(client.getPaymentAuthorization).toHaveBeenCalledWith('o1', 'navy-jwt');
+    const [, sig] = client.submitSignature.mock.calls[0];
+    // The submitted signature recovers to the payer wallet.
+    expect(verifyTypedData(td.domain as any, td.types as any, td.message as any, sig).toLowerCase()).toBe(wallet.address.toLowerCase());
+    expect(client.submitSignature).toHaveBeenCalledWith('o1', expect.any(String), 'navy-jwt');
+    expect(out.txHash).toBe('0xabc');
   });
 
-  it('signs when expectedSigner is a required signer of the tx', async () => {
-    const { b64, signer } = sampleTx();
+  it('signs when expectedSigner matches the typed-data `from`', async () => {
+    const td = sampleTypedData(wallet.address);
     const client = {
-      getPaymentTx: jest.fn().mockResolvedValue({ tx: b64, invoice: {} }),
-      submitSignedTx: jest.fn().mockResolvedValue({ txSignature: 'sig', status: 'confirming' }),
+      getPaymentAuthorization: jest.fn().mockResolvedValue({ typedData: td, invoice: {} }),
+      submitSignature: jest.fn().mockResolvedValue({ txHash: '0xabc', status: 'confirming' }),
     } as any;
-    const signTransaction = jest.fn().mockImplementation(async (tx: Transaction) => tx);
-    const out = await payInvoice({ orderId: 'o1', navyAccessToken: 'jwt', client, signTransaction, expectedSigner: signer });
-    expect(out.txSignature).toBe('sig');
+    const out = await payInvoice({ orderId: 'o1', navyAccessToken: 'jwt', client, signTypedData: realSigner, expectedSigner: wallet.address });
+    expect(out.txHash).toBe('0xabc');
   });
 
-  it('rejects a tx built for a different payer than expectedSigner', async () => {
-    const { b64 } = sampleTx();
+  it('rejects a typed data built for a different payer than expectedSigner', async () => {
+    const td = sampleTypedData('0x000000000000000000000000000000000000BEEF');
+    const signTypedData = jest.fn();
     const client = {
-      getPaymentTx: jest.fn().mockResolvedValue({ tx: b64, invoice: {} }),
-      submitSignedTx: jest.fn(),
+      getPaymentAuthorization: jest.fn().mockResolvedValue({ typedData: td, invoice: {} }),
+      submitSignature: jest.fn(),
     } as any;
-    const signTransaction = jest.fn();
     await expect(
-      payInvoice({ orderId: 'o1', navyAccessToken: 'jwt', client, signTransaction, expectedSigner: 'SomeOtherWallet111111111111111111111111111' }),
+      payInvoice({ orderId: 'o1', navyAccessToken: 'jwt', client, signTypedData, expectedSigner: wallet.address }),
     ).rejects.toThrow(/different wallet/);
-    expect(signTransaction).not.toHaveBeenCalled();
+    expect(signTypedData).not.toHaveBeenCalled();
   });
 });
