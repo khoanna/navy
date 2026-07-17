@@ -3,9 +3,16 @@
 // `txSignature`. We match those keys exactly (values are 1e6 USDC base units).
 export interface Position { address: string; principalBase: string; currentValueBase: string; cTokenAmount: string; }
 
-/** Format USDC base units (6 decimals) to a plain decimal string. */
+/** Format USDC base units (6 decimals) to a plain decimal string.
+ *  Uses integer arithmetic to avoid float precision loss on large amounts. */
 export function formatUsdc(base: string | number): string {
-  return (Number(base) / 1_000_000).toString();
+  const n = BigInt(base);
+  const whole = n / 1_000_000n;
+  const frac = n % 1_000_000n;
+  if (frac === 0n) return whole.toString();
+  // Zero-pad fractional part to 6 digits, then trim trailing zeros.
+  const fracStr = frac.toString().padStart(6, '0').replace(/0+$/, '');
+  return `${whole}.${fracStr}`;
 }
 
 export class FarmingClient {

@@ -33,4 +33,13 @@ describe('FarmingClient', () => {
 
 describe('formatUsdc', () => {
   it('formats USDC base units (6 dec) to a decimal string', () => { expect(formatUsdc('1500000')).toBe('1.5'); });
+  it('handles whole-dollar amounts without a decimal point', () => { expect(formatUsdc('2000000')).toBe('2'); });
+  it('handles zero', () => { expect(formatUsdc('0')).toBe('0'); });
+  it('trims trailing fractional zeros', () => { expect(formatUsdc('1100000')).toBe('1.1'); });
+  it('preserves all 6 fractional digits when needed', () => { expect(formatUsdc('1000001')).toBe('1.000001'); });
+  it('is BigInt-safe for large amounts that would lose float precision', () => {
+    // 10_000_000_000_000_000 base units = 10_000_000_000 USDC — well beyond float safe integer
+    expect(formatUsdc('10000000000000000')).toBe('10000000000');
+  });
+  it('accepts a number input', () => { expect(formatUsdc(500000)).toBe('0.5'); });
 });

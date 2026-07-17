@@ -17,6 +17,8 @@ const ALLOWED_HTTPS_HOSTS = new Set(['pay.navy', 'localhost', '127.0.0.1']);
  * `https://evil.com/x/pay/<uuid>` is rejected: the host must be allowlisted and
  * the path must be exactly `/pay/<uuid>`.
  */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
+
 export function parsePayUrl(raw: string): string {
   const url = raw.trim();
 
@@ -27,6 +29,10 @@ export function parsePayUrl(raw: string): string {
   try {
     parsed = new URL(url);
   } catch {
+    throw new Error('Not a Navy invoice');
+  }
+  // Require https for non-local hosts; http is only allowed for localhost/127.0.0.1 (local dev).
+  if (parsed.protocol === 'http:' && !LOCAL_HOSTS.has(parsed.hostname)) {
     throw new Error('Not a Navy invoice');
   }
   if (!ALLOWED_HTTPS_HOSTS.has(parsed.hostname)) throw new Error('Not a Navy invoice');
