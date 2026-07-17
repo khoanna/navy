@@ -4,24 +4,25 @@
 
 | | |
 |---|---|
-| **NavyPayments** | `0xdce57a75499c96d172a01263620B7e097BA70f20` |
-| **USDC (Aave Sepolia, EIP-2612 permit)** | `0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8` |
+| **NavyPayments** | `0x89fEc56A75518680757aaBdd47Ba8ddFb6480bF3` |
+| **USDC (Circle, EIP-2612 permit + EIP-3009)** | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 | **Owner / admin** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |
 | **Relayer (allowlisted)** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |
 | **feeBps** | `100` (1%) |
 | Chain ID | `11155111` |
 
-Payments and farming now use the **same** USDC (Aave's Sepolia test USDC) — no more two-token seam. Mint it via the Aave Faucet `0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D` (`mint(token, to, amount)`, which owns the token). Set `NAVY_PAYMENTS_ADDRESS` in `be/.env` to the deployed address.
+**Unified on Circle's USDC.** Payments and farming both use Circle's canonical Sepolia USDC. Farming supplies it to **Compound III (Comet)** `0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e` (whose `baseToken()` is this USDC). Get test USDC from **faucet.circle.com** (Ethereum Sepolia). Set `NAVY_PAYMENTS_ADDRESS` in `be/.env`.
 
-_(Prior EIP-3009 / Circle-USDC deployment was `0xC3FE1f88cA721e241f77f2E58dF6E5Da4DA0672f`; superseded.)_
+`payInvoice` uses EIP-2612 `permit` + `transferFrom` (Circle USDC supports both permit and EIP-3009; permit is used). USDC EIP-712 domain: `name="USDC"`, `version="2"`.
+
+_Superseded: `0xC3FE…672f` (EIP-3009/Circle), `0xdce5…0f20` (permit/Aave test USDC)._
 
 ### End-to-end proof (`be/scripts/evm-e2e.mjs`)
-Faucet-mint Aave USDC → payer signs an EIP-712 `Permit` (EIP-2612) → relayer submits `payInvoice` (gasless: `permit` + `transferFrom`) → **99/1 split verified** → `InvoicePaid` emitted → replay rejected.
-- payInvoice tx (plain-EOA payer): `0xcd2efa2ee8fa2eac44f150bc9a15bac848aed6f639db79005f48ffc37365bab1`
-- payInvoice tx (7702 smart-account payer): `0x5638347a34d48353597bc3043715a87994516b7058524a3052271c1996f91573`
+Fund payer with Circle USDC → payer signs an EIP-712 `Permit` → relayer submits `payInvoice` (gasless: `permit` + `transferFrom`) → **99/1 split** → `InvoicePaid` → replay rejected.
+- plain-EOA payer: `0xd9eeab93ca6e8bf353a0b0ce0e79385578b511f269e4240c588d1e40d70958f4`
+- former-7702 (now plain-EOA) payer `0xd5de…`: `0x7d1eb0d16f4bb1a6157063c4abfb4f18cec431a434f48fa03fc5047f88102076`
 
 ### Operational gotchas
-- **EIP-2612 permit uses plain `ecrecover`** — so BOTH a plain EOA and a 7702-delegated smart account can be the payer (verified above). This is the key advantage over Circle USDC's EIP-3009, whose `SignatureChecker` routes signers-with-code to EIP-1271 and rejects a raw ECDSA sig.
-- **`forge script` against a 7702 account needs `--slow`** — some RPCs reject queued/gapped nonces from delegated accounts; `--slow` submits sequentially.
-- **Aave USDC EIP-712 domain on Sepolia:** `name = "USDC"`, `version = "1"` (verified on-chain; it has no `version()` getter, reconstructed vs `DOMAIN_SEPARATOR()`).
-- **Aave USDC `mint` is owner-only** (owner = the Faucet); fund test accounts through the Faucet contract, not the token directly.
+- **EIP-7702 delegation can be revoked** — the owner account `0xd5de…` was a 7702 smart account; a self-sponsored type-4 tx delegating to the zero address cleared it back to a plain EOA (`getCode → 0x`), so it can now sign for Circle USDC (whose `SignatureChecker` routes signers-with-code to EIP-1271). Revocation tx: `0x477d13dd3cda8c799a157ff87236510a965098656b91380a98451baee86733c6`.
+- **Circle USDC uses `SignatureChecker`** for both permit and EIP-3009 → the payer must be a plain EOA (or an EIP-1271 contract wallet). Plain EOAs work via ecrecover.
+- **`forge script --slow`** is only needed against a 7702-delegated sender (gapped-nonce); a plain-EOA deployer doesn't need it.

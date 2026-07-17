@@ -5,10 +5,10 @@ import {Test} from "forge-std/Test.sol";
 import {NavyPayments} from "../src/NavyPayments.sol";
 import {IUsdcPermit} from "../src/interfaces/IUsdcPermit.sol";
 
-/// @dev Exercises the REAL Aave Sepolia USDC EIP-2612 permit on a Sepolia fork.
+/// @dev Exercises the REAL Circle Sepolia USDC EIP-2612 permit on a Sepolia fork.
 /// Skips automatically when SEPOLIA_RPC_URL is not set.
 contract NavyPaymentsForkTest is Test {
-    address constant USDC = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
+    address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
 
     NavyPayments navy;
     address owner = address(0x0111);

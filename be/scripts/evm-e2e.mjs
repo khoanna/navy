@@ -55,7 +55,7 @@ const USDC_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function nonces(address) view returns (uint256)',
   'function name() view returns (string)',
-  'function mint(address,uint256)',
+  'function transfer(address,uint256) returns (bool)',
 ];
 
 function log(ok, msg) { console.log(`${ok ? '✓' : '✗'} ${msg}`); if (!ok) process.exitCode = 1; }
@@ -76,11 +76,11 @@ async function main() {
   console.log(`Network chainId=${CHAIN_ID}  payments=${paymentsAddr}  usdc=${usdcAddr}`);
   console.log(`owner=${owner.address}  relayer=${relayer.address}  payer=${payer.address}`);
 
-  // Self-fund the payer with Aave USDC via the Aave Sepolia Faucet (owner of the test USDC).
-  if ((await usdc.balanceOf(payer.address)) < AMOUNT) {
-    console.log('… minting Aave USDC to payer via Aave faucet');
-    const faucet = new ethers.Contract('0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D', ['function mint(address token, address to, uint256 amount) returns (uint256)'], owner);
-    await (await faucet.mint(usdcAddr, payer.address, AMOUNT * 3n)).wait();
+  // Fund the payer with Circle USDC from the owner wallet (Circle USDC has no on-chain mint;
+  // the human faucet is faucet.circle.com). Skipped when the owner IS the payer.
+  if (payer.address.toLowerCase() !== owner.address.toLowerCase() && (await usdc.balanceOf(payer.address)) < AMOUNT) {
+    console.log('… transferring Circle USDC to payer from owner');
+    await (await usdc.connect(owner).transfer(payer.address, AMOUNT * 2n)).wait();
   }
   log((await usdc.balanceOf(payer.address)) >= AMOUNT, `payer USDC balance >= ${AMOUNT}`);
   log((await provider.getBalance(relayer.address)) > 0n, 'relayer has Sepolia ETH for gas');
@@ -104,7 +104,7 @@ async function main() {
   const message = { owner: payer.address, spender: paymentsAddr, value: AMOUNT.toString(), nonce: nonce.toString(), deadline: deadline.toString() };
   const signature = await payer.signTypedData(domain, PERMIT_TYPES, message);
   const sig = ethers.Signature.from(signature);
-  log(ethers.verifyTypedData(domain, PERMIT_TYPES, message, signature) === payer.address, 'payer permit signature recovers to payer (Aave USDC EIP-712 domain)');
+  log(ethers.verifyTypedData(domain, PERMIT_TYPES, message, signature) === payer.address, 'payer permit signature recovers to payer (USDC EIP-712 domain)');
 
   const mBefore = await usdc.balanceOf(merchantPayout);
   const tBefore = await usdc.balanceOf(treasury);
