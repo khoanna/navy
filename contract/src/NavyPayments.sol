@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IUsdcPermit} from "./interfaces/IUsdcPermit.sol";
+import {IEIP3009} from "./interfaces/IEIP3009.sol";
 
-/// @title NavyPayments — EIP-2612 gasless invoice payments with an enforced fee split.
+/// @title NavyPayments — EIP-3009 gasless invoice payments with an enforced fee split.
+/// @dev The payment token is Circle Sepolia USDC, which reverts on failed ERC-20 transfers,
+/// so return values are intentionally unchecked (no SafeERC20 dependency).
 contract NavyPayments {
     uint16 public constant MAX_FEE_BPS = 1000; // 10% ceiling
     uint256 public constant MIN_INVOICE_AMOUNT = 10_000; // 0.01 USDC (6 decimals)
 
     address public owner;
     address public treasury;
-    IUsdcPermit public usdc;
+    IEIP3009 public usdc;
     uint16 public feeBps;
 
     mapping(address => bool) public relayers;
@@ -43,8 +45,10 @@ contract NavyPayments {
     error FeeTooHigh();
     error MerchantExists();
     error MerchantInactive();
+    error MerchantUnknown();
     error AmountTooSmall();
     error AlreadyPaid();
+    error ZeroAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -57,14 +61,16 @@ contract NavyPayments {
     }
 
     constructor(address _usdc, address _treasury, uint16 _feeBps, address _owner) {
+        if (_usdc == address(0) || _treasury == address(0) || _owner == address(0)) revert ZeroAddress();
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
-        usdc = IUsdcPermit(_usdc);
+        usdc = IEIP3009(_usdc);
         treasury = _treasury;
         feeBps = _feeBps;
         owner = _owner;
     }
 
     function setConfig(uint16 _feeBps, address _treasury) external onlyOwner {
+        if (_treasury == address(0)) revert ZeroAddress();
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
         feeBps = _feeBps;
         treasury = _treasury;
@@ -77,17 +83,21 @@ contract NavyPayments {
     }
 
     function registerMerchant(bytes16 merchantId, address payout) external onlyOwner {
+        if (payout == address(0)) revert ZeroAddress();
         if (merchants[merchantId].exists) revert MerchantExists();
         merchants[merchantId] = Merchant({payout: payout, active: true, exists: true});
         emit MerchantRegistered(merchantId, payout);
     }
 
     function setMerchantActive(bytes16 merchantId, bool active) external onlyOwner {
+        if (!merchants[merchantId].exists) revert MerchantUnknown();
         merchants[merchantId].active = active;
         emit MerchantActiveSet(merchantId, active);
     }
 
     function setMerchantPayout(bytes16 merchantId, address payout) external onlyOwner {
+        if (payout == address(0)) revert ZeroAddress();
+        if (!merchants[merchantId].exists) revert MerchantUnknown();
         merchants[merchantId].payout = payout;
         emit MerchantPayoutSet(merchantId, payout);
     }
@@ -96,7 +106,8 @@ contract NavyPayments {
         bytes16 merchantId,
         bytes16 invoiceId,
         uint256 amount,
-        uint256 deadline,
+        uint256 validAfter,
+        uint256 validBefore,
         address payer,
         uint8 v,
         bytes32 r,
@@ -109,14 +120,15 @@ contract NavyPayments {
         if (!m.exists || !m.active) revert MerchantInactive();
         if (amount < MIN_INVOICE_AMOUNT) revert AmountTooSmall();
 
-        // Effects before interactions. The invoice key is the on-chain replay
-        // nonce; the payer's EIP-2612 permit authorizes the exact `amount` and
-        // `deadline` (its own per-token nonce prevents signature replay).
+        // Effects before interactions. `key` is the EIP-3009 authorization nonce → it binds
+        // merchant+invoice+amount+payer+expiry into the signed message. `receiveWithAuthorization`
+        // requires msg.sender == to, so only this contract can redeem the authorization (and the
+        // token's per-nonce authorizationState prevents any signature replay).
         invoicePaid[key] = true;
-        usdc.permit(payer, address(this), amount, deadline, v, r, s); // gasless approval
-        usdc.transferFrom(payer, address(this), amount); // pull
+        usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, key, v, r, s);
 
         uint256 fee = (amount * feeBps) / 10000; // floors
+        // USDC reverts on failed transfers, so return values are unchecked by design.
         usdc.transfer(m.payout, amount - fee);
         if (fee > 0) {
             usdc.transfer(treasury, fee);
