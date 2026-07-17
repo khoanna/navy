@@ -54,7 +54,7 @@ export default function DetailView({ m }: { m: MerchantDetailData }) {
             <Text variant="label" muted upper>On-chain tx</Text>
             <div style={{ marginTop: space.xs }}>
               {m.onchainRegisterTx ? (
-                <a href={`https://explorer.solana.com/tx/${m.onchainRegisterTx}?cluster=devnet`} target="_blank" rel="noreferrer">
+                <a href={`https://sepolia.etherscan.io/tx/${m.onchainRegisterTx}`} target="_blank" rel="noreferrer">
                   <Text variant="mono" color={colors.accent}>{m.onchainRegisterTx.slice(0, 16)}…</Text>
                 </a>
               ) : (

@@ -114,7 +114,7 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
               <Text variant="label" muted upper>Tx</Text>
               <div style={{ marginTop: space.xs }}>
                 {order.txSignature ? (
-                  <a href={`https://explorer.solana.com/tx/${order.txSignature}?cluster=devnet`} target="_blank" rel="noreferrer">
+                  <a href={`https://sepolia.etherscan.io/tx/${order.txSignature}`} target="_blank" rel="noreferrer">
                     <Text variant="mono" color={colors.accent}>{order.txSignature.slice(0, 16)}…</Text>
                   </a>
                 ) : (
