@@ -50,7 +50,7 @@ describe('NavyConfigService EVM getters', () => {
     });
     expect(cfg.evmChainId).toBe(11155111);
     expect(cfg.usdcEip712Name).toBe('USDC');
-    expect(cfg.usdcEip712Version).toBe('2');
+    expect(cfg.usdcEip712Version).toBe('1');
     expect(cfg.relayerMinBalanceWei).toBe(20000000000000000n); // 0.02 ETH
   });
 });
