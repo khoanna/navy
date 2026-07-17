@@ -19,6 +19,7 @@ export interface MerchantDto {
   approvalStatus: string;
   payoutAddress: string | null;
   onchainRegisteredAt: Date | null;
+  onchainRegisterTx: string | null;
   rejectionReason: string | null;
   createdAt: Date;
 }
@@ -31,6 +32,7 @@ export function toMerchantDto<T>(m: T): T extends null ? null : T extends undefi
     approvalStatus: v.approvalStatus,
     payoutAddress: v.payoutAddress ?? null,
     onchainRegisteredAt: v.onchainRegisteredAt ?? null,
+    onchainRegisterTx: v.onchainRegisterTx ?? null,
     rejectionReason: v.rejectionReason ?? null,
     createdAt: v.createdAt,
   })) as any;
