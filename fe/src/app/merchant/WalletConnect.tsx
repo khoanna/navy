@@ -37,6 +37,7 @@ export default function WalletConnect() {
       const prep = await fetch('/api/merchant/payout/prepare', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address: addr }),
       }).then((r) => r.json());
+      if (!prep.ok || !prep.message) { setStatus(prep.error ?? 'Could not get signing challenge'); return; }
       const message: string = prep.message;
 
       const signature = await signer.signMessage(message);
