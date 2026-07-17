@@ -9,28 +9,26 @@ export interface UsdcDomain {
 
 export type Eip712Types = Record<string, Array<{ name: string; type: string }>>;
 
-export const RECEIVE_WITH_AUTHORIZATION_TYPES: Eip712Types = {
-  ReceiveWithAuthorization: [
-    { name: 'from', type: 'address' },
-    { name: 'to', type: 'address' },
+export const PERMIT_TYPES: Eip712Types = {
+  Permit: [
+    { name: 'owner', type: 'address' },
+    { name: 'spender', type: 'address' },
     { name: 'value', type: 'uint256' },
-    { name: 'validAfter', type: 'uint256' },
-    { name: 'validBefore', type: 'uint256' },
-    { name: 'nonce', type: 'bytes32' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
   ],
 };
 
 export interface AuthorizationTypedData {
   domain: UsdcDomain;
   types: Eip712Types;
-  primaryType: 'ReceiveWithAuthorization';
+  primaryType: 'Permit';
   message: {
-    from: string;
-    to: string;
+    owner: string;
+    spender: string;
     value: string;
-    validAfter: string;
-    validBefore: string;
     nonce: string;
+    deadline: string;
   };
 }
 
@@ -49,7 +47,7 @@ export function invoiceIdHexFromOrderId(orderId: string): string {
   return uuidToBytes16Hex(orderId);
 }
 
-/** keccak256(abi.encodePacked(bytes16 merchantId, bytes16 invoiceId)) — the EIP-3009 nonce + contract invoice key. */
+/** keccak256(abi.encodePacked(bytes16 merchantId, bytes16 invoiceId)) — the on-chain invoice key. */
 export function invoiceKey(merchantIdHex16: string, invoiceIdHex16: string): string {
   return ethers.keccak256(ethers.concat([merchantIdHex16, invoiceIdHex16]));
 }
@@ -57,23 +55,21 @@ export function invoiceKey(merchantIdHex16: string, invoiceIdHex16: string): str
 export function buildAuthorizationTypedData(p: {
   domain: UsdcDomain;
   payer: string;
-  to: string;
+  spender: string;
   amount: bigint;
-  validAfter: number;
-  validBefore: number;
-  nonce: string;
+  nonce: bigint;
+  deadline: number;
 }): AuthorizationTypedData {
   return {
     domain: p.domain,
-    types: RECEIVE_WITH_AUTHORIZATION_TYPES,
-    primaryType: 'ReceiveWithAuthorization',
+    types: PERMIT_TYPES,
+    primaryType: 'Permit',
     message: {
-      from: p.payer,
-      to: p.to,
+      owner: p.payer,
+      spender: p.spender,
       value: p.amount.toString(),
-      validAfter: p.validAfter.toString(),
-      validBefore: p.validBefore.toString(),
-      nonce: p.nonce,
+      nonce: p.nonce.toString(),
+      deadline: p.deadline.toString(),
     },
   };
 }

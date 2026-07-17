@@ -146,12 +146,7 @@
           "internalType": "uint256"
         },
         {
-          "name": "validAfter",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "validBefore",
+          "name": "deadline",
           "type": "uint256",
           "internalType": "uint256"
         },
@@ -309,7 +304,7 @@
         {
           "name": "",
           "type": "address",
-          "internalType": "contract IEIP3009"
+          "internalType": "contract IUsdcPermit"
         }
       ],
       "stateMutability": "view"

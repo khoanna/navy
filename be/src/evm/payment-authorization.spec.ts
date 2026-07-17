@@ -9,7 +9,7 @@ import {
   type UsdcDomain,
 } from './payment-authorization';
 
-const DOMAIN: UsdcDomain = { name: 'USDC', version: '2', chainId: 11155111, verifyingContract: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' };
+const DOMAIN: UsdcDomain = { name: 'USDC', version: '1', chainId: 11155111, verifyingContract: '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8' };
 const PAYMENTS = '0x1111111111111111111111111111111111111111';
 
 describe('payment-authorization', () => {
@@ -29,13 +29,11 @@ describe('payment-authorization', () => {
     expect(invoiceKey(m, i)).toBe(expected);
   });
 
-  it('builds typed data whose digest a wallet signs and we recover', async () => {
+  it('builds an EIP-2612 Permit whose digest a wallet signs and we recover', async () => {
     const wallet = ethers.Wallet.createRandom();
-    const m = merchantIdHex('11111111-2222-3333-4444-555555555555');
-    const i = invoiceIdHexFromOrderId('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
     const td = buildAuthorizationTypedData({
-      domain: DOMAIN, payer: wallet.address, to: PAYMENTS,
-      amount: 1_000_000n, validAfter: 0, validBefore: 9_999_999_999, nonce: invoiceKey(m, i),
+      domain: DOMAIN, payer: wallet.address, spender: PAYMENTS,
+      amount: 1_000_000n, nonce: 0n, deadline: 9_999_999_999,
     });
     const sig = await wallet.signTypedData(td.domain, td.types, td.message);
     expect(recoverAuthorizationSigner(td, sig)).toBe(wallet.address);
@@ -45,10 +43,9 @@ describe('payment-authorization', () => {
 
   it('recovers a DIFFERENT address for a tampered amount (signature no longer matches)', async () => {
     const wallet = ethers.Wallet.createRandom();
-    const nonce = invoiceKey(merchantIdHex('11111111-2222-3333-4444-555555555555'), invoiceIdHexFromOrderId('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'));
-    const signed = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, to: PAYMENTS, amount: 1_000_000n, validAfter: 0, validBefore: 9_999_999_999, nonce });
+    const signed = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, spender: PAYMENTS, amount: 1_000_000n, nonce: 0n, deadline: 9_999_999_999 });
     const sig = await wallet.signTypedData(signed.domain, signed.types, signed.message);
-    const tampered = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, to: PAYMENTS, amount: 2_000_000n, validAfter: 0, validBefore: 9_999_999_999, nonce });
+    const tampered = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, spender: PAYMENTS, amount: 2_000_000n, nonce: 0n, deadline: 9_999_999_999 });
     expect(recoverAuthorizationSigner(tampered, sig)).not.toBe(wallet.address);
   });
 });
