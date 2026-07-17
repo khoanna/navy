@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { TxSummary } from './tx-summary';
 
+/**
+ * Per-subwallet allowlist (deny-by-default). Field names are preserved across the
+ * Solana→EVM migration; their meaning is reinterpreted for EVM:
+ *   - allowedProgramIds  = allowed CONTRACT addresses ([USDC, AavePool, aToken]).
+ *   - allowedDestinations = allowed RECIPIENT addresses ([subwallet, AavePool, ownerMainWallet]).
+ * All comparisons are case-insensitive (lowercased hex).
+ */
 export interface SubwalletPolicy {
   allowedProgramIds: string[];
   allowedDestinations: string[];
@@ -10,43 +17,50 @@ export interface PolicyContext {
   subwallet: string;
 }
 
+const lower = (s: string) => s.toLowerCase();
+
 @Injectable()
 export class PolicyValidator {
   check(policy: SubwalletPolicy, tx: TxSummary, ctx: PolicyContext): PolicyResult {
-    // The subwallet itself is always a permitted destination: WSOL unwrap closes
-    // the transient ATA back to the subwallet, and the subwallet funds its own accounts.
-    const allowedDestinations = new Set([...policy.allowedDestinations, ctx.subwallet]);
+    const allowedContracts = new Set(policy.allowedProgramIds.map(lower));
+    // The subwallet itself is always an implicit allowed destination (defense-in-depth):
+    // it funds/receives its own value, same as the Solana model.
+    const allowedDestinations = new Set([...policy.allowedDestinations, ctx.subwallet].map(lower));
+    const subwallet = lower(ctx.subwallet);
 
     for (const ix of tx.instructions) {
-      // Defense-in-depth: every program must be explicitly allowlisted.
-      if (!policy.allowedProgramIds.includes(ix.programId)) {
-        return { ok: false, reason: `program not allowlisted: ${ix.programId}` };
+      // Defense-in-depth: every contract we call must be explicitly allowlisted.
+      if (!allowedContracts.has(lower(ix.to))) {
+        return { ok: false, reason: `contract not allowlisted: ${ix.to}` };
       }
 
       switch (ix.kind) {
-        case 'system-transfer':
-        case 'token-transfer':
-        case 'token-close': {
-          const dest = ix.destination;
-          if (dest === undefined || !allowedDestinations.has(dest)) {
-            return { ok: false, reason: `${ix.kind} destination not allowed: ${dest}` };
+        case 'erc20-approve': {
+          const spender = ix.spender ? lower(ix.spender) : undefined;
+          if (spender === undefined || !allowedDestinations.has(spender)) {
+            return { ok: false, reason: `approve spender not allowed: ${ix.spender}` };
           }
           break;
         }
-        case 'token-dangerous':
-          return {
-            ok: false,
-            reason: `token instruction not permitted (opcode ${ix.rawOpcode})`,
-          };
-        case 'unknown':
-          return { ok: false, reason: `instruction not permitted for program ${ix.programId}` };
-        case 'system-create':
-        case 'token-init':
-        case 'token-sync':
-        case 'ata-create':
-        case 'save':
-          // benign / expected instructions
+        case 'erc20-transfer':
+        case 'aave-withdraw':
+        case 'native-transfer': {
+          const recipient = ix.recipient ? lower(ix.recipient) : undefined;
+          if (recipient === undefined || !allowedDestinations.has(recipient)) {
+            return { ok: false, reason: `${ix.kind} destination not allowed: ${ix.recipient}` };
+          }
           break;
+        }
+        case 'aave-supply': {
+          // Supplied liquidity must credit the subwallet's own aToken position —
+          // never a third party.
+          if (ix.onBehalfOf === undefined || lower(ix.onBehalfOf) !== subwallet) {
+            return { ok: false, reason: `supply onBehalfOf not the subwallet: ${ix.onBehalfOf}` };
+          }
+          break;
+        }
+        case 'unknown':
+          return { ok: false, reason: `instruction not permitted for contract ${ix.to}` };
         default: {
           // exhaustiveness guard
           const _never: never = ix.kind;

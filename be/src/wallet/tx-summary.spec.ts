@@ -1,194 +1,98 @@
-import { Transaction, TransactionInstruction, SystemProgram, PublicKey, Keypair } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { Interface, getAddress } from 'ethers';
 import { deriveTxSummary } from './tx-summary';
 
-const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-const SAVE_PROGRAM_ID = new PublicKey('ALend7Ketfx5bxh6ghsCDXAoDrhvEmsXT3cynB6aPLgx');
+const erc20 = new Interface([
+  'function approve(address spender, uint256 value)',
+  'function transfer(address to, uint256 value)',
+]);
+const aavePool = new Interface([
+  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
+  'function withdraw(address asset, uint256 amount, address to)',
+]);
 
-function key(): PublicKey {
-  return Keypair.generate().publicKey;
-}
+const USDC = getAddress('0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8');
+const POOL = getAddress('0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951');
+const ATOKEN = getAddress('0x16dA4541aD1807f4443d92D26044C1147406EB80');
+const SUB = getAddress('0x00000000000000000000000000000000000000A1');
+const OWNER = getAddress('0x00000000000000000000000000000000000000B2');
 
-function meta(pubkey: PublicKey) {
-  return { pubkey, isSigner: false, isWritable: true };
-}
-
-function wrap(ix: TransactionInstruction): Transaction {
-  return new Transaction().add(ix);
-}
-
-describe('deriveTxSummary', () => {
-  it('classifies a System transfer with destination = keys[1]', () => {
-    const from = key();
-    const to = key();
-    const ix = SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: 1000 });
-    const { instructions } = deriveTxSummary(wrap(ix));
+describe('deriveTxSummary (EVM calldata)', () => {
+  it('decodes ERC-20 approve(spender, amount)', () => {
+    const data = erc20.encodeFunctionData('approve', [POOL, 5000n]);
+    const { instructions } = deriveTxSummary([{ to: USDC, data }]);
     expect(instructions).toHaveLength(1);
-    expect(instructions[0].kind).toBe('system-transfer');
-    expect(instructions[0].destination).toBe(to.toBase58());
-    expect(instructions[0].programId).toBe(SystemProgram.programId.toBase58());
+    expect(instructions[0].kind).toBe('erc20-approve');
+    expect(instructions[0].to).toBe(USDC);
+    expect(instructions[0].spender).toBe(POOL);
+    expect(instructions[0].amount).toBe(5000n);
+    expect(instructions[0].selector).toBe('0x095ea7b3');
   });
 
-  it('classifies a System CreateAccount (opcode 0) as system-create', () => {
-    const ix = new TransactionInstruction({
-      programId: SystemProgram.programId,
-      keys: [meta(key()), meta(key())],
-      data: Buffer.from([0, 0, 0, 0]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('system-create');
+  it('decodes ERC-20 transfer(to, amount)', () => {
+    const data = erc20.encodeFunctionData('transfer', [SUB, 12345n]);
+    const { instructions } = deriveTxSummary([{ to: USDC, data }]);
+    expect(instructions[0].kind).toBe('erc20-transfer');
+    expect(instructions[0].recipient).toBe(SUB);
+    expect(instructions[0].amount).toBe(12345n);
   });
 
-  it('classifies SPL Transfer (opcode 3) with destination = keys[1]', () => {
-    const source = key();
-    const dest = key();
-    const owner = key();
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(source), meta(dest), meta(owner)],
-      data: Buffer.from([3, 0, 0, 0, 0, 0, 0, 0, 0]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-transfer');
-    expect(instructions[0].destination).toBe(dest.toBase58());
-    expect(instructions[0].rawOpcode).toBe(3);
+  it('decodes Aave supply(asset, amount, onBehalfOf, referralCode)', () => {
+    const data = aavePool.encodeFunctionData('supply', [USDC, 7000n, SUB, 0]);
+    const { instructions } = deriveTxSummary([{ to: POOL, data }]);
+    expect(instructions[0].kind).toBe('aave-supply');
+    expect(instructions[0].to).toBe(POOL);
+    expect(instructions[0].onBehalfOf).toBe(SUB);
+    expect(instructions[0].amount).toBe(7000n);
   });
 
-  it('classifies SPL TransferChecked (opcode 12) with destination = keys[2]', () => {
-    const source = key();
-    const mint = key();
-    const dest = key();
-    const owner = key();
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(source), meta(mint), meta(dest), meta(owner)],
-      data: Buffer.from([12, 0, 0, 0, 0, 0, 0, 0, 0, 6]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-transfer');
-    expect(instructions[0].destination).toBe(dest.toBase58());
-    expect(instructions[0].rawOpcode).toBe(12);
+  it('decodes Aave withdraw(asset, amount, to)', () => {
+    const data = aavePool.encodeFunctionData('withdraw', [USDC, 4000n, OWNER]);
+    const { instructions } = deriveTxSummary([{ to: POOL, data }]);
+    expect(instructions[0].kind).toBe('aave-withdraw');
+    expect(instructions[0].recipient).toBe(OWNER);
+    expect(instructions[0].amount).toBe(4000n);
   });
 
-  it('classifies SPL CloseAccount (opcode 9) with destination = keys[1]', () => {
-    const account = key();
-    const dest = key();
-    const owner = key();
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(account), meta(dest), meta(owner)],
-      data: Buffer.from([9]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-close');
-    expect(instructions[0].destination).toBe(dest.toBase58());
-    expect(instructions[0].rawOpcode).toBe(9);
+  it('decodes a bare native value transfer', () => {
+    const { instructions } = deriveTxSummary([{ to: SUB, data: '0x', value: 5000n }]);
+    expect(instructions[0].kind).toBe('native-transfer');
+    expect(instructions[0].recipient).toBe(SUB);
+    expect(instructions[0].amount).toBe(5000n);
+    expect(instructions[0].selector).toBe('0x');
   });
 
-  it('classifies SPL Approve (opcode 4) as token-dangerous', () => {
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(key()), meta(key()), meta(key())],
-      data: Buffer.from([4, 0, 0, 0, 0, 0, 0, 0, 0]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-dangerous');
-    expect(instructions[0].rawOpcode).toBe(4);
+  it('classifies an unknown selector as unknown', () => {
+    // random 4-byte selector, no matching function
+    const { instructions } = deriveTxSummary([{ to: USDC, data: '0xdeadbeef' }]);
+    expect(instructions[0].kind).toBe('unknown');
+    expect(instructions[0].selector).toBe('0xdeadbeef');
   });
 
-  it('classifies SPL SyncNative (opcode 17) as token-sync', () => {
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(key())],
-      data: Buffer.from([17]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-sync');
-    expect(instructions[0].rawOpcode).toBe(17);
-  });
-
-  it('classifies SPL InitializeAccount (opcode 1) as token-init', () => {
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(key()), meta(key()), meta(key()), meta(key())],
-      data: Buffer.from([1]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('token-init');
-    expect(instructions[0].rawOpcode).toBe(1);
-  });
-
-  it('classifies an ATA create (empty data, ATA program) as ata-create', () => {
-    const ix = new TransactionInstruction({
-      programId: ATA_PROGRAM_ID,
-      keys: [meta(key()), meta(key()), meta(key()), meta(key())],
-      data: Buffer.from([]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('ata-create');
-  });
-
-  it('classifies an ATA CreateIdempotent (opcode 1) as ata-create', () => {
-    const ix = new TransactionInstruction({
-      programId: ATA_PROGRAM_ID,
-      keys: [meta(key()), meta(key())],
-      data: Buffer.from([1]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('ata-create');
-  });
-
-  it('classifies a Save/Solend instruction as save', () => {
-    const ix = new TransactionInstruction({
-      programId: SAVE_PROGRAM_ID,
-      keys: [meta(key())],
-      data: Buffer.from([42, 1, 2, 3]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('save');
-    expect(instructions[0].programId).toBe(SAVE_PROGRAM_ID.toBase58());
-  });
-
-  it('classifies an unknown program instruction as unknown', () => {
-    const ix = new TransactionInstruction({
-      programId: key(),
-      keys: [meta(key())],
-      data: Buffer.from([9, 9, 9]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
+  it('classifies empty calldata with no value as unknown', () => {
+    const { instructions } = deriveTxSummary([{ to: ATOKEN, data: '0x' }]);
     expect(instructions[0].kind).toBe('unknown');
   });
 
-  it('classifies an unknown System opcode as unknown', () => {
-    const ix = new TransactionInstruction({
-      programId: SystemProgram.programId,
-      keys: [meta(key())],
-      data: Buffer.from([99, 0, 0, 0]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('unknown');
+  it('decodes a multi-call deposit flow (approve + supply)', () => {
+    const approve = erc20.encodeFunctionData('approve', [POOL, 9000n]);
+    const supply = aavePool.encodeFunctionData('supply', [USDC, 9000n, SUB, 0]);
+    const { instructions } = deriveTxSummary([
+      { to: USDC, data: approve },
+      { to: POOL, data: supply },
+    ]);
+    expect(instructions.map((i) => i.kind)).toEqual(['erc20-approve', 'aave-supply']);
   });
 
-  it('classifies an unknown token opcode as unknown but keeps rawOpcode', () => {
-    const ix = new TransactionInstruction({
-      programId: TOKEN_PROGRAM_ID,
-      keys: [meta(key())],
-      data: Buffer.from([250]),
-    });
-    const { instructions } = deriveTxSummary(wrap(ix));
-    expect(instructions[0].kind).toBe('unknown');
-    expect(instructions[0].rawOpcode).toBe(250);
+  it('normalizes addresses to checksummed form regardless of input case', () => {
+    const data = erc20.encodeFunctionData('approve', [POOL, 1n]);
+    const { instructions } = deriveTxSummary([{ to: USDC.toLowerCase(), data }]);
+    expect(instructions[0].to).toBe(USDC);
+    expect(instructions[0].spender).toBe(POOL);
   });
-});
 
-describe('deriveTxSummary system-transfer lamports', () => {
-  it('decodes the transfer amount as a bigint', () => {
-    const from = Keypair.generate().publicKey;
-    const to = Keypair.generate().publicKey;
-    const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: 12345 }));
-    const summary = deriveTxSummary(tx);
-    expect(summary.instructions[0].kind).toBe('system-transfer');
-    expect(summary.instructions[0].destination).toBe(to.toBase58());
-    expect(summary.instructions[0].lamports).toBe(12345n);
+  it('treats a selector-matched call with malformed args as unknown', () => {
+    // approve selector but truncated / garbage payload
+    const { instructions } = deriveTxSummary([{ to: USDC, data: '0x095ea7b300' }]);
+    expect(instructions[0].kind).toBe('unknown');
   });
 });
