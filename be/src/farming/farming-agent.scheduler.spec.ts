@@ -10,7 +10,9 @@ function makeAgent(opts: {
   const sw = opts.sw ?? { id: 's1', pubkey: '0xSub', userId: 'u1', status: 'active' };
   const prisma = { farmingSubwallet: { findMany: jest.fn().mockResolvedValue([sw]) } } as any;
   const farming = { depositSubwallet: jest.fn().mockResolvedValue({ txSignature: '0xh' }), refreshSubwallet: jest.fn().mockResolvedValue({}) } as any;
-  const evm = { provider: {} } as any;
+  // usdcAddress must be a valid address — the scheduler constructs a USDC contract in
+  // its ctor (overridden below); Circle USDC (Sepolia).
+  const evm = { provider: {}, usdcAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' } as any;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
   const bounds = opts.bounds ?? { rentBuffer: 2_000_000, minDeposit: 1_000_000, maxDeposit: 1_000_000_000 };
   const delegation = opts.delegation ?? { autoFundSubwallet: jest.fn().mockResolvedValue({ skipped: 'not enabled' }) };

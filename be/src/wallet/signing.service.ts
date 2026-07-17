@@ -22,7 +22,7 @@ export class SigningService {
   /**
    * Send ONE policy-checked EVM call from a farming subwallet.
    *
-   * The subwallet is the msg.sender (Aave requires the caller to own the USDC), so it
+   * The subwallet is the msg.sender (Comet credits the supplier = the caller), so it
    * broadcasts its own tx and pays gas from its Sepolia-ETH float. Security discipline
    * (unchanged from the Solana model): the summary is derived from the ACTUAL call
    * (never trusts the caller) → PolicyValidator (deny-by-default) → decrypt the key

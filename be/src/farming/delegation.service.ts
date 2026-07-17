@@ -7,7 +7,6 @@ import { DelegatedFundingService } from './delegated-funding.service';
 import { FarmingService } from './farming.service';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
-import { FARM_USDC } from './aave-yield-adapter';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
 import { computeFundAmount, type FundingBounds } from './funding.util';
 
@@ -30,7 +29,7 @@ export class DelegationService {
 
   private _usdc?: ethers.Contract;
   private get usdc(): ethers.Contract {
-    return (this._usdc ??= new ethers.Contract(FARM_USDC, usdcIface, this.evm.provider));
+    return (this._usdc ??= new ethers.Contract(this.evm.usdcAddress, usdcIface, this.evm.provider));
   }
 
   /** The user's main-wallet USDC balance (base units), the source for auto-funding. */

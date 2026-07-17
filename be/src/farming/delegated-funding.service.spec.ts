@@ -1,13 +1,14 @@
 import { ethers } from 'ethers';
 import { DelegatedFundingService } from './delegated-funding.service';
 import { DelegatedPolicyValidator } from '../wallet/delegated-policy.validator';
-import { FARM_USDC } from './aave-yield-adapter';
 
+// Circle USDC (Sepolia) — the unified farming + payment token (evm.usdcAddress).
+const USDC = ethers.getAddress('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
 const SUB = ethers.Wallet.createRandom().address;
 const USER = ethers.Wallet.createRandom().address;
 
 function build() {
-  const evm = { usdcDomain: { chainId: 11155111 }, provider: {} } as any;
+  const evm = { usdcDomain: { chainId: 11155111 }, usdcAddress: USDC, provider: {} } as any;
   // Happy-path: Privy broadcasts and returns a hash.
   const privy = { sendDelegatedTransaction: jest.fn().mockResolvedValue({ hash: '0xhash' }) } as any;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
@@ -24,9 +25,9 @@ describe('DelegatedFundingService.fundSubwalletFromUser', () => {
       userAddress: USER, subwalletPubkey: SUB, amountLamports: 20_000_000n,
     });
     expect(res).toEqual({ txSignature: '0xhash' });
-    // The call is a real ERC-20 transfer(subwallet, amount) to FARM_USDC.
+    // The call is a real ERC-20 transfer(subwallet, amount) to Circle USDC.
     const arg = privy.sendDelegatedTransaction.mock.calls[0][0];
-    expect(arg).toEqual(expect.objectContaining({ walletId: 'wallet-123', address: USER, to: FARM_USDC, chainId: 11155111 }));
+    expect(arg).toEqual(expect.objectContaining({ walletId: 'wallet-123', address: USER, to: USDC, chainId: 11155111 }));
     const iface = new ethers.Interface(['function transfer(address to, uint256 value)']);
     const [to, value] = iface.decodeFunctionData('transfer', arg.data);
     expect(ethers.getAddress(to)).toBe(SUB);

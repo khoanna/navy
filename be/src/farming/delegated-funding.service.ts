@@ -5,7 +5,6 @@ import { DelegatedPolicyValidator } from '../wallet/delegated-policy.validator';
 import { deriveTxSummary, type EvmCall } from '../wallet/tx-summary';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
-import { FARM_USDC } from './aave-yield-adapter';
 import { FARM_FUNDING_BOUNDS } from './farming.bounds';
 import type { FundingBounds } from './funding.util';
 
@@ -37,7 +36,8 @@ export class DelegatedFundingService {
     amountLamports: bigint;
   }): Promise<{ txSignature: string }> {
     const call: EvmCall = {
-      to: FARM_USDC,
+      // Circle USDC (the unified farming + payment token).
+      to: this.evm.usdcAddress,
       data: usdcIface.encodeFunctionData('transfer', [args.subwalletPubkey, args.amountLamports]),
     };
 

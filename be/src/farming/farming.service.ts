@@ -2,7 +2,7 @@ import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubwalletService } from '../wallet/subwallet.service';
 import { SigningService } from '../wallet/signing.service';
-import { AaveYieldAdapter } from './aave-yield-adapter';
+import { CompoundYieldAdapter } from './compound-yield-adapter';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
 import { toFarmingEventDto } from '../common/serialize';
@@ -12,7 +12,7 @@ export class FarmingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly subwallets: SubwalletService,
-    private readonly adapter: AaveYieldAdapter,
+    private readonly adapter: CompoundYieldAdapter,
     private readonly signing: SigningService,
     @Inject(NAVY_EVM) private readonly evm: NavyEvm,
     private readonly audit: AuditService,

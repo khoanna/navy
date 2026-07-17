@@ -5,7 +5,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FarmingService } from './farming.service';
 import { AuditService } from '../audit/audit.service';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
-import { FARM_USDC } from './aave-yield-adapter';
 import { DelegationService } from './delegation.service';
 
 // Bounds are USDC base units (6 dec) post-migration; `rentBuffer` is retained under
@@ -27,7 +26,8 @@ export class FarmingAgentScheduler {
     @Inject(FARM_BOUNDS) private readonly bounds: FarmBounds,
     private readonly delegation: DelegationService,
   ) {
-    this.usdc = new ethers.Contract(FARM_USDC, usdcIface, this.evm.provider);
+    // Circle USDC (the unified farming + payment token).
+    this.usdc = new ethers.Contract(this.evm.usdcAddress, usdcIface, this.evm.provider);
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

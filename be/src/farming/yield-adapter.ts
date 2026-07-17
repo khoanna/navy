@@ -1,9 +1,10 @@
 import type { EvmCall } from '../wallet/tx-summary';
 
 /**
- * A yield position, in base units of the farmed asset (USDC, 6 dec on Aave Sepolia).
+ * A yield position, in base units of the farmed asset (Circle USDC, 6 dec).
  * Field names are preserved across the Solana→EVM migration; `*Lamports` now hold
- * USDC base units and `cTokenAmount` holds the aToken balance (which rebases 1:1).
+ * USDC base units and `cTokenAmount` holds the Comet supplier balance (balanceOf,
+ * which grows with accrued interest).
  */
 export interface YieldPosition { principalLamports: bigint; currentValueLamports: bigint; cTokenAmount: bigint; }
 

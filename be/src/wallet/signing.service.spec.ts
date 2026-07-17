@@ -4,16 +4,16 @@ import { PolicyValidator } from './policy.validator';
 import { EnvelopeCipherService } from '../crypto/cipher.service';
 import type { EvmCall } from './tx-summary';
 
-const POOL = '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951';
-const USDC = '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8';
-const ATOKEN = '0x16dA4541aD1807f4443d92D26044C1147406EB80';
+// Compound III (Comet) USDC market + Circle USDC, Sepolia.
+const COMET = '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e';
+const USDC = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
 
 const erc20 = new ethers.Interface([
   'function approve(address spender, uint256 value)',
   'function transfer(address to, uint256 value)',
 ]);
-const pool = new ethers.Interface([
-  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
+const comet = new ethers.Interface([
+  'function supply(address asset, uint256 amount)',
 ]);
 
 // A minimal EVM stub — signAndSend only needs `provider` to construct the Wallet.
@@ -24,10 +24,10 @@ describe('SigningService.signAndSend', () => {
 
   it('rejects a call to a non-allowlisted contract (derived from the call, not a caller summary)', async () => {
     const evil = ethers.Wallet.createRandom().address;
-    const call: EvmCall = { to: evil, data: erc20.encodeFunctionData('approve', [POOL, 1n]) };
+    const call: EvmCall = { to: evil, data: erc20.encodeFunctionData('approve', [COMET, 1n]) };
     const row = {
       pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
+      policyJson: { allowedProgramIds: [USDC, COMET], allowedDestinations: [COMET] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn() } as any;
@@ -41,7 +41,7 @@ describe('SigningService.signAndSend', () => {
     const call: EvmCall = { to: USDC, data: erc20.encodeFunctionData('approve', [attacker, 1n]) };
     const row = {
       pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
+      policyJson: { allowedProgramIds: [USDC, COMET], allowedDestinations: [COMET] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn() } as any;
@@ -54,7 +54,7 @@ describe('SigningService.signAndSend', () => {
     const call: EvmCall = { to: USDC, data: '0xdeadbeef' };
     const row = {
       pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: { allowedProgramIds: [USDC], allowedDestinations: [POOL] },
+      policyJson: { allowedProgramIds: [USDC], allowedDestinations: [COMET] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
@@ -69,13 +69,13 @@ describe('SigningService.signAndSend', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'subwallet.sign.denied' }));
   });
 
-  it('signs + sends a valid aave-supply call: decrypts the key, broadcasts, wipes, records subwallet.sign', async () => {
+  it('signs + sends a valid compound-supply call: decrypts the key, broadcasts, wipes, records subwallet.sign', async () => {
     const subKey = ethers.Wallet.createRandom();
-    const call: EvmCall = { to: POOL, data: pool.encodeFunctionData('supply', [USDC, 100n, subKey.address, 0]) };
+    const call: EvmCall = { to: COMET, data: comet.encodeFunctionData('supply', [USDC, 100n]) };
     const secret = Buffer.from(subKey.privateKey.slice(2), 'hex');
     const row = {
       pubkey: subKey.address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
+      policyJson: { allowedProgramIds: [USDC, COMET], allowedDestinations: [COMET] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
