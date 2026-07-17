@@ -1,10 +1,10 @@
+import { ethers } from 'ethers';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression, Interval } from '@nestjs/schedule';
-import { EventParser } from '@coral-xyz/anchor';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from './webhook.service';
-import { NAVY_ONCHAIN, type NavyOnchain } from '../onchain/onchain.module';
-import { orderIdToInvoiceId, invoiceIdToHex } from './invoice-id';
+import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
+import { merchantIdHex, invoiceIdHexFromOrderId } from '../evm/payment-authorization';
 
 export interface SecretLookup { secretForMerchant(merchantId: string): Promise<string | null>; }
 
@@ -16,89 +16,78 @@ export class ChainWatcherService {
     private readonly prisma: PrismaService,
     private readonly webhooks: WebhookService,
     private readonly secrets: SecretLookup,
-    @Inject(NAVY_ONCHAIN) private readonly onchain: NavyOnchain,
+    @Inject(NAVY_EVM) private readonly chain: NavyEvm,
   ) {}
 
-  async markPaid(orderId: string, info: { payer: string; signature: string; fee?: bigint }): Promise<void> {
+  async markPaid(orderId: string, info: { payer: string; txHash: string; fee?: bigint }): Promise<void> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.status === 'paid') return;
-    // Atomic guarded write: only ONE concurrent caller (submit fast-path vs. the 15s sweep)
-    // can flip confirming→paid. The loser gets count 0 and must NOT re-fire the webhook.
+    // Atomic guarded write: only ONE concurrent caller (submit fast-path vs. sweep) flips → paid.
     const claimed = await this.prisma.order.updateMany({
       where: { id: orderId, status: { not: 'paid' } },
-      data: { status: 'paid', payer: info.payer, txSignature: info.signature, paidAt: new Date() },
+      data: { status: 'paid', payer: info.payer, txSignature: info.txHash, paidAt: new Date() },
     });
     if (claimed.count !== 1) return; // another caller already settled — do not fire the webhook
-    // Re-read the settled row for the webhook payload (needs the updated fields).
     const updated = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (order.callbackUrl && updated) {
       const secret = await this.secrets.secretForMerchant(order.merchantId);
       if (secret) {
-        // Prefer the reconciled on-chain fee; fall back to the feeBps recompute.
         const fee = info.fee ?? (updated.amount * BigInt(updated.feeBps)) / 10000n;
         await this.webhooks.deliver(orderId, order.callbackUrl, secret, {
           orderId, reference: updated.reference, amount: updated.amount.toString(),
-          fee: fee.toString(), payer: info.payer, txSignature: info.signature,
+          fee: fee.toString(), payer: info.payer, txSignature: info.txHash,
           status: 'paid', paidAt: updated.paidAt,
         });
       }
     }
   }
 
-  /**
-   * Reconcile a `confirming` order against the on-chain `InvoicePaid` event
-   * before settling it. This is the settlement source of truth: an order only
-   * becomes `paid` if its submitted tx confirmed successfully AND emitted a
-   * matching InvoicePaid event; a reverted tx becomes `failed` (no webhook).
-   */
+  /** Settlement source of truth: settle only if the tx mined successfully AND emitted a matching InvoicePaid. */
   async confirmOrder(orderId: string): Promise<void> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.status === 'paid') return;
-    if (!order.txSignature) return; // submit path hasn't recorded a signature yet
+    if (!order.txSignature) return; // submit hasn't recorded a tx hash yet
 
-    const tx = await this.onchain.connection.getTransaction(order.txSignature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    });
-    if (tx == null) return; // not yet confirmed — a later sweep retries
-
-    if (tx.meta?.err) {
-      // The tx landed but reverted on-chain: fail the order, never settle/webhook.
+    const receipt = await this.chain.provider.getTransactionReceipt(order.txSignature);
+    if (receipt == null) return; // not yet mined — a later sweep retries
+    if (receipt.status !== 1) {
       await this.prisma.order.update({ where: { id: orderId }, data: { status: 'failed' } });
       return;
     }
-
-    const event = this.findInvoicePaid(order.id, tx.meta?.logMessages ?? []);
+    const event = this.findInvoicePaid(order.merchantId, order.id, receipt.logs ?? []);
     if (!event) return; // don't settle without the event; a sweep retries
-
-    await this.markPaid(orderId, { payer: event.payer, signature: order.txSignature, fee: event.fee });
+    await this.markPaid(orderId, { payer: event.payer, txHash: order.txSignature, fee: event.fee });
   }
 
-  /** Parse InvoicePaid events from tx logs and return the one matching this order. */
+  /** Decode InvoicePaid logs and return the one matching this order's (merchantId, invoiceId). */
   private findInvoicePaid(
+    merchantUuid: string,
     orderId: string,
-    logs: string[],
+    logs: ReadonlyArray<{ topics: ReadonlyArray<string>; data: string }>,
   ): { payer: string; amount: bigint; fee: bigint } | null {
-    let wantHex: string;
+    let wantMerchant: string, wantInvoice: string;
     try {
-      wantHex = invoiceIdToHex(orderIdToInvoiceId(orderId));
+      wantMerchant = merchantIdHex(merchantUuid);
+      wantInvoice = invoiceIdHexFromOrderId(orderId);
     } catch {
       return null;
     }
-    const parser = new EventParser(this.onchain.program.programId, this.onchain.program.coder);
-    let events: Array<{ name: string; data: any }>;
-    try {
-      events = [...parser.parseLogs(logs)] as Array<{ name: string; data: any }>;
-    } catch {
-      return null;
-    }
-    for (const ev of events) {
-      if (ev.name.toLowerCase() !== 'invoicepaid') continue;
-      const data = ev.data;
-      const invoiceId: number[] = Array.from(data.invoiceId ?? data.invoice_id ?? []);
-      if (invoiceIdToHex(invoiceId) !== wantHex) continue;
-      const payer: string = typeof data.payer?.toBase58 === 'function' ? data.payer.toBase58() : String(data.payer);
-      return { payer, amount: BigInt(data.amount.toString()), fee: BigInt(data.fee.toString()) };
+    for (const log of logs) {
+      let parsed: ethers.LogDescription | null;
+      try {
+        parsed = this.chain.payments.interface.parseLog({ topics: [...log.topics], data: log.data });
+      } catch {
+        continue;
+      }
+      if (!parsed || parsed.name !== 'InvoicePaid') continue;
+      const mId = String(parsed.args.merchantId).toLowerCase();
+      const iId = String(parsed.args.invoiceId).toLowerCase();
+      if (mId !== wantMerchant.toLowerCase() || iId !== wantInvoice.toLowerCase()) continue;
+      return {
+        payer: String(parsed.args.payer),
+        amount: BigInt(parsed.args.amount.toString()),
+        fee: BigInt(parsed.args.fee.toString()),
+      };
     }
     return null;
   }
