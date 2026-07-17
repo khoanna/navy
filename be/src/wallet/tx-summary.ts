@@ -6,7 +6,7 @@ import { Interface, getAddress } from 'ethers';
  * `deriveTxSummary` is the AUTHORITATIVE source of what a subwallet tx actually
  * does: it decodes the raw calldata of each call (never trusts a caller-supplied
  * summary) into a small, deny-by-default shape the PolicyValidator can reason
- * about. Framework-free (no NestJS / @solana imports) so it stays unit-testable.
+ * about. Framework-free (no NestJS / chain-SDK imports) so it stays unit-testable.
  *
  * Decoded surface (only what the Aave-v3 farming flow needs):
  *   - ERC-20  approve(spender, amount)   → 'erc20-approve'  (spender)

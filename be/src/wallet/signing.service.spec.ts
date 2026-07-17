@@ -1,123 +1,95 @@
-import { Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { ethers } from 'ethers';
 import { SigningService } from './signing.service';
 import { PolicyValidator } from './policy.validator';
 import { EnvelopeCipherService } from '../crypto/cipher.service';
+import type { EvmCall } from './tx-summary';
 
-describe('SigningService', () => {
-  it('rejects a tx whose instruction calls a non-allowlisted program (derived from tx, not caller summary)', async () => {
-    const evil = Keypair.generate().publicKey;          // not allowlisted
-    const allowed = Keypair.generate().publicKey.toBase58();
-    const ix = new TransactionInstruction({ keys: [], programId: evil, data: Buffer.alloc(0) });
-    const tx = new Transaction().add(ix);
+const POOL = '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951';
+const USDC = '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8';
+const ATOKEN = '0x16dA4541aD1807f4443d92D26044C1147406EB80';
+
+const erc20 = new ethers.Interface([
+  'function approve(address spender, uint256 value)',
+  'function transfer(address to, uint256 value)',
+]);
+const pool = new ethers.Interface([
+  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
+]);
+
+// A minimal EVM stub — signAndSend only needs `provider` to construct the Wallet.
+const evm = { provider: {} as any } as any;
+
+describe('SigningService.signAndSend', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('rejects a call to a non-allowlisted contract (derived from the call, not a caller summary)', async () => {
+    const evil = ethers.Wallet.createRandom().address;
+    const call: EvmCall = { to: evil, data: erc20.encodeFunctionData('approve', [POOL, 1n]) };
     const row = {
-      pubkey: 'PK', status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: { allowedProgramIds: [allowed], allowedDestinations: ['OWNER'] },
+      pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
+      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn() } as any;
     const cipher = new EnvelopeCipherService(Buffer.alloc(32, 1));
-    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit);
-    await expect(svc.signTransaction('s1', tx))
-      .rejects.toThrow(/Policy denied/);
+    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit, evm);
+    await expect(svc.signAndSend('s1', call)).rejects.toThrow(/Policy denied/);
   });
 
-  it('rejects a tx that transfers to a non-allowlisted destination (derived from tx)', async () => {
-    const attacker = Keypair.generate().publicKey;
-    const from = Keypair.generate().publicKey;
-    const tx = new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: from, toPubkey: attacker, lamports: 1 }),
-    );
+  it('rejects an approve to a non-allowlisted spender', async () => {
+    const attacker = ethers.Wallet.createRandom().address;
+    const call: EvmCall = { to: USDC, data: erc20.encodeFunctionData('approve', [attacker, 1n]) };
     const row = {
-      pubkey: 'PK', status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
-      policyJson: {
-        allowedProgramIds: [SystemProgram.programId.toBase58()],
-        allowedDestinations: ['Owner111111111111111111111111111111111111'],
-      },
+      pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
+      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn() } as any;
     const cipher = new EnvelopeCipherService(Buffer.alloc(32, 1));
-    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit);
-    await expect(svc.signTransaction('s1', tx))
-      .rejects.toThrow(/Policy denied/);
+    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit, evm);
+    await expect(svc.signAndSend('s1', call)).rejects.toThrow(/Policy denied/);
   });
 
-  it('rejects a tx with an SPL Approve (opcode 4): does NOT sign, records subwallet.sign.denied', async () => {
-    // Approve is a dangerous token opcode — delegating spend authority is never allowed.
-    const ix = new TransactionInstruction({
-      keys: [],
-      programId: TOKEN_PROGRAM_ID,
-      data: Buffer.from([4, 0, 0, 0, 0, 0, 0, 0, 0]),
-    });
-    const tx = new Transaction().add(ix);
-    const spy = jest.spyOn(tx, 'partialSign');
-
-    const owner = Keypair.generate().publicKey.toBase58();
-    const secretKey = Keypair.generate().secretKey; // real 64-byte secret
+  it('rejects an unknown selector: does NOT touch the key, records subwallet.sign.denied', async () => {
+    const call: EvmCall = { to: USDC, data: '0xdeadbeef' };
     const row = {
-      pubkey: Keypair.generate().publicKey.toBase58(),
-      status: 'active',
-      encryptedPrivkey: 'x',
-      dataKeyWrapped: 'y',
-      policyJson: {
-        allowedProgramIds: [TOKEN_PROGRAM_ID.toBase58()],
-        allowedDestinations: [owner],
-      },
+      pubkey: ethers.Wallet.createRandom().address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
+      policyJson: { allowedProgramIds: [USDC], allowedDestinations: [POOL] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
-    const cipher = { open: jest.fn().mockResolvedValue(Buffer.from(secretKey)), seal: jest.fn() } as any;
-    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit);
+    const cipher = { open: jest.fn(), seal: jest.fn() } as any;
+    const sendSpy = jest.spyOn(ethers.Wallet.prototype, 'sendTransaction');
+    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit, evm);
 
-    await expect(svc.signTransaction('s1', tx)).rejects.toThrow(/Policy denied/);
-
-    // BEHAVIOR: the key was never touched, the tx was never signed.
+    await expect(svc.signAndSend('s1', call)).rejects.toThrow(/Policy denied/);
+    // BEHAVIOR: the key was never decrypted, no tx sent.
     expect(cipher.open).not.toHaveBeenCalled();
-    expect(spy).not.toHaveBeenCalled();
-    expect(tx.signatures.length).toBe(0);
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'subwallet.sign.denied' }),
-    );
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'subwallet.sign.denied' }));
   });
 
-  it('signs a valid tx (System transfer to allowlisted owner): partialSign called, subwallet.sign recorded', async () => {
-    const ownerKp = Keypair.generate();
-    const owner = ownerKp.publicKey.toBase58();
-    const subKp = Keypair.generate();
-    const tx = new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: subKp.publicKey, toPubkey: ownerKp.publicKey, lamports: 1 }),
-    );
-    // partialSign compiles the message, which requires these to be set.
-    tx.recentBlockhash = '11111111111111111111111111111111';
-    tx.feePayer = subKp.publicKey;
-    const spy = jest.spyOn(tx, 'partialSign');
-
+  it('signs + sends a valid aave-supply call: decrypts the key, broadcasts, wipes, records subwallet.sign', async () => {
+    const subKey = ethers.Wallet.createRandom();
+    const call: EvmCall = { to: POOL, data: pool.encodeFunctionData('supply', [USDC, 100n, subKey.address, 0]) };
+    const secret = Buffer.from(subKey.privateKey.slice(2), 'hex');
     const row = {
-      pubkey: subKp.publicKey.toBase58(),
-      status: 'active',
-      encryptedPrivkey: 'x',
-      dataKeyWrapped: 'y',
-      policyJson: {
-        allowedProgramIds: [SystemProgram.programId.toBase58()],
-        allowedDestinations: [owner],
-      },
+      pubkey: subKey.address, status: 'active', encryptedPrivkey: 'x', dataKeyWrapped: 'y',
+      policyJson: { allowedProgramIds: [USDC, POOL, ATOKEN], allowedDestinations: [POOL] },
     };
     const prisma = { farmingSubwallet: { findUnique: jest.fn().mockResolvedValue(row) } } as any;
     const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
-    // Real secret key matching the subwallet so partialSign produces a real signature.
-    const cipher = { open: jest.fn().mockResolvedValue(Buffer.from(subKp.secretKey)), seal: jest.fn() } as any;
-    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit);
+    const cipher = { open: jest.fn().mockResolvedValue(Buffer.from(secret)), seal: jest.fn() } as any;
+    const wait = jest.fn().mockResolvedValue({});
+    const sendSpy = jest.spyOn(ethers.Wallet.prototype, 'sendTransaction').mockResolvedValue({ hash: '0xhash', wait } as any);
+    const svc = new SigningService(prisma, cipher, new PolicyValidator(), audit, evm);
 
-    const result = await svc.signTransaction('s1', tx);
+    const hash = await svc.signAndSend('s1', call);
 
-    // BEHAVIOR: the key was decrypted, the tx was signed with a real signature.
+    expect(hash).toBe('0xhash');
     expect(cipher.open).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledTimes(1);
-    const sig = result.signatures.find((s) => s.publicKey.equals(subKp.publicKey));
-    expect(sig?.signature).toBeInstanceOf(Buffer);
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'subwallet.sign' }),
-    );
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'subwallet.sign' }));
   });
 });
