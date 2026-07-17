@@ -1,8 +1,7 @@
-// The farming backend (be/src/farming) kept its Solana-era wire field names after the
-// EVM migration — the amounts are now USDC base units (6 decimals), but the JSON keys are
-// still `amountLamports` / `principalLamports` / `currentValueLamports` / `cTokenAmount` /
-// `txSignature`. We match those keys exactly and only change the *interpretation* (1e6, USDC).
-export interface Position { address: string; principalLamports: string; currentValueLamports: string; cTokenAmount: string; }
+// The farming backend (be/src/farming) returns amounts as USDC base units (6 decimals).
+// Wire keys: `amountBase` / `principalBase` / `currentValueBase` / `cTokenAmount` /
+// `txSignature`. We match those keys exactly (values are 1e6 USDC base units).
+export interface Position { address: string; principalBase: string; currentValueBase: string; cTokenAmount: string; }
 
 /** Format USDC base units (6 decimals) to a plain decimal string. */
 export function formatUsdc(base: string | number): string {
@@ -19,7 +18,7 @@ export class FarmingClient {
   }
   createSubwallet(token: string): Promise<{ subwalletId: string; address: string }> { return this.json('/farming/subwallet', token, { method: 'POST' }); }
   getPosition(token: string): Promise<Position> { return this.json('/farming', token); }
-  deposit(token: string, amountBase: string): Promise<{ txSignature: string }> { return this.json('/farming/deposit', token, { method: 'POST', body: JSON.stringify({ amountLamports: amountBase }) }); }
+  deposit(token: string, amountBase: string): Promise<{ txSignature: string }> { return this.json('/farming/deposit', token, { method: 'POST', body: JSON.stringify({ amountBase }) }); }
   withdraw(token: string, amount: 'all' | string): Promise<{ txSignature: string }> { return this.json('/farming/withdraw', token, { method: 'POST', body: JSON.stringify({ amount }) }); }
   history(token: string): Promise<any[]> { return this.json('/farming/history', token); }
   getDelegation(token: string): Promise<{ available: boolean; enabled: boolean }> { return this.json('/farming/delegation', token); }

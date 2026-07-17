@@ -102,8 +102,8 @@ export default function Farming() {
     }
   };
 
-  const principal = pos ? Number(formatUsdc(pos.principalLamports)) : 0;
-  const current = pos ? Number(formatUsdc(pos.currentValueLamports)) : 0;
+  const principal = pos ? Number(formatUsdc(pos.principalBase)) : 0;
+  const current = pos ? Number(formatUsdc(pos.currentValueBase)) : 0;
   const gain = current - principal;
   const gainPct = principal > 0 ? (gain / principal) * 100 : 0;
 

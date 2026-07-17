@@ -13,15 +13,15 @@ describe('FarmingClient', () => {
     expect(out.address).toBe('0xPK');
   });
   it('getPosition fetches with the bearer', async () => {
-    const f = mockFetch(200, { address: '0xPK', principalLamports: '100', currentValueLamports: '105', cTokenAmount: '100' });
+    const f = mockFetch(200, { address: '0xPK', principalBase: '100', currentValueBase: '105', cTokenAmount: '100' });
     const c = new FarmingClient('http://api', f);
-    expect((await c.getPosition('jwt')).currentValueLamports).toBe('105');
+    expect((await c.getPosition('jwt')).currentValueBase).toBe('105');
   });
   it('deposit posts the USDC base-unit amount', async () => {
     const f = mockFetch(200, { txSignature: '0xsig' });
     const c = new FarmingClient('http://api', f);
     await c.deposit('jwt', '1500000');
-    expect(f).toHaveBeenCalledWith('http://api/farming/deposit', expect.objectContaining({ method: 'POST', body: JSON.stringify({ amountLamports: '1500000' }) }));
+    expect(f).toHaveBeenCalledWith('http://api/farming/deposit', expect.objectContaining({ method: 'POST', body: JSON.stringify({ amountBase: '1500000' }) }));
   });
   it('withdraw posts the amount', async () => {
     const f = mockFetch(200, { txSignature: '0xsig' });
