@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **NavyPayments** | `0x89fEc56A75518680757aaBdd47Ba8ddFb6480bF3` |
+| **NavyPayments** | `0x163933e3f23CBcC93C3910cdFDB0B42EFcfA844c` |
 | **USDC (Circle, EIP-2612 permit + EIP-3009)** | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 | **Owner / admin** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |
 | **Relayer (allowlisted)** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |

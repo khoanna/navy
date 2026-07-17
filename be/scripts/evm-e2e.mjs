@@ -42,18 +42,18 @@ function uuidToBytes16Hex(uuid) {
   if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error(`invalid uuid: ${uuid}`);
   return '0x' + hex;
 }
-const PERMIT_TYPES = {
-  Permit: [
-    { name: 'owner', type: 'address' }, { name: 'spender', type: 'address' },
-    { name: 'value', type: 'uint256' }, { name: 'nonce', type: 'uint256' },
-    { name: 'deadline', type: 'uint256' },
+const RWA_TYPES = {
+  ReceiveWithAuthorization: [
+    { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
   ],
 };
+const invoiceKey = (m, i) => ethers.keccak256(ethers.concat([m, i]));
 
 const PAYMENTS_ABI = JSON.parse(readFileSync(join(beRoot, 'src/evm/navy-payments-abi.json'), 'utf8')).abi;
 const USDC_ABI = [
   'function balanceOf(address) view returns (uint256)',
-  'function nonces(address) view returns (uint256)',
   'function name() view returns (string)',
   'function transfer(address,uint256) returns (bool)',
 ];
@@ -97,20 +97,20 @@ async function main() {
 
   console.log('… registering merchant'); await (await payments.connect(owner).registerMerchant(merchantId, merchantPayout)).wait();
 
-  // Build the EIP-2612 Permit (payer approves the NavyPayments contract to pull AMOUNT), and sign it.
-  const domain = { name: process.env.NAVY_USDC_EIP712_NAME ?? await usdc.name(), version: process.env.NAVY_USDC_EIP712_VERSION ?? '1', chainId: CHAIN_ID, verifyingContract: usdcAddr };
-  const deadline = Math.floor(Date.now() / 1000) + 3600;
-  const nonce = await usdc.nonces(payer.address);
-  const message = { owner: payer.address, spender: paymentsAddr, value: AMOUNT.toString(), nonce: nonce.toString(), deadline: deadline.toString() };
-  const signature = await payer.signTypedData(domain, PERMIT_TYPES, message);
+  // Build the EIP-3009 ReceiveWithAuthorization (nonce = keccak256(merchantId, invoiceId)) and sign it.
+  const domain = { name: process.env.NAVY_USDC_EIP712_NAME ?? await usdc.name(), version: process.env.NAVY_USDC_EIP712_VERSION ?? '2', chainId: CHAIN_ID, verifyingContract: usdcAddr };
+  const validBefore = Math.floor(Date.now() / 1000) + 3600;
+  const nonce = invoiceKey(merchantId, invoiceId);
+  const message = { from: payer.address, to: paymentsAddr, value: AMOUNT.toString(), validAfter: '0', validBefore: validBefore.toString(), nonce };
+  const signature = await payer.signTypedData(domain, RWA_TYPES, message);
   const sig = ethers.Signature.from(signature);
-  log(ethers.verifyTypedData(domain, PERMIT_TYPES, message, signature) === payer.address, 'payer permit signature recovers to payer (USDC EIP-712 domain)');
+  log(ethers.verifyTypedData(domain, RWA_TYPES, message, signature) === payer.address, 'payer signature recovers to payer (USDC EIP-3009 domain)');
 
   const mBefore = await usdc.balanceOf(merchantPayout);
   const tBefore = await usdc.balanceOf(treasury);
 
-  console.log('… relayer submits payInvoice (gasless for payer: permit + transferFrom)');
-  const tx = await payments.connect(relayer).payInvoice(merchantId, invoiceId, AMOUNT, deadline, payer.address, sig.v, sig.r, sig.s);
+  console.log('… relayer submits payInvoice (gasless for payer: receiveWithAuthorization)');
+  const tx = await payments.connect(relayer).payInvoice(merchantId, invoiceId, AMOUNT, 0, validBefore, payer.address, sig.v, sig.r, sig.s);
   const receipt = await tx.wait();
   log(receipt.status === 1, `payInvoice mined ok (tx ${tx.hash})`);
 
@@ -125,7 +125,7 @@ async function main() {
 
   // Replay must fail (same invoice → invoicePaid guard).
   try {
-    await (await payments.connect(relayer).payInvoice(merchantId, invoiceId, AMOUNT, deadline, payer.address, sig.v, sig.r, sig.s)).wait();
+    await (await payments.connect(relayer).payInvoice(merchantId, invoiceId, AMOUNT, 0, validBefore, payer.address, sig.v, sig.r, sig.s)).wait();
     log(false, 'replay was rejected');
   } catch { log(true, 'replay of the same invoice was rejected'); }
 
