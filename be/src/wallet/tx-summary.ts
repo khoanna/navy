@@ -8,20 +8,21 @@ import { Interface, getAddress } from 'ethers';
  * summary) into a small, deny-by-default shape the PolicyValidator can reason
  * about. Framework-free (no NestJS / chain-SDK imports) so it stays unit-testable.
  *
- * Decoded surface (only what the Aave-v3 farming flow needs):
- *   - ERC-20  approve(spender, amount)   → 'erc20-approve'  (spender)
- *   - ERC-20  transfer(to, amount)       → 'erc20-transfer' (recipient)
- *   - Aave    supply(asset, amount, onBehalfOf, referralCode) → 'aave-supply'
- *   - Aave    withdraw(asset, amount, to)                     → 'aave-withdraw' (recipient)
- *   - a call with a non-zero `value` and empty calldata       → 'native-transfer' (recipient)
+ * Decoded surface (only what the Compound-v3 (Comet) farming flow needs):
+ *   - ERC-20   approve(spender, amount)   → 'erc20-approve'  (spender)
+ *   - ERC-20   transfer(to, amount)       → 'erc20-transfer' (recipient)
+ *   - Comet    supply(asset, amount)                → 'compound-supply' (credits msg.sender)
+ *   - Comet    withdraw(asset, amount)              → 'compound-withdraw' (to msg.sender)
+ *   - Comet    withdrawTo(to, asset, amount)        → 'compound-withdraw' (recipient)
+ *   - a call with a non-zero `value` and empty calldata → 'native-transfer' (recipient)
  * Everything else → 'unknown' (rejected by the policy).
  */
 
 export type IxKind =
   | 'erc20-approve'
   | 'erc20-transfer'
-  | 'aave-supply'
-  | 'aave-withdraw'
+  | 'compound-supply'
+  | 'compound-withdraw'
   | 'native-transfer'
   | 'unknown';
 
@@ -33,10 +34,8 @@ export interface DecodedIx {
   kind: IxKind;
   /** erc20-approve: the approved spender. */
   spender?: string;
-  /** erc20-transfer / aave-withdraw / native-transfer: where value/tokens go. */
+  /** erc20-transfer / compound-withdraw (withdrawTo) / native-transfer: where value/tokens go. */
   recipient?: string;
-  /** aave-supply: the account credited with the aToken position. */
-  onBehalfOf?: string;
   /** transferred / approved / supplied / withdrawn amount (base units). */
   amount?: bigint;
 }
@@ -57,16 +56,18 @@ const erc20 = new Interface([
   'function transfer(address to, uint256 value)',
 ]);
 
-const aavePool = new Interface([
-  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
-  'function withdraw(address asset, uint256 amount, address to)',
+const comet = new Interface([
+  'function supply(address asset, uint256 amount)',
+  'function withdraw(address asset, uint256 amount)',
+  'function withdrawTo(address to, address asset, uint256 amount)',
 ]);
 
 const SELECTORS = {
   approve: erc20.getFunction('approve')!.selector,
   transfer: erc20.getFunction('transfer')!.selector,
-  supply: aavePool.getFunction('supply')!.selector,
-  withdraw: aavePool.getFunction('withdraw')!.selector,
+  supply: comet.getFunction('supply')!.selector,
+  withdraw: comet.getFunction('withdraw')!.selector,
+  withdrawTo: comet.getFunction('withdrawTo')!.selector,
 };
 
 /** Normalize to a checksummed address; falls back to the raw string if invalid. */
@@ -108,12 +109,19 @@ function decodeCall(call: EvmCall): DecodedIx {
         return { to, selector, kind: 'erc20-transfer', recipient: addr(recipient), amount: BigInt(value) };
       }
       case SELECTORS.supply: {
-        const [, amount, onBehalfOf] = aavePool.decodeFunctionData('supply', data);
-        return { to, selector, kind: 'aave-supply', onBehalfOf: addr(onBehalfOf), amount: BigInt(amount) };
+        // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet);
+        // there is no on-behalf-of arg to check.
+        const [, amount] = comet.decodeFunctionData('supply', data);
+        return { to, selector, kind: 'compound-supply', amount: BigInt(amount) };
       }
       case SELECTORS.withdraw: {
-        const [, amount, recipient] = aavePool.decodeFunctionData('withdraw', data);
-        return { to, selector, kind: 'aave-withdraw', recipient: addr(recipient), amount: BigInt(amount) };
+        // Comet withdraw(asset, amount) sends the base to the implicit msg.sender.
+        const [, amount] = comet.decodeFunctionData('withdraw', data);
+        return { to, selector, kind: 'compound-withdraw', amount: BigInt(amount) };
+      }
+      case SELECTORS.withdrawTo: {
+        const [recipient, , amount] = comet.decodeFunctionData('withdrawTo', data);
+        return { to, selector, kind: 'compound-withdraw', recipient: addr(recipient), amount: BigInt(amount) };
       }
       default:
         return { to, selector, kind: 'unknown' };

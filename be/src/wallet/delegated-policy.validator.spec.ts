@@ -6,7 +6,7 @@ const erc20 = new Interface(['function transfer(address to, uint256 value)']);
 
 const SUB = getAddress('0x00000000000000000000000000000000000000A1');
 const OTHER = getAddress('0x00000000000000000000000000000000000000B2');
-const USDC = getAddress('0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8');
+const USDC = getAddress('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
 
 const ctx = { subwallet: SUB, minLamports: 1000n, maxLamports: 1_000_000n };
 const transfer = (to: string, amount: bigint) => erc20.encodeFunctionData('transfer', [to, amount]);

@@ -4,8 +4,8 @@ import { TxSummary } from './tx-summary';
 /**
  * Per-subwallet allowlist (deny-by-default). Field names are preserved across the
  * Solana→EVM migration; their meaning is reinterpreted for EVM:
- *   - allowedProgramIds  = allowed CONTRACT addresses ([USDC, AavePool, aToken]).
- *   - allowedDestinations = allowed RECIPIENT addresses ([subwallet, AavePool, ownerMainWallet]).
+ *   - allowedProgramIds  = allowed CONTRACT addresses ([USDC, Comet]).
+ *   - allowedDestinations = allowed RECIPIENT addresses ([subwallet, Comet, ownerMainWallet]).
  * All comparisons are case-insensitive (lowercased hex).
  */
 export interface SubwalletPolicy {
@@ -43,7 +43,6 @@ export class PolicyValidator {
           break;
         }
         case 'erc20-transfer':
-        case 'aave-withdraw':
         case 'native-transfer': {
           const recipient = ix.recipient ? lower(ix.recipient) : undefined;
           if (recipient === undefined || !allowedDestinations.has(recipient)) {
@@ -51,12 +50,22 @@ export class PolicyValidator {
           }
           break;
         }
-        case 'aave-supply': {
-          // Supplied liquidity must credit the subwallet's own aToken position —
-          // never a third party.
-          if (ix.onBehalfOf === undefined || lower(ix.onBehalfOf) !== subwallet) {
-            return { ok: false, reason: `supply onBehalfOf not the subwallet: ${ix.onBehalfOf}` };
+        case 'compound-withdraw': {
+          // Comet withdrawTo(to,…) carries an explicit recipient — check it. Bare
+          // withdraw(asset,amount) redeems to the implicit msg.sender (the subwallet,
+          // an implicit allowed destination), so no recipient to validate.
+          if (ix.recipient !== undefined) {
+            const recipient = lower(ix.recipient);
+            if (!allowedDestinations.has(recipient)) {
+              return { ok: false, reason: `${ix.kind} destination not allowed: ${ix.recipient}` };
+            }
           }
+          break;
+        }
+        case 'compound-supply': {
+          // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet);
+          // there is no on-behalf-of parameter to redirect, so the contract allowlist
+          // check above is sufficient.
           break;
         }
         case 'unknown':

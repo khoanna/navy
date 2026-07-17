@@ -6,60 +6,66 @@ const erc20 = new Interface([
   'function approve(address spender, uint256 value)',
   'function transfer(address to, uint256 value)',
 ]);
-const aavePool = new Interface([
-  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
-  'function withdraw(address asset, uint256 amount, address to)',
+const comet = new Interface([
+  'function supply(address asset, uint256 amount)',
+  'function withdraw(address asset, uint256 amount)',
+  'function withdrawTo(address to, address asset, uint256 amount)',
 ]);
 
-const USDC = getAddress('0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8');
-const POOL = getAddress('0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951');
-const ATOKEN = getAddress('0x16dA4541aD1807f4443d92D26044C1147406EB80');
+// Circle USDC + Compound III (Comet) USDC market, Sepolia.
+const USDC = getAddress('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
+const COMET = getAddress('0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e');
 const SUB = getAddress('0x00000000000000000000000000000000000000A1');
 const OWNER = getAddress('0x00000000000000000000000000000000000000B2');
 const ATTACKER = getAddress('0x00000000000000000000000000000000000000cc');
 const RANDOM_CONTRACT = getAddress('0x00000000000000000000000000000000000000dd');
 
 const policy: SubwalletPolicy = {
-  allowedProgramIds: [USDC, POOL, ATOKEN],
-  allowedDestinations: [POOL, OWNER], // subwallet is implicit
+  allowedProgramIds: [USDC, COMET],
+  allowedDestinations: [COMET, OWNER], // subwallet is implicit
 };
 const ctx: PolicyContext = { subwallet: SUB };
 
 const approve = (spender: string, amount: bigint) => erc20.encodeFunctionData('approve', [spender, amount]);
 const transfer = (to: string, amount: bigint) => erc20.encodeFunctionData('transfer', [to, amount]);
-const supply = (onBehalfOf: string, amount: bigint) =>
-  aavePool.encodeFunctionData('supply', [USDC, amount, onBehalfOf, 0]);
-const withdraw = (to: string, amount: bigint) => aavePool.encodeFunctionData('withdraw', [USDC, amount, to]);
+const supply = (amount: bigint) => comet.encodeFunctionData('supply', [USDC, amount]);
+const withdrawTo = (to: string, amount: bigint) => comet.encodeFunctionData('withdrawTo', [to, USDC, amount]);
+const withdraw = (amount: bigint) => comet.encodeFunctionData('withdraw', [USDC, amount]);
 
 describe('PolicyValidator (EVM)', () => {
   const v = new PolicyValidator();
 
-  it('allows the deposit flow: approve(Pool) + supply(onBehalfOf=subwallet)', () => {
+  it('allows the deposit flow: approve(Comet) + supply(USDC) (credits msg.sender)', () => {
     const tx = deriveTxSummary([
-      { to: USDC, data: approve(POOL, 9000n) },
-      { to: POOL, data: supply(SUB, 9000n) },
+      { to: USDC, data: approve(COMET, 9000n) },
+      { to: COMET, data: supply(9000n) },
     ]);
     expect(v.check(policy, tx, ctx)).toEqual({ ok: true });
   });
 
-  it('allows a withdraw to the owner main wallet', () => {
-    const tx = deriveTxSummary([{ to: POOL, data: withdraw(OWNER, 4000n) }]);
+  it('allows a withdrawTo the owner main wallet', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: withdrawTo(OWNER, 4000n) }]);
     expect(v.check(policy, tx, ctx)).toEqual({ ok: true });
   });
 
-  it('allows a withdraw back to the subwallet (implicit destination)', () => {
-    const tx = deriveTxSummary([{ to: POOL, data: withdraw(SUB, 4000n) }]);
+  it('allows a bare withdraw (redeems to the implicit subwallet msg.sender)', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: withdraw(4000n) }]);
+    expect(v.check(policy, tx, ctx)).toEqual({ ok: true });
+  });
+
+  it('allows a withdrawTo back to the subwallet (implicit destination)', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: withdrawTo(SUB, 4000n) }]);
     expect(v.check(policy, tx, ctx)).toEqual({ ok: true });
   });
 
   it('rejects a call to a non-allowlisted contract', () => {
-    const tx = deriveTxSummary([{ to: RANDOM_CONTRACT, data: approve(POOL, 1n) }]);
+    const tx = deriveTxSummary([{ to: RANDOM_CONTRACT, data: approve(COMET, 1n) }]);
     const r = v.check(policy, tx, ctx);
     expect(r.ok).toBe(false);
     expect((r as any).reason).toMatch(/contract not allowlisted/);
   });
 
-  it('rejects approve to a spender that is not the Aave Pool', () => {
+  it('rejects approve to a spender that is not the Comet', () => {
     const tx = deriveTxSummary([{ to: USDC, data: approve(ATTACKER, 9000n) }]);
     const r = v.check(policy, tx, ctx);
     expect(r.ok).toBe(false);
@@ -73,18 +79,11 @@ describe('PolicyValidator (EVM)', () => {
     expect((r as any).reason).toMatch(/erc20-transfer destination not allowed/);
   });
 
-  it('rejects a withdraw to a non-allowed recipient', () => {
-    const tx = deriveTxSummary([{ to: POOL, data: withdraw(ATTACKER, 9000n) }]);
+  it('rejects a withdrawTo a non-allowed recipient', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: withdrawTo(ATTACKER, 9000n) }]);
     const r = v.check(policy, tx, ctx);
     expect(r.ok).toBe(false);
-    expect((r as any).reason).toMatch(/aave-withdraw destination not allowed/);
-  });
-
-  it('rejects supply that credits an account other than the subwallet', () => {
-    const tx = deriveTxSummary([{ to: POOL, data: supply(ATTACKER, 9000n) }]);
-    const r = v.check(policy, tx, ctx);
-    expect(r.ok).toBe(false);
-    expect((r as any).reason).toMatch(/supply onBehalfOf not the subwallet/);
+    expect((r as any).reason).toMatch(/compound-withdraw destination not allowed/);
   });
 
   it('rejects an unknown selector on an allowlisted contract', () => {
@@ -96,8 +95,8 @@ describe('PolicyValidator (EVM)', () => {
 
   it('compares addresses case-insensitively', () => {
     const tx = deriveTxSummary([
-      { to: USDC.toLowerCase(), data: approve(POOL.toLowerCase(), 1n) },
-      { to: POOL.toLowerCase(), data: supply(SUB.toLowerCase(), 1n) },
+      { to: USDC.toLowerCase(), data: approve(COMET.toLowerCase(), 1n) },
+      { to: COMET.toLowerCase(), data: supply(1n) },
     ]);
     expect(v.check(policy, tx, ctx)).toEqual({ ok: true });
   });

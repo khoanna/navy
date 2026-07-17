@@ -5,25 +5,26 @@ const erc20 = new Interface([
   'function approve(address spender, uint256 value)',
   'function transfer(address to, uint256 value)',
 ]);
-const aavePool = new Interface([
-  'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
-  'function withdraw(address asset, uint256 amount, address to)',
+const comet = new Interface([
+  'function supply(address asset, uint256 amount)',
+  'function withdraw(address asset, uint256 amount)',
+  'function withdrawTo(address to, address asset, uint256 amount)',
 ]);
 
-const USDC = getAddress('0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8');
-const POOL = getAddress('0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951');
-const ATOKEN = getAddress('0x16dA4541aD1807f4443d92D26044C1147406EB80');
+// Circle USDC + Compound III (Comet) USDC market, Sepolia.
+const USDC = getAddress('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
+const COMET = getAddress('0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e');
 const SUB = getAddress('0x00000000000000000000000000000000000000A1');
 const OWNER = getAddress('0x00000000000000000000000000000000000000B2');
 
 describe('deriveTxSummary (EVM calldata)', () => {
   it('decodes ERC-20 approve(spender, amount)', () => {
-    const data = erc20.encodeFunctionData('approve', [POOL, 5000n]);
+    const data = erc20.encodeFunctionData('approve', [COMET, 5000n]);
     const { instructions } = deriveTxSummary([{ to: USDC, data }]);
     expect(instructions).toHaveLength(1);
     expect(instructions[0].kind).toBe('erc20-approve');
     expect(instructions[0].to).toBe(USDC);
-    expect(instructions[0].spender).toBe(POOL);
+    expect(instructions[0].spender).toBe(COMET);
     expect(instructions[0].amount).toBe(5000n);
     expect(instructions[0].selector).toBe('0x095ea7b3');
   });
@@ -36,19 +37,28 @@ describe('deriveTxSummary (EVM calldata)', () => {
     expect(instructions[0].amount).toBe(12345n);
   });
 
-  it('decodes Aave supply(asset, amount, onBehalfOf, referralCode)', () => {
-    const data = aavePool.encodeFunctionData('supply', [USDC, 7000n, SUB, 0]);
-    const { instructions } = deriveTxSummary([{ to: POOL, data }]);
-    expect(instructions[0].kind).toBe('aave-supply');
-    expect(instructions[0].to).toBe(POOL);
-    expect(instructions[0].onBehalfOf).toBe(SUB);
+  it('decodes Comet supply(asset, amount) — credits the implicit msg.sender', () => {
+    const data = comet.encodeFunctionData('supply', [USDC, 7000n]);
+    const { instructions } = deriveTxSummary([{ to: COMET, data }]);
+    expect(instructions[0].kind).toBe('compound-supply');
+    expect(instructions[0].to).toBe(COMET);
     expect(instructions[0].amount).toBe(7000n);
+    // No recipient: supply credits msg.sender.
+    expect(instructions[0].recipient).toBeUndefined();
   });
 
-  it('decodes Aave withdraw(asset, amount, to)', () => {
-    const data = aavePool.encodeFunctionData('withdraw', [USDC, 4000n, OWNER]);
-    const { instructions } = deriveTxSummary([{ to: POOL, data }]);
-    expect(instructions[0].kind).toBe('aave-withdraw');
+  it('decodes Comet withdraw(asset, amount) — to the implicit msg.sender (no recipient)', () => {
+    const data = comet.encodeFunctionData('withdraw', [USDC, 4000n]);
+    const { instructions } = deriveTxSummary([{ to: COMET, data }]);
+    expect(instructions[0].kind).toBe('compound-withdraw');
+    expect(instructions[0].amount).toBe(4000n);
+    expect(instructions[0].recipient).toBeUndefined();
+  });
+
+  it('decodes Comet withdrawTo(to, asset, amount) — exposes the recipient', () => {
+    const data = comet.encodeFunctionData('withdrawTo', [OWNER, USDC, 4000n]);
+    const { instructions } = deriveTxSummary([{ to: COMET, data }]);
+    expect(instructions[0].kind).toBe('compound-withdraw');
     expect(instructions[0].recipient).toBe(OWNER);
     expect(instructions[0].amount).toBe(4000n);
   });
@@ -69,25 +79,25 @@ describe('deriveTxSummary (EVM calldata)', () => {
   });
 
   it('classifies empty calldata with no value as unknown', () => {
-    const { instructions } = deriveTxSummary([{ to: ATOKEN, data: '0x' }]);
+    const { instructions } = deriveTxSummary([{ to: COMET, data: '0x' }]);
     expect(instructions[0].kind).toBe('unknown');
   });
 
   it('decodes a multi-call deposit flow (approve + supply)', () => {
-    const approve = erc20.encodeFunctionData('approve', [POOL, 9000n]);
-    const supply = aavePool.encodeFunctionData('supply', [USDC, 9000n, SUB, 0]);
+    const approve = erc20.encodeFunctionData('approve', [COMET, 9000n]);
+    const supply = comet.encodeFunctionData('supply', [USDC, 9000n]);
     const { instructions } = deriveTxSummary([
       { to: USDC, data: approve },
-      { to: POOL, data: supply },
+      { to: COMET, data: supply },
     ]);
-    expect(instructions.map((i) => i.kind)).toEqual(['erc20-approve', 'aave-supply']);
+    expect(instructions.map((i) => i.kind)).toEqual(['erc20-approve', 'compound-supply']);
   });
 
   it('normalizes addresses to checksummed form regardless of input case', () => {
-    const data = erc20.encodeFunctionData('approve', [POOL, 1n]);
+    const data = erc20.encodeFunctionData('approve', [COMET, 1n]);
     const { instructions } = deriveTxSummary([{ to: USDC.toLowerCase(), data }]);
     expect(instructions[0].to).toBe(USDC);
-    expect(instructions[0].spender).toBe(POOL);
+    expect(instructions[0].spender).toBe(COMET);
   });
 
   it('treats a selector-matched call with malformed args as unknown', () => {
