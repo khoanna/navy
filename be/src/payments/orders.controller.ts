@@ -93,7 +93,9 @@ export class OrdersController {
         where: { id },
         data: { status: 'awaiting_payment', issuedTxConsumedAt: null, issuedTxHash: null, txSignature: null },
       });
-      return { txHash, status: 'retry' };
+      // Wallet clients only recognize 'failed' (they treat any other string, incl. 'retry', as
+      // success). The order is internally RESET to awaiting_payment above so the user can re-auth.
+      return { txHash, status: 'failed' };
     }
     await this.prisma.order.update({ where: { id }, data: { status: 'confirming', txSignature: txHash } });
     await this.watcher.confirmOrder(id);
