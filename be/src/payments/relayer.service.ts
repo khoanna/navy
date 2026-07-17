@@ -6,6 +6,7 @@ import { NavyConfigService } from '../config/config.service';
 import {
   buildAuthorizationTypedData,
   invoiceIdHexFromOrderId,
+  invoiceKey,
   authorizationDigest,
   type AuthorizationTypedData,
 } from '../evm/payment-authorization';
@@ -23,7 +24,7 @@ export class RelayerService {
     private readonly cfg: NavyConfigService,
   ) {}
 
-  /** Build the EIP-2612 Permit the wallet signs, and persist its digest as a durable single-use nonce. */
+  /** Build the EIP-3009 ReceiveWithAuthorization the wallet signs, and persist its digest as a durable single-use nonce. */
   async buildAuthorization(
     order: { id: string; amount: bigint; expiresAt: Date; reference?: string },
     merchantIdHex16: string,
@@ -34,15 +35,17 @@ export class RelayerService {
     if (balance < this.cfg.relayerMinBalanceWei) {
       throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
     }
-    const nonce: bigint = await this.chain.usdc.nonces(payer);
-    const deadline = Math.floor(order.expiresAt.getTime() / 1000);
+    // EIP-3009 nonce is the deterministic on-chain invoice key (bytes32), not a token nonce.
+    const nonce = invoiceKey(merchantIdHex16, invoiceIdHexFromOrderId(order.id));
+    const validBefore = Math.floor(order.expiresAt.getTime() / 1000);
     const typedData = buildAuthorizationTypedData({
       domain: this.chain.usdcDomain,
       payer,
-      spender: this.chain.paymentsAddress,
+      to: this.chain.paymentsAddress,
       amount: order.amount,
+      validAfter: 0,
+      validBefore,
       nonce,
-      deadline,
     });
     const issuedTxHash = authorizationDigest(typedData);
     await this.prisma.order.update({
@@ -81,14 +84,14 @@ export class RelayerService {
     });
     if (consumed.count !== 1) throw new BadRequestException('Authorization already submitted');
 
-    // Reconstruct the exact payInvoice args from the order (the on-chain USDC.permit re-verifies the sig against these).
+    // Reconstruct the exact payInvoice args from the order (the on-chain USDC.receiveWithAuthorization re-verifies the sig against these).
     const merchantIdHex16 = '0x' + order.merchantId.replace(/-/g, '').toLowerCase();
     const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
-    const deadline = Math.floor(order.issuedTxExpiresAt!.getTime() / 1000);
+    const validBefore = Math.floor(order.issuedTxExpiresAt!.getTime() / 1000);
     const sig = ethers.Signature.from(signature);
-    // Note: the permit nonce is NOT passed — the token reads its own current nonce during permit().
+    // EIP-3009: validAfter=0, validBefore from the issued authorization; the token derives the nonce (invoiceKey) itself.
     const tx = await this.chain.payments.payInvoice(
-      merchantIdHex16, invoiceIdHex16, order.amount, deadline, signer, sig.v, sig.r, sig.s,
+      merchantIdHex16, invoiceIdHex16, order.amount, 0, validBefore, signer, sig.v, sig.r, sig.s,
     );
     const receipt = await tx.wait();
     return { txHash: tx.hash, payer: signer, err: receipt && receipt.status === 1 ? null : 'reverted' };

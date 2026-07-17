@@ -45,9 +45,9 @@ export class NavyConfigService {
   get treasuryAddress(): string { return this.req('NAVY_TREASURY_ADDRESS'); }
   get relayerPrivateKey(): string { return this.req('NAVY_RELAYER_PRIVATE_KEY'); }
   get ownerPrivateKey(): string { return this.req('NAVY_OWNER_PRIVATE_KEY'); }
-  /** USDC EIP-712 domain name/version. Circle Sepolia USDC (EIP-2612 permit) is name "USDC", version "1"; overridable + verify against chain. */
+  /** USDC EIP-712 domain name/version. Circle Sepolia USDC (EIP-3009) is name "USDC", version "2"; overridable + verify against chain. */
   get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USDC'; }
-  get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '1'; }
+  get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '2'; }
   /** Min relayer ETH balance (wei) required before submitting a payment. Env is ETH; default 0.02. */
   get relayerMinBalanceWei(): bigint {
     const eth = this.env.NAVY_RELAYER_MIN_BALANCE_ETH ?? '0.02';

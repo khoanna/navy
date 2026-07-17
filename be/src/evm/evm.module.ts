@@ -15,7 +15,6 @@ export interface NavyEvm {
   paymentsAsOwner: ethers.Contract; // connected to the owner wallet (admin ops)
   relayer: ethers.Wallet;
   owner: ethers.Wallet;
-  usdc: ethers.Contract;          // read-only USDC handle for EIP-2612 nonce reads
   usdcAddress: string;
   treasury: string;
   paymentsAddress: string;
@@ -33,7 +32,6 @@ export interface NavyEvm {
       const owner = new ethers.Wallet(cfg.ownerPrivateKey, provider);
       const payments = new ethers.Contract(cfg.paymentsAddress, artifact.abi, relayer);
       const paymentsAsOwner = new ethers.Contract(cfg.paymentsAddress, artifact.abi, owner);
-      const usdc = new ethers.Contract(cfg.usdcAddress, ['function nonces(address) view returns (uint256)'], provider);
       const usdcDomain: UsdcDomain = {
         name: cfg.usdcEip712Name,
         version: cfg.usdcEip712Version,
@@ -41,7 +39,7 @@ export interface NavyEvm {
         verifyingContract: cfg.usdcAddress,
       };
       return {
-        provider, payments, paymentsAsOwner, relayer, owner, usdc,
+        provider, payments, paymentsAsOwner, relayer, owner,
         usdcAddress: cfg.usdcAddress, treasury: cfg.treasuryAddress,
         paymentsAddress: cfg.paymentsAddress, usdcDomain,
       };
