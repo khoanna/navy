@@ -1,14 +1,14 @@
 import { BadGatewayException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegistrarService } from '../onchain/registrar.service';
-import { merchantIdFromUuid } from '../onchain/payments-client';
+import { EvmRegistrarService } from '../evm/evm-registrar.service';
+import { merchantIdHex } from '../evm/payment-authorization';
 import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class AdminMerchantsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly registrar: RegistrarService,
+    private readonly registrar: EvmRegistrarService,
     private readonly audit: AuditService,
   ) {}
 
@@ -29,8 +29,8 @@ export class AdminMerchantsService {
     } catch (e) {
       throw new BadGatewayException(`On-chain registration failed: ${(e as Error).message}`);
     }
-    // Persist the deterministic 16-byte merchant_id (hex) that seeds the on-chain Merchant PDA.
-    const onchainMerchantId = Buffer.from(merchantIdFromUuid(merchant.id)).toString('hex');
+    // Persist the deterministic 16-byte merchant_id (hex) that seeds the on-chain Merchant registry.
+    const onchainMerchantId = merchantIdHex(merchant.id).slice(2); // strip 0x prefix for the DB column
     const updated = await this.prisma.merchant.update({
       where: { id },
       data: { approvalStatus: 'approved', onchainMerchantId, onchainRegisteredAt: new Date(), onchainRegisterTx: tx, rejectionReason: null },
