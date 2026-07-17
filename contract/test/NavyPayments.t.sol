@@ -151,4 +151,104 @@ contract NavyPaymentsTest is Test {
         assertEq(usdc.balanceOf(merchantPayout), 500_000);
         assertEq(usdc.balanceOf(treasury), 0);
     }
+
+    function test_payInvoice_onlyRelayer() public {
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"44444444444444444444444444444444");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+
+        vm.expectRevert(NavyPayments.NotRelayer.selector);
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsReplay() public {
+        _setup_merchant_relayer_funds();
+        usdc.mint(_payer(), 1_000_000); // top up for the (never-completed) second attempt
+        bytes16 invoiceId = bytes16(hex"55555555555555555555555555555555");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+
+        vm.prank(relayer);
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+
+        vm.prank(relayer);
+        vm.expectRevert(NavyPayments.AlreadyPaid.selector);
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsInactiveMerchant() public {
+        _setup_merchant_relayer_funds();
+        vm.prank(owner);
+        navy.setMerchantActive(MID, false);
+        bytes16 invoiceId = bytes16(hex"66666666666666666666666666666666");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+
+        vm.prank(relayer);
+        vm.expectRevert(NavyPayments.MerchantInactive.selector);
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsUnknownMerchant() public {
+        _setup_merchant_relayer_funds();
+        bytes16 unknown = bytes16(hex"99999999999999999999999999999999");
+        bytes16 invoiceId = bytes16(hex"77777777777777777777777777777777");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(unknown, invoiceId, 500_000, validBefore);
+
+        vm.prank(relayer);
+        vm.expectRevert(NavyPayments.MerchantInactive.selector);
+        navy.payInvoice(unknown, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsBelowMinimum() public {
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"88888888888888888888888888888888");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 9_999, validBefore);
+
+        vm.prank(relayer);
+        vm.expectRevert(NavyPayments.AmountTooSmall.selector);
+        navy.payInvoice(MID, invoiceId, 9_999, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsExpired() public {
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+
+        vm.warp(validBefore + 1); // now past expiry
+        vm.prank(relayer);
+        vm.expectRevert(bytes("authorization expired"));
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsAmountTamper() public {
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        uint256 validBefore = block.timestamp + 3600;
+        // Sign for 500_000 but submit 900_000: USDC signature verification must reject.
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(MID, invoiceId, 500_000, validBefore);
+
+        vm.prank(relayer);
+        vm.expectRevert(bytes("invalid signature"));
+        navy.payInvoice(MID, invoiceId, 900_000, 0, validBefore, _payer(), v, r, s);
+    }
+
+    function test_payInvoice_rejectsWrongMerchantBinding() public {
+        _setup_merchant_relayer_funds();
+        bytes16 other = bytes16(hex"cccccccccccccccccccccccccccccccc");
+        vm.prank(owner);
+        navy.registerMerchant(other, address(0xABCD));
+        bytes16 invoiceId = bytes16(hex"dddddddddddddddddddddddddddddddd");
+        uint256 validBefore = block.timestamp + 3600;
+        // Sign the authorization bound to `other`, but submit it against MID.
+        (uint8 v, bytes32 r, bytes32 s) = _signInvoice(other, invoiceId, 500_000, validBefore);
+
+        vm.prank(relayer);
+        vm.expectRevert(bytes("invalid signature"));
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
+    }
 }
