@@ -26,14 +26,23 @@ contract NavyPaymentsFuzzTest is Test {
         vm.warp(1_700_000_000);
     }
 
-    function _signPermit(uint256 amount, uint256 deadline)
+    function _signAuth(bytes16 invoiceId, uint256 amount, uint256 validAfter, uint256 validBefore)
         internal
         view
         returns (uint8 v, bytes32 r, bytes32 s)
     {
         address payer = vm.addr(payerPk);
+        bytes32 nonce = keccak256(abi.encodePacked(MID, invoiceId));
         bytes32 structHash = keccak256(
-            abi.encode(usdc.PERMIT_TYPEHASH(), payer, address(navy), amount, usdc.nonces(payer), deadline)
+            abi.encode(
+                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
+                payer,
+                address(navy),
+                amount,
+                validAfter,
+                validBefore,
+                nonce
+            )
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));
         return vm.sign(payerPk, digest);
@@ -49,11 +58,11 @@ contract NavyPaymentsFuzzTest is Test {
         address payer = vm.addr(payerPk);
         usdc.mint(payer, amount);
         bytes16 invoiceId = bytes16(uint128(amount)); // unique per amount
-        uint256 deadline = block.timestamp + 3600;
-        (uint8 v, bytes32 r, bytes32 s) = _signPermit(amount, deadline);
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signAuth(invoiceId, amount, 0, validBefore);
 
         vm.prank(relayer);
-        navy.payInvoice(MID, invoiceId, amount, deadline, payer, v, r, s);
+        navy.payInvoice(MID, invoiceId, amount, 0, validBefore, payer, v, r, s);
 
         uint256 expectedFee = (amount * feeBps) / 10000;
         assertEq(usdc.balanceOf(treasury), expectedFee);
