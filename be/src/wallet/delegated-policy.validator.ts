@@ -4,14 +4,13 @@ import type { PolicyResult } from './policy.validator';
 
 /**
  * Bounds for the ONE delegated operation Navy performs on a user's main wallet:
- * auto-funding the user's own subwallet. Field names preserved across the
- * Solana→EVM migration; `*Lamports` now hold EVM base units (wei for a native
- * ETH gas top-up, or USDC base units for an ERC-20 top-up).
+ * auto-funding the user's own subwallet. `*Base` hold EVM base units (wei for a
+ * native ETH gas top-up, or USDC base units for an ERC-20 top-up).
  */
 export interface DelegatedFundingContext {
   subwallet: string;
-  minLamports: bigint;
-  maxLamports: bigint;
+  minBase: bigint;
+  maxBase: bigint;
 }
 
 const lower = (s: string) => s.toLowerCase();
@@ -21,7 +20,7 @@ const lower = (s: string) => s.toLowerCase();
  * only either:
  *   - a native value transfer to the subwallet, or
  *   - an ERC-20 `transfer(subwallet, amount)`,
- * with the amount within [minLamports, maxLamports]. Anything else is denied.
+ * with the amount within [minBase, maxBase]. Anything else is denied.
  * Reuses deriveTxSummary — never trusts a caller-supplied summary (the funding
  * service derives it from the built tx).
  */
@@ -42,10 +41,10 @@ export class DelegatedPolicyValidator {
     if (ix.amount === undefined) {
       return { ok: false, reason: 'transfer amount could not be decoded' };
     }
-    if (ix.amount < ctx.minLamports || ix.amount > ctx.maxLamports) {
+    if (ix.amount < ctx.minBase || ix.amount > ctx.maxBase) {
       return {
         ok: false,
-        reason: `amount ${ix.amount} out of bounds [${ctx.minLamports}, ${ctx.maxLamports}]`,
+        reason: `amount ${ix.amount} out of bounds [${ctx.minBase}, ${ctx.maxBase}]`,
       };
     }
     return { ok: true };

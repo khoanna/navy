@@ -55,7 +55,7 @@ export class FarmingService {
     const pos = await this.adapter.getPosition(sw.pubkey);
     await this.prisma.farmingSubwallet.update({
       where: { id: sw.id },
-      data: { principalLamports: pos.principalLamports, currentValueLamports: pos.currentValueLamports, lastRefreshedAt: new Date() },
+      data: { principalBase: pos.principalBase, currentValueBase: pos.currentValueBase, lastRefreshedAt: new Date() },
     });
     return pos;
   }
@@ -73,7 +73,7 @@ export class FarmingService {
   async getPosition(userId: string) {
     const sw = await this.active(userId);
     const pos = await this.refreshSubwallet(sw);
-    return { address: sw.pubkey, principalLamports: pos.principalLamports.toString(), currentValueLamports: pos.currentValueLamports.toString(), cTokenAmount: pos.cTokenAmount.toString() };
+    return { address: sw.pubkey, principalBase: pos.principalBase.toString(), currentValueBase: pos.currentValueBase.toString(), cTokenAmount: pos.cTokenAmount.toString() };
   }
 
   async listHistory(userId: string) {

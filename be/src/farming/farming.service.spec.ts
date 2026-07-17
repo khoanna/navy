@@ -5,7 +5,7 @@ const OWNER = ethers.Wallet.createRandom().address;
 const SUB = ethers.Wallet.createRandom().address;
 
 function deps() {
-  const sw = { id: 's1', userId: 'u1', pubkey: SUB, ownerMainWallet: OWNER, status: 'active', principalLamports: 0n, currentValueLamports: 0n };
+  const sw = { id: 's1', userId: 'u1', pubkey: SUB, ownerMainWallet: OWNER, status: 'active', principalBase: 0n, currentValueBase: 0n };
   const prisma = {
     farmingSubwallet: { findFirst: jest.fn().mockResolvedValue(sw), update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...sw, ...data })) },
     farmingEvent: { create: jest.fn().mockResolvedValue({ id: 'e1' }), findMany: jest.fn().mockResolvedValue([]) },
@@ -14,7 +14,7 @@ function deps() {
   const adapter = {
     buildDeposit: jest.fn().mockResolvedValue([{ to: '0xusdc', data: '0x1' }, { to: '0xpool', data: '0x2' }]),
     buildWithdraw: jest.fn().mockResolvedValue([{ to: '0xpool', data: '0x3' }]),
-    getPosition: jest.fn().mockResolvedValue({ principalLamports: 100n, currentValueLamports: 105n, cTokenAmount: 100n }),
+    getPosition: jest.fn().mockResolvedValue({ principalBase: 100n, currentValueBase: 105n, cTokenAmount: 100n }),
     policyAllowlist: jest.fn().mockResolvedValue({ programIds: ['P'], destinations: ['D'] }),
   };
   // signAndSend returns a tx hash per call.
@@ -53,7 +53,7 @@ describe('FarmingService', () => {
   it('getPosition refreshes from the adapter and persists', async () => {
     const { svc, prisma } = deps();
     const pos = await svc.getPosition('u1');
-    expect(pos.currentValueLamports).toBe('105');
+    expect(pos.currentValueBase).toBe('105');
     expect(prisma.farmingSubwallet.update).toHaveBeenCalled();
   });
   it('depositSubwallet(sw, amount) deposits for a specific row (used by the scheduler)', async () => {

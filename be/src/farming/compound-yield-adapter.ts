@@ -64,7 +64,7 @@ export class CompoundYieldAdapter implements YieldAdapter {
     const bal: bigint = await this.comet.balanceOf(subwallet);
     // v1: no on-chain cost basis; principal == current value (farming_event holds
     // the deposit amounts for a richer view if desired).
-    return { principalLamports: bal, currentValueLamports: bal, cTokenAmount: bal };
+    return { principalBase: bal, currentValueBase: bal, cTokenAmount: bal };
   }
 
   async policyAllowlist(subwallet: string, ownerMainWallet: string): Promise<PolicyAllowlist> {

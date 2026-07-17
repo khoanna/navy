@@ -8,7 +8,7 @@ const SUB = getAddress('0x00000000000000000000000000000000000000A1');
 const OTHER = getAddress('0x00000000000000000000000000000000000000B2');
 const USDC = getAddress('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
 
-const ctx = { subwallet: SUB, minLamports: 1000n, maxLamports: 1_000_000n };
+const ctx = { subwallet: SUB, minBase: 1000n, maxBase: 1_000_000n };
 const transfer = (to: string, amount: bigint) => erc20.encodeFunctionData('transfer', [to, amount]);
 
 describe('DelegatedPolicyValidator (EVM)', () => {

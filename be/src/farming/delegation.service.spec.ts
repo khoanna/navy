@@ -69,7 +69,7 @@ describe('DelegationService', () => {
     (svc as any).prisma.user.findUnique.mockResolvedValue({ id: 'u1', privyDid: 'did:1', primaryWallet: USER_ADDR, farmDelegationEnabledAt: new Date(), farmDelegationWalletId: 'wallet-123' });
     (svc as any).prisma.farmingSubwallet.findFirst.mockResolvedValue({ id: 's1', pubkey: SUB_ADDR, userId: 'u1' });
     const res = await svc.fundNow('u1');
-    expect(funding.fundSubwalletFromUser).toHaveBeenCalledWith(expect.objectContaining({ amountLamports: 20_000_000n, subwalletPubkey: SUB_ADDR }));
+    expect(funding.fundSubwalletFromUser).toHaveBeenCalledWith(expect.objectContaining({ amountBase: 20_000_000n, subwalletPubkey: SUB_ADDR }));
     expect(res).toEqual({ txSignature: '0xsig' });
   });
 

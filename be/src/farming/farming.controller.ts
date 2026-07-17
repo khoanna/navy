@@ -9,7 +9,7 @@ import { IsString, Matches } from 'class-validator';
 import { parsePositiveAmount } from '../common/amount.util';
 
 class DepositDto {
-  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amountLamports!: string;
+  @IsString() @Matches(/^\d+$/, { message: 'must be a base-unit integer string' }) amountBase!: string;
 }
 class WithdrawDto {
   @IsString() @Matches(/^(all|\d+)$/) amount!: string;
@@ -31,7 +31,7 @@ export class FarmingController {
   position(@Req() req: any) { return this.farming.getPosition(req.user.sub); }
 
   @Post('deposit')
-  deposit(@Req() req: any, @Body() dto: DepositDto) { return this.farming.deposit(req.user.sub, parsePositiveAmount(dto.amountLamports, 'amountLamports')); }
+  deposit(@Req() req: any, @Body() dto: DepositDto) { return this.farming.deposit(req.user.sub, parsePositiveAmount(dto.amountBase, 'amountBase')); }
 
   @Post('withdraw')
   withdraw(@Req() req: any, @Body() dto: WithdrawDto) { return this.farming.withdraw(req.user.sub, dto.amount === 'all' ? 'all' : parsePositiveAmount(dto.amount)); }

@@ -22,7 +22,7 @@ describe('DelegatedFundingService.fundSubwalletFromUser', () => {
     const { svc, privy, audit } = build();
     const res = await svc.fundSubwalletFromUser({
       userId: 'u1', privyDid: 'did:1', walletId: 'wallet-123',
-      userAddress: USER, subwalletPubkey: SUB, amountLamports: 20_000_000n,
+      userAddress: USER, subwalletPubkey: SUB, amountBase: 20_000_000n,
     });
     expect(res).toEqual({ txSignature: '0xhash' });
     // The call is a real ERC-20 transfer(subwallet, amount) to Circle USDC.
@@ -39,7 +39,7 @@ describe('DelegatedFundingService.fundSubwalletFromUser', () => {
     const { svc, privy, audit } = build();
     await expect(svc.fundSubwalletFromUser({
       userId: 'u1', privyDid: 'did:1', walletId: 'w', userAddress: USER, subwalletPubkey: SUB,
-      amountLamports: 2_000_000_000n,
+      amountBase: 2_000_000_000n,
     })).rejects.toThrow(/out of bounds|denied/i);
     expect(privy.sendDelegatedTransaction).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'farming.delegated.fund.denied' }));
@@ -50,7 +50,7 @@ describe('DelegatedFundingService.fundSubwalletFromUser', () => {
     privy.sendDelegatedTransaction.mockResolvedValueOnce({ hash: undefined });
     await expect(svc.fundSubwalletFromUser({
       userId: 'u1', privyDid: 'did:1', walletId: 'wallet-123',
-      userAddress: USER, subwalletPubkey: SUB, amountLamports: 20_000_000n,
+      userAddress: USER, subwalletPubkey: SUB, amountBase: 20_000_000n,
     })).rejects.toThrow(/did not return a transaction hash/);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'farming.delegated.fund.unsigned' }));
   });

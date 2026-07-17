@@ -48,7 +48,7 @@ describe('CompoundYieldAdapter', () => {
     const balanceOf = jest.fn().mockResolvedValue(1_234_567n);
     const pos = await makeAdapter(balanceOf).getPosition(SUB);
     expect(balanceOf).toHaveBeenCalledWith(SUB);
-    expect(pos).toEqual({ principalLamports: 1_234_567n, currentValueLamports: 1_234_567n, cTokenAmount: 1_234_567n });
+    expect(pos).toEqual({ principalBase: 1_234_567n, currentValueBase: 1_234_567n, cTokenAmount: 1_234_567n });
   });
 
   it('policyAllowlist lists [USDC, Comet] contracts and [subwallet, Comet, owner] destinations', async () => {

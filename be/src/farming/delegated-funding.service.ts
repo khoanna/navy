@@ -21,7 +21,7 @@ export class DelegatedFundingService {
   ) {}
 
   /**
-   * Move `amountLamports` (USDC base units) from the user's delegated main wallet into
+   * Move `amountBase` (USDC base units) from the user's delegated main wallet into
    * their farming subwallet via an ERC-20 transfer. The tx is built server-side, its
    * summary is derived from the ACTUAL calldata (never trusted from the caller) and
    * bounded by the DelegatedPolicyValidator, then Privy broadcasts it from the user's
@@ -33,18 +33,18 @@ export class DelegatedFundingService {
     walletId?: string;
     userAddress: string;
     subwalletPubkey: string;
-    amountLamports: bigint;
+    amountBase: bigint;
   }): Promise<{ txSignature: string }> {
     const call: EvmCall = {
       // Circle USDC (the unified farming + payment token).
       to: this.evm.usdcAddress,
-      data: usdcIface.encodeFunctionData('transfer', [args.subwalletPubkey, args.amountLamports]),
+      data: usdcIface.encodeFunctionData('transfer', [args.subwalletPubkey, args.amountBase]),
     };
 
     const verdict = this.policy.check(deriveTxSummary([call]), {
       subwallet: args.subwalletPubkey,
-      minLamports: this.bounds.fundMin,
-      maxLamports: this.bounds.fundMax,
+      minBase: this.bounds.fundMin,
+      maxBase: this.bounds.fundMax,
     });
     if (!verdict.ok) {
       await this.audit.record({
@@ -74,7 +74,7 @@ export class DelegatedFundingService {
       actor: `user:${args.userId}`,
       action: 'farming.delegated.fund',
       target: args.subwalletPubkey,
-      metadata: { amount: args.amountLamports.toString(), signature: hash },
+      metadata: { amount: args.amountBase.toString(), signature: hash },
     });
     return { txSignature: hash };
   }

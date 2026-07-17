@@ -109,7 +109,7 @@ export class DelegationService {
         walletId: user.farmDelegationWalletId ?? undefined,
         userAddress: user.primaryWallet!,
         subwalletPubkey: sw.pubkey,
-        amountLamports: amount,
+        amountBase: amount,
       });
     } catch (err) {
       // If delegated signing fails, check whether the wallet was un-delegated from the

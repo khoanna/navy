@@ -69,8 +69,8 @@ model FarmingSubwallet {
   status           String   @default("active")
   createdAt        DateTime @default(now())
   ownerMainWallet      String?
-  principalLamports    BigInt   @default(0)
-  currentValueLamports BigInt   @default(0)
+  principalBase        BigInt   @default(0)
+  currentValueBase     BigInt   @default(0)
   lastRefreshedAt      DateTime?
   events               FarmingEvent[]
 }

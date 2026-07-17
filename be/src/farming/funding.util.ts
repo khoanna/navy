@@ -1,5 +1,5 @@
 export interface FundingBounds {
-  /** Lamports to always leave in the user's embedded wallet. */
+  /** Base units to always leave in the user's embedded wallet. */
   reserve: bigint;
   /** Minimum spare that justifies a top-up. */
   fundMin: bigint;
