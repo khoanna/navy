@@ -51,6 +51,11 @@ export class PolicyValidator {
           break;
         }
         case 'compound-withdraw': {
+          // The supplied/withdrawn asset must be an allowlisted contract (USDC) — reject a
+          // wrong-asset (collateral) withdraw even from the correct Comet market.
+          if (ix.asset === undefined || !allowedContracts.has(lower(ix.asset))) {
+            return { ok: false, reason: `${ix.kind} asset not allowed: ${ix.asset}` };
+          }
           // Comet withdrawTo(to,…) carries an explicit recipient — check it. Bare
           // withdraw(asset,amount) redeems to the implicit msg.sender (the subwallet,
           // an implicit allowed destination), so no recipient to validate.
@@ -63,9 +68,12 @@ export class PolicyValidator {
           break;
         }
         case 'compound-supply': {
-          // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet);
-          // there is no on-behalf-of parameter to redirect, so the contract allowlist
-          // check above is sufficient.
+          // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet); the only
+          // redirectable surface is `asset`, which must be an allowlisted contract (USDC) — this
+          // closes a wrong-asset (collateral) supply even to the correct Comet market.
+          if (ix.asset === undefined || !allowedContracts.has(lower(ix.asset))) {
+            return { ok: false, reason: `${ix.kind} asset not allowed: ${ix.asset}` };
+          }
           break;
         }
         case 'unknown':

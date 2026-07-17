@@ -37,29 +37,32 @@ describe('deriveTxSummary (EVM calldata)', () => {
     expect(instructions[0].amount).toBe(12345n);
   });
 
-  it('decodes Comet supply(asset, amount) — credits the implicit msg.sender', () => {
+  it('decodes Comet supply(asset, amount) — credits the implicit msg.sender, exposes asset', () => {
     const data = comet.encodeFunctionData('supply', [USDC, 7000n]);
     const { instructions } = deriveTxSummary([{ to: COMET, data }]);
     expect(instructions[0].kind).toBe('compound-supply');
     expect(instructions[0].to).toBe(COMET);
+    expect(instructions[0].asset).toBe(USDC);
     expect(instructions[0].amount).toBe(7000n);
     // No recipient: supply credits msg.sender.
     expect(instructions[0].recipient).toBeUndefined();
   });
 
-  it('decodes Comet withdraw(asset, amount) — to the implicit msg.sender (no recipient)', () => {
+  it('decodes Comet withdraw(asset, amount) — to the implicit msg.sender (no recipient), exposes asset', () => {
     const data = comet.encodeFunctionData('withdraw', [USDC, 4000n]);
     const { instructions } = deriveTxSummary([{ to: COMET, data }]);
     expect(instructions[0].kind).toBe('compound-withdraw');
+    expect(instructions[0].asset).toBe(USDC);
     expect(instructions[0].amount).toBe(4000n);
     expect(instructions[0].recipient).toBeUndefined();
   });
 
-  it('decodes Comet withdrawTo(to, asset, amount) — exposes the recipient', () => {
+  it('decodes Comet withdrawTo(to, asset, amount) — exposes the recipient + asset', () => {
     const data = comet.encodeFunctionData('withdrawTo', [OWNER, USDC, 4000n]);
     const { instructions } = deriveTxSummary([{ to: COMET, data }]);
     expect(instructions[0].kind).toBe('compound-withdraw');
     expect(instructions[0].recipient).toBe(OWNER);
+    expect(instructions[0].asset).toBe(USDC);
     expect(instructions[0].amount).toBe(4000n);
   });
 

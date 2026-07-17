@@ -19,6 +19,8 @@ const SUB = getAddress('0x00000000000000000000000000000000000000A1');
 const OWNER = getAddress('0x00000000000000000000000000000000000000B2');
 const ATTACKER = getAddress('0x00000000000000000000000000000000000000cc');
 const RANDOM_CONTRACT = getAddress('0x00000000000000000000000000000000000000dd');
+// A different (collateral) ERC-20 that is NOT allowlisted — a wrong-asset supply/withdraw target.
+const OTHER_ASSET = getAddress('0x00000000000000000000000000000000000000ee');
 
 const policy: SubwalletPolicy = {
   allowedProgramIds: [USDC, COMET],
@@ -77,6 +79,27 @@ describe('PolicyValidator (EVM)', () => {
     const r = v.check(policy, tx, ctx);
     expect(r.ok).toBe(false);
     expect((r as any).reason).toMatch(/erc20-transfer destination not allowed/);
+  });
+
+  it('rejects a supply whose asset is not USDC (wrong-collateral path)', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: comet.encodeFunctionData('supply', [OTHER_ASSET, 9000n]) }]);
+    const r = v.check(policy, tx, ctx);
+    expect(r.ok).toBe(false);
+    expect((r as any).reason).toMatch(/compound-supply asset not allowed/);
+  });
+
+  it('rejects a bare withdraw whose asset is not USDC', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: comet.encodeFunctionData('withdraw', [OTHER_ASSET, 4000n]) }]);
+    const r = v.check(policy, tx, ctx);
+    expect(r.ok).toBe(false);
+    expect((r as any).reason).toMatch(/compound-withdraw asset not allowed/);
+  });
+
+  it('rejects a withdrawTo whose asset is not USDC even to an allowed recipient', () => {
+    const tx = deriveTxSummary([{ to: COMET, data: comet.encodeFunctionData('withdrawTo', [OWNER, OTHER_ASSET, 4000n]) }]);
+    const r = v.check(policy, tx, ctx);
+    expect(r.ok).toBe(false);
+    expect((r as any).reason).toMatch(/compound-withdraw asset not allowed/);
   });
 
   it('rejects a withdrawTo a non-allowed recipient', () => {

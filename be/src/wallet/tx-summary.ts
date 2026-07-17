@@ -36,6 +36,8 @@ export interface DecodedIx {
   spender?: string;
   /** erc20-transfer / compound-withdraw (withdrawTo) / native-transfer: where value/tokens go. */
   recipient?: string;
+  /** compound-supply / compound-withdraw: the Comet market asset being supplied/withdrawn. */
+  asset?: string;
   /** transferred / approved / supplied / withdrawn amount (base units). */
   amount?: bigint;
 }
@@ -109,19 +111,19 @@ function decodeCall(call: EvmCall): DecodedIx {
         return { to, selector, kind: 'erc20-transfer', recipient: addr(recipient), amount: BigInt(value) };
       }
       case SELECTORS.supply: {
-        // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet);
-        // there is no on-behalf-of arg to check.
-        const [, amount] = comet.decodeFunctionData('supply', data);
-        return { to, selector, kind: 'compound-supply', amount: BigInt(amount) };
+        // Comet supply(asset, amount) credits the implicit msg.sender (the subwallet); the `asset`
+        // is decoded so the policy can pin it to USDC (a non-USDC asset is a wrong-collateral path).
+        const [asset, amount] = comet.decodeFunctionData('supply', data);
+        return { to, selector, kind: 'compound-supply', asset: addr(asset), amount: BigInt(amount) };
       }
       case SELECTORS.withdraw: {
         // Comet withdraw(asset, amount) sends the base to the implicit msg.sender.
-        const [, amount] = comet.decodeFunctionData('withdraw', data);
-        return { to, selector, kind: 'compound-withdraw', amount: BigInt(amount) };
+        const [asset, amount] = comet.decodeFunctionData('withdraw', data);
+        return { to, selector, kind: 'compound-withdraw', asset: addr(asset), amount: BigInt(amount) };
       }
       case SELECTORS.withdrawTo: {
-        const [recipient, , amount] = comet.decodeFunctionData('withdrawTo', data);
-        return { to, selector, kind: 'compound-withdraw', recipient: addr(recipient), amount: BigInt(amount) };
+        const [recipient, asset, amount] = comet.decodeFunctionData('withdrawTo', data);
+        return { to, selector, kind: 'compound-withdraw', recipient: addr(recipient), asset: addr(asset), amount: BigInt(amount) };
       }
       default:
         return { to, selector, kind: 'unknown' };
