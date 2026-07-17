@@ -13,16 +13,16 @@ describe('Payments auth e2e (user JWT required)', () => {
   });
   afterAll(async () => { await app.close(); });
 
-  it('rejects payment-tx without a token (401)', async () => {
+  it('rejects payment-authorization without a token (401)', async () => {
     await request(app.getHttpServer())
-      .get('/v1/orders/any-id/payment-tx')
+      .get('/v1/orders/any-id/payment-authorization')
       .expect(401);
   });
 
   it('rejects submit without a token (401)', async () => {
     await request(app.getHttpServer())
       .post('/v1/orders/any-id/submit')
-      .send({ signedTx: 'deadbeef' })
+      .send({ signature: '0xdeadbeef' })
       .expect(401);
   });
 });

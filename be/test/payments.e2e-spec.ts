@@ -1,25 +1,30 @@
 /**
- * Payments localnet e2e (gated behind NAVY_E2E=1).
+ * Payments Sepolia e2e (gated behind NAVY_E2E=1).
  *
- * Requires a local validator with navy_payments deployed and Config initialized:
- *   cd ../onchain && anchor localnet   # or solana-test-validator + anchor deploy
+ * Requires the NavyPayments contract deployed on Sepolia and the backend pointed at it
+ * (all NAVY_* env vars set: Sepolia RPC, relayer key, payments contract + Circle USDC address),
+ * plus a funded payer:
+ *   - Circle USDC on the payer's wallet (Sepolia test USDC, 6 decimals)
+ *   - a little Sepolia ETH on the relayer to submit txs (the payer signs gaslessly via EIP-2612 permit)
  *
- * Flow it exercises (implement against onchain/tests patterns when running for real):
- *   1. Connect to http://127.0.0.1:8899, load the program via the IDL + a funded relayer keypair.
- *   2. Create a test USDC mint (6 decimals) + treasury ATA + merchant payout ATA + user ATA, mintTo user.
- *   3. initialize_config(100, mint); update_config(100, treasury, mint); register_merchant(merchantWallet, payout).
- *   4. OrdersService.create(merchantId, { amount, reference, callbackUrl }).
- *   5. RelayerService.buildPaymentTx(order, merchantAuthority, user.publicKey) -> base64 partial tx.
- *   6. Transaction.from(base64); user.partialSign; RelayerService.verifyAndSubmit(orderId, signed).
- *   7. ChainWatcherService.markPaid(orderId, { payer, signature }); assert order.status === 'paid'
- *      and a local http sink received a POST with a valid X-Navy-Signature HMAC.
+ * Flow it exercises (implement against a running backend when running for real):
+ *   1. Fund the payer wallet with Circle USDC on Sepolia.
+ *   2. OrdersService.create(merchantId, { amount, reference, callbackUrl }).
+ *   3. GET /v1/orders/:id/payment-authorization (Navy user JWT) -> { typedData, invoice }
+ *      where typedData is the EIP-712 Permit domain/types/message.
+ *   4. Sign the EIP-712 Permit with the payer key (ethers signer._signTypedData) -> signature.
+ *   5. POST /v1/orders/:id/submit { signature } -> { txHash, status }; the relayer submits the
+ *      permit + payInvoice tx (transferFrom split: merchant payout + 1% fee to treasury).
+ *   6. Poll GET the order until status === 'paid' (ChainWatcherService settles it after confirming
+ *      the on-chain InvoicePaid event) and assert a local http sink received a POST with a valid
+ *      X-Navy-Signature HMAC webhook.
  */
 const RUN = process.env.NAVY_E2E === '1';
 
-(RUN ? describe : describe.skip)('payments e2e (localnet)', () => {
-  it('order -> build -> sign -> submit -> paid -> webhook', async () => {
-    // Implemented on-demand against a running local validator; see the JSDoc above and
-    // onchain/tests/navy-payments.pay.ts for the mint/ATA/config/register setup helpers.
+(RUN ? describe : describe.skip)('payments e2e (Sepolia)', () => {
+  it('order -> authorize -> sign permit -> submit -> paid -> webhook', async () => {
+    // Implemented on-demand against a running backend + deployed NavyPayments contract on Sepolia;
+    // see the JSDoc above for the fund/authorize/sign/submit/settle flow.
     expect(process.env.NAVY_E2E).toBe('1');
   });
 });
