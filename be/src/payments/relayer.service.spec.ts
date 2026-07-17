@@ -131,6 +131,29 @@ describe('RelayerService (EVM)', () => {
     await expect(svc.verifyAndSubmit(ORDER_ID, sig, wallet.address)).rejects.toThrow(/expired/i);
   });
 
+  it('verifyAndSubmit persists {confirming, txSignature} BEFORE awaiting tx.wait (crash-safety)', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const expiresAt = new Date(Date.now() + 600_000);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const wait = jest.fn().mockResolvedValue({ status: 1 });
+    const payInvoice = jest.fn().mockResolvedValue({ hash: '0xtxhash', wait });
+    const chain = makeChain(10n ** 18n, payInvoice);
+    const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
+    const prisma = makePrisma(order);
+    const svc = new RelayerService(chain, prisma, makeCfg());
+
+    await svc.verifyAndSubmit(ORDER_ID, sig, wallet.address);
+
+    expect(prisma.order.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: { status: 'confirming', txSignature: '0xtxhash' },
+    });
+    // The confirming write must happen before tx.wait() resolves the mine.
+    const writeOrder = prisma.order.update.mock.invocationCallOrder[0];
+    const waitOrder = wait.mock.invocationCallOrder[0];
+    expect(writeOrder).toBeLessThan(waitOrder);
+  });
+
   it('verifyAndSubmit maps a reverted receipt to err', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);

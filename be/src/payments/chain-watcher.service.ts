@@ -115,8 +115,11 @@ export class ChainWatcherService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async expireStale(): Promise<void> {
+    // Never expire an order whose issued authorization was already consumed (submitted): it may be
+    // mid-flight on-chain (or crashed after broadcast). Expiring it would drop a real payment with
+    // no webhook. `sweepConfirming`/`confirmOrder` own the terminal state of a submitted order.
     const stale = await this.prisma.order.findMany({
-      where: { status: 'awaiting_payment', expiresAt: { lt: new Date() } },
+      where: { status: 'awaiting_payment', expiresAt: { lt: new Date() }, issuedTxConsumedAt: null },
     });
     for (const o of stale) {
       await this.prisma.order.update({ where: { id: o.id }, data: { status: 'expired' } });

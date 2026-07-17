@@ -100,4 +100,14 @@ describe('ChainWatcherService (EVM)', () => {
     await svc.confirmOrder(ORDER_ID);
     expect(w.deliver).not.toHaveBeenCalled();
   });
+
+  it('expireStale queries only awaiting_payment orders with an un-consumed nonce (skips submitted orders)', async () => {
+    const prisma = { order: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() } } as any;
+    const svc = new ChainWatcherService(prisma, webhooks(), secrets(), makeChain(null));
+    await svc.expireStale();
+    expect(prisma.order.findMany).toHaveBeenCalledWith({
+      where: { status: 'awaiting_payment', expiresAt: { lt: expect.any(Date) }, issuedTxConsumedAt: null },
+    });
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
 });

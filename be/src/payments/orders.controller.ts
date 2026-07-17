@@ -86,8 +86,14 @@ export class OrdersController {
   async submit(@Param('id') id: string, @Body() dto: SubmitDto, @Req() req: any) {
     const { txHash, err } = await this.relayer.verifyAndSubmit(id, dto.signature, req.user.walletAddress);
     if (err) {
-      await this.prisma.order.update({ where: { id }, data: { status: 'failed', txSignature: txHash } });
-      return { txHash, status: 'failed' };
+      // The submitted tx reverted. Reset the order so the user can re-authorize: clear the consumed
+      // nonce + issued hash so a fresh `payment-authorization` can be built (build is gated on
+      // `awaiting_payment`). Without this the nonce stays consumed and the order is permanently stuck.
+      await this.prisma.order.update({
+        where: { id },
+        data: { status: 'awaiting_payment', issuedTxConsumedAt: null, issuedTxHash: null, txSignature: null },
+      });
+      return { txHash, status: 'retry' };
     }
     await this.prisma.order.update({ where: { id }, data: { status: 'confirming', txSignature: txHash } });
     await this.watcher.confirmOrder(id);

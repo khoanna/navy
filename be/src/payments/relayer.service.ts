@@ -93,6 +93,13 @@ export class RelayerService {
     const tx = await this.chain.payments.payInvoice(
       merchantIdHex16, invoiceIdHex16, order.amount, 0, validBefore, signer, sig.v, sig.r, sig.s,
     );
+    // Crash-safety: persist the broadcast tx hash + `confirming` BEFORE awaiting the mine. A crash
+    // between broadcast and this write would otherwise strand a paid order at `awaiting_payment`
+    // (nonce consumed, no txHash) — invisible to sweepConfirming and wrongly expired by expireStale.
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: 'confirming', txSignature: tx.hash },
+    });
     const receipt = await tx.wait();
     return { txHash: tx.hash, payer: signer, err: receipt && receipt.status === 1 ? null : 'reverted' };
   }
