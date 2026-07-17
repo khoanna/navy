@@ -59,6 +59,14 @@ contract NavyPaymentsForkTest is Test {
             return;
         }
         address payer = vm.addr(payerPk);
+        // EIP-3009 requires the payer be a plain EOA: Circle USDC treats a signer WITH code as a
+        // contract and routes to EIP-1271, rejecting a raw ECDSA sig. If this fixture address has
+        // code on the current fork state, skip (the live e2e proves the real flow with a real EOA).
+        if (payer.code.length != 0) {
+            emit log("SKIP: fork fixture payer has code (7702/contract); EIP-3009 needs a plain EOA");
+            vm.skip(true);
+            return;
+        }
         uint256 amount = 1_000_000;
         // Give the payer USDC by cheating balance via `deal` (works on forked ERC-20s).
         deal(USDC, payer, amount);
