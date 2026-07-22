@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
@@ -15,6 +15,9 @@ import { RELYING_PARTY } from '@/lib/config/privy';
 import { LinkEmailSheet } from '@/features/settings/LinkEmailSheet';
 import { MfaEnrollSheet } from '@/features/settings/MfaEnrollSheet';
 import { RecoverySheet } from '@/features/settings/RecoverySheet';
+import { UsernameSheet } from '@/features/settings/UsernameSheet';
+import { UsernameClient } from '@/lib/account/usernameClient';
+import { getEnv } from '@/lib/config/env';
 import { currentRecoveryState, recoveryMethodLabel } from '@/lib/account/recovery';
 import { enrolledMfaMethods, mfaMethodLabel } from '@/lib/account/mfa';
 
@@ -95,7 +98,7 @@ function Chevron() {
 export default function Settings() {
   const router = useRouter();
   const toast = useToast();
-  const { signOut } = useNavySession();
+  const { signOut, authedFetch } = useNavySession();
   const { address } = useMobileSigner();
 
   const { user } = usePrivy();
@@ -110,8 +113,25 @@ export default function Settings() {
   const { unenrollMfa } = useMfaEnrollment();
 
   const [confirm, setConfirm] = useState<null | 'logout' | 'mfa-off' | 'mfa-passkey-off'>(null);
-  const [sheet, setSheet] = useState<null | 'email' | 'mfa' | 'recovery'>(null);
+  const [sheet, setSheet] = useState<null | 'email' | 'mfa' | 'recovery' | 'username'>(null);
   const [copied, setCopied] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
+
+  const usernameClient = useMemo(
+    () => (authedFetch ? new UsernameClient(getEnv().navyApiUrl, authedFetch) : null),
+    [authedFetch],
+  );
+
+  // Load current handle for the row subtitle; re-load when the sheet closes.
+  useEffect(() => {
+    if (!usernameClient || sheet === 'username') return;
+    let active = true;
+    usernameClient
+      .me()
+      .then((me) => { if (active) setUsername(me.username); })
+      .catch(() => { /* leave as-is on failure */ });
+    return () => { active = false; };
+  }, [usernameClient, sheet]);
 
   const rows = describeLinkedAccounts(user);
   const unlinkable = canUnlink(user);
@@ -221,6 +241,18 @@ export default function Settings() {
             </Pressable>
           </View>
         </View>
+      </Card>
+
+      {/* Profile */}
+      <SectionTitle>Profile</SectionTitle>
+      <Card glass compact style={styles.listCard}>
+        <Row
+          icon="wallet"
+          title="Username"
+          subtitle={username ? `@${username}` : 'Set a handle'}
+          onPress={() => setSheet('username')}
+          trailing={<Chevron />}
+        />
       </Card>
 
       {/* Linked accounts */}
@@ -372,6 +404,7 @@ export default function Settings() {
       <LinkEmailSheet open={sheet === 'email'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
       <MfaEnrollSheet open={sheet === 'mfa'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
       <RecoverySheet open={sheet === 'recovery'} onClose={() => setSheet(null)} onDone={() => setSheet(null)} />
+      <UsernameSheet open={sheet === 'username'} onClose={() => setSheet(null)} />
     </Screen>
   );
 }
