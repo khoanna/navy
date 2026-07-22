@@ -51,5 +51,16 @@ export function useMobileSigner() {
     return signature as string;
   };
 
-  return { address, signTypedData, wallets, ready: !!isReady };
+  const sendTransaction = async ({ to, valueWei }: { to: string; valueWei: string }): Promise<string> => {
+    if (!wallet) throw new Error('No embedded Ethereum wallet available');
+    const provider = await wallet.getProvider();
+    const valueHex = '0x' + BigInt(valueWei).toString(16);
+    const txHash = await provider.request({
+      method: 'eth_sendTransaction',
+      params: [{ from: wallet.address, to, value: valueHex }],
+    });
+    return txHash as string;
+  };
+
+  return { address, signTypedData, sendTransaction, wallets, ready: !!isReady };
 }
