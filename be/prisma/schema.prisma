@@ -205,9 +205,10 @@ model Transfer {
   toAddress   String
   toUsername  String?
   amount      BigInt
-  nonce       String    @unique // bytes32 EIP-3009 authorization nonce
-  digest      String    @unique // EIP-712 digest the wallet signs
-  validBefore DateTime
+  asset       String    @default("USDC")
+  nonce       String?   @unique // bytes32 EIP-3009 authorization nonce
+  digest      String?   @unique // EIP-712 digest the wallet signs
+  validBefore DateTime?
   status      String    @default("awaiting_signature") // awaiting_signature|confirming|confirmed|failed
   txHash      String?
   consumedAt  DateTime?

@@ -42,6 +42,7 @@ export class TransferWatcherService {
     });
     for (const t of stuck) {
       try {
+        if (!t.nonce || !t.validBefore) continue; // ETH rows have no EIP-3009 auth to recover
         const used: boolean = await this.chain.usdc.authorizationState(t.fromAddress, t.nonce);
         if (used) {
           // The EIP-3009 authorization was consumed on-chain → the transfer succeeded.

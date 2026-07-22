@@ -66,7 +66,7 @@ export class TransferService {
 
     const row = await this.prisma.transfer.create({
       data: {
-        fromUserId: userId, fromAddress, toAddress, toUsername, amount,
+        fromUserId: userId, fromAddress, toAddress, toUsername, amount, asset: 'USDC',
         nonce, digest, validBefore: new Date(validBeforeSec * 1000), status: 'awaiting_signature',
       },
     });
@@ -78,6 +78,7 @@ export class TransferService {
   async submit(userId: string, transferId: string, signature: string, expectedPayer: string): Promise<{ txHash: string; status: string }> {
     const t = await this.prisma.transfer.findUnique({ where: { id: transferId } });
     if (!t || t.fromUserId !== userId) throw new BadRequestException('Transfer not found');
+    if (!t.nonce || !t.digest || !t.validBefore) throw new BadRequestException('Transfer is not signable');
     if (t.consumedAt) throw new BadRequestException('Transfer already submitted');
     if (t.validBefore < new Date()) throw new BadRequestException('Transfer authorization expired');
 
@@ -113,7 +114,7 @@ export class TransferService {
     });
     return rows.map((r) => ({
       id: r.id, toAddress: r.toAddress, toUsername: r.toUsername,
-      amount: r.amount.toString(), status: r.status, txHash: r.txHash, createdAt: r.createdAt,
+      amount: r.amount.toString(), asset: r.asset, status: r.status, txHash: r.txHash, createdAt: r.createdAt,
     }));
   }
 }
