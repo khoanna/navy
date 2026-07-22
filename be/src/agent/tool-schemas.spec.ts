@@ -5,7 +5,7 @@ describe('tool-schemas', () => {
     expect(TOOL_NAMES.sort()).toEqual([
       'build_farming_deposit', 'build_farming_withdraw', 'build_transfer',
       'get_farming_summary', 'get_payment_history', 'get_portfolio',
-      'get_spending_analytics', 'resolve_recipient',
+      'get_spending_analytics', 'get_token_info', 'get_top_coins', 'resolve_recipient',
     ].sort());
   });
   it('every tool is a valid function schema', () => {
