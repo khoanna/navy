@@ -197,3 +197,22 @@ model OrderCharge {
   value   Int
   amount  BigInt
 }
+
+model Transfer {
+  id          String    @id @default(uuid())
+  fromUserId  String
+  fromAddress String
+  toAddress   String
+  toUsername  String?
+  amount      BigInt
+  nonce       String    @unique // bytes32 EIP-3009 authorization nonce
+  digest      String    @unique // EIP-712 digest the wallet signs
+  validBefore DateTime
+  status      String    @default("awaiting_signature") // awaiting_signature|confirming|confirmed|failed
+  txHash      String?
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([fromUserId, createdAt])
+  @@index([status])
+}
