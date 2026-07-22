@@ -2,11 +2,17 @@ import { useCallback, useRef } from 'react';
 import { useCameraPermissions } from 'expo-camera';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { parsePayUrl } from '@/lib/pay/payUrl';
+import { parseSendTarget } from '@/lib/pay/parseSendTarget';
 
 export interface UseCameraScannerOptions {
   /** Called once when a valid Navy pay URL is decoded. Receives the order UUID. */
   onOrder: (orderId: string) => void;
-  /** Called when a QR is decoded but is NOT a Navy pay URL. Optional. */
+  /**
+   * Called once when a QR decodes to a raw EVM address / EIP-681 send target
+   * (but is NOT a Navy pay URL). Optional — omit to disable the send branch.
+   */
+  onSend?: (target: { address: string; amountWei?: string }) => void;
+  /** Called when a QR is decoded but is neither a pay URL nor a send target. Optional. */
   onInvalid?: (text: string) => void;
 }
 
@@ -33,6 +39,7 @@ export interface UseCameraScannerResult {
  */
 export function useCameraScanner({
   onOrder,
+  onSend,
   onInvalid,
 }: UseCameraScannerOptions): UseCameraScannerResult {
   // useCameraPermissions returns a 3-tuple: [permission, request, refresh].
@@ -50,8 +57,14 @@ export function useCameraScanner({
       try {
         orderId = parsePayUrl(data);
       } catch {
-        // Not a Navy pay URL — call optional invalid handler.
-        onInvalid?.(data);
+        // Not a Navy pay URL — try the send-target branch (raw address / EIP-681).
+        const target = parseSendTarget(data);
+        if (target) {
+          doneRef.current = true;
+          onSend?.(target);
+        } else {
+          onInvalid?.(data);
+        }
         return;
       }
 
@@ -59,7 +72,7 @@ export function useCameraScanner({
       doneRef.current = true;
       onOrder(orderId);
     },
-    [onOrder, onInvalid],
+    [onOrder, onSend, onInvalid],
   );
 
   return { permission, requestPermission, handleBarcode };
