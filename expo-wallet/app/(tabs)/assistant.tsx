@@ -23,6 +23,7 @@ import type { SseEvent } from '@/lib/agent/sseParser';
 import { streamAgentChat } from '@/lib/agent/agentClient';
 import { TransferClient } from '@/lib/transfer/transferClient';
 import { FarmingClient } from '@/lib/farming/farmingClient';
+import { mapSendError } from '@/lib/wallet/sendErrors';
 
 import { Text } from '@/ui/Text';
 import { Icon } from '@/ui/Icon';
@@ -36,7 +37,7 @@ import { FarmingConfirmCard } from '@/features/assistant/FarmingConfirmCard';
 export default function Assistant() {
   const { session, authedFetch } = useNavySession();
   const token = session?.tokens.accessToken;
-  const { signTypedData } = useMobileSigner();
+  const { signTypedData, sendTransaction } = useMobileSigner();
 
   const [state, dispatch] = useReducer(chatReducer, undefined, initialChat);
   const [input, setInput] = useState('');
@@ -63,34 +64,53 @@ export default function Assistant() {
     }
   }, []);
 
-  const send = useCallback(async () => {
+  const send = useCallback(
+    async (text: string) => {
+      if (!text || !token) return;
+      dispatch({ type: 'send', text });
+      try {
+        await streamAgentChat(
+          getEnv().navyApiUrl,
+          token,
+          { message: text, conversationId: state.conversationId },
+          onEvent,
+        );
+      } catch (err) {
+        dispatch({
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Something went wrong',
+        });
+      }
+    },
+    [token, state.conversationId, onEvent],
+  );
+
+  // The input's send button: guard streaming, clear the box, then dispatch.
+  const submitInput = useCallback(() => {
     const text = input.trim();
-    if (!text || state.streaming || !token) return;
-    dispatch({ type: 'send', text });
+    if (!text || state.streaming) return;
     setInput('');
-    try {
-      await streamAgentChat(
-        getEnv().navyApiUrl,
-        token,
-        { message: text, conversationId: state.conversationId },
-        onEvent,
-      );
-    } catch (err) {
-      dispatch({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Something went wrong',
-      });
-    }
-  }, [input, state.streaming, state.conversationId, token, onEvent]);
+    void send(text);
+  }, [input, state.streaming, send]);
 
   // Sign the returned typedData + submit (authorization already built server-side).
   const onConfirmTransfer = useCallback(
     (result: any) => async () => {
-      const sig = await signTypedData(result.typedData);
-      const client = new TransferClient(getEnv().navyApiUrl, authedFetch!);
-      await client.submit(result.transferId, sig);
+      try {
+        if (result.asset === 'ETH') {
+          const txHash = await sendTransaction({ to: result.to, valueWei: result.amountWei });
+          await new TransferClient(getEnv().navyApiUrl, authedFetch!).recordEth(result.to, result.amountWei, txHash);
+        } else {
+          const sig = await signTypedData(result.typedData);
+          await new TransferClient(getEnv().navyApiUrl, authedFetch!).submit(result.transferId, sig);
+        }
+      } catch (e) {
+        const { title, detail } = mapSendError(e);
+        void send(`The send failed: ${title} — ${detail}. Briefly explain and tell me what to do next.`);
+        throw e; // let the confirm card show its Failed state too
+      }
     },
-    [signTypedData, authedFetch],
+    [signTypedData, sendTransaction, authedFetch, send],
   );
 
   const onConfirmFarming = useCallback(
@@ -178,12 +198,12 @@ export default function Assistant() {
             placeholderTextColor={colors.textDim}
             style={styles.input}
             editable={!state.streaming}
-            onSubmitEditing={send}
+            onSubmitEditing={submitInput}
             returnKeyType="send"
             multiline
           />
           <Pressable
-            onPress={send}
+            onPress={submitInput}
             disabled={!input.trim() || state.streaming}
             style={[
               styles.sendBtn,

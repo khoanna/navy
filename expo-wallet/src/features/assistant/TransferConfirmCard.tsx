@@ -5,8 +5,9 @@ import { Text } from '@/ui/Text';
 import { Icon } from '@/ui/Icon';
 import { SlideToConfirm } from '@/ui/SlideToConfirm';
 import { colors, space } from '@/ui/theme';
-import { usdcBaseToDisplay } from '@/lib/wallet/balances';
+import { usdcBaseToDisplay, weiToEth } from '@/lib/wallet/balances';
 import { short } from '@/lib/wallet/identicon';
+import { mapSendError } from '@/lib/wallet/sendErrors';
 
 type Phase = 'idle' | 'sending' | 'done' | 'error';
 
@@ -23,18 +24,29 @@ export function TransferConfirmCard({
   onConfirm: () => Promise<void>;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
+  const [lastError, setLastError] = useState<unknown>(null);
 
   const recipient = result?.recipient ?? {};
   const address: string = recipient.address ?? '';
   const username: string | null = recipient.username ?? null;
   const label = username ? `@${username} · ${short(address)}` : short(address);
 
+  const isEth = result?.asset === 'ETH';
+  const amountText = isEth
+    ? `${weiToEth(result?.amountWei ?? '0')}`
+    : usdcBaseToDisplay(result?.amount ?? '0');
+  const assetLabel = isEth ? 'ETH' : 'USDC';
+  const feeText = isEth ? 'Network fee paid from your ETH' : 'gasless · $0.00 fee';
+
   const run = () => {
     if (phase === 'sending' || phase === 'done') return;
     setPhase('sending');
     onConfirm()
       .then(() => setPhase('done'))
-      .catch(() => setPhase('error'));
+      .catch((e) => {
+        setLastError(e);
+        setPhase('error');
+      });
   };
 
   return (
@@ -54,15 +66,15 @@ export function TransferConfirmCard({
 
       <View style={styles.amountRow}>
         <Text variant="h2" numeric color={colors.textHi}>
-          {usdcBaseToDisplay(result?.amount ?? '0')}
+          {amountText}
         </Text>
         <Text variant="caption" muted>
-          USDC
+          {assetLabel}
         </Text>
       </View>
 
       <Text variant="caption" color={colors.aqua} style={styles.fee}>
-        gasless · $0.00 fee
+        {feeText}
       </Text>
 
       {phase === 'done' ? (
@@ -77,9 +89,12 @@ export function TransferConfirmCard({
           <View style={styles.statusRow}>
             <Icon name="x" size={18} color={colors.danger} />
             <Text variant="bodyStrong" color={colors.danger}>
-              Failed
+              {mapSendError(lastError).title}
             </Text>
           </View>
+          <Text variant="caption" muted>
+            {mapSendError(lastError).detail}
+          </Text>
           <SlideToConfirm label="Slide to retry" onConfirm={run} resetKey={phase} />
         </View>
       ) : (
