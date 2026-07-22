@@ -19,6 +19,7 @@ import { NavyPayClient, Payment } from '@/lib/pay/navyPayClient';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { short, avatarColors } from '@/lib/wallet/identicon';
 import { earnTip } from '@/lib/wallet/tips';
+import { MarketClient } from '@/lib/market/marketClient';
 
 import { Text } from '@/ui/Text';
 import { Gradient } from '@/ui/Gradient';
@@ -39,6 +40,7 @@ export default function Home() {
   const [recent, setRecent] = useState<Payment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [ethUsd, setEthUsd] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const env = getEnv();
@@ -54,6 +56,14 @@ export default function Home() {
         setUsdc('0');
       }
     }
+    if (authedFetch) {
+      try {
+        const prices = await new MarketClient(getEnv().navyApiUrl, authedFetch).getPrices(['ethereum']);
+        setEthUsd(prices.ethereum?.priceUsd ?? null);
+      } catch {
+        setEthUsd(null);
+      }
+    }
     if (token) {
       try {
         const list = await new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined).getUserPayments(token);
@@ -62,7 +72,7 @@ export default function Home() {
         setRecent([]);
       }
     }
-  }, [address, token]);
+  }, [address, token, authedFetch]);
 
   useEffect(() => {
     load();
@@ -89,6 +99,11 @@ export default function Home() {
   const usdcNumeric = usdc === '—' ? 0 : Number(usdc.replace(/,/g, '')) || 0;
   const tip = earnTip(usdcNumeric, 100);
   const [avA, avB] = avatarColors(address);
+
+  // Portfolio total in USD (USDC ≈ $1) once we have an ETH price.
+  const usdcNum = usdc === '—' ? 0 : Number(usdc.replace(/,/g, '')) || 0;
+  const ethNum = eth === '—' ? 0 : Number(eth) || 0;
+  const totalUsd = ethUsd != null ? usdcNum + ethNum * ethUsd : null;
 
   return (
     <SafeAreaView style={styles.root}>
@@ -150,19 +165,32 @@ export default function Home() {
             </Text>
             {usdc === '—' ? (
               <View style={styles.balSkeleton} />
+            ) : totalUsd != null ? (
+              <>
+                <View style={styles.balRow}>
+                  <Text variant="display" numeric color={colors.textHi}>
+                    ${totalUsd.toFixed(2)}
+                  </Text>
+                </View>
+                <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={styles.solLine}>
+                  {usdc} USDC · {eth} ETH (${(ethNum * (ethUsd ?? 0)).toFixed(2)})
+                </Text>
+              </>
             ) : (
-              <View style={styles.balRow}>
-                <Text variant="display" numeric color={colors.textHi}>
-                  {usdc}
+              <>
+                <View style={styles.balRow}>
+                  <Text variant="display" numeric color={colors.textHi}>
+                    {usdc}
+                  </Text>
+                  <Text variant="h3" color="rgba(255,255,255,0.62)">
+                    USDC
+                  </Text>
+                </View>
+                <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={styles.solLine}>
+                  ≈ {eth} ETH
                 </Text>
-                <Text variant="h3" color="rgba(255,255,255,0.62)">
-                  USDC
-                </Text>
-              </View>
+              </>
             )}
-            <Text variant="caption" numeric color="rgba(255,255,255,0.72)" style={styles.solLine}>
-              ≈ {eth} ETH
-            </Text>
           </View>
 
           <View style={{ marginTop: space.lg }}>
