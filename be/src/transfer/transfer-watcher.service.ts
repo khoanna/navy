@@ -27,4 +27,35 @@ export class TransferWatcherService {
       }
     }
   }
+
+  /**
+   * Recover transfers whose nonce was consumed but the confirming-write never landed
+   * (a crash between the CAS-consume and the status:'confirming' write). Reads the USDC
+   * EIP-3009 authorizationState to decide the true outcome. Mirrors the payments layer's
+   * recoverConsumedOrders self-healing.
+   */
+  @Interval(45_000)
+  async recoverConsumedTransfers() {
+    const stuck = await this.prisma.transfer.findMany({
+      where: { status: 'awaiting_signature', consumedAt: { not: null } },
+      take: 25,
+    });
+    for (const t of stuck) {
+      try {
+        const used: boolean = await this.chain.usdc.authorizationState(t.fromAddress, t.nonce);
+        if (used) {
+          // The EIP-3009 authorization was consumed on-chain → the transfer succeeded.
+          await this.prisma.transfer.update({ where: { id: t.id }, data: { status: 'confirmed' } });
+        } else if (t.validBefore < new Date()) {
+          // Never landed and can no longer be signed → dead.
+          await this.prisma.transfer.update({ where: { id: t.id }, data: { status: 'failed', consumedAt: null } });
+        } else {
+          // Not yet on-chain and still valid → release the consume latch so the user can retry.
+          await this.prisma.transfer.update({ where: { id: t.id }, data: { consumedAt: null } });
+        }
+      } catch (e) {
+        this.log.warn(`recoverConsumedTransfers ${t.id}: ${(e as Error).message}`);
+      }
+    }
+  }
 }
