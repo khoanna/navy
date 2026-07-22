@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { TransferService } from './transfer.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -32,6 +32,12 @@ export class TransferController {
   @Throttle({ default: { ttl: 60000, limit: 20 } })
   submit(@Req() req: any, @Body() dto: SubmitDto) {
     return this.transfers.submit(req.user.sub, dto.transferId, dto.signature, req.user.walletAddress);
+  }
+
+  @Get('resolve')
+  @Throttle({ default: { ttl: 60000, limit: 40 } })
+  resolve(@Query('recipient') recipient: string) {
+    return this.transfers.resolve(recipient ?? '');
   }
 
   @Get('history')

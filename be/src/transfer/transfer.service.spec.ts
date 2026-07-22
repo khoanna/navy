@@ -38,4 +38,25 @@ describe('TransferService.buildAuthorization', () => {
     const { svc } = deps({ chain: { provider: { getBalance: jest.fn(bigBal) }, usdc: { balanceOf: jest.fn(async () => 10n) }, relayer: { address: '0xr' }, usdcDomain: USDC_DOMAIN } });
     await expect(svc.buildAuthorization('u1', '0x1111111111111111111111111111111111111111', '@linh', 20n)).rejects.toThrow(/insufficient/i);
   });
+
+  describe('TransferService.resolve', () => {
+    it('returns the address for a 0x recipient (username null)', async () => {
+      const { svc } = deps();
+      const r = await svc.resolve('0x0000000000000000000000000000000000000001');
+      expect(r).toEqual({ address: '0x0000000000000000000000000000000000000001', username: null });
+    });
+    it('resolves a @username via UserService', async () => {
+      const { svc } = deps();
+      const r = await svc.resolve('@linh');
+      expect(r).toEqual({ address: '0x000000000000000000000000000000000000dEaD', username: 'linh' });
+    });
+    it('throws on an unknown @username', async () => {
+      const { svc } = deps({ users: { resolveUsername: jest.fn(async () => null) } });
+      await expect(svc.resolve('@ghost')).rejects.toThrow(/not found/i);
+    });
+    it('throws on garbage', async () => {
+      const { svc } = deps();
+      await expect(svc.resolve('not-an-address')).rejects.toThrow(/invalid/i);
+    });
+  });
 });

@@ -108,6 +108,16 @@ export class TransferService {
     return { txHash: tx.hash, status };
   }
 
+  /** Resolve a @username or 0x address to a wallet address (for the Send UI / ETH broadcast). */
+  async resolve(recipient: string): Promise<{ address: string; username: string | null }> {
+    const parsed = parseRecipient(recipient);
+    if (!parsed) throw new BadRequestException('Invalid recipient');
+    if (parsed.kind === 'address') return { address: parsed.value, username: null };
+    const r = await this.users.resolveUsername(parsed.value);
+    if (!r) throw new BadRequestException(`User @${parsed.value} not found`);
+    return { address: r.address, username: r.username };
+  }
+
   async history(userId: string, take = 20) {
     const rows = await this.prisma.transfer.findMany({
       where: { fromUserId: userId }, orderBy: { createdAt: 'desc' }, take,
