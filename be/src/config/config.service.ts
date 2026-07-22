@@ -65,4 +65,7 @@ export class NavyConfigService {
   get openRouterBaseUrl(): string { return this.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1'; }
   get agentMaxIterations(): number { const n = parseInt(this.env.AGENT_MAX_ITERATIONS ?? '8', 10); return Number.isFinite(n) && n > 0 ? n : 8; }
   get agentContextTokenBudget(): number { const n = parseInt(this.env.AGENT_CONTEXT_TOKENS ?? '6000', 10); return Number.isFinite(n) && n > 0 ? n : 6000; }
+  // --- CoinGecko (market data) ---
+  get coinGeckoApiKey(): string { return this.env.COINGECKO_API_KEY ?? ''; }
+  get coinGeckoBaseUrl(): string { return this.env.COINGECKO_BASE_URL ?? 'https://api.coingecko.com/api/v3'; }
 }
