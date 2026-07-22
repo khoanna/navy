@@ -59,4 +59,10 @@ export class NavyConfigService {
     const eth = this.env.NAVY_RELAYER_MIN_BALANCE_ETH ?? '0.02';
     try { return ethers.parseEther(eth); } catch { return ethers.parseEther('0.02'); }
   }
+  // --- OpenRouter (AI assistant) ---
+  get openRouterApiKey(): string { return this.env.OPENROUTER_API_KEY ?? ''; }
+  get openRouterModel(): string { return this.env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash'; }
+  get openRouterBaseUrl(): string { return this.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1'; }
+  get agentMaxIterations(): number { const n = parseInt(this.env.AGENT_MAX_ITERATIONS ?? '8', 10); return Number.isFinite(n) && n > 0 ? n : 8; }
+  get agentContextTokenBudget(): number { const n = parseInt(this.env.AGENT_CONTEXT_TOKENS ?? '6000', 10); return Number.isFinite(n) && n > 0 ? n : 6000; }
 }
