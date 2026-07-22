@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { JsonRpcProvider, parseEther } from 'ethers';
+import { JsonRpcProvider, parseEther, parseUnits } from 'ethers';
 
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
@@ -40,10 +40,10 @@ type Resolved = { address: string; username: string | null };
 
 /** amount (decimal display string) → USDC base units (6dp) string. null if invalid / non-positive. */
 function usdcAmountToBase(amount: string): string | null {
-  const n = Number(amount);
-  if (!Number.isFinite(n) || n <= 0) return null;
+  const s = (amount ?? '').trim();
+  if (!s) return null;
   try {
-    const base = BigInt(Math.round(n * 1e6));
+    const base = parseUnits(s, 6); // 6-decimal USDC base units, exact
     return base > 0n ? base.toString() : null;
   } catch {
     return null;
@@ -205,7 +205,12 @@ function SendInner({
       : ethWeiStr !== null && BigInt(ethWeiStr) <= BigInt(ethWei);
 
   const amountValid = asset === 'USDC' ? usdcBaseStr !== null : ethWeiStr !== null;
-  const canSend = !!resolved && amountValid && withinBalance && phase !== 'sending';
+  const isSelf =
+    !!resolved &&
+    !!myAddress &&
+    resolved.address.toLowerCase() === myAddress.toLowerCase();
+  const canSend =
+    !!resolved && !isSelf && amountValid && withinBalance && phase !== 'sending';
 
   // ── MAX ───────────────────────────────────────────────────────────────────
   const setMax = () => {
@@ -315,6 +320,12 @@ function SendInner({
               </Text>
             )}
           </>
+        )}
+
+        {isSelf && (
+          <Text variant="caption" color={colors.danger} style={{ marginTop: space.xs }}>
+            You can't send to yourself
+          </Text>
         )}
 
         {/* Asset toggle */}

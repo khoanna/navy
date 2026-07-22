@@ -46,11 +46,9 @@ export default function ScanScreen() {
       router.replace(`/pay/${orderId}`);
     },
     onSend: (target) => {
-      router.replace(
-        '/send?to=' +
-          encodeURIComponent(target.address) +
-          (target.amountWei ? '&amountWei=' + target.amountWei : ''),
-      );
+      let url = '/send?to=' + encodeURIComponent(target.address);
+      if (target.amountWei) url += '&amountWei=' + target.amountWei + '&asset=ETH';
+      router.replace(url);
     },
     onInvalid: () => {
       toast('Not a Navy pay code');
