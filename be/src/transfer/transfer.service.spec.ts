@@ -60,3 +60,37 @@ describe('TransferService.buildAuthorization', () => {
     });
   });
 });
+
+describe('TransferService.recordEthSend', () => {
+  function ethDeps() {
+    const rows: any[] = [];
+    const prisma = {
+      transfer: {
+        findFirst: jest.fn(async ({ where }: any) => rows.find((r) => r.txHash === where.txHash) ?? null),
+        create: jest.fn(async ({ data }: any) => { const row = { id: 'e1', ...data }; rows.push(row); return row; }),
+      },
+    };
+    const chain = { provider: {}, relayer: { address: '0xr' }, usdc: {}, usdcDomain: {} };
+    const svc = new TransferService(chain as any, prisma as any, {} as any, { relayerMinBalanceWei: 0n } as any);
+    return { svc, prisma, rows };
+  }
+  const TX = '0x' + 'a'.repeat(64);
+  it('inserts an ETH transfer row (asset ETH, confirming)', async () => {
+    const { svc, rows } = ethDeps();
+    const r = await svc.recordEthSend('u1', '0x1111111111111111111111111111111111111111', '0x0000000000000000000000000000000000000002', 1000000000000000n, TX);
+    expect(r.status).toBe('confirming');
+    expect(rows[0].asset).toBe('ETH');
+    expect(rows[0].amount).toBe(1000000000000000n);
+    expect(rows[0].txHash).toBe(TX);
+  });
+  it('is idempotent on txHash (double-report returns the existing row)', async () => {
+    const { svc, prisma } = ethDeps();
+    await svc.recordEthSend('u1', '0x1111111111111111111111111111111111111111', '0x0000000000000000000000000000000000000002', 5n, TX);
+    await svc.recordEthSend('u1', '0x1111111111111111111111111111111111111111', '0x0000000000000000000000000000000000000002', 5n, TX);
+    expect(prisma.transfer.create).toHaveBeenCalledTimes(1);
+  });
+  it('rejects an invalid recipient address', async () => {
+    const { svc } = ethDeps();
+    await expect(svc.recordEthSend('u1', '0x1111111111111111111111111111111111111111', 'nope', 5n, TX)).rejects.toThrow(/invalid/i);
+  });
+});

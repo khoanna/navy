@@ -108,6 +108,21 @@ export class TransferService {
     return { txHash: tx.hash, status };
   }
 
+  /** Record an ETH send the client already broadcast. Idempotent on txHash; the watcher reconciles it. */
+  async recordEthSend(userId: string, fromAddress: string, to: string, amountWei: bigint, txHash: string): Promise<{ id: string; status: string }> {
+    const existing = await this.prisma.transfer.findFirst({ where: { txHash } });
+    if (existing) return { id: existing.id, status: existing.status };
+    if (!ethers.isAddress(to)) throw new BadRequestException('invalid recipient address');
+    if (amountWei <= 0n) throw new BadRequestException('amount must be positive');
+    const row = await this.prisma.transfer.create({
+      data: {
+        fromUserId: userId, fromAddress, toAddress: ethers.getAddress(to), toUsername: null,
+        amount: amountWei, asset: 'ETH', status: 'confirming', txHash, consumedAt: new Date(),
+      },
+    });
+    return { id: row.id, status: row.status };
+  }
+
   /** Resolve a @username or 0x address to a wallet address (for the Send UI / ETH broadcast). */
   async resolve(recipient: string): Promise<{ address: string; username: string | null }> {
     const parsed = parseRecipient(recipient);

@@ -15,6 +15,11 @@ class SubmitDto {
   @IsString() @IsNotEmpty() transferId!: string;
   @IsString() @Matches(/^0x[0-9a-fA-F]{130}$/, { message: 'signature must be 65-byte hex' }) signature!: string;
 }
+class EthRecordDto {
+  @IsString() @Matches(/^0x[0-9a-fA-F]{40}$/, { message: 'to must be a 0x address' }) to!: string;
+  @IsString() @Matches(/^\d+$/, { message: 'amountWei must be an integer string' }) amountWei!: string;
+  @IsString() @Matches(/^0x[0-9a-fA-F]{64}$/, { message: 'txHash must be a 0x 32-byte hash' }) txHash!: string;
+}
 
 @Controller('transfer')
 @UseGuards(JwtGuard, RolesGuard)
@@ -32,6 +37,12 @@ export class TransferController {
   @Throttle({ default: { ttl: 60000, limit: 20 } })
   submit(@Req() req: any, @Body() dto: SubmitDto) {
     return this.transfers.submit(req.user.sub, dto.transferId, dto.signature, req.user.walletAddress);
+  }
+
+  @Post('eth/record')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
+  recordEth(@Req() req: any, @Body() dto: EthRecordDto) {
+    return this.transfers.recordEthSend(req.user.sub, req.user.walletAddress, dto.to, BigInt(dto.amountWei), dto.txHash);
   }
 
   @Get('resolve')
