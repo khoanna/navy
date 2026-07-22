@@ -25,4 +25,10 @@ export class TransferClient {
   submit(transferId: string, signature: string) {
     return this.json<{ txHash: string; status: string }>('/transfer/submit', { method: 'POST', body: JSON.stringify({ transferId, signature }) });
   }
+  resolve(recipient: string) {
+    return this.json<{ address: string; username: string | null }>(`/transfer/resolve?recipient=${encodeURIComponent(recipient)}`);
+  }
+  recordEth(to: string, amountWei: string, txHash: string) {
+    return this.json<{ id: string; status: string }>('/transfer/eth/record', { method: 'POST', body: JSON.stringify({ to, amountWei, txHash }) });
+  }
 }
