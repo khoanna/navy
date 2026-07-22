@@ -13,21 +13,25 @@ export class MarketController {
 
   @Get('prices')
   @Throttle({ default: { ttl: 60000, limit: 60 } })
-  getPrices(@Query('ids') ids?: string) {
-    const list = (ids ?? 'ethereum').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 25);
-    return this.prices.prices(list);
+  async getPrices(@Query('ids') ids?: string) {
+    const list = (ids ?? 'ethereum').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10);
+    try { return await this.prices.prices(list); }
+    catch { return {}; } // app treats an empty price map as "prices unavailable" and hides USD
   }
 
   @Get('token')
   @Throttle({ default: { ttl: 60000, limit: 40 } })
   async getToken(@Query('query') query: string) {
-    const info = await this.prices.tokenInfo(query ?? '');
-    return info ?? { error: `Couldn't find a token matching "${query ?? ''}"` };
+    try {
+      const info = await this.prices.tokenInfo(query ?? '');
+      return info ?? { error: `Couldn't find a token matching "${query ?? ''}"` };
+    } catch { return { error: 'Prices are unavailable right now. Please try again shortly.' }; }
   }
 
   @Get('top')
   @Throttle({ default: { ttl: 60000, limit: 30 } })
-  getTop(@Query('limit') limit?: string) {
-    return this.prices.topCoins(limit ? parseInt(limit, 10) : 10);
+  async getTop(@Query('limit') limit?: string) {
+    try { return await this.prices.topCoins(limit ? parseInt(limit, 10) : 10); }
+    catch { return { error: 'Prices are unavailable right now. Please try again shortly.' }; }
   }
 }

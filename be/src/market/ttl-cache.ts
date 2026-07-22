@@ -30,4 +30,15 @@ export class TtlCache {
     this.inflight.set(key, p);
     return p as Promise<T>;
   }
+
+  /** Return the cached value if still fresh, else undefined (no load). */
+  peek<T>(key: string): T | undefined {
+    const c = this.store.get(key);
+    return c && c.expiresAt > this.now() ? (c.value as T) : undefined;
+  }
+
+  /** Directly store a value with a ttl (used to seed per-item entries from a batch load). */
+  set<T>(key: string, ttlMs: number, value: T): void {
+    this.store.set(key, { value, expiresAt: this.now() + ttlMs });
+  }
 }

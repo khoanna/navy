@@ -19,10 +19,24 @@ export class PriceService {
 
   async prices(ids: string[]): Promise<Record<string, PriceDto>> {
     const out: Record<string, PriceDto> = {};
-    await Promise.all(ids.map(async (id) => {
-      const dto = await this.cache.getOrLoad(`price:${id}`, PRICE_TTL, async () => normalizePrice(id, await this.client.simplePrice([id])));
-      if (dto) out[id] = dto;
-    }));
+    const missing: string[] = [];
+    for (const id of ids) {
+      const hit = this.cache.peek<PriceDto>(`price:${id}`);
+      if (hit) out[id] = hit; else missing.push(id);
+    }
+    if (missing.length) {
+      const batchKey = 'pricebatch:' + [...missing].sort().join(',');
+      const fetched = await this.cache.getOrLoad<Record<string, PriceDto>>(batchKey, PRICE_TTL, async () => {
+        const json = await this.client.simplePrice(missing);          // ONE upstream call for all missing ids
+        const map: Record<string, PriceDto> = {};
+        for (const id of missing) {
+          const dto = normalizePrice(id, json);
+          if (dto) { this.cache.set(`price:${id}`, PRICE_TTL, dto); map[id] = dto; }
+        }
+        return map;
+      });
+      Object.assign(out, fetched);
+    }
     return out;
   }
 

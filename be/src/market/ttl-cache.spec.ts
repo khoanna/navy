@@ -29,4 +29,10 @@ describe('TtlCache', () => {
     const cache = new TtlCache();
     await expect(cache.getOrLoad('k', 100, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
   });
+  it('peek returns a fresh value and undefined after expiry', async () => {
+    let t = 1000; const cache = new TtlCache({ now: () => t });
+    cache.set('k', 100, 'v');
+    expect(cache.peek('k')).toBe('v');
+    t = 1200; expect(cache.peek('k')).toBeUndefined();
+  });
 });
