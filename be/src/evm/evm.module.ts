@@ -6,6 +6,8 @@ import type { UsdcDomain } from './payment-authorization';
 // require avoids nodenext JSON-import assertions (same pattern as the Solana IDL).
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const artifact = require('./navy-payments-abi.json');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const usdcArtifact = require('./usdc-abi.json');
 
 export const NAVY_EVM = Symbol('NAVY_EVM');
 
@@ -15,6 +17,7 @@ export interface NavyEvm {
   paymentsAsOwner: ethers.Contract; // connected to the owner wallet (admin ops)
   relayer: ethers.Wallet;
   owner: ethers.Wallet;
+  usdc: ethers.Contract;          // connected to the relayer wallet (transferWithAuthorization submitter)
   usdcAddress: string;
   treasury: string;
   paymentsAddress: string;
@@ -32,6 +35,7 @@ export interface NavyEvm {
       const owner = new ethers.Wallet(cfg.ownerPrivateKey, provider);
       const payments = new ethers.Contract(cfg.paymentsAddress, artifact.abi, relayer);
       const paymentsAsOwner = new ethers.Contract(cfg.paymentsAddress, artifact.abi, owner);
+      const usdc = new ethers.Contract(cfg.usdcAddress, usdcArtifact.abi, relayer);
       const usdcDomain: UsdcDomain = {
         name: cfg.usdcEip712Name,
         version: cfg.usdcEip712Version,
@@ -39,7 +43,7 @@ export interface NavyEvm {
         verifyingContract: cfg.usdcAddress,
       };
       return {
-        provider, payments, paymentsAsOwner, relayer, owner,
+        provider, payments, paymentsAsOwner, relayer, owner, usdc,
         usdcAddress: cfg.usdcAddress, treasury: cfg.treasuryAddress,
         paymentsAddress: cfg.paymentsAddress, usdcDomain,
       };
