@@ -4,6 +4,7 @@ import { OrdersService } from '../payments/orders.service';
 import { FarmingService } from '../farming/farming.service';
 import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
+import { PriceService } from '../market/price.service';
 import { spendingSeries } from './analytics';
 import type { ToolHandlers } from './types';
 
@@ -15,6 +16,7 @@ export class AgentToolsService {
     private readonly farming: FarmingService,
     private readonly transfers: TransferService,
     private readonly users: UserService,
+    private readonly prices: PriceService,
   ) {}
 
   /** Build the handler map bound to one authenticated user. */
@@ -27,7 +29,16 @@ export class AgentToolsService {
         ]);
         let farming: any = null;
         try { farming = await this.farming.getPosition(userId); } catch { /* no subwallet yet */ }
-        return { display: { kind: 'card' }, usdcBase: usdc.toString(), ethWei: ethWei.toString(), farming };
+        let ethUsd: number | null = null, totalUsd: number | null = null;
+        try {
+          ethUsd = await this.prices.ethUsd();
+          if (ethUsd != null) {
+            const usdcUsd = Number(usdc) / 1e6;
+            const ethAmt = Number(ethWei) / 1e18;
+            totalUsd = Math.round((usdcUsd + ethAmt * ethUsd) * 100) / 100;
+          }
+        } catch { /* prices unavailable — omit USD, never block the portfolio */ }
+        return { display: { kind: 'card' }, usdcBase: usdc.toString(), ethWei: ethWei.toString(), farming, ethUsd, totalUsd };
       },
       get_payment_history: async (a) => {
         const limit = typeof a.limit === 'number' ? Math.min(a.limit, 50) : 20;
@@ -72,6 +83,16 @@ export class AgentToolsService {
       },
       build_farming_withdraw: async (a) => {
         return { display: { kind: 'action', action: 'farming_withdraw' }, amount: String(a.amount) };
+      },
+      get_token_info: async (a) => {
+        const info = await this.prices.tokenInfo(String(a.query ?? ''));
+        if (!info) return { error: `Couldn't find a token matching "${String(a.query ?? '')}"` };
+        return { display: { kind: 'token' }, ...info };
+      },
+      get_top_coins: async (a) => {
+        const limit = typeof a.limit === 'number' ? a.limit : 10;
+        const coins = await this.prices.topCoins(limit);
+        return { display: { kind: 'card' }, coins };
       },
     };
   }

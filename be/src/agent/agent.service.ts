@@ -21,6 +21,9 @@ result's recipient.address) alongside their @username, plus the amount and asset
 who they are paying before signing.
 If a tool returns an error, tell the user what went wrong in one short sentence and how to fix it.
 Always end your turn with a short message to the user — never reply with nothing.
+You can also look up any cryptocurrency's market data with get_token_info and top coins with get_top_coins.
+When you present token data, give a brief analysis (price, today's move, market position) in plain language —
+do not just list raw numbers.
 Be concise. Never claim a transfer or deposit has happened — only that a proposal is ready to confirm.`;
 
 /** A sink the controller provides to forward streaming events to the HTTP response. */

@@ -12,6 +12,7 @@ export type ChatMessage =
 
 export type ToolDisplay =
   | { kind: 'card' }
+  | { kind: 'token' }
   | { kind: 'chart'; chartType: 'line' | 'bar' | 'pie' }
   | { kind: 'action'; action: 'transfer' | 'farming_deposit' | 'farming_withdraw' };
 
