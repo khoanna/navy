@@ -87,7 +87,18 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* 5. Settings — account / security */}
+      {/* 5. Assistant — AI chat (portfolio, transfers, farming) */}
+      <Tabs.Screen
+        name="assistant"
+        options={{
+          title: 'Assistant',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="bolt" color={color} size={size} />
+          ),
+        }}
+      />
+
+      {/* 6. Settings — account / security */}
       <Tabs.Screen
         name="settings"
         options={{
