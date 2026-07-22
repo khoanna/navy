@@ -170,9 +170,10 @@ export default function Home() {
           </View>
         </Gradient>
 
-        {/* Quick actions row: Receive · Pay · Earn */}
+        {/* Quick actions row: Receive · Send · Pay · Earn */}
         <View style={styles.actions}>
           <Action icon="receive" label="Receive" onPress={() => router.push('/receive')} />
+          <Action icon="arrowUpRight" label="Send" onPress={() => router.push('/send')} />
           <Action icon="scan" label="Pay" onPress={() => router.push('/scan')} primary />
           <Action icon="sprout" label="Earn" onPress={() => router.push('/farming')} />
         </View>
