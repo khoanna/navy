@@ -54,8 +54,17 @@ export class AgentToolsService {
         return { display: { kind: 'card' }, address: null, note: 'not a known @username; treat as raw address if it is 0x…' };
       },
       build_transfer: async (a) => {
+        const asset = a.asset === 'ETH' ? 'ETH' : 'USDC';
+        if (asset === 'ETH') {
+          const resolved = await this.transfers.resolve(String(a.recipient));
+          const amountWei = BigInt(String(a.amountBase));
+          const bal = await this.chain.provider.getBalance(walletAddress);
+          // Leave a little headroom for gas; if the balance can't cover amount + a nominal reserve, refuse.
+          if (bal <= amountWei) return { error: 'Not enough ETH to cover that amount plus gas. Add ETH and try again.' };
+          return { display: { kind: 'action', action: 'transfer' }, asset: 'ETH', to: resolved.address, amountWei: amountWei.toString(), recipient: resolved };
+        }
         const res = await this.transfers.buildAuthorization(userId, walletAddress, String(a.recipient), BigInt(String(a.amountBase)));
-        return { display: { kind: 'action', action: 'transfer' }, ...res };
+        return { display: { kind: 'action', action: 'transfer' }, asset: 'USDC', ...res };
       },
       build_farming_deposit: async (a) => {
         return { display: { kind: 'action', action: 'farming_deposit' }, amountBase: String(a.amountBase) };
