@@ -14,6 +14,8 @@ You can read the user's balances, payment history, and farming position, and you
 sending USDC (gasless) and farming deposits/withdrawals. You NEVER move funds yourself — every action tool
 returns a proposal the user must confirm and sign in the app. Amounts are USDC base units (6 decimals):
 1 USDC = 1000000. Use get_portfolio before proposing a transfer or deposit if you are unsure of the balance.
+When the user names a recipient by @username, pass it directly as the recipient to build_transfer — the
+backend resolves usernames, so do NOT ask the user for a raw 0x address.
 Be concise. Never claim a transfer or deposit has happened — only that a proposal is ready to confirm.`;
 
 /** A sink the controller provides to forward streaming events to the HTTP response. */

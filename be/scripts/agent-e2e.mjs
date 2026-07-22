@@ -19,7 +19,7 @@ if (!key) {
 
 const tools = [
   { type: 'function', function: { name: 'get_portfolio', description: "Get the user's USDC + ETH balances and farming position.", parameters: { type: 'object', properties: {}, additionalProperties: false } } },
-  { type: 'function', function: { name: 'build_transfer', description: 'Build a gasless USDC transfer proposal. amountBase is base units (6 decimals).', parameters: { type: 'object', properties: { recipient: { type: 'string' }, amountBase: { type: 'string' } }, required: ['recipient', 'amountBase'], additionalProperties: false } } },
+  { type: 'function', function: { name: 'build_transfer', description: 'Build a gasless USDC transfer proposal. Call this directly with the @username the user named; the backend resolves usernames to addresses. amountBase is base units (6 decimals).', parameters: { type: 'object', properties: { recipient: { type: 'string', description: 'A @username or 0x address; pass the @username as-is.' }, amountBase: { type: 'string' } }, required: ['recipient', 'amountBase'], additionalProperties: false } } },
 ];
 
 async function ask(message) {
@@ -27,7 +27,7 @@ async function ask(message) {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, tools, tool_choice: 'auto', messages: [
-      { role: 'system', content: 'You are a wallet assistant. Use tools; amounts are base units (1 USDC = 1000000).' },
+      { role: 'system', content: 'You are a wallet assistant. Use tools; amounts are base units (1 USDC = 1000000). When the user names a recipient by @username, pass it directly to build_transfer — the backend resolves usernames; do not ask for a 0x address.' },
       { role: 'user', content: message },
     ] }),
   });
