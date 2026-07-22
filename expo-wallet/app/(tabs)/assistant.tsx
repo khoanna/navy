@@ -33,6 +33,7 @@ import { PortfolioCard } from '@/features/assistant/PortfolioCard';
 import { ChartCard } from '@/features/assistant/ChartCard';
 import { TransferConfirmCard } from '@/features/assistant/TransferConfirmCard';
 import { FarmingConfirmCard } from '@/features/assistant/FarmingConfirmCard';
+import { TokenInfoCard, formatUsd } from '@/features/assistant/TokenInfoCard';
 
 export default function Assistant() {
   const { session, authedFetch } = useNavySession();
@@ -303,6 +304,10 @@ function ToolRender({
     return <ChartCard result={result} />;
   }
 
+  if (kind === 'token') {
+    return <TokenInfoCard result={result} />;
+  }
+
   if (kind === 'action') {
     if (display.action === 'transfer') {
       return <TransferConfirmCard result={result} onConfirm={onConfirmTransfer(result)} />;
@@ -316,6 +321,10 @@ function ToolRender({
     // Portfolio / farming summary have usdcBase/ethWei/farming; render richly.
     if (result.usdcBase !== undefined || result.ethWei !== undefined || result.farming !== undefined) {
       return <PortfolioCard result={result} />;
+    }
+    // Top-coins list from get_top_coins.
+    if (Array.isArray(result.coins)) {
+      return <TopCoinsCard coins={result.coins} />;
     }
     // Other card-shaped results (history / resolve): compact generic chip.
     return (
@@ -333,6 +342,42 @@ function ToolRender({
       <Text variant="caption" dim>
         {name}
       </Text>
+    </View>
+  );
+}
+
+/** A compact ranked list for get_top_coins results. */
+function TopCoinsCard({ coins }: { coins: any[] }) {
+  return (
+    <View style={styles.topCoins}>
+      {coins.map((c, i) => {
+        const rank = typeof c?.rank === 'number' ? c.rank : i + 1;
+        const symbol = typeof c?.symbol === 'string' ? c.symbol.toUpperCase() : '';
+        const price = typeof c?.priceUsd === 'number' ? c.priceUsd : null;
+        const change = typeof c?.change24h === 'number' ? c.change24h : null;
+        return (
+          <View key={c?.id ?? i} style={styles.coinRow}>
+            <Text variant="caption" dim style={styles.coinRank}>
+              #{rank}
+            </Text>
+            <Text variant="bodyStrong" color={colors.textHi} style={styles.coinSym}>
+              {symbol}
+            </Text>
+            <Text variant="caption" numeric color={colors.text}>
+              {formatUsd(price)}
+            </Text>
+            {change != null && (
+              <Text
+                variant="caption"
+                color={change >= 0 ? colors.success : colors.danger}
+                style={styles.coinChange}
+              >
+                {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+              </Text>
+            )}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -412,6 +457,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glassFill,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  topCoins: {
+    minWidth: 260,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.glassFill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: space.xs,
+  },
+  coinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.xs,
+  },
+  coinRank: {
+    width: 34,
+  },
+  coinSym: {
+    flex: 1,
+  },
+  coinChange: {
+    width: 68,
+    textAlign: 'right',
   },
   errorBubble: {
     alignSelf: 'flex-start',
