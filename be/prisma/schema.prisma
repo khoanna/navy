@@ -10,6 +10,7 @@ model User {
   id                      String    @id @default(uuid())
   privyDid                String    @unique
   primaryWallet           String?
+  username                String?   @unique
   status                  String    @default("active")
   createdAt               DateTime  @default(now())
   farmDelegationWalletId  String?
