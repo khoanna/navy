@@ -110,10 +110,11 @@ export class TransferService {
 
   /** Record an ETH send the client already broadcast. Idempotent on txHash; the watcher reconciles it. */
   async recordEthSend(userId: string, fromAddress: string, to: string, amountWei: bigint, txHash: string): Promise<{ id: string; status: string }> {
-    const existing = await this.prisma.transfer.findFirst({ where: { txHash } });
+    const existing = await this.prisma.transfer.findFirst({ where: { txHash, fromUserId: userId } });
     if (existing) return { id: existing.id, status: existing.status };
     if (!ethers.isAddress(to)) throw new BadRequestException('invalid recipient address');
     if (amountWei <= 0n) throw new BadRequestException('amount must be positive');
+    // Self-reported history: to/amount are the client's claim; the watcher reconciles only status (not to/amount).
     const row = await this.prisma.transfer.create({
       data: {
         fromUserId: userId, fromAddress, toAddress: ethers.getAddress(to), toUsername: null,

@@ -59,8 +59,9 @@ export class AgentToolsService {
           const resolved = await this.transfers.resolve(String(a.recipient));
           const amountWei = BigInt(String(a.amountBase));
           const bal = await this.chain.provider.getBalance(walletAddress);
-          // Leave a little headroom for gas; if the balance can't cover amount + a nominal reserve, refuse.
-          if (bal <= amountWei) return { error: 'Not enough ETH to cover that amount plus gas. Add ETH and try again.' };
+          // Reserve a little ETH for gas (matches the Send screen's ETH MAX reserve).
+          const GAS_RESERVE_WEI = 300000000000000n; // ~0.0003 ETH
+          if (bal < amountWei + GAS_RESERVE_WEI) return { error: 'Not enough ETH to cover that amount plus gas. Add ETH and try again.' };
           return { display: { kind: 'action', action: 'transfer' }, asset: 'ETH', to: resolved.address, amountWei: amountWei.toString(), recipient: resolved };
         }
         const res = await this.transfers.buildAuthorization(userId, walletAddress, String(a.recipient), BigInt(String(a.amountBase)));
