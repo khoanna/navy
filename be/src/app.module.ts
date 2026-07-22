@@ -17,6 +17,7 @@ import { FarmingModule } from './farming/farming.module';
 import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
 import { TransferModule } from './transfer/transfer.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { TransferModule } from './transfer/transfer.module';
     NavyConfigModule, PrismaModule, CryptoModule, AuditModule, AuthModule,
     UserModule, AdminModule, MerchantModule, WalletModule, PaymentsModule,
     AdminMerchantsModule, FarmingModule, HealthModule, ProductsModule,
-    TransferModule,
+    TransferModule, AgentModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

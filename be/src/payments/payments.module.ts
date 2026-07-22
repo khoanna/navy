@@ -38,5 +38,6 @@ import { AuditService } from '../audit/audit.service';
       useFactory: (p: PrismaService, w: WebhookService, s: SecretLookupService, o: NavyEvm) => new ChainWatcherService(p, w, s, o),
     },
   ],
+  exports: [OrdersService],
 })
 export class PaymentsModule {}

@@ -25,5 +25,6 @@ import { FARM_FUNDING_BOUNDS } from './farming.bounds';
       fundMax: BigInt(process.env.NAVY_FARM_FUND_MAX ?? '1000000000'),
     } },
   ],
+  exports: [FarmingService],
 })
 export class FarmingModule {}
