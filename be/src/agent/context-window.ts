@@ -23,5 +23,8 @@ export function trimMessages(messages: ChatMessage[], budgetTokens: number): Cha
     kept.unshift(rest[i]);
     used += t;
   }
+  // A leading role:'tool' message would be an orphan (its assistant+tool_calls was trimmed away),
+  // which OpenRouter rejects. Drop leading tool messages so the kept window starts on a valid boundary.
+  while (kept.length && kept[0].role === 'tool') kept.shift();
   return system ? [system, ...kept] : kept;
 }

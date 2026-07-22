@@ -47,8 +47,8 @@ export class AgentService {
     const userMsg: ChatMessage = { role: 'user', content: userText };
     const seed = trimMessages([...base, userMsg], this.cfg.agentContextTokenBudget);
 
-    await this.conversations.append(convo.id, userMsg);
     if (prior.length === 0) await this.conversations.append(convo.id, { role: 'system', content: SYSTEM_PROMPT });
+    await this.conversations.append(convo.id, userMsg);
 
     const handlers = this.tools.forUser(userId, walletAddress);
     const priorLen = seed.length;

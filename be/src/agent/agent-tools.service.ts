@@ -42,7 +42,9 @@ export class AgentToolsService {
       get_spending_analytics: async (a) => {
         const period = (a.period as any) ?? 'day';
         const list: any[] = await this.orders.listForPayer(walletAddress, { take: 200, skip: 0 });
-        const orders = list.map((o) => ({ amount: o.amount, createdAt: new Date(o.paidAt ?? Date.now()), status: o.status }));
+        const orders = list
+          .filter((o) => o.paidAt)
+          .map((o) => ({ amount: o.amount, createdAt: new Date(o.paidAt), status: o.status }));
         const series = spendingSeries(orders, period);
         return { display: { kind: 'chart', chartType: 'bar' }, ...series };
       },

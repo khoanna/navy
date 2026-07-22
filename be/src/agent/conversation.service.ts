@@ -17,7 +17,7 @@ export class ConversationService {
 
   /** Load prior messages as ChatMessage[] (oldest first). */
   async history(conversationId: string): Promise<ChatMessage[]> {
-    const rows = await this.prisma.agentMessage.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' } });
+    const rows = await this.prisma.agentMessage.findMany({ where: { conversationId }, orderBy: { seq: 'asc' } });
     return rows.map((r) => {
       if (r.role === 'tool') return { role: 'tool', tool_call_id: r.toolCallId!, content: r.content ?? '' };
       if (r.role === 'assistant') return { role: 'assistant', content: r.content, tool_calls: (r.toolCalls as any) ?? undefined };

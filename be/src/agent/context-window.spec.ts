@@ -16,4 +16,17 @@ describe('context-window', () => {
     expect(out[out.length - 1].content).toBe('latest question');
     expect(out.length).toBeLessThan(msgs.length);
   });
+  it('never returns a leading orphan tool message when the budget splits a tool-call group', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'system', content: 'SYS' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_portfolio', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: '{"usdc":"100"}' },
+      { role: 'assistant', content: 'You have 100 USDC.' },
+      { role: 'user', content: 'and my ETH?' },
+    ];
+    // A tiny budget that forces dropping the oldest assistant(tool_calls) but might keep its tool reply.
+    const out = trimMessages(msgs, 20);
+    const firstNonSystem = out.find((m) => m.role !== 'system');
+    expect(firstNonSystem?.role).not.toBe('tool');
+  });
 });

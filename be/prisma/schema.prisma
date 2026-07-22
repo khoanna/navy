@@ -236,6 +236,7 @@ model AgentMessage {
   content        String?
   toolCalls      Json?
   toolCallId     String?
+  seq            Int               @default(autoincrement())
   createdAt      DateTime          @default(now())
 
   @@index([conversationId, createdAt])
