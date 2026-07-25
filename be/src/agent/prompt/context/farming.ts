@@ -1,0 +1,2 @@
+/** Appended only when the turn touches farming (see detect-context.ts). */
+export const FARMING_BLOCK = `Farming detail: Farming supplies USDC to Compound III (Comet) on Sepolia through the user's Navy farming subwallet. Deposits earn variable yield with no lock-up — the user can withdraw any amount, or "all", at any time. Check get_farming_summary for the current position before proposing a withdrawal whose size depends on the balance. To withdraw everything, pass the literal string "all" as the amount.`;
