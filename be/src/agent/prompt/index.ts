@@ -1,7 +1,7 @@
 // Public API for the assistant's system prompt. Fragments live in sibling files —
 // see README.md for the convention. Composition order is significant: invariants sit
 // high (model weights early tokens most); tone sits last.
-import { IDENTITY } from './base';
+import { IDENTITY } from './identity';
 import { INVARIANTS } from './invariants';
 import { TOOL_ROUTING } from './tool-routing';
 import { DISCIPLINE } from './discipline';

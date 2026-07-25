@@ -1,3 +1,9 @@
+import { getFarmingSummary } from './tools/get-farming-summary';
+import { buildFarmingDeposit } from './tools/build-farming-deposit';
+import { buildFarmingWithdraw } from './tools/build-farming-withdraw';
+import { getTokenInfo } from './tools/get-token-info';
+import { getTopCoins } from './tools/get-top-coins';
+
 /** Which optional detail blocks are relevant for this turn. */
 export interface PromptContext {
   farming?: boolean;
@@ -8,8 +14,8 @@ const FARMING_HINTS = /\b(farm|farming|yield|apy|apr|compound|comet|supply|depos
 const MARKET_HINTS =
   /\b(price|priced|market|marketcap|coin|coins|token|trending|top|btc|eth|bitcoin|ethereum|sol|solana|worth of|chart|ath)\b/i;
 
-const FARMING_TOOLS = new Set(['get_farming_summary', 'build_farming_deposit', 'build_farming_withdraw']);
-const MARKET_TOOLS = new Set(['get_token_info', 'get_top_coins']);
+const FARMING_TOOLS = new Set([getFarmingSummary.name, buildFarmingDeposit.name, buildFarmingWithdraw.name]);
+const MARKET_TOOLS = new Set([getTokenInfo.name, getTopCoins.name]);
 
 /**
  * Decide which detail blocks to include from the user's message plus the tools already

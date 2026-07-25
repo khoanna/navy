@@ -1,14 +1,8 @@
 import type { ToolSchema } from './types';
-import { getPortfolio } from './prompt/tools/get-portfolio';
-import { getPaymentHistory } from './prompt/tools/get-payment-history';
-import { getFarmingSummary } from './prompt/tools/get-farming-summary';
-import { getSpendingAnalytics } from './prompt/tools/get-spending-analytics';
-import { resolveRecipient } from './prompt/tools/resolve-recipient';
-import { buildTransfer } from './prompt/tools/build-transfer';
-import { buildFarmingDeposit } from './prompt/tools/build-farming-deposit';
-import { buildFarmingWithdraw } from './prompt/tools/build-farming-withdraw';
-import { getTokenInfo } from './prompt/tools/get-token-info';
-import { getTopCoins } from './prompt/tools/get-top-coins';
+import {
+  getPortfolio, getPaymentHistory, getFarmingSummary, getSpendingAnalytics, resolveRecipient,
+  buildTransfer, buildFarmingDeposit, buildFarmingWithdraw, getTokenInfo, getTopCoins,
+} from './prompt/tools';
 
 const str = { type: 'string' } as const;
 
