@@ -24,12 +24,14 @@ import { streamAgentChat } from '@/lib/agent/agentClient';
 import { TransferClient } from '@/lib/transfer/transferClient';
 import { FarmingClient } from '@/lib/farming/farmingClient';
 import { mapSendError } from '@/lib/wallet/sendErrors';
+import { short } from '@/lib/wallet/identicon';
 
 import { Text } from '@/ui/Text';
 import { Icon } from '@/ui/Icon';
 import { colors, radius, space } from '@/ui/theme';
 
 import { PortfolioCard } from '@/features/assistant/PortfolioCard';
+import { PaymentHistoryCard } from '@/features/assistant/PaymentHistoryCard';
 import { ChartCard } from '@/features/assistant/ChartCard';
 import { TransferConfirmCard } from '@/features/assistant/TransferConfirmCard';
 import { FarmingConfirmCard } from '@/features/assistant/FarmingConfirmCard';
@@ -263,7 +265,11 @@ function MessageRow({
     );
   }
 
-  // Tool message.
+  // Tool message. A tool that returned an error (e.g. the backend asking us to clarify an
+  // amount, or a lookup that failed) carries no renderable card — the assistant's own text
+  // conveys the outcome, so we suppress the chip entirely instead of showing a bare tool name.
+  if (message.result && typeof message.result.error === 'string') return null;
+
   return (
     <View style={[styles.bubbleRow, styles.assistantRow]}>
       <ToolRender
@@ -322,11 +328,19 @@ function ToolRender({
     if (result.usdcBase !== undefined || result.ethWei !== undefined || result.farming !== undefined) {
       return <PortfolioCard result={result} />;
     }
+    // Payment history from get_payment_history.
+    if (Array.isArray(result.orders)) {
+      return <PaymentHistoryCard result={result} />;
+    }
     // Top-coins list from get_top_coins.
     if (Array.isArray(result.coins)) {
       return <TopCoinsCard coins={result.coins} />;
     }
-    // Other card-shaped results (history / resolve): compact generic chip.
+    // Recipient lookup from resolve_recipient ({address, username?} or {address:null,note}).
+    if ('address' in result) {
+      return <RecipientChip result={result} />;
+    }
+    // Other card-shaped results: compact generic chip.
     return (
       <View style={styles.genericCard}>
         <Text variant="caption" dim>
@@ -341,6 +355,33 @@ function ToolRender({
     <View style={styles.genericCard}>
       <Text variant="caption" dim>
         {name}
+      </Text>
+    </View>
+  );
+}
+
+/** A compact chip for resolve_recipient results — shows who a handle/address maps to. */
+function RecipientChip({ result }: { result: any }) {
+  const address: string | null = typeof result?.address === 'string' ? result.address : null;
+  const username: string | null = typeof result?.username === 'string' ? result.username : null;
+  if (!address) {
+    // Unknown handle — the assistant's text explains; keep a subtle marker.
+    return (
+      <View style={styles.genericCard}>
+        <Text variant="caption" dim>
+          Recipient not found
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.chip}>
+      <Icon name="send" size={14} color={colors.aqua} />
+      <Text variant="caption" color={colors.textHi}>
+        {username ? `@${username}` : 'Recipient'}
+      </Text>
+      <Text variant="caption" numeric dim>
+        {short(address)}
       </Text>
     </View>
   );
