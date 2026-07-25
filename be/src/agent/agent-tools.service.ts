@@ -6,6 +6,7 @@ import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
 import { PriceService } from '../market/price.service';
 import { spendingSeries } from './analytics';
+import { userSpecifiedAmount, CLARIFY } from './amount-guard';
 import type { ToolHandlers } from './types';
 
 @Injectable()
@@ -19,8 +20,13 @@ export class AgentToolsService {
     private readonly prices: PriceService,
   ) {}
 
-  /** Build the handler map bound to one authenticated user. */
-  forUser(userId: string, walletAddress: string): ToolHandlers {
+  /**
+   * Build the handler map bound to one authenticated user.
+   * `userText` is the current turn's message — used to deterministically block build_* proposals
+   * whose amount the user never actually specified (the model would otherwise invent one).
+   */
+  forUser(userId: string, walletAddress: string, userText?: string): ToolHandlers {
+    const hasAmount = userSpecifiedAmount(userText);
     return {
       get_portfolio: async () => {
         const [ethWei, usdc] = await Promise.all([
@@ -65,6 +71,7 @@ export class AgentToolsService {
         return { display: { kind: 'card' }, address: null, note: 'not a known @username; treat as raw address if it is 0x…' };
       },
       build_transfer: async (a) => {
+        if (!hasAmount) return { error: CLARIFY.transfer };
         const asset = a.asset === 'ETH' ? 'ETH' : 'USDC';
         if (asset === 'ETH') {
           const resolved = await this.transfers.resolve(String(a.recipient));
@@ -79,9 +86,11 @@ export class AgentToolsService {
         return { display: { kind: 'action', action: 'transfer' }, asset: 'USDC', ...res };
       },
       build_farming_deposit: async (a) => {
+        if (!hasAmount) return { error: CLARIFY.farming_deposit };
         return { display: { kind: 'action', action: 'farming_deposit' }, amountBase: String(a.amountBase) };
       },
       build_farming_withdraw: async (a) => {
+        if (!hasAmount) return { error: CLARIFY.farming_withdraw };
         return { display: { kind: 'action', action: 'farming_withdraw' }, amount: String(a.amount) };
       },
       get_token_info: async (a) => {

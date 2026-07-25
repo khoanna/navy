@@ -7,24 +7,17 @@ import { runAgentLoop } from './agent-loop';
 import { dispatchTool } from './tool-dispatch';
 import { trimMessages } from './context-window';
 import { TOOLS } from './tool-schemas';
+import { buildSystemPrompt, detectPromptContext } from './prompt';
 import type { ChatMessage } from './types';
 
-const SYSTEM_PROMPT = `You are Navy Assistant, an in-wallet AI for a USDC payment wallet on Ethereum Sepolia.
-You can read the user's balances, payment history, and farming position, and you can PROPOSE actions:
-sending USDC (gasless) and farming deposits/withdrawals. You NEVER move funds yourself — every action tool
-returns a proposal the user must confirm and sign in the app. Amounts are USDC base units (6 decimals):
-1 USDC = 1000000. Use get_portfolio before proposing a transfer or deposit if you are unsure of the balance.
-When the user names a recipient by @username, pass it directly as the recipient to build_transfer — the
-backend resolves usernames, so do NOT ask the user for a raw 0x address.
-When a transfer proposal is ready, ALWAYS confirm the recipient's resolved wallet address (the tool
-result's recipient.address) alongside their @username, plus the amount and asset, so the user can verify
-who they are paying before signing.
-If a tool returns an error, tell the user what went wrong in one short sentence and how to fix it.
-Always end your turn with a short message to the user — never reply with nothing.
-You can also look up any cryptocurrency's market data with get_token_info and top coins with get_top_coins.
-When you present token data, give a brief analysis (price, today's move, market position) in plain language —
-do not just list raw numbers.
-Be concise. Never claim a transfer or deposit has happened — only that a proposal is ready to confirm.`;
+/** Names of every tool referenced by the assistant messages already in this conversation. */
+function priorToolNames(messages: ChatMessage[]): string[] {
+  const names: string[] = [];
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.tool_calls) for (const c of m.tool_calls) names.push(c.function.name);
+  }
+  return names;
+}
 
 /** A sink the controller provides to forward streaming events to the HTTP response. */
 export interface StreamSink {
@@ -51,16 +44,18 @@ export class AgentService {
     const convo = await this.conversations.getOrCreate(userId, conversationId);
     const prior = await this.conversations.history(convo.id);
 
-    const base: ChatMessage[] = prior.length && prior[0].role === 'system'
-      ? prior
-      : [{ role: 'system', content: SYSTEM_PROMPT }, ...prior];
+    // Inject a freshly-composed system prompt each turn (never persisted), so we can append
+    // domain detail (farming/market) only when the turn touches it. Drop any legacy stored
+    // system message so old conversations pick up the current prompt too.
+    const history = prior.filter((m) => m.role !== 'system');
+    const ctx = detectPromptContext(userText, priorToolNames(history));
+    const systemMsg: ChatMessage = { role: 'system', content: buildSystemPrompt(ctx) };
     const userMsg: ChatMessage = { role: 'user', content: userText };
-    const seed = trimMessages([...base, userMsg], this.cfg.agentContextTokenBudget);
+    const seed = trimMessages([systemMsg, ...history, userMsg], this.cfg.agentContextTokenBudget);
 
-    if (prior.length === 0) await this.conversations.append(convo.id, { role: 'system', content: SYSTEM_PROMPT });
     await this.conversations.append(convo.id, userMsg);
 
-    const handlers = this.tools.forUser(userId, walletAddress);
+    const handlers = this.tools.forUser(userId, walletAddress, userText);
     const priorLen = seed.length;
 
     // Track the last tool error so we can surface it if the model ends the turn with no text
