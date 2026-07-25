@@ -1,18 +1,28 @@
 import type { ToolSchema } from './types';
+import { getPortfolio } from './prompt/tools/get-portfolio';
+import { getPaymentHistory } from './prompt/tools/get-payment-history';
+import { getFarmingSummary } from './prompt/tools/get-farming-summary';
+import { getSpendingAnalytics } from './prompt/tools/get-spending-analytics';
+import { resolveRecipient } from './prompt/tools/resolve-recipient';
+import { buildTransfer } from './prompt/tools/build-transfer';
+import { buildFarmingDeposit } from './prompt/tools/build-farming-deposit';
+import { buildFarmingWithdraw } from './prompt/tools/build-farming-withdraw';
+import { getTokenInfo } from './prompt/tools/get-token-info';
+import { getTopCoins } from './prompt/tools/get-top-coins';
 
 const str = { type: 'string' } as const;
 
 export const TOOLS: ToolSchema[] = [
-  { type: 'function', function: { name: 'get_portfolio', description: "Get the user's USDC + ETH balances and farming position.", parameters: { type: 'object', properties: {}, additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_payment_history', description: "List the user's recent paid orders.", parameters: { type: 'object', properties: { limit: { type: 'number' } }, additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_farming_summary', description: "Get the user's Compound farming position and earnings.", parameters: { type: 'object', properties: {}, additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_spending_analytics', description: 'Aggregate the user spending into a chart-ready series.', parameters: { type: 'object', properties: { period: { type: 'string', enum: ['day', 'week', 'month'] } }, additionalProperties: false } } },
-  { type: 'function', function: { name: 'resolve_recipient', description: 'Resolve a @username or 0x address to a wallet address.', parameters: { type: 'object', properties: { recipient: str }, required: ['recipient'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'build_transfer', description: 'Build a peer-to-peer send proposal for the user to confirm and sign. Call this DIRECTLY with the recipient the user named (do NOT ask for a 0x address when they gave a @username; the backend resolves usernames). amountBase is base units of the chosen asset: USDC has 6 decimals (1 USDC = 1000000); ETH is wei (1 ETH = 1000000000000000000). Default asset is USDC (gasless).', parameters: { type: 'object', properties: { recipient: { type: 'string', description: 'A @username or a 0x wallet address; pass the @username as-is.' }, amountBase: { type: 'string', description: 'Amount in base units of the asset (USDC 6-decimals, or ETH wei).' }, asset: { type: 'string', enum: ['USDC', 'ETH'], description: 'Which asset to send. Defaults to USDC.' } }, required: ['recipient', 'amountBase'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'build_farming_deposit', description: 'Propose supplying USDC to the Compound farming vault. amountBase = 6-decimal base units.', parameters: { type: 'object', properties: { amountBase: str }, required: ['amountBase'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'build_farming_withdraw', description: 'Propose withdrawing from the farming vault. amount = base units or the literal "all".', parameters: { type: 'object', properties: { amount: str }, required: ['amount'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_token_info', description: 'Look up live market data for ANY cryptocurrency by name or symbol (e.g. "BTC", "bitcoin", "solana"). Returns price, 24h/7d/30d change, market cap, rank, supply, ATH, and a short description. Use it to answer any price/market/"tell me about X" question. Summarize and analyze the result for the user — do not dump raw numbers.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Token name or symbol, e.g. "BTC" or "solana".' } }, required: ['query'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_top_coins', description: 'List the top cryptocurrencies by market capitalization (default 10). Use for "top coins" / "what is trending" questions.', parameters: { type: 'object', properties: { limit: { type: 'number' } }, additionalProperties: false } } },
+  { type: 'function', function: { name: getPortfolio.name, description: getPortfolio.description, parameters: { type: 'object', properties: {}, additionalProperties: false } } },
+  { type: 'function', function: { name: getPaymentHistory.name, description: getPaymentHistory.description, parameters: { type: 'object', properties: { limit: { type: 'number' } }, additionalProperties: false } } },
+  { type: 'function', function: { name: getFarmingSummary.name, description: getFarmingSummary.description, parameters: { type: 'object', properties: {}, additionalProperties: false } } },
+  { type: 'function', function: { name: getSpendingAnalytics.name, description: getSpendingAnalytics.description, parameters: { type: 'object', properties: { period: { type: 'string', enum: ['day', 'week', 'month'] } }, additionalProperties: false } } },
+  { type: 'function', function: { name: resolveRecipient.name, description: resolveRecipient.description, parameters: { type: 'object', properties: { recipient: str }, required: ['recipient'], additionalProperties: false } } },
+  { type: 'function', function: { name: buildTransfer.name, description: buildTransfer.description, parameters: { type: 'object', properties: { recipient: { type: 'string', description: 'A @username or a 0x wallet address; pass the @username as-is.' }, amountBase: { type: 'string', description: 'Amount in base units of the asset (USDC 6-decimals, or ETH wei). Must come from the user — never guessed.' }, asset: { type: 'string', enum: ['USDC', 'ETH'], description: 'Which asset to send. Defaults to USDC.' } }, required: ['recipient', 'amountBase'], additionalProperties: false } } },
+  { type: 'function', function: { name: buildFarmingDeposit.name, description: buildFarmingDeposit.description, parameters: { type: 'object', properties: { amountBase: str }, required: ['amountBase'], additionalProperties: false } } },
+  { type: 'function', function: { name: buildFarmingWithdraw.name, description: buildFarmingWithdraw.description, parameters: { type: 'object', properties: { amount: str }, required: ['amount'], additionalProperties: false } } },
+  { type: 'function', function: { name: getTokenInfo.name, description: getTokenInfo.description, parameters: { type: 'object', properties: { query: { type: 'string', description: 'Token name or symbol, e.g. "BTC" or "solana".' } }, required: ['query'], additionalProperties: false } } },
+  { type: 'function', function: { name: getTopCoins.name, description: getTopCoins.description, parameters: { type: 'object', properties: { limit: { type: 'number' } }, additionalProperties: false } } },
 ];
 
 export const TOOL_NAMES = TOOLS.map((t) => t.function.name);
