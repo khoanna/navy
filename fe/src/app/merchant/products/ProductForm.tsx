@@ -35,7 +35,10 @@ export function ProductForm({ initial, onSaved }: { initial?: ProductRow; onSave
     const err = validateImageFile(f);
     if (err) { setError(err); setFile(null); return; }
     setFile(f);
-    setPreview(URL.createObjectURL(f));
+    setPreview((prev) => {
+      if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
   }
 
   async function submit(e?: React.FormEvent) {
