@@ -3,46 +3,57 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { colors, radius, space } from './theme';
 
-const Ctx = createContext<(msg: string) => void>(() => {});
+export type ToastIntent = 'info' | 'success' | 'error';
 
-/** Returns a `show(message)` function that displays a transient toast. */
+const Ctx = createContext<(msg: string, intent?: ToastIntent) => void>(() => {});
+
+/** Returns a `show(message, intent?)` function that displays a transient toast. */
 export function useToast() {
   return useContext(Ctx);
 }
 
+const INTENT_BORDER: Record<ToastIntent, string> = {
+  info: colors.borderStrong,
+  success: colors.success,
+  error: colors.danger,
+};
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [msg, setMsg] = useState<string | null>(null);
+  const [state, setState] = useState<{ msg: string; intent: ToastIntent } | null>(null);
   const opacity = useRef(new Animated.Value(0)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const toast = useCallback((m: string) => {
+  const toast = useCallback((m: string, intent: ToastIntent = 'info') => {
     // Cancel any in-flight timer.
     if (timerRef.current !== null) clearTimeout(timerRef.current);
 
-    setMsg(m);
+    setState({ msg: m, intent });
     Animated.timing(opacity, {
       toValue: 1,
       duration: 180,
       useNativeDriver: true,
     }).start();
 
+    const dwell = intent === 'error' ? 4600 : 3200;
     timerRef.current = setTimeout(() => {
       Animated.timing(opacity, {
         toValue: 0,
         duration: 260,
         useNativeDriver: true,
-      }).start(() => setMsg(null));
-    }, 3200);
+      }).start(() => setState(null));
+    }, dwell);
   }, [opacity]);
 
   return (
     <Ctx.Provider value={toast}>
       {children}
-      {msg !== null && (
+      {state !== null && (
         <View style={styles.positioner} pointerEvents="none">
-          <Animated.View style={[styles.toast, { opacity }]}>
+          <Animated.View
+            style={[styles.toast, { opacity, borderLeftWidth: 3, borderLeftColor: INTENT_BORDER[state.intent] }]}
+          >
             <Text variant="body" color={colors.textHi}>
-              {msg}
+              {state.msg}
             </Text>
           </Animated.View>
         </View>
