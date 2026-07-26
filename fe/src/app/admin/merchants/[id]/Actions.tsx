@@ -7,17 +7,8 @@ import { Modal } from '@/ui/Modal';
 import { useToast } from '@/ui/Toast';
 import { mapError } from '@/lib/mapError';
 import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 import { colors, space, radius } from '@/ui/theme';
-
-async function detailOf(res: Response): Promise<string | undefined> {
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const b = body as { error?: unknown; message?: unknown };
-    if (typeof b.error === 'string') return b.error;
-    if (typeof b.message === 'string') return b.message;
-  }
-  return undefined;
-}
 
 export default function Actions({ id, canApprove }: { id: string; canApprove: boolean }) {
   const router = useRouter();

@@ -15,21 +15,12 @@ import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
 import { useAsync } from '@/lib/useAsync';
 import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 
 interface OrderItemRow { name: string; unitPrice: string; quantity: number; }
 interface OrderChargeRow { name: string; mode: string; value: number; amount: string; }
 interface Order { id: string; reference: string; amount: string; status: string; payer: string | null; txSignature: string | null; subtotal: string | null; description: string | null; items: OrderItemRow[]; charges: OrderChargeRow[]; }
 const TERMINAL = ['paid', 'expired', 'failed'];
-
-async function detailOf(res: Response): Promise<string | undefined> {
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const b = body as { error?: unknown; message?: unknown };
-    if (typeof b.error === 'string') return b.error;
-    if (typeof b.message === 'string') return b.message;
-  }
-  return undefined;
-}
 
 export default function OrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

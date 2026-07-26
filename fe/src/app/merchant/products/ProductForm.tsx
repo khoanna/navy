@@ -7,17 +7,8 @@ import { Text } from '@/ui/Text';
 import { useToast } from '@/ui/Toast';
 import { mapError } from '@/lib/mapError';
 import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 import { colors, space, radius } from '@/ui/theme';
-
-async function detailOf(res: Response): Promise<string | undefined> {
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const b = body as { error?: unknown; message?: unknown };
-    if (typeof b.error === 'string') return b.error;
-    if (typeof b.message === 'string') return b.message;
-  }
-  return undefined;
-}
 
 const inputStyle: React.CSSProperties = {
   background: colors.bgElevated, border: `1px solid ${colors.borderStrong}`,

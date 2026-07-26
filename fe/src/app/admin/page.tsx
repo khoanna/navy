@@ -16,22 +16,13 @@ import { statusTone } from '@/lib/dashboard/status';
 import { ADMIN_NAV } from '@/ui/nav';
 import { useAsync } from '@/lib/useAsync';
 import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 
 interface AdminStats {
   merchantsTotal: number; pending: number; approved: number; rejected: number; onchainRegistered: number;
   ordersTotal: number; volumeTotal: string; series: { date: string; amount: string }[];
   recentPending: { id: string; businessName: string; createdAt: string }[];
   recentPayments: { id: string; reference: string; amount: string; status: string }[];
-}
-
-async function detailOf(res: Response): Promise<string | undefined> {
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const b = body as { error?: unknown; message?: unknown };
-    if (typeof b.error === 'string') return b.error;
-    if (typeof b.message === 'string') return b.message;
-  }
-  return undefined;
 }
 
 export default function AdminOverview() {

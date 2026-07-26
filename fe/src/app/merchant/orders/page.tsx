@@ -18,20 +18,11 @@ import { statusTone } from '@/lib/dashboard/status';
 import { NewInvoiceForm } from './NewInvoiceForm';
 import { useAsync } from '@/lib/useAsync';
 import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 
 interface Order { id: string; reference: string; amount: string; status: string; createdAt: string; }
 
 const FILTERS = ['all', 'awaiting_payment', 'paid', 'expired'] as const;
-
-async function detailOf(res: Response): Promise<string | undefined> {
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const b = body as { error?: unknown; message?: unknown };
-    if (typeof b.error === 'string') return b.error;
-    if (typeof b.message === 'string') return b.message;
-  }
-  return undefined;
-}
 
 export default function Orders() {
   const router = useRouter();
