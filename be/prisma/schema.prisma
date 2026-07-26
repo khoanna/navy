@@ -155,15 +155,17 @@ model PayoutChallenge {
 }
 
 model Product {
-  id         String   @id @default(uuid())
-  merchantId String
-  merchant   Merchant @relation(fields: [merchantId], references: [id])
-  name       String
-  sku        String?
-  unitPrice  BigInt
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String   @id @default(uuid())
+  merchantId    String
+  merchant      Merchant @relation(fields: [merchantId], references: [id])
+  name          String
+  sku           String?
+  unitPrice     BigInt
+  imageUrl      String?
+  imagePublicId String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model MerchantCharge {
