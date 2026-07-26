@@ -13,6 +13,11 @@ export class OrderAuthService {
   ) {}
 
   async verify(apiKey: string, rawBody: string, signature: string): Promise<{ merchantId: string }> {
+    // Reject a missing/malformed key or signature up front — never pass `undefined`
+    // into the unique lookup (Prisma throws on that, surfacing a 500 instead of a 401).
+    if (typeof apiKey !== 'string' || !apiKey || typeof signature !== 'string' || !signature) {
+      throw new UnauthorizedException('Missing API key or signature');
+    }
     const key = await this.prisma.merchantApiKey.findUnique({ where: { apiKey } });
     if (!key || key.status !== 'active' || !key.secretEnc || !key.dataKeyWrapped) {
       throw new UnauthorizedException('Invalid API key');
