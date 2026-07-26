@@ -68,4 +68,8 @@ export class NavyConfigService {
   // --- CoinGecko (market data) ---
   get coinGeckoApiKey(): string { return this.env.COINGECKO_API_KEY ?? ''; }
   get coinGeckoBaseUrl(): string { return this.env.COINGECKO_BASE_URL ?? 'https://api.coingecko.com/api/v3'; }
+  // --- Cloudinary (product images) ---
+  get cloudinaryCloudName(): string { return this.req('CLOUDINARY_CLOUD_NAME'); }
+  get cloudinaryApiKey(): string { return this.req('CLOUDINARY_API_KEY'); }
+  get cloudinaryApiSecret(): string { return this.req('CLOUDINARY_API_SECRET'); }
 }
