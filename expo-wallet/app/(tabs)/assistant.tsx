@@ -24,10 +24,12 @@ import { streamAgentChat } from '@/lib/agent/agentClient';
 import { TransferClient } from '@/lib/transfer/transferClient';
 import { FarmingClient } from '@/lib/farming/farmingClient';
 import { mapSendError } from '@/lib/wallet/sendErrors';
+import { mapError } from '@/lib/ui/mapError';
 import { short } from '@/lib/wallet/identicon';
 
 import { Text } from '@/ui/Text';
 import { Icon } from '@/ui/Icon';
+import { useToast } from '@/ui/Toast';
 import { colors, radius, space } from '@/ui/theme';
 
 import { PortfolioCard } from '@/features/assistant/PortfolioCard';
@@ -36,11 +38,15 @@ import { ChartCard } from '@/features/assistant/ChartCard';
 import { TransferConfirmCard } from '@/features/assistant/TransferConfirmCard';
 import { FarmingConfirmCard } from '@/features/assistant/FarmingConfirmCard';
 import { TokenInfoCard, formatUsd } from '@/features/assistant/TokenInfoCard';
+import { Markdown } from '@/features/assistant/Markdown';
+import { TypingDots } from '@/features/assistant/TypingDots';
+import { useTypewriter } from '@/features/assistant/useTypewriter';
 
 export default function Assistant() {
   const { session, authedFetch } = useNavySession();
   const token = session?.tokens.accessToken;
   const { signTypedData, sendTransaction } = useMobileSigner();
+  const toast = useToast();
 
   const [state, dispatch] = useReducer(chatReducer, undefined, initialChat);
   const [input, setInput] = useState('');
@@ -63,9 +69,11 @@ export default function Assistant() {
         break;
       case 'error':
         dispatch({ type: 'error', message: e.data.message });
+        // Immediate, dismissible signal in addition to the in-chat error bubble.
+        toast(mapError(e.data.message).detail, 'error');
         break;
     }
-  }, []);
+  }, [toast]);
 
   const send = useCallback(
     async (text: string) => {
@@ -79,13 +87,13 @@ export default function Assistant() {
           onEvent,
         );
       } catch (err) {
-        dispatch({
-          type: 'error',
-          message: err instanceof Error ? err.message : 'Something went wrong',
-        });
+        const mapped = mapError(err);
+        dispatch({ type: 'error', message: mapped.detail });
+        // Immediate, dismissible signal in addition to the in-chat error bubble.
+        toast(mapped.detail, 'error');
       }
     },
-    [token, state.conversationId, onEvent],
+    [token, state.conversationId, onEvent, toast],
   );
 
   // The input's send button: guard streaming, clear the box, then dispatch.
@@ -109,23 +117,32 @@ export default function Assistant() {
         }
       } catch (e) {
         const { title, detail } = mapSendError(e);
+        // Immediate, actionable signal; the card also shows its Failed state and the model explains.
+        toast(`${title} — ${detail}`, 'error');
         void send(`The send failed: ${title} — ${detail}. Briefly explain and tell me what to do next.`);
         throw e; // let the confirm card show its Failed state too
       }
     },
-    [signTypedData, sendTransaction, authedFetch, send],
+    [signTypedData, sendTransaction, authedFetch, send, toast],
   );
 
   const onConfirmFarming = useCallback(
     (result: any) => async () => {
       const fc = new FarmingClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
-      if (result.display.action === 'farming_deposit') {
-        await fc.deposit(token!, result.amountBase);
-      } else {
-        await fc.withdraw(token!, result.amount);
+      try {
+        if (result.display.action === 'farming_deposit') {
+          await fc.deposit(token!, result.amountBase);
+        } else {
+          await fc.withdraw(token!, result.amount);
+        }
+      } catch (e) {
+        const { title, detail } = mapSendError(e);
+        // Immediate, actionable signal; the card also shows its Failed state on rethrow.
+        toast(`${title} — ${detail}`, 'error');
+        throw e;
       }
     },
-    [authedFetch, token],
+    [authedFetch, token, toast],
   );
 
   // Guard: no session / no authed fetch → prompt to sign in.
@@ -251,18 +268,9 @@ function MessageRow({
   }
 
   if (message.role === 'assistant') {
-    const isTypingPlaceholder = streaming && isTrailing && message.text === '';
-    return (
-      <View style={[styles.bubbleRow, styles.assistantRow]}>
-        <View style={[styles.bubble, styles.assistantBubble]}>
-          {isTypingPlaceholder ? (
-            <Text dim>…</Text>
-          ) : (
-            <Text color={colors.text}>{message.text}</Text>
-          )}
-        </View>
-      </View>
-    );
+    // The trailing assistant reply animates text-by-text as it streams; earlier
+    // messages render in full immediately (no re-animation on re-render).
+    return <AssistantBubble text={message.text} animate={isTrailing} streaming={streaming} />;
   }
 
   // Tool message. A tool that returned an error (e.g. the backend asking us to clarify an
@@ -277,6 +285,32 @@ function MessageRow({
         onConfirmTransfer={onConfirmTransfer}
         onConfirmFarming={onConfirmFarming}
       />
+    </View>
+  );
+}
+
+/**
+ * Assistant text bubble: renders Markdown, revealed text-by-text while the reply
+ * streams. Shows an animated typing indicator until the first character lands
+ * (e.g. while the model is still calling a tool).
+ */
+function AssistantBubble({
+  text,
+  animate,
+  streaming,
+}: {
+  text: string;
+  animate: boolean;
+  streaming: boolean;
+}) {
+  const revealed = useTypewriter(text, animate);
+  const showDots = revealed.length === 0 && streaming;
+  if (revealed.length === 0 && !streaming) return null; // tool-only turn, no text
+  return (
+    <View style={[styles.bubbleRow, styles.assistantRow]}>
+      <View style={[styles.bubble, styles.assistantBubble]}>
+        {showDots ? <TypingDots /> : <Markdown text={revealed} />}
+      </View>
     </View>
   );
 }
