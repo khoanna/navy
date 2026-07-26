@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sessionBackendFetch } from '@/lib/session-backend';
-import { guardOrigin, parseJson } from '@/lib/request-guards';
+import { sessionBackendFetch, sessionBackendFetchRaw } from '@/lib/session-backend';
+import { guardOrigin } from '@/lib/request-guards';
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const rejected = guardOrigin(req);
   if (rejected) return rejected;
   const { id } = await ctx.params;
-  const parsed = await parseJson(req);
-  if (!parsed.ok) return parsed.response;
-  const res = await sessionBackendFetch(`/merchant/products/${id}`, { method: 'PATCH', body: JSON.stringify(parsed.body) });
+  const form = await req.formData();
+  const res = await sessionBackendFetchRaw(`/merchant/products/${id}`, { method: 'PATCH', body: form });
   return NextResponse.json(await res.json().catch(() => ({})), { status: res.status });
 }
 
