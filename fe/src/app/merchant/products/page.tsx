@@ -57,6 +57,11 @@ export default function Products() {
   const closeAndReload = () => { setCreating(false); setEditing(null); retry(); };
 
   const cols: Column<ProductRow>[] = [
+    { key: 'img', header: '', render: (p) => (
+      p.imageUrl
+        ? <img src={p.imageUrl} alt={p.name} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: `1px solid ${colors.borderStrong}` }} />
+        : <div style={{ width: 40, height: 40, borderRadius: 8, background: colors.bgElevated, border: `1px solid ${colors.borderStrong}` }} aria-hidden />
+    ) },
     { key: 'name', header: 'Name', render: (p) => <Text variant="bodyStrong" color={colors.textHi}>{p.name}</Text> },
     { key: 'sku', header: 'SKU', render: (p) => <Text variant="body" dim>{p.sku ?? '—'}</Text> },
     { key: 'price', header: 'Unit price', align: 'right', render: (p) => <Text variant="body" numeric>{formatUsdc(p.unitPrice)} USDC</Text> },
