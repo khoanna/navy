@@ -5,6 +5,8 @@ import { colors, space, radius } from '@/ui/theme';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { AuthCard } from '@/ui/AuthCard';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 
 const inputStyle: React.CSSProperties = {
   background: colors.bgElevated,
@@ -53,8 +55,9 @@ export default function MerchantLogin() {
       // Surface the backend's reason (e.g. "password must be longer than or
       // equal to 8 characters") instead of a generic label.
       const data = await res.json().catch(() => null);
+      const detail = data && typeof data.error === 'string' ? data.error : undefined;
       const fallback = mode === 'login' ? 'Invalid credentials' : 'Signup failed';
-      setError((data && typeof data.error === 'string' && data.error) || fallback);
+      setError(res.status === 401 && !detail ? fallback : mapError(new NavyApiError('auth failed', res.status, detail)).detail);
     } finally {
       busyRef.current = false;
       setBusy(false);
