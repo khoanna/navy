@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text as RNText,
@@ -12,12 +12,15 @@ import { useNavySession } from '@/lib/auth/SessionContext';
 import { getEnv } from '@/lib/config/env';
 import { NavyPayClient, Payment } from '@/lib/pay/navyPayClient';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
+import { useAsync } from '@/lib/ui/useAsync';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Card } from '@/ui/Card';
 import { Icon } from '@/ui/Icon';
 import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
-import { Skeleton } from '@/ui/Skeleton';
+import { SkeletonList } from '@/ui/SkeletonList';
+import { ErrorState } from '@/ui/ErrorState';
+import { StaleChip } from '@/ui/StaleChip';
 import { colors, radius, space } from '@/ui/theme';
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -86,36 +89,25 @@ type ListItem =
 
 export default function History() {
   const { session, authedFetch } = useNavySession();
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const token = session?.tokens.accessToken;
   const [filter, setFilter] = useState('all');
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
 
-  const load = useCallback(async () => {
-    const token = session?.tokens.accessToken;
-    if (!token) return;
-    try {
-      setPayments(
-        await new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined).getUserPayments(token),
-      );
-    } catch {
-      setPayments([]);
-    } finally {
-      setLoaded(true);
-    }
-  }, [session]);
+  const { data, loading, refreshing, error, staleError, retry } = useAsync<Payment[]>(
+    async () => {
+      if (!token) return [];
+      return new NavyPayClient(
+        getEnv().navyApiUrl,
+        undefined,
+        authedFetch ?? undefined,
+      ).getUserPayments(token);
+    },
+    { deps: [token] },
+  );
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const pull = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+  const payments = useMemo(() => data ?? [], [data]);
+  const pull = retry;
 
   const availableFilters = useMemo(
     () => FILTERS.filter((f) => f.key === 'all' || payments.some(f.match)),
@@ -254,16 +246,24 @@ export default function History() {
       )}
 
       {/* Loading skeleton */}
-      {!loaded && (
+      {loading && (
         <View style={styles.skeletonWrap}>
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} width="100%" height={64} style={styles.skeletonRow} />
-          ))}
+          <SkeletonList rows={3} height={64} />
+        </View>
+      )}
+
+      {/* Blocking load error (no data) */}
+      {error && <ErrorState error={error} onRetry={retry} />}
+
+      {/* Non-blocking refresh failure while data is present */}
+      {staleError && (
+        <View style={styles.staleWrap}>
+          <StaleChip onRetry={retry} />
         </View>
       )}
 
       {/* Grouped list via FlatList */}
-      {loaded && listItems.length > 0 && (
+      {!loading && !error && listItems.length > 0 && (
         <Card glass compact style={styles.listCard}>
           <FlatList
             data={listItems}
@@ -275,7 +275,7 @@ export default function History() {
       )}
 
       {/* Empty state */}
-      {loaded && filtered.length === 0 && (
+      {!loading && !error && filtered.length === 0 && (
         <View style={styles.empty}>
           <GlowIcon name="clock" color={colors.textDim} size={92} />
           <Text
@@ -349,8 +349,8 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginTop: space.lg,
   },
-  skeletonRow: {
-    borderRadius: radius.md,
+  staleWrap: {
+    marginTop: space.md,
   },
   listCard: {
     marginTop: space.lg,

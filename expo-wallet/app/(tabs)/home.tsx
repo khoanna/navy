@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text as RNText,
@@ -20,14 +20,24 @@ import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { short, avatarColors } from '@/lib/wallet/identicon';
 import { earnTip } from '@/lib/wallet/tips';
 import { MarketClient } from '@/lib/market/marketClient';
+import { useAsync } from '@/lib/ui/useAsync';
 
 import { Text } from '@/ui/Text';
 import { Gradient } from '@/ui/Gradient';
 import { Card } from '@/ui/Card';
 import { Icon, IconName } from '@/ui/Icon';
 import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
+import { ErrorState } from '@/ui/ErrorState';
+import { StaleChip } from '@/ui/StaleChip';
 import { colors, gradients, radius, space } from '@/ui/theme';
 import { FundButton } from '@/features/wallet/FundButton';
+
+interface HomeData {
+  eth: string;
+  usdc: string;
+  ethUsd: number | null;
+  recent: Payment[];
+}
 
 export default function Home() {
   const router = useRouter();
@@ -35,54 +45,59 @@ export default function Home() {
   const { address } = useMobileSigner();
   const token = session?.tokens.accessToken;
 
-  const [eth, setEth] = useState('—');
-  const [usdc, setUsdc] = useState('—');
-  const [recent, setRecent] = useState<Payment[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [ethUsd, setEthUsd] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
-    const env = getEnv();
-    if (address) {
-      try {
+  const { data, loading, refreshing, error, staleError, retry } = useAsync<HomeData>(
+    async () => {
+      const env = getEnv();
+
+      // Balances are the primary, blocking data. A failure here surfaces as an error.
+      let eth = '0';
+      let usdc = '0';
+      if (address) {
         const provider = new JsonRpcProvider(env.sepoliaRpc);
         const usdcReader = makeUsdcReader(provider, env.usdcAddress);
         const b = await fetchBalances(provider, address, usdcReader);
-        setEth(weiToEth(b.ethWei));
-        setUsdc(usdcBaseToDisplay(b.usdcBase));
-      } catch {
-        setEth('0');
-        setUsdc('0');
+        eth = weiToEth(b.ethWei);
+        usdc = usdcBaseToDisplay(b.usdcBase);
       }
-    }
-    if (authedFetch) {
-      try {
-        const prices = await new MarketClient(getEnv().navyApiUrl, authedFetch).getPrices(['ethereum']);
-        setEthUsd(prices.ethereum?.priceUsd ?? null);
-      } catch {
-        setEthUsd(null);
-      }
-    }
-    if (token) {
-      try {
-        const list = await new NavyPayClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined).getUserPayments(token);
-        setRecent(list.slice(0, 3));
-      } catch {
-        setRecent([]);
-      }
-    }
-  }, [address, token, authedFetch]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+      // Prices are best-effort: a null ethUsd is a valid, non-blocking state.
+      let ethUsd: number | null = null;
+      if (authedFetch) {
+        try {
+          const prices = await new MarketClient(env.navyApiUrl, authedFetch).getPrices(['ethereum']);
+          ethUsd = prices.ethereum?.priceUsd ?? null;
+        } catch {
+          ethUsd = null;
+        }
+      }
 
-  const refresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+      // Recent payments are best-effort too — the full list lives on the History tab.
+      let recent: Payment[] = [];
+      if (token) {
+        try {
+          const list = await new NavyPayClient(
+            env.navyApiUrl,
+            undefined,
+            authedFetch ?? undefined,
+          ).getUserPayments(token);
+          recent = list.slice(0, 3);
+        } catch {
+          recent = [];
+        }
+      }
+
+      return { eth, usdc, ethUsd, recent };
+    },
+    { deps: [address, token, authedFetch] },
+  );
+
+  const refresh = retry;
+  const eth = data?.eth ?? '—';
+  const usdc = data?.usdc ?? '—';
+  const ethUsd = data?.ethUsd ?? null;
+  const recent = data?.recent ?? [];
 
   const copyAddress = async () => {
     if (!address) return;
@@ -163,7 +178,11 @@ export default function Home() {
             <Text variant="label" upper color="rgba(255,255,255,0.6)">
               Total balance
             </Text>
-            {usdc === '—' ? (
+            {error ? (
+              <View style={styles.heroError}>
+                <ErrorState compact error={error} onRetry={retry} />
+              </View>
+            ) : loading || usdc === '—' ? (
               <View style={styles.balSkeleton} />
             ) : totalUsd != null ? (
               <>
@@ -197,6 +216,13 @@ export default function Home() {
             <FundButton address={address} variant="ghost" />
           </View>
         </Gradient>
+
+        {/* Non-blocking refresh failure — last-good balances stay visible above */}
+        {staleError && (
+          <View style={styles.staleWrap}>
+            <StaleChip onRetry={retry} />
+          </View>
+        )}
 
         {/* Quick actions row: Receive · Send · Pay · Earn */}
         <View style={styles.actions}>
@@ -433,6 +459,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     backgroundColor: 'rgba(255,255,255,0.16)',
     marginTop: 6,
+  },
+  heroError: {
+    marginTop: space.sm,
+    alignSelf: 'stretch',
+  },
+  staleWrap: {
+    marginTop: space.md,
   },
   solLine: {
     marginTop: 2,

@@ -1,6 +1,15 @@
 'use client';
 import React, { useCallback, useState } from 'react';
 import { BrowserProvider, type Eip1193Provider } from 'ethers';
+import { Button } from '@/ui/Button';
+import { Text } from '@/ui/Text';
+import { ErrorState } from '@/ui/ErrorState';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
+import type { MappedError } from '@/lib/mapError';
+import { colors, space } from '@/ui/theme';
 
 declare global {
   interface Window {
@@ -9,35 +18,44 @@ declare global {
 }
 
 export default function WalletConnect() {
+  const toast = useToast();
   const [address, setAddress] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<MappedError | null>(null);
 
   const connect = useCallback(async () => {
-    if (!window.ethereum) { setStatus('No EVM wallet found. Install MetaMask.'); return; }
-    setStatus('Connecting…');
+    if (!window.ethereum) { setErr(mapError(new Error('No EVM wallet found. Install MetaMask.'))); return; }
+    setErr(null);
+    setConnecting(true);
     try {
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       setAddress(await signer.getAddress());
-      setStatus('');
     } catch (e) {
-      setStatus(`Failed to connect: ${(e as Error).message}`);
+      setErr(mapError(e));
+    } finally {
+      setConnecting(false);
     }
   }, []);
 
   const setPayout = useCallback(async () => {
-    if (!window.ethereum) { setStatus('Connect a wallet first'); return; }
-    setStatus('Requesting signature…');
+    if (!window.ethereum) { setErr(mapError(new Error('Connect a wallet first'))); return; }
+    setErr(null);
+    setSaving(true);
     try {
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
 
-      const prep = await fetch('/api/merchant/payout/prepare', {
+      const prepRes = await fetch('/api/merchant/payout/prepare', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address: addr }),
-      }).then((r) => r.json());
-      if (!prep.ok || !prep.message) { setStatus(prep.error ?? 'Could not get signing challenge'); return; }
+      });
+      const prep = await prepRes.json().catch(() => null);
+      if (!prepRes.ok || !prep?.ok || !prep?.message) {
+        throw new NavyApiError('challenge failed', prepRes.status, prep?.error ?? 'Could not get signing challenge');
+      }
       const message: string = prep.message;
 
       const signature = await signer.signMessage(message);
@@ -46,19 +64,24 @@ export default function WalletConnect() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addr, message, signature }),
       });
-      setStatus(res.ok ? `Payout address set: ${addr}` : 'Backend rejected the payout binding');
+      if (!res.ok) throw new NavyApiError('payout failed', res.status, await detailOf(res));
+      toast('Payout wallet connected', 'success');
     } catch (e) {
-      setStatus(`Failed: ${(e as Error).message}`);
+      setErr(mapError(e));
+    } finally {
+      setSaving(false);
     }
-  }, []);
+  }, [toast]);
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div style={{ display: 'grid', gap: space.md }}>
       {address
-        ? <p>Connected: {address}</p>
-        : <button onClick={connect}>Connect wallet</button>}
-      <button onClick={setPayout} disabled={!address}>Set payout address</button>
-      {status && <p>{status}</p>}
+        ? <Text variant="body" color={colors.textHi}>Connected: {address}</Text>
+        : <div style={{ maxWidth: 220 }}><Button label="Connect wallet" variant="secondary" loading={connecting} onPress={connect} /></div>}
+      <div style={{ maxWidth: 220 }}>
+        <Button label="Set payout address" loading={saving} disabled={!address} onPress={setPayout} />
+      </div>
+      {err && <ErrorState compact error={err} onRetry={() => setErr(null)} />}
     </div>
   );
 }

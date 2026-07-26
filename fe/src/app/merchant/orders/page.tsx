@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AppShell } from '@/ui/AppShell';
@@ -9,11 +9,16 @@ import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
 import { Pill } from '@/ui/Bits';
 import { Modal } from '@/ui/Modal';
+import { ErrorState } from '@/ui/ErrorState';
+import { SkeletonList } from '@/ui/SkeletonList';
 import { colors, space, radius } from '@/ui/theme';
 import { MERCHANT_NAV } from '@/ui/nav';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
 import { NewInvoiceForm } from './NewInvoiceForm';
+import { useAsync } from '@/lib/useAsync';
+import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 
 interface Order { id: string; reference: string; amount: string; status: string; createdAt: string; }
 
@@ -21,28 +26,15 @@ const FILTERS = ['all', 'awaiting_payment', 'paid', 'expired'] as const;
 
 export default function Orders() {
   const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
   const [status, setStatus] = useState('all');
   const [showNew, setShowNew] = useState(false);
 
-  const reload = async () => {
+  const { data: orders, loading, error, staleError, retry } = useAsync<Order[]>(async () => {
     const res = await fetch(`/api/merchant/orders?status=${status}`);
-    if (res.status === 401) { router.replace('/merchant/login'); return; }
-    if (res.ok) setOrders(await res.json());
-  };
-
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      const res = await fetch(`/api/merchant/orders?status=${status}`);
-      if (!active) return;
-      if (res.status === 401) { router.replace('/merchant/login'); return; }
-      if (res.ok) setOrders(await res.json());
-    };
-    load();
-    const t = setInterval(load, 4000);
-    return () => { active = false; clearInterval(t); };
-  }, [status, router]);
+    if (res.status === 401) { router.replace('/merchant/login'); throw new NavyApiError('unauthorized', 401); }
+    if (!res.ok) throw new NavyApiError('orders failed', res.status, await detailOf(res));
+    return res.json();
+  }, { poll: 4000, deps: [status] });
 
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -92,9 +84,22 @@ export default function Orders() {
           );
         })}
       </nav>
-      <DataTable columns={cols} rows={orders} empty="No orders." />
+      {loading && !orders ? (
+        <SkeletonList rows={5} height={56} />
+      ) : error && !orders ? (
+        <ErrorState error={error} onRetry={retry} />
+      ) : (
+        <>
+          {staleError && (
+            <button onClick={retry} style={{ marginBottom: space.md, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <Text variant="caption" color={colors.warning}>Couldn’t refresh · Retry</Text>
+            </button>
+          )}
+          <DataTable columns={cols} rows={orders ?? []} empty="No orders." />
+        </>
+      )}
       <Modal open={showNew} title="New invoice" subtitle="Create a payment request and share its QR." onClose={() => setShowNew(false)}>
-        <NewInvoiceForm onCreated={reload} />
+        <NewInvoiceForm onCreated={retry} />
       </Modal>
     </AppShell>
   );

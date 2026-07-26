@@ -4,9 +4,13 @@ import { Card } from '@/ui/Card';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
 import { IconBadge, Field } from '@/ui/Bits';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 import { colors, space } from '@/ui/theme';
 
 export default function ApiKeyPanel() {
+  const toast = useToast();
   const [issued, setIssued] = useState<{ apiKey: string; apiSecret: string } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -16,9 +20,15 @@ export default function ApiKeyPanel() {
     setBusy(true);
     try {
       const res = await fetch('/api/merchant/api-keys', { method: 'POST' });
-      const body = await res.json();
-      if (res.ok) setIssued({ apiKey: body.apiKey, apiSecret: body.apiSecret });
-      else setError(body.error ?? 'Failed (is your merchant account approved?)');
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new NavyApiError('api key failed', res.status,
+          (body && typeof body.error === 'string' ? body.error : undefined) ?? 'Failed (is your merchant account approved?)');
+      }
+      setIssued({ apiKey: body.apiKey, apiSecret: body.apiSecret });
+      toast('API key generated', 'success');
+    } catch (e) {
+      setError(mapError(e).detail);
     } finally {
       setBusy(false);
     }

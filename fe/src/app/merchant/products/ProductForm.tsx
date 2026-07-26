@@ -4,6 +4,10 @@ import { usdcInputToBaseUnits } from '@/lib/money';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 import { colors, space, radius } from '@/ui/theme';
 
 const inputStyle: React.CSSProperties = {
@@ -14,6 +18,7 @@ const inputStyle: React.CSSProperties = {
 export interface ProductRow { id: string; name: string; sku: string | null; unitPrice: string; active: boolean; }
 
 export function ProductForm({ initial, onSaved }: { initial?: ProductRow; onSaved: () => void }) {
+  const toast = useToast();
   const [name, setName] = useState(initial?.name ?? '');
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [price, setPrice] = useState(initial ? formatUsdc(initial.unitPrice) : '');
@@ -29,11 +34,18 @@ export function ProductForm({ initial, onSaved }: { initial?: ProductRow; onSave
     if (!name.trim()) { setError('Name is required'); return; }
     setSaving(true);
     const body = JSON.stringify({ name: name.trim(), sku: sku.trim() || undefined, unitPrice });
-    const res = initial
-      ? await fetch(`/api/merchant/products/${initial.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
-      : await fetch('/api/merchant/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    setSaving(false);
-    if (res.ok) onSaved(); else setError(`Failed (${res.status})`);
+    try {
+      const res = initial
+        ? await fetch(`/api/merchant/products/${initial.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
+        : await fetch('/api/merchant/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (!res.ok) throw new NavyApiError('save product failed', res.status, await detailOf(res));
+      toast(initial ? 'Product updated' : 'Product added', 'success');
+      onSaved();
+    } catch (err) {
+      setError(mapError(err).detail);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

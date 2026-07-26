@@ -9,10 +9,12 @@ import { Splash } from '@/ui/Splash';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
+import { ErrorState } from '@/ui/ErrorState';
 import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
 import { OtpInput } from '@/ui/OtpInput';
 import { isComplete } from '@/lib/ui/otp';
+import { mapError, MappedError } from '@/lib/ui/mapError';
 import { RELYING_PARTY } from '@/lib/config/privy';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
@@ -32,13 +34,20 @@ export default function Login() {
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [authError, setAuthError] = useState<MappedError | null>(null);
+  const [lastAttempt, setLastAttempt] = useState<(() => void) | null>(null);
 
-  const run = async (fn: () => Promise<void>, label: string) => {
+  const run = async (fn: () => Promise<void>, label: string, retry?: () => void) => {
     setBusy(true);
+    setAuthError(null);
     try {
       await fn();
     } catch (e) {
-      toast(`${label}: ${(e as Error).message}`);
+      const mapped = mapError(e);
+      // Persistent, retryable error beneath the form — plus a transient toast.
+      setAuthError({ title: label, detail: mapped.detail });
+      setLastAttempt(() => retry ?? null);
+      toast(`${label}: ${mapped.detail}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -61,7 +70,7 @@ export default function Login() {
     run(async () => {
       await loginWithPasskey({ relyingParty: RELYING_PARTY });
       await finish();
-    }, 'Passkey login failed');
+    }, 'Passkey login failed', passkey);
 
   // OAuth on Expo: login({ provider }) opens an in-app browser via expo-web-browser.
   // The promise resolves inline (not redirect-based), so we call finish() after.
@@ -69,19 +78,19 @@ export default function Login() {
     run(async () => {
       await loginWithOAuth({ provider });
       await finish();
-    }, 'Social login failed');
+    }, 'Social login failed', () => social(provider));
 
   const sendCode = () =>
     run(async () => {
       await email.sendCode({ email: emailAddr });
       setSent(true);
-    }, 'Could not send code');
+    }, 'Could not send code', sendCode);
 
   const verify = (c: string) =>
     run(async () => {
       await email.loginWithCode({ code: c });
       await finish();
-    }, 'Verification failed');
+    }, 'Verification failed', () => verify(c));
 
   // Hold the splash while the redirect above fires, so the form never flashes.
   if (initializing || session) return <Splash />;
@@ -193,6 +202,17 @@ export default function Login() {
           </Pressable>
         </View>
       )}
+
+      {/* Persistent auth error + retry (survives past the transient toast) */}
+      {authError && (
+        <View style={styles.errorWrap}>
+          <ErrorState
+            compact
+            error={authError}
+            onRetry={lastAttempt ?? undefined}
+          />
+        </View>
+      )}
     </Screen>
   );
 }
@@ -263,6 +283,9 @@ const styles = StyleSheet.create({
     marginTop: space.xxl,
   },
   resendWrap: {
+    marginTop: space.xl,
+  },
+  errorWrap: {
     marginTop: space.xl,
   },
 });

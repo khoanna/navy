@@ -5,6 +5,8 @@ import { colors, space, radius } from '@/ui/theme';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { AuthCard } from '@/ui/AuthCard';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 
 const inputStyle: React.CSSProperties = {
   background: colors.bgElevated,
@@ -46,8 +48,10 @@ export default function AdminLogin() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, totp }),
       });
-      if (res.ok) router.replace('/admin');
-      else setError('Invalid credentials or TOTP');
+      if (res.ok) { router.replace('/admin'); return; }
+      const data = await res.json().catch(() => null);
+      const detail = data && typeof data.error === 'string' ? data.error : undefined;
+      setError(res.status === 401 && !detail ? 'Invalid credentials or TOTP' : mapError(new NavyApiError('login failed', res.status, detail)).detail);
     } finally {
       busyRef.current = false;
       setBusy(false);

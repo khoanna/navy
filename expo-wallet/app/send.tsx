@@ -27,8 +27,9 @@ import { runTransferFlow } from '@/lib/transfer/transferFlow';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { Card } from '@/ui/Card';
+import { ErrorState } from '@/ui/ErrorState';
 import { SlideToConfirm } from '@/ui/SlideToConfirm';
-import { useToast } from '@/ui/Toast';
+import { useToast, ToastIntent } from '@/ui/Toast';
 import { colors, radius, space } from '@/ui/theme';
 
 /** Reserve a little ETH for gas so a MAX/ETH send can still be mined. Matches the backend. */
@@ -118,7 +119,7 @@ function SendInner({
   sendTransaction: (a: { to: string; valueWei: string }) => Promise<string>;
   params: { to?: string; amountWei?: string; asset?: string };
   router: ReturnType<typeof useRouter>;
-  toast: (m: string) => void;
+  toast: (m: string, intent?: ToastIntent) => void;
 }) {
   const [asset, setAsset] = useState<Asset>(params.asset === 'ETH' ? 'ETH' : 'USDC');
   const [amount, setAmount] = useState<string>(() =>
@@ -250,7 +251,7 @@ function SendInner({
     work()
       .then(() => {
         setPhase('done');
-        toast('Sent');
+        toast('Sent', 'success');
         router.back();
       })
       .catch((e) => {
@@ -388,15 +389,10 @@ function SendInner({
           </Text>
         </Card>
 
-        {/* Error state */}
+        {/* Send failure — persistent + retryable (distinct from inline recipient errors) */}
         {phase === 'error' && sendErr && (
           <Card compact style={styles.errCard}>
-            <Text variant="bodyStrong" color={colors.danger}>
-              {sendErr.title}
-            </Text>
-            <Text variant="caption" color={colors.text} style={{ marginTop: space.xs }}>
-              {sendErr.detail}
-            </Text>
+            <ErrorState compact error={sendErr} onRetry={canSend ? doSend : undefined} />
           </Card>
         )}
 

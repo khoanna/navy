@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
@@ -7,6 +7,8 @@ import { useNavySession } from '@/lib/auth/SessionContext';
 import { FarmingClient, formatUsdc, Position } from '@/lib/farming/farmingClient';
 import { AutoFarmToggle } from '@/features/farming/AutoFarmToggle';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
+import { useAsync } from '@/lib/ui/useAsync';
+import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
@@ -14,7 +16,8 @@ import { Card } from '@/ui/Card';
 import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
 import { IconBadge, GlowIcon, Pill, PressRow } from '@/ui/Bits';
-import { Skeleton } from '@/ui/Skeleton';
+import { ErrorState } from '@/ui/ErrorState';
+import { StaleChip } from '@/ui/StaleChip';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
@@ -29,41 +32,38 @@ export default function Farming() {
   const token = session?.tokens.accessToken;
   const client = new FarmingClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
 
-  const [pos, setPos] = useState<Position | null>(null);
   const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [actionError, setActionError] = useState<MappedError | null>(null);
+  const [lastAction, setLastAction] = useState<(() => void) | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!token) return;
-    try {
-      setPos(await client.getPosition(token));
-    } catch {
-      setPos(null);
-    } finally {
-      setLoaded(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  const {
+    data: pos,
+    loading,
+    refreshing,
+    error,
+    staleError,
+    retry,
+  } = useAsync<Position | null>(
+    async () => {
+      if (!token) return null;
+      return client.getPosition(token);
+    },
+    { deps: [token] },
+  );
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const pull = retry;
 
-  const pull = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
-  };
-
-  const guard = async (fn: () => Promise<void>, label: string) => {
+  const guard = async (fn: () => Promise<void>, action: () => void) => {
     if (!token) return;
     setBusy(true);
+    setActionError(null);
     try {
       await fn();
-      await refresh();
+      await retry();
     } catch (e) {
-      toast(`${label}: ${(e as Error).message}`);
+      // Persistent, actionable inline error (not just a transient toast).
+      setActionError(mapSendError(e));
+      setLastAction(() => action);
     } finally {
       setBusy(false);
     }
@@ -72,7 +72,7 @@ export default function Farming() {
   const start = () =>
     guard(
       () => client.createSubwallet(token!).then(() => {}),
-      'Could not start farming',
+      start,
     );
 
   const fund = () =>
@@ -83,22 +83,25 @@ export default function Farming() {
       // authorizations, not arbitrary transfers. `fund-now` computes the spare balance
       // and tops up the subwallet (or skips when there's nothing to move).
       const r = await client.fundNow(token!);
-      toast('skipped' in r ? `Nothing to fund (${r.skipped})` : 'Funded your farming subwallet.');
-    }, 'Funding failed');
+      toast(
+        'skipped' in r ? `Nothing to fund (${r.skipped})` : 'Funded your farming subwallet.',
+        'success',
+      );
+    }, fund);
 
   const withdraw = () =>
     guard(async () => {
       const r = await client.withdraw(token!, 'all');
-      toast(`Withdrawn: Tx ${r.txSignature.slice(0, 16)}…`);
-    }, 'Withdraw failed');
+      toast(`Withdrawn: Tx ${r.txSignature.slice(0, 16)}…`, 'success');
+    }, withdraw);
 
   const copySubwallet = async () => {
     if (!pos) return;
     try {
       await Clipboard.setStringAsync(pos.address);
-      toast('Subwallet address copied.');
+      toast('Subwallet address copied.', 'success');
     } catch {
-      toast('Could not copy address.');
+      toast('Could not copy address.', 'error');
     }
   };
 
@@ -106,8 +109,6 @@ export default function Farming() {
   const current = pos ? Number(formatUsdc(pos.currentValueBase)) : 0;
   const gain = current - principal;
   const gainPct = principal > 0 ? (gain / principal) * 100 : 0;
-
-  const loading = !loaded;
 
   return (
     <Screen scroll tabSafe onRefresh={pull} refreshing={refreshing}>
@@ -123,6 +124,12 @@ export default function Farming() {
 
       <AutoFarmToggle />
 
+      {staleError && !error && (
+        <View style={styles.staleWrap}>
+          <StaleChip onRetry={retry} />
+        </View>
+      )}
+
       {loading ? (
         /* Loading hero */
         <Gradient colors={gradients.oceanDeep} glow style={styles.hero}>
@@ -131,6 +138,11 @@ export default function Farming() {
           </Text>
           <View style={styles.heroSkeleton} />
         </Gradient>
+      ) : error ? (
+        /* Blocking load failure (no position data) */
+        <View style={styles.loadErrorWrap}>
+          <ErrorState error={error} onRetry={retry} />
+        </View>
       ) : !pos ? (
         /* Empty state — start farming */
         <View style={styles.emptyInner}>
@@ -154,6 +166,15 @@ export default function Farming() {
             onPress={start}
             style={styles.emptyBtn}
           />
+          {actionError && (
+            <View style={styles.actionErrorWrap}>
+              <ErrorState
+                compact
+                error={actionError}
+                onRetry={lastAction ?? undefined}
+              />
+            </View>
+          )}
         </View>
       ) : (
         <>
@@ -197,6 +218,17 @@ export default function Farming() {
               />
             </View>
           </View>
+
+          {/* Persistent, actionable fund/withdraw error (not just a toast) */}
+          {actionError && (
+            <View style={styles.actionErrorWrap}>
+              <ErrorState
+                compact
+                error={actionError}
+                onRetry={lastAction ?? undefined}
+              />
+            </View>
+          )}
 
           {/* How it works */}
           <Text variant="h3" color={colors.textHi} style={styles.howTitle}>
@@ -298,6 +330,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyBtn: {
+    alignSelf: 'stretch',
+  },
+  staleWrap: {
+    marginTop: space.md,
+  },
+  loadErrorWrap: {
+    marginTop: space.xl,
+  },
+  actionErrorWrap: {
+    marginTop: space.md,
     alignSelf: 'stretch',
   },
   btnRow: {

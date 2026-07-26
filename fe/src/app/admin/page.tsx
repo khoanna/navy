@@ -1,5 +1,4 @@
 'use client';
-import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AppShell } from '@/ui/AppShell';
@@ -9,10 +8,15 @@ import { TrendChart } from '@/ui/TrendChart';
 import { DataTable, Column } from '@/ui/DataTable';
 import { Text } from '@/ui/Text';
 import { Pill } from '@/ui/Bits';
+import { ErrorState } from '@/ui/ErrorState';
+import { SkeletonList } from '@/ui/SkeletonList';
 import { colors, space } from '@/ui/theme';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
 import { ADMIN_NAV } from '@/ui/nav';
+import { useAsync } from '@/lib/useAsync';
+import { NavyApiError } from '@/lib/navyApi';
+import { detailOf } from '@/lib/httpError';
 
 interface AdminStats {
   merchantsTotal: number; pending: number; approved: number; rejected: number; onchainRegistered: number;
@@ -23,24 +27,12 @@ interface AdminStats {
 
 export default function AdminOverview() {
   const router = useRouter();
-  const [s, setS] = useState<AdminStats | null>(null);
-  const [err, setErr] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/admin/stats');
-        if (!alive) return;
-        if (res.status === 401) { router.replace('/admin/login'); return; }
-        if (!res.ok) { setErr(true); return; }
-        setS(await res.json());
-      } catch { if (alive) setErr(true); }
-    };
-    load();
-    const t = setInterval(load, 8000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+  const { data: s, loading, error, staleError, retry } = useAsync<AdminStats>(async () => {
+    const res = await fetch('/api/admin/stats');
+    if (res.status === 401) { router.replace('/admin/login'); throw new NavyApiError('unauthorized', 401); }
+    if (!res.ok) throw new NavyApiError('stats failed', res.status, await detailOf(res));
+    return res.json();
+  }, { poll: 8000 });
 
   const logout = async () => { await fetch('/api/auth/logout', { method: 'POST' }); router.push('/admin/login'); };
 
@@ -59,26 +51,42 @@ export default function AdminOverview() {
   return (
     <AppShell items={ADMIN_NAV} identity={{ title: 'Admin', subtitle: 'Platform' }} onLogout={logout}>
       <TopBar eyebrow="Admin" title="Overview" />
-      {err && <div style={{ marginBottom: space.lg }}><Text variant="caption" color={colors.danger}>Couldn’t load metrics.</Text></div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: space.lg, marginBottom: space.xl }}>
-        <StatCard label="Merchants" value={String(s?.merchantsTotal ?? 0)} icon="store" />
-        <StatCard label="Pending" value={String(s?.pending ?? 0)} icon="clock" onClick={() => router.push('/admin/merchants?status=pending')} />
-        <StatCard label="Approved / on-chain" value={`${s?.approved ?? 0} / ${s?.onchainRegistered ?? 0}`} icon="shield" />
-        <StatCard label="Total volume" value={`${formatUsdc(s?.volumeTotal ?? '0')} USDC`} icon="chart" delta={s ? `${s.ordersTotal} orders` : null} />
-      </div>
-      <div style={{ marginBottom: space.xl }}>
-        <TrendChart title="Platform volume · last 30 days" series={series} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.lg }}>
-        <div>
-          <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Pending review</Text>
-          <DataTable columns={pendingCols} rows={s?.recentPending ?? []} empty="No pending merchants" />
+      {loading && !s ? (
+        <div style={{ display: 'grid', gap: space.lg }}>
+          <SkeletonList rows={1} height={96} />
+          <SkeletonList rows={1} height={220} />
+          <SkeletonList rows={4} height={48} />
         </div>
-        <div>
-          <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Recent payments</Text>
-          <DataTable columns={payCols} rows={s?.recentPayments ?? []} empty="No payments yet" />
-        </div>
-      </div>
+      ) : error && !s ? (
+        <ErrorState error={error} onRetry={retry} />
+      ) : s ? (
+        <>
+          {staleError && (
+            <button onClick={retry} style={{ marginBottom: space.lg, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <Text variant="caption" color={colors.warning}>Couldn’t refresh · Retry</Text>
+            </button>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: space.lg, marginBottom: space.xl }}>
+            <StatCard label="Merchants" value={String(s.merchantsTotal)} icon="store" />
+            <StatCard label="Pending" value={String(s.pending)} icon="clock" onClick={() => router.push('/admin/merchants?status=pending')} />
+            <StatCard label="Approved / on-chain" value={`${s.approved} / ${s.onchainRegistered}`} icon="shield" />
+            <StatCard label="Total volume" value={`${formatUsdc(s.volumeTotal)} USDC`} icon="chart" delta={`${s.ordersTotal} orders`} />
+          </div>
+          <div style={{ marginBottom: space.xl }}>
+            <TrendChart title="Platform volume · last 30 days" series={series} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.lg }}>
+            <div>
+              <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Pending review</Text>
+              <DataTable columns={pendingCols} rows={s.recentPending} empty="No pending merchants" />
+            </div>
+            <div>
+              <Text variant="h3" color={colors.textHi} style={{ display: 'block', marginBottom: space.md }}>Recent payments</Text>
+              <DataTable columns={payCols} rows={s.recentPayments} empty="No payments yet" />
+            </div>
+          </div>
+        </>
+      ) : null}
     </AppShell>
   );
 }
