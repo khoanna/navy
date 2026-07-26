@@ -1,5 +1,5 @@
 'use client';
-import { use, useEffect, useState } from 'react';
+import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AppShell } from '@/ui/AppShell';
@@ -7,36 +7,45 @@ import { TopBar } from '@/ui/TopBar';
 import { Card } from '@/ui/Card';
 import { Text } from '@/ui/Text';
 import { Pill, Field, Divider } from '@/ui/Bits';
+import { ErrorState } from '@/ui/ErrorState';
+import { SkeletonList } from '@/ui/SkeletonList';
 import { colors, space } from '@/ui/theme';
 import { MERCHANT_NAV } from '@/ui/nav';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { statusTone } from '@/lib/dashboard/status';
+import { useAsync } from '@/lib/useAsync';
+import { NavyApiError } from '@/lib/navyApi';
 
 interface OrderItemRow { name: string; unitPrice: string; quantity: number; }
 interface OrderChargeRow { name: string; mode: string; value: number; amount: string; }
 interface Order { id: string; reference: string; amount: string; status: string; payer: string | null; txSignature: string | null; subtotal: string | null; description: string | null; items: OrderItemRow[]; charges: OrderChargeRow[]; }
 const TERMINAL = ['paid', 'expired', 'failed'];
 
+async function detailOf(res: Response): Promise<string | undefined> {
+  const body = await res.json().catch(() => null);
+  if (body && typeof body === 'object') {
+    const b = body as { error?: unknown; message?: unknown };
+    if (typeof b.error === 'string') return b.error;
+    if (typeof b.message === 'string') return b.message;
+  }
+  return undefined;
+}
+
 export default function OrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [order, setOrder] = useState<Order | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    const t = setInterval(load, 4000);
-    async function load() {
-      const res = await fetch(`/api/merchant/orders/${id}`);
-      if (!active) return;
-      if (res.ok) {
-        const o: Order = await res.json();
-        setOrder(o);
-        if (TERMINAL.includes(o.status)) clearInterval(t);
-      }
-    }
-    load();
-    return () => { active = false; clearInterval(t); };
-  }, [id]);
+  // Once the order reaches a terminal state, drop the 4s poll (nothing changes).
+  const [terminal, setTerminal] = useState(false);
+
+  const { data: order, loading, error, staleError, retry } = useAsync<Order>(async () => {
+    const res = await fetch(`/api/merchant/orders/${id}`);
+    if (res.status === 401) { router.replace('/merchant/login'); throw new NavyApiError('unauthorized', 401); }
+    if (!res.ok) throw new NavyApiError('order failed', res.status, await detailOf(res));
+    const o: Order = await res.json();
+    if (TERMINAL.includes(o.status)) setTerminal(true);
+    return o;
+  }, { poll: terminal ? undefined : 4000, deps: [id] });
 
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -51,16 +60,23 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
       identity={{ title: 'Merchant', subtitle: 'Dashboard' }}
       onLogout={logout}
     >
-      <TopBar eyebrow="Order" title={order ? order.reference : 'Loading…'} />
+      <TopBar eyebrow="Order" title={order ? order.reference : 'Order'} />
       <div style={{ marginBottom: space.lg }}>
         <Link href="/merchant/orders">
           <Text variant="caption" color={colors.accent}>← orders</Text>
         </Link>
       </div>
-      {!order ? (
-        <Text variant="body" dim>Loading…</Text>
-      ) : (
+      {loading && !order ? (
+        <div style={{ maxWidth: 560 }}><SkeletonList rows={5} height={48} /></div>
+      ) : error && !order ? (
+        <ErrorState error={error} onRetry={retry} />
+      ) : order ? (
         <div style={{ maxWidth: 560 }}>
+          {staleError && (
+            <button onClick={retry} style={{ marginBottom: space.md, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <Text variant="caption" color={colors.warning}>Couldn’t refresh · Retry</Text>
+            </button>
+          )}
           <Card>
             <Field label="Amount" value={`${formatUsdc(order.amount)} USDC`} numeric />
             {order.description && (
@@ -124,7 +140,7 @@ export default function OrderDetail({ params }: { params: Promise<{ id: string }
             </div>
           </Card>
         </div>
-      )}
+      ) : null}
     </AppShell>
   );
 }
