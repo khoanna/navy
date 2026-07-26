@@ -1,3 +1,5 @@
+import { mapError } from '../ui/mapError';
+
 export interface MappedError { title: string; detail: string }
 
 /** Turn any raw send failure (chain, RPC, Privy, backend 4xx/5xx) into friendly, actionable text. */
@@ -33,5 +35,9 @@ export function mapSendError(raw: unknown): MappedError {
   if (m.includes('network') || m.includes('timeout') || m.includes('fetch') || m.includes('econn')) {
     return { title: 'Network problem', detail: 'Could not reach the network. Check your connection and retry.' };
   }
-  return { title: "Couldn't send", detail: msg ? msg.slice(0, 140) : 'Something went wrong. Please try again.' };
+  // Transfer-specific branches above stay as-is. Generic tail delegates:
+  const generic = mapError(raw);
+  // Preserve the send-flavoured label for the truly-unknown case.
+  if (generic.title === 'Something went wrong') return { title: "Couldn't send", detail: generic.detail };
+  return generic;
 }

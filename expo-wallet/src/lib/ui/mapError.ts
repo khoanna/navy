@@ -1,4 +1,5 @@
-export interface MappedError { title: string; detail: string }
+import type { MappedError } from '../wallet/sendErrors';
+export type { MappedError };
 
 /** Turn any load/read failure (network, RPC, backend 4xx/5xx) into friendly, actionable text. */
 export function mapError(raw: unknown): MappedError {
