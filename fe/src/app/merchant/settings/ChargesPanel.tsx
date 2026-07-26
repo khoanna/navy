@@ -4,7 +4,20 @@ import { usdcInputToBaseUnits } from '@/lib/money';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 import { colors, space, radius } from '@/ui/theme';
+
+async function detailOf(res: Response): Promise<string | undefined> {
+  const body = await res.json().catch(() => null);
+  if (body && typeof body === 'object') {
+    const b = body as { error?: unknown; message?: unknown };
+    if (typeof b.error === 'string') return b.error;
+    if (typeof b.message === 'string') return b.message;
+  }
+  return undefined;
+}
 
 interface Charge {
   id: string;
@@ -31,6 +44,7 @@ function describe(c: Charge) {
 }
 
 export function ChargesPanel() {
+  const toast = useToast();
   const [rows, setRows] = useState<Charge[]>([]);
   const [name, setName] = useState('');
   const [mode, setMode] = useState<'percent' | 'fixed'>('percent');
@@ -63,18 +77,27 @@ export function ChargesPanel() {
       }
     }
     if (!name.trim()) { setError('Name is required'); return; }
-    const res = await fetch('/api/merchant/charges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim(), mode, value }),
-    });
-    if (res.ok) { setName(''); setVal(''); reload(); }
-    else setError(`Failed (${res.status})`);
+    try {
+      const res = await fetch('/api/merchant/charges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), mode, value }),
+      });
+      if (!res.ok) throw new NavyApiError('add charge failed', res.status, await detailOf(res));
+      setName(''); setVal(''); toast('Charge added', 'success'); reload();
+    } catch (err) {
+      setError(mapError(err).detail);
+    }
   }
 
   const remove = async (id: string) => {
-    await fetch(`/api/merchant/charges/${id}`, { method: 'DELETE' });
-    reload();
+    try {
+      const res = await fetch(`/api/merchant/charges/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new NavyApiError('remove charge failed', res.status, await detailOf(res));
+      toast('Charge removed', 'success'); reload();
+    } catch (err) {
+      toast(mapError(err).detail, 'error');
+    }
   };
 
   return (

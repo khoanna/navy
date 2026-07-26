@@ -7,6 +7,9 @@ import { computeInvoiceTotals } from '@/lib/invoice-totals';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
 import { Icon } from '@/ui/Icon';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 import { colors, space, radius } from '@/ui/theme';
 
 const inputStyle: React.CSSProperties = { background: colors.bgElevated, border: `1px solid ${colors.borderStrong}`, borderRadius: radius.md, color: colors.text, padding: '12px 14px', outline: 'none', width: '100%' };
@@ -22,6 +25,7 @@ const EXPIRY_PRESETS: { label: string; seconds: number }[] = [
 
 export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
   const router = useRouter();
+  const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
@@ -57,18 +61,24 @@ export function NewInvoiceForm({ onCreated }: { onCreated?: () => void }) {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setError(''); setResult(null);
-    if (lines.length === 0) { setError('Add at least one product'); return; }
+    if (lines.length === 0) { setError('Add at least one product'); submittingRef.current = false; return; }
     setSubmitting(true);
     try {
       const res = await fetch('/api/merchant/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: lines, description: description || undefined, expiresInSec }),
       });
-      const body = await res.json();
-      if (res.ok) { setResult({ orderId: body.orderId, reference: body.reference, qr: body.qr, payUrl: body.payUrl }); onCreated?.(); }
-      else setError(body.error ?? (res.status === 409 ? 'Your account is not approved yet' : `Failed (${res.status})`));
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        const detail = (body && typeof body.error === 'string' ? body.error : undefined)
+          ?? (res.status === 409 ? 'Your account is not approved yet' : undefined);
+        throw new NavyApiError('create invoice failed', res.status, detail);
+      }
+      setResult({ orderId: body.orderId, reference: body.reference, qr: body.qr, payUrl: body.payUrl });
+      toast('Invoice created', 'success');
+      onCreated?.();
     } catch (err) {
-      setError((err as Error).message ?? 'Network error — please try again');
+      setError(mapError(err).detail);
     } finally {
       setSubmitting(false);
       submittingRef.current = false;

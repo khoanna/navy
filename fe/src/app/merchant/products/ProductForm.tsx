@@ -4,7 +4,20 @@ import { usdcInputToBaseUnits } from '@/lib/money';
 import { formatUsdc } from '@/lib/dashboard/stats';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 import { colors, space, radius } from '@/ui/theme';
+
+async function detailOf(res: Response): Promise<string | undefined> {
+  const body = await res.json().catch(() => null);
+  if (body && typeof body === 'object') {
+    const b = body as { error?: unknown; message?: unknown };
+    if (typeof b.error === 'string') return b.error;
+    if (typeof b.message === 'string') return b.message;
+  }
+  return undefined;
+}
 
 const inputStyle: React.CSSProperties = {
   background: colors.bgElevated, border: `1px solid ${colors.borderStrong}`,
@@ -14,6 +27,7 @@ const inputStyle: React.CSSProperties = {
 export interface ProductRow { id: string; name: string; sku: string | null; unitPrice: string; active: boolean; }
 
 export function ProductForm({ initial, onSaved }: { initial?: ProductRow; onSaved: () => void }) {
+  const toast = useToast();
   const [name, setName] = useState(initial?.name ?? '');
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [price, setPrice] = useState(initial ? formatUsdc(initial.unitPrice) : '');
@@ -29,11 +43,18 @@ export function ProductForm({ initial, onSaved }: { initial?: ProductRow; onSave
     if (!name.trim()) { setError('Name is required'); return; }
     setSaving(true);
     const body = JSON.stringify({ name: name.trim(), sku: sku.trim() || undefined, unitPrice });
-    const res = initial
-      ? await fetch(`/api/merchant/products/${initial.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
-      : await fetch('/api/merchant/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    setSaving(false);
-    if (res.ok) onSaved(); else setError(`Failed (${res.status})`);
+    try {
+      const res = initial
+        ? await fetch(`/api/merchant/products/${initial.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
+        : await fetch('/api/merchant/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (!res.ok) throw new NavyApiError('save product failed', res.status, await detailOf(res));
+      toast(initial ? 'Product updated' : 'Product added', 'success');
+      onSaved();
+    } catch (err) {
+      setError(mapError(err).detail);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

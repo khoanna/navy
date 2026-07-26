@@ -4,10 +4,24 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
 import { Modal } from '@/ui/Modal';
+import { useToast } from '@/ui/Toast';
+import { mapError } from '@/lib/mapError';
+import { NavyApiError } from '@/lib/navyApi';
 import { colors, space, radius } from '@/ui/theme';
+
+async function detailOf(res: Response): Promise<string | undefined> {
+  const body = await res.json().catch(() => null);
+  if (body && typeof body === 'object') {
+    const b = body as { error?: unknown; message?: unknown };
+    if (typeof b.error === 'string') return b.error;
+    if (typeof b.message === 'string') return b.message;
+  }
+  return undefined;
+}
 
 export default function Actions({ id, canApprove }: { id: string; canApprove: boolean }) {
   const router = useRouter();
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [rejecting, setRejecting] = useState(false);
@@ -15,13 +29,19 @@ export default function Actions({ id, canApprove }: { id: string; canApprove: bo
 
   async function call(action: 'approve' | 'reject', rejectReason?: string) {
     setBusy(true); setError('');
-    const res = await fetch(`/api/admin/merchants/${id}/${action}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: action === 'reject' ? JSON.stringify({ reason: rejectReason }) : undefined,
-    });
-    setBusy(false);
-    if (res.ok) router.refresh();
-    else setError((await res.json().catch(() => ({})))?.error ?? `Failed (${res.status})`);
+    try {
+      const res = await fetch(`/api/admin/merchants/${id}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: action === 'reject' ? JSON.stringify({ reason: rejectReason }) : undefined,
+      });
+      if (!res.ok) throw new NavyApiError(`${action} failed`, res.status, await detailOf(res));
+      toast(action === 'approve' ? 'Merchant approved' : 'Merchant rejected', 'success');
+      router.refresh();
+    } catch (e) {
+      setError(mapError(e).detail);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function closeReject() {
