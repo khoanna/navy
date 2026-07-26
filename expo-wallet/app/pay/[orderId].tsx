@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,6 +13,8 @@ import { isUuid } from '@/lib/pay/payUrl';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
+import { useAsync } from '@/lib/ui/useAsync';
+import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
@@ -20,6 +22,7 @@ import { Card } from '@/ui/Card';
 import { Gradient } from '@/ui/Gradient';
 import { Icon } from '@/ui/Icon';
 import { IconBadge, Pill, Divider, Field } from '@/ui/Bits';
+import { ErrorState } from '@/ui/ErrorState';
 import { Sheet } from '@/ui/Sheet';
 import { SlideToConfirm } from '@/ui/SlideToConfirm';
 import { SuccessCheck } from '@/ui/SuccessCheck';
@@ -56,25 +59,35 @@ export default function PayScreen() {
   // Guard hand-typed /pay/<x> URLs: the QR path validates, a typed URL does not.
   const validId = Boolean(orderId) && isUuid(orderId);
 
-  const [order, setOrder] = useState<Order | null>(null);
-  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [paid, setPaid] = useState(false);
   const [slideReset, setSlideReset] = useState(0);
+  const [payError, setPayError] = useState<MappedError | null>(null);
 
-  useEffect(() => {
-    if (!validId) { setNotFound(true); return; }
-    client.getOrder(orderId).then(setOrder).catch(() => setNotFound(true));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId, validId]);
+  const {
+    data: order,
+    loading,
+    error,
+    retry,
+  } = useAsync<Order>(
+    async () => {
+      if (!validId) {
+        // Surfaces via mapError as a friendly "Not found" panel.
+        throw new Error('Invoice not found (HTTP 404)');
+      }
+      return client.getOrder(orderId) as Promise<Order>;
+    },
+    { deps: [orderId, validId] },
+  );
 
   async function pay() {
     if (!validId) return;
     const token = session?.tokens.accessToken;
-    if (!token) { toast('Payment failed: not signed in'); return; }
-    if (!address) { toast('Payment failed: no wallet available'); return; }
+    if (!token) { setPayError(mapSendError(new Error('Not signed in'))); toast('Payment failed: not signed in', 'error'); return; }
+    if (!address) { setPayError(mapSendError(new Error('No wallet available'))); toast('Payment failed: no wallet available', 'error'); return; }
     setBusy(true);
+    setPayError(null);
     try {
       // expectedSigner asserts the server-built authorization (payer derived from our token)
       // is one this embedded wallet can sign — refuses typed data built for a different payer.
@@ -86,15 +99,17 @@ export default function PayScreen() {
         expectedSigner: address,
       });
       if (res.status === 'failed') {
-        toast('Payment failed on-chain');
+        setPayError(mapSendError(new Error('Payment failed on-chain')));
+        toast('Payment failed on-chain', 'error');
         setSlideReset((n) => n + 1);
         return;
       }
-      toast(`Payment sent: ${res.txHash.slice(0, 16)}…`);
+      toast(`Payment sent: ${res.txHash.slice(0, 16)}…`, 'success');
       setConfirming(false);
       setPaid(true);
     } catch (e) {
-      toast(`Payment failed: ${(e as Error).message}`);
+      setPayError(mapSendError(e));
+      toast('Payment failed', 'error');
       setSlideReset((n) => n + 1);
     } finally {
       setBusy(false);
@@ -109,24 +124,19 @@ export default function PayScreen() {
     }
   };
 
-  if (notFound) {
+  if (error) {
     return (
       <Screen>
         <View style={styles.center}>
           <IconBadge name="shield" color={colors.danger} size={72} />
-          <Text variant="h2" color={colors.textHi} center style={{ marginTop: space.lg }}>
-            Invoice not found
-          </Text>
-          <Text dim center style={{ marginTop: space.sm, marginBottom: space.xl }}>
-            This Navy invoice is invalid or has expired.
-          </Text>
+          <ErrorState error={error} onRetry={validId ? retry : undefined} />
           <Button label="Back to wallet" onPress={close} full={false} />
         </View>
       </Screen>
     );
   }
 
-  if (!order) {
+  if (loading || !order) {
     return (
       <Screen>
         <View style={styles.center}>
@@ -259,7 +269,7 @@ export default function PayScreen() {
           icon={payable ? 'check' : undefined}
           loading={busy}
           disabled={!payable}
-          onPress={() => setConfirming(true)}
+          onPress={() => { setPayError(null); setConfirming(true); }}
         />
         <Button
           label="Cancel"
@@ -293,6 +303,11 @@ export default function PayScreen() {
           <Field label="Network fee" value="Sponsored · Gasless" valueColor={colors.aqua} />
           <Field label="You pay" value={`${amountText} USDC`} />
         </Card>
+        {payError && (
+          <View style={styles.payErrorWrap}>
+            <ErrorState compact error={payError} onRetry={pay} />
+          </View>
+        )}
         <SlideToConfirm label="Slide to pay" onConfirm={pay} disabled={busy} resetKey={slideReset} />
       </Sheet>
     </Screen>
@@ -417,5 +432,9 @@ const styles = StyleSheet.create({
   },
   confirmCard: {
     marginBottom: space.lg,
+  },
+  payErrorWrap: {
+    marginBottom: space.md,
+    alignSelf: 'stretch',
   },
 });
