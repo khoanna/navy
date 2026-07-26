@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **NavyPayments** | `0x163933e3f23CBcC93C3910cdFDB0B42EFcfA844c` |
+| **NavyPayments** | `0xb135C49Ef6c0505F7fB55932F31A9E93eba6e907` |
 | **USDC (Circle, EIP-2612 permit + EIP-3009)** | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 | **Owner / admin** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |
 | **Relayer (allowlisted)** | `0xd5de8324D526A201672B30584e495C71BeBb3e9A` |
@@ -15,7 +15,7 @@
 
 `payInvoice` uses EIP-3009 `receiveWithAuthorization` (Circle USDC supports both permit and EIP-3009; EIP-3009 is used because its nonce = `keccak256(merchantId, invoiceId)` binds merchant + invoice + amount + payer + expiry into the signature, and `msg.sender == to` restricts redemption to this contract — a binding permit cannot provide). USDC EIP-712 domain: `name="USDC"`, `version="2"`.
 
-_Superseded: `0xC3FE…672f` (EIP-3009/Circle), `0xdce5…0f20` (permit/Aave test USDC)._
+_Superseded: `0x1639…844c` (EIP-3009/Circle, redeployed 2026-07-25), `0xC3FE…672f` (EIP-3009/Circle), `0xdce5…0f20` (permit/Aave test USDC)._
 
 ### End-to-end proof (`be/scripts/evm-e2e.mjs`)
 Fund payer with Circle USDC → payer signs an EIP-712 `ReceiveWithAuthorization` (nonce = `keccak256(merchantId, invoiceId)`) → relayer submits `payInvoice` (gasless: `receiveWithAuthorization`) → **99/1 split** → `InvoicePaid` → replay rejected.
