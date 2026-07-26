@@ -1,7 +1,8 @@
 import {
   BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Req,
-  UploadedFile, UseGuards, UseInterceptors,
+  UploadedFile, UseFilters, UseGuards, UseInterceptors,
 } from '@nestjs/common';
+import { MulterExceptionFilter } from './multer-exception.filter';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -21,6 +22,7 @@ class UpdateProductDto {
   @IsString() @IsOptional() @IsNotEmpty() name?: string;
   @IsString() @IsOptional() sku?: string;
   @IsString() @IsOptional() @Matches(/^\d+$/, { message: 'unitPrice must be a base-unit integer string' }) unitPrice?: string;
+  // NOTE: `active` is not settable via this multipart endpoint — archive/activate goes through DELETE.
   @IsBoolean() @IsOptional() active?: boolean;
 }
 
@@ -28,7 +30,7 @@ class UpdateProductDto {
 const fileInterceptor = FileInterceptor('image', {
   limits: { fileSize: MAX_IMAGE_BYTES },
   fileFilter: (_req, file, cb) => {
-    const r = validateProductImage({ mimetype: file.mimetype, size: 1 });
+    const r = validateProductImage({ mimetype: file.mimetype, size: 1 /* real size unknown at filter time; limits.fileSize enforces the cap */ });
     cb(r.ok ? null : new BadRequestException(r.error), r.ok);
   },
 });
@@ -36,6 +38,7 @@ const fileInterceptor = FileInterceptor('image', {
 @Controller('merchant/products')
 @UseGuards(JwtGuard, RolesGuard)
 @Roles('merchant')
+@UseFilters(MulterExceptionFilter)
 export class ProductsController {
   constructor(
     private readonly products: ProductsService,
@@ -63,18 +66,27 @@ export class ProductsController {
   async update(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateProductDto, @UploadedFile() file?: Express.Multer.File) {
     let imageUrl: string | undefined;
     let imagePublicId: string | undefined;
+    let uploadedPublicId: string | undefined;
     if (file) {
       const check = validateProductImage({ mimetype: file.mimetype, size: file.size });
       if (!check.ok) throw new BadRequestException(check.error);
       const uploaded = await this.cloudinary.uploadImage(file.buffer);
       imageUrl = uploaded.url;
       imagePublicId = uploaded.publicId;
+      uploadedPublicId = uploaded.publicId;
     }
-    const { product, replacedPublicId } = await this.products.update(req.user.sub, id, {
-      name: dto.name, sku: dto.sku,
-      unitPrice: dto.unitPrice !== undefined ? parsePositiveAmount(dto.unitPrice, 'unitPrice') : undefined,
-      active: dto.active, imageUrl, imagePublicId,
-    });
+    let product: any;
+    let replacedPublicId: string | null;
+    try {
+      ({ product, replacedPublicId } = await this.products.update(req.user.sub, id, {
+        name: dto.name, sku: dto.sku,
+        unitPrice: dto.unitPrice !== undefined ? parsePositiveAmount(dto.unitPrice, 'unitPrice') : undefined,
+        active: dto.active, imageUrl, imagePublicId,
+      }));
+    } catch (err) {
+      if (uploadedPublicId) await this.cloudinary.deleteImage(uploadedPublicId);
+      throw err;
+    }
     if (replacedPublicId) await this.cloudinary.deleteImage(replacedPublicId);
     return product;
   }
