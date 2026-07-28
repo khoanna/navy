@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {NavyVault} from "../src/NavyVault.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockYieldAdapter} from "./mocks/MockYieldAdapter.sol";
+import {LossyMockYieldAdapter} from "./mocks/LossyMockYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract NavyVaultTest is Test {
@@ -156,5 +157,32 @@ contract NavyVaultTest is Test {
         assertEq(adapterA.totalAssets(), 30e6);
         assertEq(adapterB.totalAssets(), 50e6);
         assertEq(vault.totalAssets(), 100e6);
+    }
+
+    function test_withdrawFromAdapter_onlyAllocator() public {
+        vm.prank(alice);
+        vm.expectRevert(NavyVault.NotAllocator.selector);
+        vault.withdrawFromAdapter(address(adapterA), 1e6);
+    }
+
+    function test_withdrawFromAdapter_unknownAdapter() public {
+        vm.prank(allocator);
+        vm.expectRevert(NavyVault.UnknownAdapter.selector);
+        vault.withdrawFromAdapter(address(0xdead), 1e6);
+    }
+
+    function test_withdrawFromAdapter_revertsOnExcessiveLoss() public {
+        // Register a lossy adapter that withholds 1e6 per withdraw; maxLossBps is 50 (0.5%).
+        LossyMockYieldAdapter lossy = new LossyMockYieldAdapter(address(vault), address(usdc), 1e6);
+        vm.prank(owner);
+        vault.addAdapter(address(lossy), 0, 10000);
+
+        _depositAs(0xBEEF, 100e6, keccak256("loss1"));
+        vm.startPrank(allocator);
+        vault.deployToAdapter(address(lossy), 50e6);
+        // Withdraw 10e6 but only 9e6 arrives → 1e6 shortfall == 10% >> 0.5% cap → revert.
+        vm.expectRevert(NavyVault.LossTooHigh.selector);
+        vault.withdrawFromAdapter(address(lossy), 10e6);
+        vm.stopPrank();
     }
 }

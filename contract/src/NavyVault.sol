@@ -206,5 +206,6 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     function reallocate(address from, address to, uint256 amount) external onlyAllocator {
         withdrawFromAdapter(from, amount);
         deployToAdapter(to, amount);
+        emit Reallocated(from, to, amount);
     }
 }
