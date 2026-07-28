@@ -208,4 +208,32 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         deployToAdapter(to, amount);
         emit Reallocated(from, to, amount);
     }
+
+    /// @dev Before fulfilling a redemption/withdrawal, top up idle from adapters if needed.
+    function _withdraw(address caller, address receiver, address ownerAddr, uint256 assets, uint256 shares)
+        internal
+        override
+    {
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        if (idle < assets) {
+            _ensureIdle(assets - idle);
+        }
+        super._withdraw(caller, receiver, ownerAddr, assets, shares);
+    }
+
+    /// @dev Pull `needed` USDC from adapters in registration order until covered, bounding loss.
+    function _ensureIdle(uint256 needed) internal {
+        uint256 n = adapters.length;
+        for (uint256 i; i < n && needed > 0; ++i) {
+            address adapter = adapters[i];
+            uint256 have = IYieldAdapter(adapter).totalAssets();
+            if (have == 0) continue;
+            uint256 pull = have < needed ? have : needed;
+            uint256 before = IERC20(asset()).balanceOf(address(this));
+            IYieldAdapter(adapter).withdraw(pull, address(this));
+            uint256 received = IERC20(asset()).balanceOf(address(this)) - before;
+            if (received + (pull * maxLossBps) / 10000 < pull) revert LossTooHigh();
+            needed = received >= needed ? 0 : needed - received;
+        }
+    }
 }

@@ -185,4 +185,37 @@ contract NavyVaultTest is Test {
         vault.withdrawFromAdapter(address(lossy), 10e6);
         vm.stopPrank();
     }
+
+    function test_redeem_pullsFromAdaptersWhenIdleInsufficient() public {
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        _depositAs(pk, 100e6, keccak256("r1"));
+        // Deploy 90e6 so idle is only 10e6.
+        vm.prank(allocator);
+        vault.deployToAdapter(address(adapterA), 90e6);
+
+        uint256 shares = vault.balanceOf(user);
+        // User redeems everything; vault must pull ~90e6 back from the adapter.
+        vm.prank(user);
+        uint256 assets = vault.redeem(shares, user, user);
+
+        assertEq(assets, 100e6);
+        assertEq(usdc.balanceOf(user), 100e6);
+        assertEq(vault.balanceOf(user), 0);
+    }
+
+    function test_redeem_partialLeavesRemainderInvested() public {
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        _depositAs(pk, 100e6, keccak256("r2"));
+        vm.prank(allocator);
+        vault.deployToAdapter(address(adapterA), 90e6);
+
+        uint256 half = vault.balanceOf(user) / 2;
+        vm.prank(user);
+        vault.redeem(half, user, user);
+
+        assertApproxEqAbs(usdc.balanceOf(user), 50e6, 1);
+        assertApproxEqAbs(vault.totalAssets(), 50e6, 1);
+    }
 }
