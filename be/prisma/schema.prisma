@@ -244,3 +244,52 @@ model AgentMessage {
 
   @@index([conversationId, createdAt])
 }
+
+model VaultDeposit {
+  id          String    @id @default(uuid())
+  userId      String
+  userAddress String
+  assetsBase  BigInt
+  nonce       String    @unique
+  digest      String    @unique
+  validBefore DateTime?
+  status      String    @default("awaiting_signature")
+  txHash      String?
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model VaultRedeem {
+  id          String    @id @default(uuid())
+  userId      String
+  userAddress String
+  sharesBase  BigInt
+  digest      String    @unique
+  deadline    DateTime?
+  status      String    @default("awaiting_signature")
+  txHash      String?
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model RebalanceEvent {
+  id          String   @id @default(uuid())
+  kind        String
+  fromAdapter String?
+  toAdapter   String?
+  amountBase  BigInt   @default(0)
+  aprFromE18  BigInt   @default(0)
+  aprToE18    BigInt   @default(0)
+  txHash      String?
+  status      String   @default("confirming")
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+}
