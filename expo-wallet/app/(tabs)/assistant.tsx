@@ -22,7 +22,8 @@ import {
 import type { SseEvent } from '@/lib/agent/sseParser';
 import { streamAgentChat } from '@/lib/agent/agentClient';
 import { TransferClient } from '@/lib/transfer/transferClient';
-import { FarmingClient } from '@/lib/farming/farmingClient';
+import { VaultClient } from '@/lib/vault/vaultClient';
+import { sharesToRedeem } from '@/lib/vault/withdrawShares';
 import { mapSendError } from '@/lib/wallet/sendErrors';
 import { mapError } from '@/lib/ui/mapError';
 import { short } from '@/lib/wallet/identicon';
@@ -128,12 +129,16 @@ export default function Assistant() {
 
   const onConfirmFarming = useCallback(
     (result: any) => async () => {
-      const fc = new FarmingClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
+      const vault = new VaultClient(getEnv().navyApiUrl, authedFetch!, signTypedData);
       try {
         if (result.display.action === 'farming_deposit') {
-          await fc.deposit(token!, result.amountBase);
+          await vault.deposit(result.amountBase);
         } else {
-          await fc.withdraw(token!, result.amount);
+          // The agent proposes a USDC withdraw amount; the vault redeems shares.
+          // Read the position and convert (all / ≥value → all shares; else proportional).
+          const position = await vault.getPosition();
+          const shares = sharesToRedeem(result.amount, position);
+          await vault.redeemShares(shares);
         }
       } catch (e) {
         const { title, detail } = mapSendError(e);
@@ -142,7 +147,7 @@ export default function Assistant() {
         throw e;
       }
     },
-    [authedFetch, token, toast],
+    [authedFetch, signTypedData, toast],
   );
 
   // Guard: no session / no authed fetch → prompt to sign in.

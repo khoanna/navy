@@ -56,7 +56,7 @@ export function FarmingConfirmCard({
       </View>
 
       <Text variant="caption" muted>
-        {isWithdraw ? 'Withdraw from Compound farming' : 'Supply to Compound farming'}
+        {isWithdraw ? 'Withdraw from the Navy vault' : 'Deposit into the Navy vault'}
       </Text>
 
       {phase === 'done' ? (

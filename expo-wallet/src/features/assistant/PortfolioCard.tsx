@@ -8,14 +8,21 @@ import { usdcBaseToDisplay, weiToEth } from '@/lib/wallet/balances';
 /**
  * Renders a `get_portfolio` or `get_farming_summary` tool result.
  * Both are `{display:{kind:'card'}}` shaped; fields are guarded so a farming
- * summary (which may only carry `farming`) or a portfolio (usdcBase/ethWei)
- * both render sensibly.
+ * summary (`{position:{sharesBase,assetsBase}}`) or a portfolio
+ * (`usdcBase`/`ethWei`/`farming:{sharesBase,assetsBase}`) both render sensibly.
+ *
+ * The pooled vault position exposes `assetsBase` (current USDC value of the
+ * user's shares) and `sharesBase` (the raw share balance). We surface the
+ * assets value as the headline "Farming" figure.
  */
 export function PortfolioCard({ result }: { result: any }) {
   const usdcBase: string | undefined = result?.usdcBase;
   const ethWei: string | undefined = result?.ethWei;
-  const farming = result?.farming;
-  const farmedBase: string | undefined = farming?.currentValueBase;
+  // Portfolio carries the vault position under `farming`; the farming summary
+  // carries it under `position`. Both are `{sharesBase, assetsBase}`.
+  const vaultPosition = result?.farming ?? result?.position;
+  const farmedBase: string | undefined = vaultPosition?.assetsBase;
+  const sharesBase: string | undefined = vaultPosition?.sharesBase;
 
   return (
     <Card glass compact style={styles.card}>
@@ -31,6 +38,9 @@ export function PortfolioCard({ result }: { result: any }) {
         )}
         {farmedBase !== undefined && (
           <Row label="Farming" value={usdcBaseToDisplay(farmedBase)} unit="USDC" accent />
+        )}
+        {sharesBase !== undefined && farmedBase !== undefined && (
+          <Row label="Shares" value={usdcBaseToDisplay(sharesBase)} unit="shares" />
         )}
       </View>
     </Card>

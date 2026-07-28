@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import React, { useMemo, useState } from 'react';
+import { View, StyleSheet, TextInput } from 'react-native';
+import { parseUnits } from 'ethers';
 
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
-import { FarmingClient, formatUsdc, Position } from '@/lib/farming/farmingClient';
-import { AutoFarmToggle } from '@/features/farming/AutoFarmToggle';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
+import { VaultClient, type VaultPosition, type VaultApy } from '@/lib/vault/vaultClient';
+import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { useAsync } from '@/lib/ui/useAsync';
 import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
 import { Screen } from '@/ui/Screen';
@@ -14,54 +14,87 @@ import { Text } from '@/ui/Text';
 import { Button } from '@/ui/Button';
 import { Card } from '@/ui/Card';
 import { Gradient } from '@/ui/Gradient';
-import { Icon } from '@/ui/Icon';
-import { IconBadge, GlowIcon, Pill, PressRow } from '@/ui/Bits';
+import { IconBadge, GlowIcon, Pill } from '@/ui/Bits';
 import { ErrorState } from '@/ui/ErrorState';
 import { StaleChip } from '@/ui/StaleChip';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
-function short(a: string) {
-  return `${a.slice(0, 6)}…${a.slice(-6)}`;
+/** amount (decimal display string) → USDC base units (6dp) string. null if invalid / non-positive. */
+function usdcAmountToBase(amount: string): string | null {
+  const s = (amount ?? '').trim();
+  if (!s) return null;
+  try {
+    const base = parseUnits(s, 6);
+    return base > 0n ? base.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Convert an aprE18 (1e18-scaled) rate to a human APR percentage string. */
+function aprE18ToPct(aprE18: string): string {
+  try {
+    const bps = (BigInt(aprE18) * 10000n) / 1_000_000_000_000_000_000n; // → basis points
+    return (Number(bps) / 100).toFixed(2);
+  } catch {
+    return '—';
+  }
 }
 
 export default function Farming() {
   const { session, authedFetch } = useNavySession();
-  const { address } = useMobileSigner();
+  const { signTypedData } = useMobileSigner();
   const toast = useToast();
   const token = session?.tokens.accessToken;
-  const client = new FarmingClient(getEnv().navyApiUrl, undefined, authedFetch ?? undefined);
 
+  const vault = useMemo(
+    () => (authedFetch ? new VaultClient(getEnv().navyApiUrl, authedFetch, signTypedData) : null),
+    [authedFetch, signTypedData],
+  );
+
+  const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<MappedError | null>(null);
   const [lastAction, setLastAction] = useState<(() => void) | null>(null);
 
   const {
-    data: pos,
+    data,
     loading,
     refreshing,
     error,
     staleError,
     retry,
-  } = useAsync<Position | null>(
+  } = useAsync<{ pos: VaultPosition; apys: VaultApy[] } | null>(
     async () => {
-      if (!token) return null;
-      return client.getPosition(token);
+      if (!vault || !token) return null;
+      const [pos, apys] = await Promise.all([vault.getPosition(), vault.getApys().catch(() => [])]);
+      return { pos, apys };
     },
-    { deps: [token] },
+    { deps: [token, vault] },
   );
 
-  const pull = retry;
+  const pos = data?.pos ?? null;
+  const apys = data?.apys ?? [];
+
+  // Headline APR: the best (highest) adapter APR currently in the vault, if any.
+  const bestApr = apys.reduce<bigint>((max, a) => {
+    try {
+      const v = BigInt(a.aprE18);
+      return v > max ? v : max;
+    } catch {
+      return max;
+    }
+  }, 0n);
 
   const guard = async (fn: () => Promise<void>, action: () => void) => {
-    if (!token) return;
+    if (!vault || !token) return;
     setBusy(true);
     setActionError(null);
     try {
       await fn();
       await retry();
     } catch (e) {
-      // Persistent, actionable inline error (not just a transient toast).
       setActionError(mapSendError(e));
       setLastAction(() => action);
     } finally {
@@ -69,60 +102,44 @@ export default function Farming() {
     }
   };
 
-  const start = () =>
-    guard(
-      () => client.createSubwallet(token!).then(() => {}),
-      start,
-    );
-
-  const fund = () =>
+  const deposit = () =>
     guard(async () => {
-      if (!pos) return;
-      // On EVM, moving USDC main→subwallet is done server-side via delegated signing
-      // (the Privy authorization key) — the embedded wallet only signs EIP-712 payment
-      // authorizations, not arbitrary transfers. `fund-now` computes the spare balance
-      // and tops up the subwallet (or skips when there's nothing to move).
-      const r = await client.fundNow(token!);
-      toast(
-        'skipped' in r ? `Nothing to fund (${r.skipped})` : 'Funded your farming subwallet.',
-        'success',
-      );
-    }, fund);
+      const base = usdcAmountToBase(amount);
+      if (!base) {
+        toast('Enter a valid USDC amount.', 'error');
+        throw new Error('Invalid amount');
+      }
+      const r = await vault!.deposit(base);
+      setAmount('');
+      toast(`Deposited — Tx ${r.txHash.slice(0, 16)}…`, 'success');
+    }, deposit);
 
-  const withdraw = () =>
+  // Redeem the full share balance back to the user's wallet.
+  const withdrawAll = () =>
     guard(async () => {
-      const r = await client.withdraw(token!, 'all');
-      toast(`Withdrawn: Tx ${r.txSignature.slice(0, 16)}…`, 'success');
-    }, withdraw);
+      if (!pos || BigInt(pos.sharesBase || '0') <= 0n) {
+        toast('Nothing to withdraw.', 'error');
+        throw new Error('No position');
+      }
+      const r = await vault!.redeemShares(pos.sharesBase);
+      toast(`Withdrawn — Tx ${r.txHash.slice(0, 16)}…`, 'success');
+    }, withdrawAll);
 
-  const copySubwallet = async () => {
-    if (!pos) return;
-    try {
-      await Clipboard.setStringAsync(pos.address);
-      toast('Subwallet address copied.', 'success');
-    } catch {
-      toast('Could not copy address.', 'error');
-    }
-  };
-
-  const principal = pos ? Number(formatUsdc(pos.principalBase)) : 0;
-  const current = pos ? Number(formatUsdc(pos.currentValueBase)) : 0;
-  const gain = current - principal;
-  const gainPct = principal > 0 ? (gain / principal) * 100 : 0;
+  const current = pos ? Number(usdcBaseToDisplay(pos.assetsBase)) : 0;
+  const hasPosition = pos ? BigInt(pos.sharesBase || '0') > 0n : false;
 
   return (
-    <Screen scroll tabSafe onRefresh={pull} refreshing={refreshing}>
+    <Screen scroll tabSafe onRefresh={retry} refreshing={refreshing}>
       {/* Header */}
       <View style={styles.head}>
         <Text variant="h2" color={colors.textHi}>
           Earn
         </Text>
         <Text variant="caption" dim>
-          Aave · Sepolia
+          Navy vault · Sepolia
+          {bestApr > 0n ? `  ·  ${aprE18ToPct(bestApr.toString())}% APR` : ''}
         </Text>
       </View>
-
-      <AutoFarmToggle />
 
       {staleError && !error && (
         <View style={styles.staleWrap}>
@@ -131,7 +148,6 @@ export default function Farming() {
       )}
 
       {loading ? (
-        /* Loading hero */
         <Gradient colors={gradients.oceanDeep} glow style={styles.hero}>
           <Text variant="label" upper center color="rgba(255,255,255,0.6)">
             Deposited · earning
@@ -139,42 +155,8 @@ export default function Farming() {
           <View style={styles.heroSkeleton} />
         </Gradient>
       ) : error ? (
-        /* Blocking load failure (no position data) */
         <View style={styles.loadErrorWrap}>
           <ErrorState error={error} onRetry={retry} />
-        </View>
-      ) : !pos ? (
-        /* Empty state — start farming */
-        <View style={styles.emptyInner}>
-          <GlowIcon name="sprout" color={colors.aqua} size={96} />
-          <Text
-            variant="h2"
-            color={colors.textHi}
-            center
-            style={styles.emptyTitle}
-          >
-            Start earning
-          </Text>
-          <Text dim center style={styles.emptyBody}>
-            Navy creates a secure, encrypted subwallet that auto-deposits into
-            the yield reserve. Your keys never leave Navy's signer.
-          </Text>
-          <Button
-            label="Create farming wallet"
-            icon="plus"
-            loading={busy}
-            onPress={start}
-            style={styles.emptyBtn}
-          />
-          {actionError && (
-            <View style={styles.actionErrorWrap}>
-              <ErrorState
-                compact
-                error={actionError}
-                onRetry={lastAction ?? undefined}
-              />
-            </View>
-          )}
         </View>
       ) : (
         <>
@@ -191,42 +173,67 @@ export default function Farming() {
                 USDC
               </Text>
             </View>
-            <Text variant="caption" color="rgba(255,255,255,0.82)">
-              {gain >= 0 ? '+' : ''}
-              {gain.toFixed(4)} USDC earned ({gainPct >= 0 ? '+' : ''}
-              {gainPct.toFixed(2)}%)
-            </Text>
+            {hasPosition && pos && (
+              <Text variant="caption" color="rgba(255,255,255,0.82)">
+                {usdcBaseToDisplay(pos.sharesBase)} shares
+              </Text>
+            )}
           </Gradient>
 
-          {/* Deposit / Withdraw actions */}
-          <View style={styles.btnRow}>
-            <View style={styles.btnItem}>
-              <Button
-                label="Fund from wallet"
-                icon="plus"
-                loading={busy}
-                onPress={fund}
+          {/* Deposit input */}
+          <Card glass compact style={styles.depositCard}>
+            <Text variant="label" upper color={colors.aqua}>
+              Deposit USDC
+            </Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0.00"
+                placeholderTextColor={colors.textDim}
+                keyboardType="decimal-pad"
+                style={styles.input}
+                editable={!busy}
               />
+              <Text variant="bodyStrong" muted>
+                USDC
+              </Text>
             </View>
-            <View style={styles.btnItem}>
+            <Button
+              label="Deposit"
+              icon="plus"
+              loading={busy}
+              disabled={!usdcAmountToBase(amount)}
+              onPress={deposit}
+            />
+          </Card>
+
+          {hasPosition && (
+            <View style={styles.withdrawRow}>
               <Button
                 label="Withdraw all"
                 icon="down"
                 variant="secondary"
                 loading={busy}
-                onPress={withdraw}
+                onPress={withdrawAll}
               />
             </View>
-          </View>
+          )}
 
-          {/* Persistent, actionable fund/withdraw error (not just a toast) */}
+          {/* Persistent, actionable error (not just a toast) */}
           {actionError && (
             <View style={styles.actionErrorWrap}>
-              <ErrorState
-                compact
-                error={actionError}
-                onRetry={lastAction ?? undefined}
-              />
+              <ErrorState compact error={actionError} onRetry={lastAction ?? undefined} />
+            </View>
+          )}
+
+          {!hasPosition && !actionError && (
+            <View style={styles.emptyInner}>
+              <GlowIcon name="sprout" color={colors.aqua} size={72} />
+              <Text dim center style={styles.emptyBody}>
+                Deposit USDC into the Navy vault to start earning. You sign a
+                gasless authorization — Navy relays it and holds no keys.
+              </Text>
             </View>
           )}
 
@@ -236,39 +243,39 @@ export default function Farming() {
           </Text>
           <Card glass compact style={styles.howCard}>
             <Text variant="caption" color={colors.text}>
-              Your USDC is supplied to Aave's USDC reserve via a Navy-secured
-              subwallet. Keys stay encrypted — the agent can never move funds
-              off-policy.
+              Your USDC joins a shared, rebalancing vault that supplies to the
+              best-yielding adapter. You hold vault shares; withdraw returns your
+              principal plus yield to your wallet. Deposits and withdrawals are
+              gasless — you sign, Navy relays.
             </Text>
           </Card>
 
-          {/* Positions list */}
-          <Card glass compact style={styles.posCard}>
-            <View style={styles.posRow}>
-              <IconBadge name="sprout" color={colors.aqua} />
-              <View style={styles.posMid}>
-                <Text variant="bodyStrong" color={colors.textHi}>
-                  USDC reserve
-                </Text>
-                <PressRow onPress={copySubwallet} style={styles.copyRow}>
-                  <Text variant="mono" color={colors.textDim}>
-                    {short(pos.address)}
+          {/* Position card */}
+          {hasPosition && pos && (
+            <Card glass compact style={styles.posCard}>
+              <View style={styles.posRow}>
+                <IconBadge name="sprout" color={colors.aqua} />
+                <View style={styles.posMid}>
+                  <Text variant="bodyStrong" color={colors.textHi}>
+                    Navy vault
                   </Text>
-                  <Icon name="copy" size={12} color={colors.textDim} />
-                </PressRow>
+                  <Text variant="caption" color={colors.textDim}>
+                    {usdcBaseToDisplay(pos.sharesBase)} shares
+                  </Text>
+                </View>
+                <Text variant="bodyStrong" numeric color={colors.textHi}>
+                  {current.toFixed(4)} USDC
+                </Text>
               </View>
-              <Text variant="bodyStrong" numeric color={colors.textHi}>
-                {current.toFixed(4)} USDC
-              </Text>
-            </View>
-          </Card>
+            </Card>
+          )}
 
           {/* Devnet note */}
           <View style={styles.noteRow}>
             <Pill label="Sepolia" />
             <Text variant="caption" muted style={styles.noteText}>
-              Funding moves USDC from your main wallet into the subwallet.
-              Withdraw returns principal + yield to your wallet.
+              Deposits mint vault shares; withdraw redeems them back to USDC in
+              your wallet.
             </Text>
           </View>
         </>
@@ -290,7 +297,6 @@ const styles = StyleSheet.create({
     marginTop: space.xl,
     alignItems: 'center',
     gap: space.xs,
-    // iOS shadow
     shadowColor: '#04121A',
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.55,
@@ -315,22 +321,38 @@ const styles = StyleSheet.create({
   heroUnit: {
     marginLeft: 6,
   },
+  depositCard: {
+    marginTop: space.lg,
+    gap: space.md,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.glassFill,
+    paddingHorizontal: space.lg,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: space.md,
+    color: colors.textHi,
+    fontSize: 20,
+  },
+  withdrawRow: {
+    marginTop: space.md,
+  },
   emptyInner: {
     alignItems: 'center',
     maxWidth: 320,
-    marginTop: 72,
+    marginTop: space.xl,
     alignSelf: 'center',
   },
-  emptyTitle: {
-    marginTop: space.lg,
-  },
   emptyBody: {
-    marginTop: space.sm,
-    marginBottom: space.xl,
+    marginTop: space.md,
     textAlign: 'center',
-  },
-  emptyBtn: {
-    alignSelf: 'stretch',
   },
   staleWrap: {
     marginTop: space.md,
@@ -341,14 +363,6 @@ const styles = StyleSheet.create({
   actionErrorWrap: {
     marginTop: space.md,
     alignSelf: 'stretch',
-  },
-  btnRow: {
-    flexDirection: 'row',
-    gap: space.md,
-    marginTop: space.lg,
-  },
-  btnItem: {
-    flex: 1,
   },
   howTitle: {
     marginTop: space.xl,
@@ -366,12 +380,6 @@ const styles = StyleSheet.create({
   posMid: {
     flex: 1,
     minWidth: 0,
-  },
-  copyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
   },
   noteRow: {
     flexDirection: 'row',
