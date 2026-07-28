@@ -35,8 +35,8 @@ export const SCENE_COPY: readonly SceneCopyItem[] = [
     id: 'treasure',
     eyebrow: 'Treasure · Farming',
     title: 'Idle balance, put to work.',
-    body: 'Opt in and your balance earns through a policy-guarded, non-custodial subwallet.',
-    points: ['Non-custodial', 'Policy-guarded signing', 'Keys never touch the agent'],
+    body: 'Opt in and your idle USDC earns yield in an auto-rebalancing vault across trusted lending markets.',
+    points: ['ERC-4626 vault shares', 'Auto-rebalanced across venues', 'Gasless deposit & redeem'],
   },
 ] as const;
 
@@ -48,7 +48,7 @@ export interface Feature {
 export const FEATURES: readonly Feature[] = [
   { title: 'The Wallet', body: 'Scan-to-pay, balances, and farming in a mobile-first web wallet.' },
   { title: 'The Gateway', body: 'Server-built invoices, two-signer gasless pay, HMAC webhooks.' },
-  { title: 'Farming', body: 'Put idle balance to work with guarded, non-custodial yield.' },
+  { title: 'Farming', body: 'Put idle balance to work in an auto-rebalancing ERC-4626 yield vault.' },
   { title: 'Security', body: 'Envelope-encrypted keys, authoritative on-chain policy checks.' },
 ] as const;
 
