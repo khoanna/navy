@@ -173,4 +173,38 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         _mint(user, shares);
         emit Deposit(msg.sender, user, assets, shares);
     }
+
+    // --- allocator rebalancing ---
+
+    /// @dev Move idle USDC into an adapter, keeping the minIdle buffer and honoring the adapter cap.
+    /// totalAssets is unchanged by this move (idle↓, adapter↑), so caps are measured against a
+    /// constant denominator.
+    function deployToAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant {
+        if (!adapterInfo[adapter].exists) revert UnknownAdapter();
+        uint256 total = totalAssets();
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        uint256 minIdle = (total * minIdleBps) / 10000;
+        if (amount > idle || idle - amount < minIdle) revert IdleBufferBreached();
+        uint256 projected = IYieldAdapter(adapter).totalAssets() + amount;
+        if (projected > (total * adapterInfo[adapter].capBps) / 10000) revert CapExceeded();
+        IERC20(asset()).transfer(adapter, amount);
+        IYieldAdapter(adapter).deposit(amount);
+        emit Deployed(adapter, amount);
+    }
+
+    /// @dev Pull USDC from an adapter back to the vault, bounding the realized shortfall by maxLossBps.
+    function withdrawFromAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant {
+        if (!adapterInfo[adapter].exists) revert UnknownAdapter();
+        uint256 before = IERC20(asset()).balanceOf(address(this));
+        IYieldAdapter(adapter).withdraw(amount, address(this));
+        uint256 received = IERC20(asset()).balanceOf(address(this)) - before;
+        if (received + (amount * maxLossBps) / 10000 < amount) revert LossTooHigh();
+        emit Divested(adapter, received);
+    }
+
+    /// @dev Convenience: divest from one adapter and deploy into another in a single call.
+    function reallocate(address from, address to, uint256 amount) external onlyAllocator {
+        withdrawFromAdapter(from, amount);
+        deployToAdapter(to, amount);
+    }
 }

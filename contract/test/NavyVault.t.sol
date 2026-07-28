@@ -104,4 +104,57 @@ contract NavyVaultTest is Test {
         vm.expectRevert(NavyVault.NotRelayer.selector);
         vault.depositWithAuthorization(alice, 1e6, 0, block.timestamp + 1 hours, nonce, 27, bytes32(0), bytes32(0));
     }
+
+    function _depositAs(uint256 pk, uint256 amount, bytes32 nonce) internal {
+        address user = vm.addr(pk);
+        usdc.mint(user, amount);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive(pk, user, address(vault), amount, 0, block.timestamp + 1 hours, nonce);
+        vm.prank(relayer);
+        vault.depositWithAuthorization(user, amount, 0, block.timestamp + 1 hours, nonce, v, r, s);
+    }
+
+    function test_deployToAdapter_movesIdleAndRespectsBuffer() public {
+        _depositAs(0xBEEF, 100e6, keccak256("d1"));
+        // minIdleBps 10% of 100e6 == 10e6 must stay idle → at most 90e6 deployable.
+        vm.prank(allocator);
+        vault.deployToAdapter(address(adapterA), 90e6);
+        assertEq(adapterA.totalAssets(), 90e6);
+        assertEq(usdc.balanceOf(address(vault)), 10e6);
+        assertEq(vault.totalAssets(), 100e6); // unchanged by moving idle→adapter
+    }
+
+    function test_deployToAdapter_revertsOnBufferBreach() public {
+        _depositAs(0xBEEF, 100e6, keccak256("d2"));
+        vm.prank(allocator);
+        vm.expectRevert(NavyVault.IdleBufferBreached.selector);
+        vault.deployToAdapter(address(adapterA), 95e6); // would leave only 5e6 < 10e6 buffer
+    }
+
+    function test_deployToAdapter_revertsOnCap() public {
+        _depositAs(0xBEEF, 100e6, keccak256("d3"));
+        vm.prank(owner);
+        vault.setTargets(address(adapterA), 5000, 5000); // cap 50%
+        vm.prank(allocator);
+        vm.expectRevert(NavyVault.CapExceeded.selector);
+        vault.deployToAdapter(address(adapterA), 60e6); // 60% > 50% cap
+    }
+
+    function test_deployToAdapter_onlyAllocator() public {
+        _depositAs(0xBEEF, 100e6, keccak256("d4"));
+        vm.prank(alice);
+        vm.expectRevert(NavyVault.NotAllocator.selector);
+        vault.deployToAdapter(address(adapterA), 10e6);
+    }
+
+    function test_reallocate_movesBetweenAdapters() public {
+        _depositAs(0xBEEF, 100e6, keccak256("d5"));
+        vm.startPrank(allocator);
+        vault.deployToAdapter(address(adapterA), 80e6);
+        vault.reallocate(address(adapterA), address(adapterB), 50e6);
+        vm.stopPrank();
+        assertEq(adapterA.totalAssets(), 30e6);
+        assertEq(adapterB.totalAssets(), 50e6);
+        assertEq(vault.totalAssets(), 100e6);
+    }
 }
