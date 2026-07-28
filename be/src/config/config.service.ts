@@ -56,6 +56,12 @@ export class NavyConfigService {
   get keeperPrivateKey(): string { return this.env.NAVY_KEEPER_PRIVATE_KEY ?? this.req('NAVY_OWNER_PRIVATE_KEY'); }
   get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault USDC'; }
   get vaultShareEip712Version(): string { return this.env.NAVY_VAULT_EIP712_VERSION ?? '1'; }
+  // --- Rebalancer keeper ---
+  get rebalanceDriftBandBps(): number { return parseInt(this.env.NAVY_REBALANCE_DRIFT_BPS ?? '500', 10); }
+  get rebalanceMinIdleBps(): number { return parseInt(this.env.NAVY_REBALANCE_MIN_IDLE_BPS ?? '1000', 10); }
+  get rebalanceGasCostBase(): bigint { return BigInt(this.env.NAVY_REBALANCE_GAS_COST_BASE ?? '100000'); }
+  get rebalanceSafetyFactor(): number { return parseInt(this.env.NAVY_REBALANCE_SAFETY_FACTOR ?? '2', 10); }
+  get rebalanceHorizonSeconds(): number { return parseInt(this.env.NAVY_REBALANCE_HORIZON_SECONDS ?? '21600', 10); }
   /** USDC EIP-712 domain name/version. Circle Sepolia USDC (EIP-3009) is name "USDC", version "2"; overridable + verify against chain. */
   get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USDC'; }
   get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '2'; }
