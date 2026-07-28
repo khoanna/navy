@@ -59,4 +59,49 @@ contract NavyVaultTest is Test {
         vault.removeAdapter(address(adapterA));
         assertEq(vault.adapterCount(), 1);
     }
+
+    // Mirrors the EIP-3009 signing helper in NavyPayments.t.sol.
+    function _signReceive(
+        uint256 pk,
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), from, to, value, validAfter, validBefore, nonce
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));
+        (v, r, s) = vm.sign(pk, digest);
+    }
+
+    function test_depositWithAuthorization_mintsShares() public {
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        usdc.mint(user, 100e6);
+
+        bytes32 nonce = keccak256("deposit-1");
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive(pk, user, address(vault), 100e6, 0, block.timestamp + 1 hours, nonce);
+
+        vm.prank(relayer);
+        uint256 shares = vault.depositWithAuthorization(user, 100e6, 0, block.timestamp + 1 hours, nonce, v, r, s);
+
+        assertEq(vault.balanceOf(user), shares);
+        assertEq(vault.totalAssets(), 100e6);
+        assertEq(usdc.balanceOf(address(vault)), 100e6);
+        // First deposit: assets convert 1:1 to shares (scaled by the decimals offset).
+        assertEq(vault.convertToAssets(shares), 100e6);
+    }
+
+    function test_depositWithAuthorization_onlyRelayer() public {
+        bytes32 nonce = keccak256("deposit-2");
+        vm.prank(alice);
+        vm.expectRevert(NavyVault.NotRelayer.selector);
+        vault.depositWithAuthorization(alice, 1e6, 0, block.timestamp + 1 hours, nonce, 27, bytes32(0), bytes32(0));
+    }
 }

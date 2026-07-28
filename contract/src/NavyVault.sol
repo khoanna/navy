@@ -7,6 +7,7 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IYieldAdapter} from "./interfaces/IYieldAdapter.sol";
+import {IEIP3009} from "./interfaces/IEIP3009.sol";
 
 /// @title NavyVault — pooled ERC-4626 farming vault with allocator-driven rebalancing.
 /// @dev Shares (navUSDC) are ERC20Permit so redemptions can be relayed gaslessly. Deposits are
@@ -149,5 +150,27 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             }
         }
         emit AdapterRemoved(adapter);
+    }
+
+    // --- gasless deposit ---
+
+    /// @dev Gasless deposit. Relayer submits a user's signed EIP-3009 ReceiveWithAuthorization
+    /// (to == this vault). USDC's own EIP-712 verification binds user+amount+expiry+nonce, and its
+    /// per-nonce authorizationState prevents replay — so the vault needs no separate paid-guard.
+    /// Shares are priced on pre-deposit state (previewDeposit before the pull), matching ERC-4626.
+    function depositWithAuthorization(
+        address user,
+        uint256 assets,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external onlyRelayer nonReentrant returns (uint256 shares) {
+        shares = previewDeposit(assets);
+        IEIP3009(asset()).receiveWithAuthorization(user, address(this), assets, validAfter, validBefore, nonce, v, r, s);
+        _mint(user, shares);
+        emit Deposit(msg.sender, user, assets, shares);
     }
 }
