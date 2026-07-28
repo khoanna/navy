@@ -51,6 +51,11 @@ export class NavyConfigService {
   get treasuryAddress(): string { return this.req('NAVY_TREASURY_ADDRESS'); }
   get relayerPrivateKey(): string { return this.req('NAVY_RELAYER_PRIVATE_KEY'); }
   get ownerPrivateKey(): string { return this.req('NAVY_OWNER_PRIVATE_KEY'); }
+  // --- NavyVault (rebalancing) ---
+  get vaultAddress(): string { return this.req('NAVY_VAULT_ADDRESS'); }
+  get keeperPrivateKey(): string { return this.env.NAVY_KEEPER_PRIVATE_KEY ?? this.req('NAVY_OWNER_PRIVATE_KEY'); }
+  get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault USDC'; }
+  get vaultShareEip712Version(): string { return this.env.NAVY_VAULT_EIP712_VERSION ?? '1'; }
   /** USDC EIP-712 domain name/version. Circle Sepolia USDC (EIP-3009) is name "USDC", version "2"; overridable + verify against chain. */
   get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USDC'; }
   get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '2'; }

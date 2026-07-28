@@ -8,6 +8,10 @@ import type { UsdcDomain } from './payment-authorization';
 const artifact = require('./navy-payments-abi.json');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const usdcArtifact = require('./usdc-abi.json');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const vaultArtifact = require('./navy-vault-abi.json'); // BARE ARRAY
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const adapterArtifact = require('./yield-adapter-abi.json'); // BARE ARRAY
 
 export const NAVY_EVM = Symbol('NAVY_EVM');
 
@@ -22,6 +26,11 @@ export interface NavyEvm {
   treasury: string;
   paymentsAddress: string;
   usdcDomain: UsdcDomain;
+  vault: ethers.Contract;         // connected to the relayer wallet (depositWithAuthorization/permit/redeem/reads)
+  vaultAsKeeper: ethers.Contract; // connected to the keeper wallet (reallocate/deployToAdapter)
+  keeper: ethers.Wallet;
+  vaultShareDomain: UsdcDomain;
+  yieldAdapterAbi: any;           // bare ABI array, for constructing adapter contracts on the fly
 }
 
 @Global()
@@ -42,10 +51,20 @@ export interface NavyEvm {
         chainId: cfg.evmChainId,
         verifyingContract: cfg.usdcAddress,
       };
+      const keeper = new ethers.Wallet(cfg.keeperPrivateKey, provider);
+      const vault = new ethers.Contract(cfg.vaultAddress, vaultArtifact, relayer);
+      const vaultAsKeeper = new ethers.Contract(cfg.vaultAddress, vaultArtifact, keeper);
+      const vaultShareDomain: UsdcDomain = {
+        name: cfg.vaultShareEip712Name,
+        version: cfg.vaultShareEip712Version,
+        chainId: cfg.evmChainId,
+        verifyingContract: cfg.vaultAddress,
+      };
       return {
         provider, payments, paymentsAsOwner, relayer, owner, usdc,
         usdcAddress: cfg.usdcAddress, treasury: cfg.treasuryAddress,
         paymentsAddress: cfg.paymentsAddress, usdcDomain,
+        vault, vaultAsKeeper, keeper, vaultShareDomain, yieldAdapterAbi: adapterArtifact,
       };
     },
   }],

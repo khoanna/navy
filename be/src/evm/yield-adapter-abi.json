@@ -1,0 +1,5 @@
+[
+  { "type": "function", "name": "totalAssets", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "uint256" }] },
+  { "type": "function", "name": "supplyRatePerYear", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "uint256" }] },
+  { "type": "function", "name": "asset", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "address" }] }
+]
