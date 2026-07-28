@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IYieldAdapter} from "./interfaces/IYieldAdapter.sol";
+
+/// @title NavyVault — pooled ERC-4626 farming vault with allocator-driven rebalancing.
+/// @dev Shares (navUSDC) are ERC20Permit so redemptions can be relayed gaslessly. Deposits are
+/// gasless via EIP-3009 (see depositWithAuthorization). The ALLOCATOR keeper may only move funds
+/// between allowlisted adapters under on-chain caps; it can never send funds to an EOA.
+contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
+    struct AdapterInfo {
+        bool exists;
+        uint16 targetBps; // desired share of totalAssets (advisory; keeper reads it)
+        uint16 capBps; // hard max share of totalAssets this adapter may hold
+    }
+
+    address public owner;
+    mapping(address => bool) public relayers;
+    mapping(address => bool) public allocators;
+
+    address[] public adapters;
+    mapping(address => AdapterInfo) public adapterInfo;
+
+    uint16 public minIdleBps; // fraction of totalAssets kept liquid in the vault
+    uint16 public maxLossBps; // max acceptable shortfall when pulling from an adapter
+
+    event RelayerSet(address indexed relayer, bool allowed);
+    event AllocatorSet(address indexed allocator, bool allowed);
+    event AdapterAdded(address indexed adapter, uint16 targetBps, uint16 capBps);
+    event AdapterRemoved(address indexed adapter);
+    event TargetsSet(address indexed adapter, uint16 targetBps, uint16 capBps);
+    event ParamsSet(uint16 minIdleBps, uint16 maxLossBps);
+    event Deployed(address indexed adapter, uint256 amount);
+    event Divested(address indexed adapter, uint256 received);
+    event Reallocated(address indexed from, address indexed to, uint256 amount);
+
+    error NotOwner();
+    error NotRelayer();
+    error NotAllocator();
+    error ZeroAddress();
+    error AdapterExists();
+    error UnknownAdapter();
+    error AdapterNotEmpty();
+    error BpsTooHigh();
+    error IdleBufferBreached();
+    error CapExceeded();
+    error LossTooHigh();
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
+    modifier onlyRelayer() {
+        if (!relayers[msg.sender]) revert NotRelayer();
+        _;
+    }
+
+    modifier onlyAllocator() {
+        if (!allocators[msg.sender]) revert NotAllocator();
+        _;
+    }
+
+    constructor(IERC20 _usdc, address _owner)
+        ERC20("Navy Vault USDC", "navUSDC")
+        ERC4626(_usdc)
+        ERC20Permit("Navy Vault USDC")
+    {
+        if (address(_usdc) == address(0) || _owner == address(0)) revert ZeroAddress();
+        owner = _owner;
+    }
+
+    // --- ERC-4626 overrides ---
+
+    /// @dev Total assets = idle USDC held by the vault + the sum of every adapter's position.
+    function totalAssets() public view override returns (uint256 total) {
+        total = IERC20(asset()).balanceOf(address(this));
+        uint256 n = adapters.length;
+        for (uint256 i; i < n; ++i) {
+            total += IYieldAdapter(adapters[i]).totalAssets();
+        }
+    }
+
+    /// @dev Virtual-share offset hardens against the ERC-4626 inflation/donation attack.
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 6;
+    }
+
+    /// @dev Required because ERC20 (via ERC4626) and ERC20Permit both sit in the hierarchy.
+    function decimals() public view override(ERC4626, ERC20) returns (uint8) {
+        return ERC4626.decimals();
+    }
+
+    // --- admin ---
+
+    function setRelayer(address relayer, bool allowed) external onlyOwner {
+        relayers[relayer] = allowed;
+        emit RelayerSet(relayer, allowed);
+    }
+
+    function setAllocator(address allocator, bool allowed) external onlyOwner {
+        allocators[allocator] = allowed;
+        emit AllocatorSet(allocator, allowed);
+    }
+
+    function setParams(uint16 _minIdleBps, uint16 _maxLossBps) external onlyOwner {
+        if (_minIdleBps > 10000 || _maxLossBps > 10000) revert BpsTooHigh();
+        minIdleBps = _minIdleBps;
+        maxLossBps = _maxLossBps;
+        emit ParamsSet(_minIdleBps, _maxLossBps);
+    }
+
+    function adapterCount() external view returns (uint256) {
+        return adapters.length;
+    }
+
+    function addAdapter(address adapter, uint16 targetBps, uint16 capBps) external onlyOwner {
+        if (adapter == address(0)) revert ZeroAddress();
+        if (adapterInfo[adapter].exists) revert AdapterExists();
+        if (targetBps > 10000 || capBps > 10000) revert BpsTooHigh();
+        adapterInfo[adapter] = AdapterInfo({exists: true, targetBps: targetBps, capBps: capBps});
+        adapters.push(adapter);
+        emit AdapterAdded(adapter, targetBps, capBps);
+    }
+
+    function setTargets(address adapter, uint16 targetBps, uint16 capBps) external onlyOwner {
+        if (!adapterInfo[adapter].exists) revert UnknownAdapter();
+        if (targetBps > 10000 || capBps > 10000) revert BpsTooHigh();
+        adapterInfo[adapter].targetBps = targetBps;
+        adapterInfo[adapter].capBps = capBps;
+        emit TargetsSet(adapter, targetBps, capBps);
+    }
+
+    function removeAdapter(address adapter) external onlyOwner {
+        if (!adapterInfo[adapter].exists) revert UnknownAdapter();
+        if (IYieldAdapter(adapter).totalAssets() != 0) revert AdapterNotEmpty();
+        delete adapterInfo[adapter];
+        uint256 n = adapters.length;
+        for (uint256 i; i < n; ++i) {
+            if (adapters[i] == adapter) {
+                adapters[i] = adapters[n - 1];
+                adapters.pop();
+                break;
+            }
+        }
+        emit AdapterRemoved(adapter);
+    }
+}
