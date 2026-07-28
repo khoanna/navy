@@ -51,3 +51,11 @@ Run once funded keys are available:
 - CompoundAdapter: `<addr after deploy>`
 - MorphoAdapter: `<addr after Morpho market pinned + deployed>`
 - owner / keeper(allocator) / relayer: `<addrs>`
+
+## NavyVault — Plan 1 review follow-ups (tracked)
+
+From the final security review of the contracts (branch `feat/navy-vault-rebalancing`). No Critical issues; the custody invariant (allocator can only move funds between owner-allowlisted adapters, never to an EOA; adapters return funds only to the vault) is verified correct. Follow-ups before this vault holds real money:
+
+1. **Live-verify `MorphoAdapter` before registering it.** Its `deposit`/`withdraw`/`totalAssets`/`supplyRatePerYear` have never executed on-chain (no resolved Sepolia Circle-USDC market). Resolve the market (section above), set the `MORPHO_*` env vars, and run `forge test --match-contract MorphoAdapterForkTest` against a real RPC (Alchemy/Infura — public RPCs are flaky for this) until green. Do NOT `addAdapter(morpho, …)` in production before this passes. `CompoundAdapter` is already verified live.
+2. **`_ensureIdle` aggregate-loss semantics (mainnet gate).** The `maxLossBps` bound is enforced per-adapter-pull, not aggregated across the redemption. Under genuinely lossy withdrawals across multiple venues the total realized shortfall could exceed `maxLossBps` of the redeemed amount (socialized loss). Latent on testnet (Compound/Morpho are not lossy in normal operation). Before mainnet: bound total realized loss across the `_ensureIdle` loop, or reprice `assets` after the pulls.
+3. **SafeERC20 — intentionally NOT adopted.** The money layer uses bare `transfer`/`approve` on Circle USDC (which reverts on failure), matching the documented `NavyPayments` convention ("no SafeERC20 dependency"). The vault asset is fixed to Circle USDC at construction, so this is correct here. Recorded so it isn't "fixed" later by mistake.
