@@ -337,8 +337,7 @@ contract NavyVaultTest is Test {
         bytes32 nonce = keccak256("zero-share");
         // previewDeposit(1) with 2_000_001 backing and no shares outstanding rounds to 0.
         assertEq(vault.previewDeposit(1), 0);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _signReceive(pk, user, address(vault), 1, 0, block.timestamp + 1 hours, nonce);
+        (uint8 v, bytes32 r, bytes32 s) = _signReceive(pk, user, address(vault), 1, 0, block.timestamp + 1 hours, nonce);
         vm.prank(relayer);
         vm.expectRevert(NavyVault.ZeroShares.selector);
         vault.depositWithAuthorization(user, 1, 0, block.timestamp + 1 hours, nonce, v, r, s);

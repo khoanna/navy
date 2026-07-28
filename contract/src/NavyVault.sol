@@ -322,8 +322,9 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             uint256 pull = have < needed ? have : needed;
             uint256 before = IERC20(asset()).balanceOf(address(this));
             try IYieldAdapter(adapter).withdraw(pull, address(this)) {
-                // ok
-            } catch {
+            // ok
+            }
+            catch {
                 continue;
             }
             uint256 received = IERC20(asset()).balanceOf(address(this)) - before;
