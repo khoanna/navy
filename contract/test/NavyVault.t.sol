@@ -6,6 +6,7 @@ import {NavyVault} from "../src/NavyVault.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockYieldAdapter} from "./mocks/MockYieldAdapter.sol";
 import {LossyMockYieldAdapter} from "./mocks/LossyMockYieldAdapter.sol";
+import {RevertingMockYieldAdapter} from "./mocks/RevertingMockYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract NavyVaultTest is Test {
@@ -234,5 +235,91 @@ contract NavyVaultTest is Test {
         vm.prank(user);
         vm.expectRevert(NavyVault.LossTooHigh.selector);
         vault.redeem(shares, user, user);
+    }
+
+    // --- audit hardening: adapter-revert isolation ---
+
+    function test_totalAssets_survivesRevertingAdapter() public {
+        RevertingMockYieldAdapter bad = new RevertingMockYieldAdapter(address(usdc));
+        vm.prank(owner);
+        vault.addAdapter(address(bad), 0, 10000);
+
+        _depositAs(0xBEEF, 100e6, keccak256("rev-ta"));
+        // The reverting adapter contributes 0; totalAssets is the healthy (idle) sum.
+        assertEq(vault.totalAssets(), 100e6);
+    }
+
+    function test_deposit_notBrickedByRevertingAdapter() public {
+        RevertingMockYieldAdapter bad = new RevertingMockYieldAdapter(address(usdc));
+        vm.prank(owner);
+        vault.addAdapter(address(bad), 0, 10000);
+
+        // depositWithAuthorization prices via previewDeposit → totalAssets; must not brick.
+        _depositAs(0xBEEF, 100e6, keccak256("rev-dep"));
+        address user = vm.addr(0xBEEF);
+        assertGt(vault.balanceOf(user), 0);
+        assertEq(vault.totalAssets(), 100e6);
+    }
+
+    function test_forceRemoveAdapter_removesRevertingAdapter() public {
+        RevertingMockYieldAdapter bad = new RevertingMockYieldAdapter(address(usdc));
+        vm.prank(owner);
+        vault.addAdapter(address(bad), 0, 10000);
+        assertEq(vault.adapterCount(), 3);
+
+        // Normal removeAdapter reverts because the emptiness check reverts → AdapterNotEmpty.
+        vm.prank(owner);
+        vm.expectRevert(NavyVault.AdapterNotEmpty.selector);
+        vault.removeAdapter(address(bad));
+
+        // Force-remove succeeds unconditionally.
+        vm.prank(owner);
+        vault.forceRemoveAdapter(address(bad));
+        assertEq(vault.adapterCount(), 2);
+        (bool exists,,) = vault.adapterInfo(address(bad));
+        assertFalse(exists);
+    }
+
+    function test_addAdapter_capEnforced() public {
+        // setUp already added 2 adapters; add until MAX_ADAPTERS (10), then expect revert.
+        vm.startPrank(owner);
+        uint256 current = vault.adapterCount();
+        for (uint256 i = current; i < vault.MAX_ADAPTERS(); ++i) {
+            MockYieldAdapter a = new MockYieldAdapter(address(vault), address(usdc), 0);
+            vault.addAdapter(address(a), 0, 10000);
+        }
+        assertEq(vault.adapterCount(), vault.MAX_ADAPTERS());
+
+        MockYieldAdapter overflow = new MockYieldAdapter(address(vault), address(usdc), 0);
+        vm.expectRevert(NavyVault.TooManyAdapters.selector);
+        vault.addAdapter(address(overflow), 0, 10000);
+        vm.stopPrank();
+    }
+
+    function test_withdrawFromAdapter_toleratesDust() public {
+        // maxLossBps=0 → only the absolute LOSS_DUST (10) tolerance applies.
+        vm.prank(owner);
+        vault.setParams(0, 0);
+
+        // Adapter withholding 2 units (<= 10 dust) → withdraw succeeds.
+        LossyMockYieldAdapter dusty = new LossyMockYieldAdapter(address(vault), address(usdc), 2);
+        vm.prank(owner);
+        vault.addAdapter(address(dusty), 0, 10000);
+
+        _depositAs(0xBEEF, 100e6, keccak256("dust1"));
+        vm.startPrank(allocator);
+        vault.deployToAdapter(address(dusty), 50e6);
+        vault.withdrawFromAdapter(address(dusty), 10e6); // 2 shortfall <= 10 dust → ok
+        vm.stopPrank();
+
+        // Adapter withholding 100 units (> 10 dust) → still reverts LossTooHigh.
+        LossyMockYieldAdapter lossy = new LossyMockYieldAdapter(address(vault), address(usdc), 100);
+        vm.prank(owner);
+        vault.addAdapter(address(lossy), 0, 10000);
+        vm.startPrank(allocator);
+        vault.deployToAdapter(address(lossy), 40e6);
+        vm.expectRevert(NavyVault.LossTooHigh.selector);
+        vault.withdrawFromAdapter(address(lossy), 10e6);
+        vm.stopPrank();
     }
 }

@@ -27,6 +27,9 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     address[] public adapters;
     mapping(address => AdapterInfo) public adapterInfo;
 
+    uint256 public constant MAX_ADAPTERS = 10;
+    uint256 private constant LOSS_DUST = 10; // absolute base-unit tolerance for protocol floor rounding
+
     uint16 public minIdleBps; // fraction of totalAssets kept liquid in the vault
     uint16 public maxLossBps; // max acceptable shortfall when pulling from an adapter
 
@@ -51,6 +54,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     error IdleBufferBreached();
     error CapExceeded();
     error LossTooHigh();
+    error TooManyAdapters();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -74,6 +78,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     {
         if (address(_usdc) == address(0) || _owner == address(0)) revert ZeroAddress();
         owner = _owner;
+        maxLossBps = 50; // 0.5% default; owner can still setParams. minIdleBps stays 0.
     }
 
     // --- ERC-4626 overrides ---
@@ -83,7 +88,12 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         total = IERC20(asset()).balanceOf(address(this));
         uint256 n = adapters.length;
         for (uint256 i; i < n; ++i) {
-            total += IYieldAdapter(adapters[i]).totalAssets();
+            try IYieldAdapter(adapters[i]).totalAssets() returns (uint256 a) {
+                total += a;
+            } catch {
+                // A reverting adapter contributes 0 instead of bricking vault-wide accounting.
+                // Excise it with forceRemoveAdapter. Conservative: understates NAV, never over.
+            }
         }
     }
 
@@ -124,6 +134,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         if (adapter == address(0)) revert ZeroAddress();
         if (adapterInfo[adapter].exists) revert AdapterExists();
         if (targetBps > 10000 || capBps > 10000) revert BpsTooHigh();
+        if (adapters.length >= MAX_ADAPTERS) revert TooManyAdapters();
         adapterInfo[adapter] = AdapterInfo({exists: true, targetBps: targetBps, capBps: capBps});
         adapters.push(adapter);
         emit AdapterAdded(adapter, targetBps, capBps);
@@ -139,7 +150,22 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
 
     function removeAdapter(address adapter) external onlyOwner {
         if (!adapterInfo[adapter].exists) revert UnknownAdapter();
-        if (IYieldAdapter(adapter).totalAssets() != 0) revert AdapterNotEmpty();
+        try IYieldAdapter(adapter).totalAssets() returns (uint256 a) {
+            if (a != 0) revert AdapterNotEmpty();
+        } catch {
+            revert AdapterNotEmpty(); // reverting adapter: use forceRemoveAdapter
+        }
+        _removeAdapter(adapter);
+    }
+
+    /// @dev Owner escape hatch: remove an adapter unconditionally (e.g. its totalAssets reverts,
+    /// or its funds are unrecoverable). Any value it still holds is written off from NAV.
+    function forceRemoveAdapter(address adapter) external onlyOwner {
+        if (!adapterInfo[adapter].exists) revert UnknownAdapter();
+        _removeAdapter(adapter);
+    }
+
+    function _removeAdapter(address adapter) internal {
         delete adapterInfo[adapter];
         uint256 n = adapters.length;
         for (uint256 i; i < n; ++i) {
@@ -198,8 +224,15 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         uint256 before = IERC20(asset()).balanceOf(address(this));
         IYieldAdapter(adapter).withdraw(amount, address(this));
         uint256 received = IERC20(asset()).balanceOf(address(this)) - before;
-        if (received + (amount * maxLossBps) / 10000 < amount) revert LossTooHigh();
+        if (amount > received && amount - received > _allowedLoss(amount)) revert LossTooHigh();
         emit Divested(adapter, received);
+    }
+
+    /// @dev Allowed shortfall on an adapter pull: the larger of a fixed dust tolerance (protocol
+    /// floor rounding) and the configured bps of the amount.
+    function _allowedLoss(uint256 amount) internal view returns (uint256) {
+        uint256 bpsLoss = (amount * maxLossBps) / 10000;
+        return bpsLoss > LOSS_DUST ? bpsLoss : LOSS_DUST;
     }
 
     /// @dev Convenience: divest from one adapter and deploy into another in a single call.
@@ -227,13 +260,22 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         uint256 n = adapters.length;
         for (uint256 i; i < n && needed > 0; ++i) {
             address adapter = adapters[i];
-            uint256 have = IYieldAdapter(adapter).totalAssets();
+            uint256 have;
+            try IYieldAdapter(adapter).totalAssets() returns (uint256 a) {
+                have = a;
+            } catch {
+                continue;
+            }
             if (have == 0) continue;
             uint256 pull = have < needed ? have : needed;
             uint256 before = IERC20(asset()).balanceOf(address(this));
-            IYieldAdapter(adapter).withdraw(pull, address(this));
+            try IYieldAdapter(adapter).withdraw(pull, address(this)) {
+                // ok
+            } catch {
+                continue;
+            }
             uint256 received = IERC20(asset()).balanceOf(address(this)) - before;
-            if (received + (pull * maxLossBps) / 10000 < pull) revert LossTooHigh();
+            if (pull > received && pull - received > _allowedLoss(pull)) revert LossTooHigh();
             needed = received >= needed ? 0 : needed - received;
         }
     }
