@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
 import { OrdersService } from '../payments/orders.service';
-import { FarmingService } from '../farming/farming.service';
+import { VaultService } from '../vault/vault.service';
 import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
 import { PriceService } from '../market/price.service';
@@ -14,7 +14,7 @@ export class AgentToolsService {
   constructor(
     @Inject(NAVY_EVM) private readonly chain: NavyEvm,
     private readonly orders: OrdersService,
-    private readonly farming: FarmingService,
+    private readonly vault: VaultService,
     private readonly transfers: TransferService,
     private readonly users: UserService,
     private readonly prices: PriceService,
@@ -33,8 +33,8 @@ export class AgentToolsService {
           this.chain.provider.getBalance(walletAddress),
           this.chain.usdc.balanceOf(walletAddress) as Promise<bigint>,
         ]);
-        let farming: any = null;
-        try { farming = await this.farming.getPosition(userId); } catch { /* no subwallet yet */ }
+        let farming: { sharesBase: string; assetsBase: string } | null = null;
+        try { farming = await this.vault.getPosition(walletAddress); } catch { /* no vault position yet */ }
         let ethUsd: number | null = null, totalUsd: number | null = null;
         try {
           ethUsd = await this.prices.ethUsd();
@@ -52,8 +52,8 @@ export class AgentToolsService {
         return { display: { kind: 'card' }, orders: list };
       },
       get_farming_summary: async () => {
-        let position: any = null;
-        try { position = await this.farming.getPosition(userId); } catch { /* none */ }
+        let position: { sharesBase: string; assetsBase: string } | null = null;
+        try { position = await this.vault.getPosition(walletAddress); } catch { /* none */ }
         return { display: { kind: 'card' }, position };
       },
       get_spending_analytics: async (a) => {
