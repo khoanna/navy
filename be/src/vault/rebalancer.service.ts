@@ -42,9 +42,12 @@ export class RebalancerService {
     const totalBase: bigint = await vault.totalAssets();
     const idleBase: bigint = await this.chain.usdc.balanceOf(await vault.getAddress());
 
+    let minIdleBps = this.cfg.rebalanceMinIdleBps;
+    try { minIdleBps = Number(await vault.minIdleBps()); } catch { /* fall back to config */ }
+
     const config: RebalanceConfig = {
       driftBandBps: this.cfg.rebalanceDriftBandBps,
-      minIdleBps: this.cfg.rebalanceMinIdleBps,
+      minIdleBps,
       gasCostBase: this.cfg.rebalanceGasCostBase,
       safetyFactor: this.cfg.rebalanceSafetyFactor,
       horizonSeconds: this.cfg.rebalanceHorizonSeconds,

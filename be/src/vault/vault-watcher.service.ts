@@ -49,7 +49,7 @@ export class VaultWatcherService {
       try {
         const used: boolean = await this.chain.usdc.authorizationState(d.userAddress, d.nonce);
         if (used) {
-          await this.prisma.vaultDeposit.update({ where: { id: d.id }, data: { status: 'confirming' } });
+          await this.prisma.vaultDeposit.update({ where: { id: d.id }, data: { status: 'confirmed' } });
         } else if (d.validBefore && d.validBefore.getTime() < Date.now()) {
           await this.prisma.vaultDeposit.update({ where: { id: d.id }, data: { consumedAt: null, status: 'failed' } });
         }
