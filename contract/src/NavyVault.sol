@@ -213,6 +213,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     function _withdraw(address caller, address receiver, address ownerAddr, uint256 assets, uint256 shares)
         internal
         override
+        nonReentrant
     {
         uint256 idle = IERC20(asset()).balanceOf(address(this));
         if (idle < assets) {

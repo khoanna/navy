@@ -218,4 +218,23 @@ contract NavyVaultTest is Test {
         assertApproxEqAbs(usdc.balanceOf(user), 50e6, 1);
         assertApproxEqAbs(vault.totalAssets(), 50e6, 1);
     }
+
+    function test_redeem_revertsWhenAdapterPullExceedsMaxLoss() public {
+        // Lossy adapter withholds 5e6 per withdraw; maxLossBps is 50 (0.5%).
+        LossyMockYieldAdapter lossy = new LossyMockYieldAdapter(address(vault), address(usdc), 5e6);
+        vm.prank(owner);
+        vault.addAdapter(address(lossy), 0, 10000);
+
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        _depositAs(pk, 100e6, keccak256("rl1"));
+        // Deploy 90e6 into the lossy adapter so a full redeem must pull from it and trip LossTooHigh.
+        vm.prank(allocator);
+        vault.deployToAdapter(address(lossy), 90e6);
+
+        uint256 shares = vault.balanceOf(user);
+        vm.prank(user);
+        vm.expectRevert(NavyVault.LossTooHigh.selector);
+        vault.redeem(shares, user, user);
+    }
 }
