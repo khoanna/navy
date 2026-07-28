@@ -21,6 +21,8 @@ contract MorphoAdapter is IYieldAdapter {
     MarketParams public marketParams;
 
     error NotVault();
+    error LoanTokenMismatch();
+    error MarketIdMismatch();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -33,6 +35,11 @@ contract MorphoAdapter is IYieldAdapter {
         morpho = IMorpho(_morpho);
         marketParams = _params;
         marketId = _id;
+
+        if (_params.loanToken != _usdc) revert LoanTokenMismatch();
+        // Morpho derives a market's Id as keccak256 over the packed MarketParams (5 static 32-byte
+        // fields = 160 bytes); abi.encode of the struct yields exactly those 160 bytes.
+        if (keccak256(abi.encode(_params)) != _id) revert MarketIdMismatch();
     }
 
     function deposit(uint256 amount) external onlyVault {
