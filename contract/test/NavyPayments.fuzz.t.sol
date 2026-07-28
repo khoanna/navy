@@ -35,13 +35,7 @@ contract NavyPaymentsFuzzTest is Test {
         bytes32 nonce = keccak256(abi.encodePacked(MID, invoiceId));
         bytes32 structHash = keccak256(
             abi.encode(
-                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
-                payer,
-                address(navy),
-                amount,
-                validAfter,
-                validBefore,
-                nonce
+                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), payer, address(navy), amount, validAfter, validBefore, nonce
             )
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));

@@ -34,7 +34,12 @@ contract NavyVaultFuzzTest is Test {
         bytes32 structHash = keccak256(
             abi.encode(
                 usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
-                user, address(vault), amount, uint256(0), block.timestamp + 1 hours, nonce
+                user,
+                address(vault),
+                amount,
+                uint256(0),
+                block.timestamp + 1 hours,
+                nonce
             )
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));

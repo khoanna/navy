@@ -57,9 +57,8 @@ contract MockUSDC {
         require(block.timestamp < validBefore, "authorization expired");
         require(!authorizationState[from][nonce], "authorization used");
 
-        bytes32 structHash = keccak256(
-            abi.encode(RECEIVE_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce)
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(RECEIVE_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
         require(ecrecover(digest, v, r, s) == from, "invalid authorization signature");
 

@@ -151,13 +151,11 @@ contract NavyPaymentsTest is Test {
 
     /// @dev Sign an EIP-3009 ReceiveWithAuthorization whose nonce = keccak256(merchantId, invoiceId).
     /// This binds the merchant + invoice + amount + payer + expiry window into the payer's signature.
-    function _signAuth(
-        bytes16 merchantId,
-        bytes16 invoiceId,
-        uint256 amount,
-        uint256 validAfter,
-        uint256 validBefore
-    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+    function _signAuth(bytes16 merchantId, bytes16 invoiceId, uint256 amount, uint256 validAfter, uint256 validBefore)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
         bytes32 nonce = _invoiceKey(merchantId, invoiceId);
         bytes32 structHash = keccak256(
             abi.encode(

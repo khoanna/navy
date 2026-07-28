@@ -17,18 +17,13 @@ contract MockUSDCTest is Test {
         vm.warp(1_700_000_000); // realistic timestamp
     }
 
-    function _signAuth(
-        address from,
-        address to,
-        uint256 value,
-        uint256 validAfter,
-        uint256 validBefore,
-        bytes32 nonce
-    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+    function _signAuth(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
         bytes32 structHash = keccak256(
-            abi.encode(
-                usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), from, to, value, validAfter, validBefore, nonce
-            )
+            abi.encode(usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), from, to, value, validAfter, validBefore, nonce)
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));
         return vm.sign(payerPk, digest);
