@@ -13,9 +13,6 @@ model User {
   username                String?   @unique
   status                  String    @default("active")
   createdAt               DateTime  @default(now())
-  farmDelegationWalletId  String?
-  farmDelegationEnabledAt DateTime?
-  subwallets              FarmingSubwallet[]
 }
 
 model Merchant {
@@ -57,34 +54,6 @@ model Admin {
   lastTotpStep        Int?
   lockedUntil         DateTime?
   failedPasswordCount Int       @default(0)
-}
-
-model FarmingSubwallet {
-  id               String   @id @default(uuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id])
-  pubkey           String   @unique
-  encryptedPrivkey String
-  dataKeyWrapped   String
-  policyJson       Json
-  status           String   @default("active")
-  createdAt        DateTime @default(now())
-  ownerMainWallet      String?
-  principalBase        BigInt   @default(0)
-  currentValueBase     BigInt   @default(0)
-  lastRefreshedAt      DateTime?
-  events               FarmingEvent[]
-}
-
-model FarmingEvent {
-  id          String   @id @default(uuid())
-  subwalletId String
-  subwallet   FarmingSubwallet @relation(fields: [subwalletId], references: [id])
-  kind        String
-  amount      BigInt   @default(0)
-  txSignature String?
-  detail      String?
-  createdAt   DateTime @default(now())
 }
 
 model AuthSession {
