@@ -30,3 +30,14 @@ Provision subwallet → fund with Circle USDC + Sepolia ETH → `approve` + Come
 - **EIP-7702 delegation can be revoked** — the owner account `0xd5de…` was a 7702 smart account; a self-sponsored type-4 tx delegating to the zero address cleared it back to a plain EOA (`getCode → 0x`), so it can now sign for Circle USDC (whose `SignatureChecker` routes signers-with-code to EIP-1271). Revocation tx: `0x477d13dd3cda8c799a157ff87236510a965098656b91380a98451baee86733c6`.
 - **Circle USDC uses `SignatureChecker`** for both permit and EIP-3009 → the payer must be a plain EOA (or an EIP-1271 contract wallet). Plain EOAs work via ecrecover.
 - **`forge script --slow`** is only needed against a 7702-delegated sender (gapped-nonce); a plain-EOA deployer doesn't need it.
+
+## NavyVault / Morpho market (Sepolia)
+
+- Morpho Blue: `0xd011EE229E7459ba1ddd22631eF7bF528d424A14`
+- Circle USDC (loanToken): `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`
+- Market id: `<TO RESOLVE — run script/ResolveMorphoMarket.s.sol against a candidate id>`
+- marketParams (loanToken / collateralToken / oracle / irm / lltv): `<TO RESOLVE>`
+- Source: `<existing market url, or "created via createMarket in tx 0x…">`
+
+> Resolve with: `MORPHO_ADDRESS=0xd011EE229E7459ba1ddd22631eF7bF528d424A14 MORPHO_MARKET_ID=<candidate> forge script script/ResolveMorphoMarket.s.sol --rpc-url sepolia`
+> If no live Circle-USDC market exists, create one via Morpho.createMarket(marketParams) with loanToken = Circle USDC and record its id here.
