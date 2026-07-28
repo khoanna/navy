@@ -41,3 +41,13 @@ Provision subwallet → fund with Circle USDC + Sepolia ETH → `approve` + Come
 
 > Resolve with: `MORPHO_ADDRESS=0xd011EE229E7459ba1ddd22631eF7bF528d424A14 MORPHO_MARKET_ID=<candidate> forge script script/ResolveMorphoMarket.s.sol --rpc-url sepolia`
 > If no live Circle-USDC market exists, create one via Morpho.createMarket(marketParams) with loanToken = Circle USDC and record its id here.
+
+## NavyVault deployment (Sepolia) — TO DEPLOY
+
+Run once funded keys are available:
+`DEPLOYER_PRIVATE_KEY=… NAVY_USDC_ADDRESS=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238 NAVY_OWNER_ADDRESS=… NAVY_RELAYER_ADDRESS=… NAVY_KEEPER_ADDRESS=… NAVY_COMET_ADDRESS=0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e forge script script/DeployVault.s.sol --rpc-url sepolia --broadcast --slow`
+
+- NavyVault: `<addr after deploy>`
+- CompoundAdapter: `<addr after deploy>`
+- MorphoAdapter: `<addr after Morpho market pinned + deployed>`
+- owner / keeper(allocator) / relayer: `<addrs>`
