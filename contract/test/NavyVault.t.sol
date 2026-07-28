@@ -322,4 +322,96 @@ contract NavyVaultTest is Test {
         vault.withdrawFromAdapter(address(lossy), 10e6);
         vm.stopPrank();
     }
+
+    // --- audit hardening batch B ---
+
+    function test_depositWithAuthorization_revertsOnZeroShares() public {
+        // Donate 2 USDC directly into the EMPTY vault so a tiny signed deposit prices to 0 shares.
+        uint256 D = 2_000_000; // 2 USDC
+        usdc.mint(address(this), D);
+        usdc.transfer(address(vault), D);
+
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        usdc.mint(user, 1); // 1 base unit
+        bytes32 nonce = keccak256("zero-share");
+        // previewDeposit(1) with 2_000_001 backing and no shares outstanding rounds to 0.
+        assertEq(vault.previewDeposit(1), 0);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive(pk, user, address(vault), 1, 0, block.timestamp + 1 hours, nonce);
+        vm.prank(relayer);
+        vm.expectRevert(NavyVault.ZeroShares.selector);
+        vault.depositWithAuthorization(user, 1, 0, block.timestamp + 1 hours, nonce, v, r, s);
+    }
+
+    function test_transferOwnership_twoStep() public {
+        vm.prank(owner);
+        vault.transferOwnership(alice);
+        assertEq(vault.pendingOwner(), alice);
+        assertEq(vault.owner(), owner); // unchanged until accepted
+
+        vm.prank(alice);
+        vault.acceptOwnership();
+        assertEq(vault.owner(), alice);
+        assertEq(vault.pendingOwner(), address(0));
+    }
+
+    function test_acceptOwnership_onlyPending() public {
+        vm.prank(owner);
+        vault.transferOwnership(alice);
+
+        address bob = address(0xB0B);
+        vm.prank(bob);
+        vm.expectRevert(NavyVault.NotPendingOwner.selector);
+        vault.acceptOwnership();
+    }
+
+    function test_setPaused_blocksDepositAndDeploy_allowsRedeem() public {
+        // A user deposits BEFORE pausing.
+        uint256 pk = 0xBEEF;
+        address user = vm.addr(pk);
+        _depositAs(pk, 100e6, keccak256("pause-dep"));
+
+        // setPaused is onlyOwner.
+        vm.prank(alice);
+        vm.expectRevert(NavyVault.NotOwner.selector);
+        vault.setPaused(true);
+
+        vm.prank(owner);
+        vault.setPaused(true);
+
+        // New deposit blocked.
+        {
+            usdc.mint(user, 10e6);
+            bytes32 nonce = keccak256("pause-dep-2");
+            (uint8 v, bytes32 r, bytes32 s) =
+                _signReceive(pk, user, address(vault), 10e6, 0, block.timestamp + 1 hours, nonce);
+            vm.prank(relayer);
+            vm.expectRevert(NavyVault.EnforcedPause.selector);
+            vault.depositWithAuthorization(user, 10e6, 0, block.timestamp + 1 hours, nonce, v, r, s);
+        }
+
+        // Deploying idle into an adapter blocked.
+        vm.prank(allocator);
+        vm.expectRevert(NavyVault.EnforcedPause.selector);
+        vault.deployToAdapter(address(adapterA), 10e6);
+
+        // Exit remains open: the earlier depositor can still redeem.
+        uint256 shares = vault.balanceOf(user);
+        vm.prank(user);
+        uint256 assets = vault.redeem(shares, user, user);
+        assertEq(assets, 100e6);
+        assertEq(vault.balanceOf(user), 0);
+    }
+
+    function test_reallocate_stillWorks_afterReentrancyGuard() public {
+        _depositAs(0xBEEF, 100e6, keccak256("realloc-b"));
+        vm.startPrank(allocator);
+        vault.deployToAdapter(address(adapterA), 80e6);
+        vault.reallocate(address(adapterA), address(adapterB), 50e6);
+        vm.stopPrank();
+        assertEq(adapterA.totalAssets(), 30e6);
+        assertEq(adapterB.totalAssets(), 50e6);
+        assertEq(vault.totalAssets(), 100e6);
+    }
 }

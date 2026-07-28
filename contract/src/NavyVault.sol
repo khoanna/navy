@@ -21,8 +21,10 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     }
 
     address public owner;
+    address public pendingOwner;
     mapping(address => bool) public relayers;
     mapping(address => bool) public allocators;
+    bool public paused;
 
     address[] public adapters;
     mapping(address => AdapterInfo) public adapterInfo;
@@ -42,6 +44,9 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     event Deployed(address indexed adapter, uint256 amount);
     event Divested(address indexed adapter, uint256 received);
     event Reallocated(address indexed from, address indexed to, uint256 amount);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event PausedSet(bool paused);
 
     error NotOwner();
     error NotRelayer();
@@ -55,9 +60,17 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     error CapExceeded();
     error LossTooHigh();
     error TooManyAdapters();
+    error ZeroShares();
+    error NotPendingOwner();
+    error EnforcedPause();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (paused) revert EnforcedPause();
         _;
     }
 
@@ -105,6 +118,36 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     /// @dev Required because ERC20 (via ERC4626) and ERC20Permit both sit in the hierarchy.
     function decimals() public view override(ERC4626, ERC20) returns (uint8) {
         return ERC4626.decimals();
+    }
+
+    /// @dev Guard the standard ERC-4626 deposit path (defense-in-depth symmetry with the gasless path).
+    function deposit(uint256 assets, address receiver) public override nonReentrant whenNotPaused returns (uint256) {
+        return super.deposit(assets, receiver);
+    }
+
+    /// @dev Guard the standard ERC-4626 mint path.
+    function mint(uint256 shares, address receiver) public override nonReentrant whenNotPaused returns (uint256) {
+        return super.mint(shares, receiver);
+    }
+
+    // --- ownership & pause ---
+
+    /// @dev Start a 2-step ownership handover. newOwner must call acceptOwnership.
+    function transferOwnership(address newOwner) external onlyOwner {
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert NotPendingOwner();
+        emit OwnershipTransferred(owner, pendingOwner);
+        owner = pendingOwner;
+        pendingOwner = address(0);
+    }
+
+    function setPaused(bool p) external onlyOwner {
+        paused = p;
+        emit PausedSet(p);
     }
 
     // --- admin ---
@@ -193,8 +236,9 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external onlyRelayer nonReentrant returns (uint256 shares) {
+    ) external onlyRelayer nonReentrant whenNotPaused returns (uint256 shares) {
         shares = previewDeposit(assets);
+        if (shares == 0) revert ZeroShares();
         IEIP3009(asset()).receiveWithAuthorization(user, address(this), assets, validAfter, validBefore, nonce, v, r, s);
         _mint(user, shares);
         emit Deposit(msg.sender, user, assets, shares);
@@ -205,7 +249,16 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     /// @dev Move idle USDC into an adapter, keeping the minIdle buffer and honoring the adapter cap.
     /// totalAssets is unchanged by this move (idle↓, adapter↑), so caps are measured against a
     /// constant denominator.
-    function deployToAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant {
+    function deployToAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant whenNotPaused {
+        _deployToAdapter(adapter, amount);
+    }
+
+    /// @dev Pull USDC from an adapter back to the vault, bounding the realized shortfall by maxLossBps.
+    function withdrawFromAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant {
+        _withdrawFromAdapter(adapter, amount);
+    }
+
+    function _deployToAdapter(address adapter, uint256 amount) internal {
         if (!adapterInfo[adapter].exists) revert UnknownAdapter();
         uint256 total = totalAssets();
         uint256 idle = IERC20(asset()).balanceOf(address(this));
@@ -218,8 +271,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         emit Deployed(adapter, amount);
     }
 
-    /// @dev Pull USDC from an adapter back to the vault, bounding the realized shortfall by maxLossBps.
-    function withdrawFromAdapter(address adapter, uint256 amount) public onlyAllocator nonReentrant {
+    function _withdrawFromAdapter(address adapter, uint256 amount) internal {
         if (!adapterInfo[adapter].exists) revert UnknownAdapter();
         uint256 before = IERC20(asset()).balanceOf(address(this));
         IYieldAdapter(adapter).withdraw(amount, address(this));
@@ -236,9 +288,9 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     }
 
     /// @dev Convenience: divest from one adapter and deploy into another in a single call.
-    function reallocate(address from, address to, uint256 amount) external onlyAllocator {
-        withdrawFromAdapter(from, amount);
-        deployToAdapter(to, amount);
+    function reallocate(address from, address to, uint256 amount) external onlyAllocator nonReentrant {
+        _withdrawFromAdapter(from, amount);
+        _deployToAdapter(to, amount);
         emit Reallocated(from, to, amount);
     }
 
