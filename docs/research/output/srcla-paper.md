@@ -164,8 +164,81 @@ SRCLA is a defined and partially implemented architecture for direct Base USDC l
 
 ## IEEE References
 
-The canonical bibliography is references.bib. Citation keys and primary URLs are cross-checked against evidence-matrix.csv.
+[1] Idle DAO, “Best Yield Overview,” official documentation. [Online]. Available: https://docs.idle.finance/products/best-yield/overview. Accessed: Aug. 1, 2026.
 
-## Artifact Appendix
+[2] B. Baude, V. Danos, and H. El Khalloufi, “Leveraged Positions on Decentralized Lending Platforms,” arXiv:2601.14005, 2026. [Online]. Available: https://arxiv.org/abs/2601.14005.
 
-The artifact package includes the review protocol, search and screening logs, evidence matrix, closest-prior-work analysis, Base registry, data dictionary, dependency taxonomy, schemas, bibliography, implementation plans, and research-engine source/tests.
+[3] P. Mohajerin Esfahani and D. Kuhn, “Data-driven Distributionally Robust Optimization Using the Wasserstein Metric: Performance Guarantees and Tractable Reformulations,” Mathematical Programming, vol. 171, pp. 115–166, 2018, doi: 10.1007/s10107-017-1172-1.
+
+[4] V. DeMiguel, X. Mei, and F. J. Nogales, “Multiperiod Portfolio Optimization with Many Risky Assets and General Transaction Costs,” 2014, doi: 10.2139/ssrn.2295345.
+
+[5] B. Senapati and R. Vaze, “Online Convex Optimization with Switching Cost and Delayed Gradients,” arXiv:2310.11880, 2023.
+
+[6] P. Zhao, Y.-J. Zhang, L. Zhang, and Z.-H. Zhou, “Adaptivity and Non-stationarity in Online Learning,” arXiv:2112.14368, 2021.
+
+[7] M. Bastankhah, V. Nadkarni, X. Wang, and P. Viswanath, “AgileRate: Bringing Adaptivity and Robustness to DeFi Lending Markets,” arXiv:2410.13105, 2024.
+
+[8] H. Qu, K. Gogol, F. Groetschla, and C. J. Tessone, “From Rules to Rewards: Reinforcement Learning for Interest Rate Adjustment in DeFi Lending,” arXiv:2506.00505, 2025.
+
+[9] Yearn Finance, “VaultV3.vy,” official source repository. [Online]. Available: https://github.com/yearn/yearn-vaults-v3/blob/master/contracts/VaultV3.vy. Accessed: Aug. 1, 2026.
+
+[10] Morpho Association, “AdaptiveCurveIRM Technical Reference,” official documentation. [Online]. Available: https://docs.morpho.org/get-started/resources/contracts/irm/. Accessed: Aug. 1, 2026.
+
+[11] Euler Labs, “Allocator and Manager Handbook,” official Euler Earn documentation, Aug. 18, 2025. [Online]. Available: https://docs.euler.finance/developers/euler-earn/allocator-handbook.
+
+[12] Yield Seeker, “Core Features,” official documentation. [Online]. Available: https://docs.yieldseeker.xyz/overview/core-features. Accessed: Aug. 1, 2026.
+
+[13] ZyfAI, “Why the Agentic Economy Needs Agentic Treasury Management,” official publication. [Online]. Available: https://blog.zyf.ai/why-the-agentic-economy-needs-the-agentic-treasury-management. Accessed: Aug. 1, 2026.
+
+[14] Mamo, “How Mamo Works,” official documentation. [Online]. Available: https://docs.mamo.bot/behind-the-scenes/how-mamo-works. Accessed: Aug. 1, 2026.
+
+[15] Giza, “Agent Lifecycle,” official documentation. [Online]. Available: https://docs.gizatech.xyz/sdk-reference/agent/lifecycle. Accessed: Aug. 1, 2026.
+
+[16] Surf Liquid, “Product Overview,” official documentation. [Online]. Available: https://surf-2.gitbook.io/surfliquid-docs/infra-and-intelligence/surf-product-overview. Accessed: Aug. 1, 2026.
+
+[17] Almanak, “Almanak SDK Documentation,” official documentation. [Online]. Available: https://sdk.docs.almanak.co/. Accessed: Aug. 1, 2026.
+
+## Appendix A: Disclosure Comparison
+
+| System | Public strength | Principal limitation |
+|---|---|---|
+| Idle Best Yield | Post-deposit capacity-aware objective | Full cost, risk, solver, trigger, and keeper configuration are incomplete |
+| Yearn V3 | Debt, loss, idle, reporting, withdrawal, and shutdown enforcement | No canonical optimizer |
+| Morpho | Exact isolated-market and stateful IRM mechanics | Rate mechanism is not an allocation policy |
+| Euler Earn | Caps, queues, timelocks, reserves, forced removal, loss procedures | Allocation objective remains curator-defined |
+| Yield Seeker and ZyfAI | Rich qualitative yield, cost, stability, liquidity, and risk factors | Equations, weights, thresholds, and live parameters are hidden |
+| Mamo and Giza | Understandable routing or lifecycle boundaries | Objective, cost horizon, and decisive triggers are incomplete |
+| Surf Liquid | Strong planning/enforcement separation | Forecast and scoring implementation is hidden |
+| Almanak | Potentially complete when a strategy and configuration are open | Framework rather than one canonical strategy |
+
+## Appendix B: Pinned Base Market Registry
+
+Registry observation: Base block 49,397,275 on Aug. 1, 2026. Native USDC is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
+
+| Destination | Contract or market identifier | Status |
+|---|---|---|
+| Aave V3 USDC | Pool `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` | Candidate; rate history must be pinned |
+| Compound III USDC | Comet `0xb125E6687d4313864e53df431d5425969c15Eb2F` | Candidate; configuration and rewards history required |
+| Moonwell USDC | mUSDC `0x36918B66F9A3eC7a59d0007D8458DB17bDffBF21` | Candidate; parameter and reward history required |
+| Morpho USDC/cbBTC 86% | `0x9103c3b4e834476c9a62ea009ba2c884ee42e94e6e314a26f04d312434191836` | Not approved pending collateral/oracle review |
+| Morpho USDC/USDe 91.5% | `0x54cf9be57fdfa6457a660991907434ff9d295c465a603a50126ff647d50b7354` | Not approved pending depeg/oracle review |
+| Morpho USDC/WETH 86% | `0x8793cf302b8ffd655ab97bd1c695dbd967807e8367a65cb2f4edaf1380ba1bda` | Not approved pending oracle/liquidation review |
+
+## Appendix C: Reproduction and Provenance
+
+The executable research core is retained outside this output directory in `research-engine/`. Run:
+
+```bash
+cd research-engine
+uv run pytest -q
+uv run ruff check .
+```
+
+The ERC-4626 baseline is retained in `contract/`. Run:
+
+```bash
+cd contract
+forge test --summary
+```
+
+Detailed intermediate research artifacts removed from the output directory remain recoverable from Git commits `61e0717` through `237f663`. This single paper is the authoritative human-facing output.
