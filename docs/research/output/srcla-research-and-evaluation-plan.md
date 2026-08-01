@@ -68,7 +68,7 @@ Each record includes author/corporate author, title, venue/type, year, DOI or pe
 Run:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import csv
 from pathlib import Path
 for name in ("search-log.csv", "screening-log.csv"):
@@ -121,7 +121,7 @@ For every SRCLA component, identify the closest academic antecedent and producti
 - [ ] **Step 5: Validate evidence**
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import csv
 from pathlib import Path
 with Path("docs/research/output/evidence-matrix.csv").open(newline="", encoding="utf-8") as handle:
@@ -172,7 +172,7 @@ Create identifiers for implementation, upgrade authority, oracle/feed, collatera
 - [ ] **Step 5: Validate registry**
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import csv
 from pathlib import Path
 with Path("docs/research/output/base-usdc-market-registry.csv").open(newline="", encoding="utf-8") as handle:
@@ -266,7 +266,7 @@ Use Abstract; Introduction and Contributions; Background; Related Work; System a
 - [ ] **Step 5: Validate and commit**
 
 ```bash
-python -m json.tool docs/research/output/experiment-manifest.schema.json >/dev/null
+python3 -m json.tool docs/research/output/experiment-manifest.schema.json >/dev/null
 rg -n "H1|H2|H3|H4|H5|H6" docs/research/output/plans/srcla-experiments-and-paper-plan.md
 rg -n "IEEE References|Artifact Appendix|Limitations" docs/research/output/paper-outline.md
 git add -f docs/research/output/experiment-manifest.schema.json docs/research/output/plans/srcla-experiments-and-paper-plan.md docs/research/output/paper-outline.md

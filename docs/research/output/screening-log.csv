@@ -1,0 +1,13 @@
+source_id,citation_key,date,status,reason,primary_url
+S001,idle-best-yield,2026-08-01,include,"Publishes post-deposit capacity-aware allocation objective and rebalance mechanics",https://docs.idle.finance/products/best-yield/overview
+S002,baude2026leveraged,2026-08-01,include,"Original convex multi-market lending allocation with utilization-dependent curves; leveraged but mathematically adjacent",https://arxiv.org/abs/2601.14005
+S003,esfahani2018wasserstein,2026-08-01,include,"Original Wasserstein DRO method used as uncertainty antecedent",https://doi.org/10.1007/s10107-017-1172-1
+S004,demiguel2014multiperiod,2026-08-01,include,"Original multidimensional no-trade-region and boundary-trading method",https://doi.org/10.2139/ssrn.2295345
+S005,senapati2023oco,2026-08-01,include,"Original online convex optimization with switching costs and delayed gradients",https://arxiv.org/abs/2310.11880
+S006,zhao2021adaptivity,2026-08-01,include,"Original nonstationary online-learning/dynamic-regret method",https://arxiv.org/abs/2112.14368
+S007,bastankhah2024agilerate,2026-08-01,include,"Adaptive DeFi lending utilization controller; related rate-setting rather than depositor allocation",https://arxiv.org/abs/2410.13105
+S008,qu2025rules,2026-08-01,include,"Offline-RL DeFi interest-rate adjustment; related utilization forecasting/control",https://arxiv.org/abs/2506.00505
+S009,yearn-v3-vault,2026-08-01,include,"Official vault accounting debt and safety enforcement code",https://github.com/yearn/yearn-vaults-v3/blob/master/contracts/VaultV3.vy
+S010,morpho-adaptive-irm,2026-08-01,include,"Official stateful Morpho interest-rate mechanism",https://docs.morpho.org/get-started/resources/contracts/irm/
+S011,ryan2026siphon,2026-08-01,exclude-out-of-scope,"Concentrated-liquidity residual reallocation is outside direct lending scope",https://doi.org/10.2139/ssrn.6374838
+S012,tekaat2023qe,2026-08-01,exclude-out-of-scope,"Macroeconomic quantitative-easing portfolio rebalancing is unrelated to DeFi controller design",https://ssrn.com/abstract=4451017
