@@ -6,20 +6,20 @@
 
 ## Research question
 
-At decision time (t), choose direct-market USDC weights (w_t\in\mathbb{R}^n) and transfers (z_t=w_t-w_{t-1}) to maximize realized net yield, while never violating an explicit admissibility and safety policy:
+At decision time $t$, choose direct-market USDC weights $w_t\in\mathbb{R}^n$ and transfers $z_t=w_t-w_{t-1}$ to maximize realized net yield, while never violating an explicit admissibility and safety policy:
 
-\[
+$$
 \max_{w_t}\quad \inf_{P\in\mathcal P_t}
 \mathbb E_P\!\left[\sum_i w_{i,t}\,R_{i,t:t+H}(w_{i,t})\right]
 -C_t(z_t)-\lambda\,\rho_P(w_t)
-\]
+$$
 
 subject to
 
-\[
+$$
 \mathbf 1^\top w_t=1,\quad 0\le w_{i,t}\le c_{i,t},\quad
 w_{i,t}=0\ \text{if market }i\notin\mathcal E_t,
-\]
+$$
 
 plus minimum idle/exit liquidity, dependency concentration, and emergency rules. Here $R$ is future base interest plus realizable incentives, $C$ is executable movement/claim cost, $\mathcal P_t$ is an uncertainty set, and $\mathcal E_t$ is the hard eligible-market set. This is a proposed organizing model, not a claim of novelty.
 
@@ -27,24 +27,24 @@ plus minimum idle/exit liquidity, dependency concentration, and emergency rules.
 
 Let market cash/supply be $S_i$, borrows $B_i$, proposed deposit $x_i$, and utilization $u_i=B_i/S_i$. If borrows do not change during the transaction, the immediate post-deposit utilization is
 
-\[
+$$
 u_i'(x_i)=\frac{B_i}{S_i+x_i}.
-\]
+$$
 
-This makes return endogenous to allocation. A displayed supply APR (s_i(u_i)) is not the return on the proposed allocation; the static marginal baseline is (s_i(u_i'(x_i))). For a large move, an implementation must use each protocol's exact integer arithmetic and accrue-interest state transition rather than this approximation.
+This makes return endogenous to allocation. A displayed supply APR $s_i(u_i)$ is not the return on the proposed allocation; the static marginal baseline is $s_i(u_i'(x_i))$. For a large move, an implementation must use each protocol's exact integer arithmetic and accrue-interest state transition rather than this approximation.
 
 ### Aave V3
 
-Aave's variable borrow curve is piecewise linear around an optimal utilization (u^*); the liquidity/supply rate is borrow rate multiplied by utilization and the share not taken by the reserve factor:
+Aave's variable borrow curve is piecewise linear around an optimal utilization $u^*$; the liquidity/supply rate is borrow rate multiplied by utilization and the share not taken by the reserve factor:
 
-\[
+$$
 r_b(u)=
 \begin{cases}
 r_0+\frac{u}{u^*}s_1,&u\le u^*\\
 r_0+s_1+\frac{u-u^*}{1-u^*}s_2,&u>u^*
 \end{cases},\qquad
 r_s(u)=r_b(u)u(1-f).
-\]
+$$
 
 The exact deployed strategy and reserve configuration—not generic documentation—must be read for Base USDC. Available liquidity is a hard operational state: at very high utilization, nominal aToken value need not be immediately withdrawable in full. The official V3 code exposes reserve state and interest-rate strategy; governance can change risk and rate parameters.
 
@@ -56,15 +56,15 @@ The exact deployed strategy and reserve configuration—not generic documentatio
 
 Compound III publishes separate kinked supply and borrow curves. For supply:
 
-\[
+$$
 r_s(u)=
 \begin{cases}
 a_s+b_su,&u\le k_s\\
 a_s+b_sk_s+c_s(u-k_s),&u>k_s.
 \end{cases}
-\]
+$$
 
-Utilization is `totalBorrow / totalSupply`; interest accrues each second from block timestamps. Unlike Aave/Moonwell, the documented Comet supply curve is directly parameterized rather than derived as (r_bu(1-f)). Therefore a generic “borrow curve times utilization” adapter would be incorrect. Base USDC market parameters must be fetched from the deployed Comet/configurator.
+Utilization is `totalBorrow / totalSupply`; interest accrues each second from block timestamps. Unlike Aave/Moonwell, the documented Comet supply curve is directly parameterized rather than derived as $r_bu(1-f)$. Therefore a generic “borrow curve times utilization” adapter would be incorrect. Base USDC market parameters must be fetched from the deployed Comet/configurator.
 
 - Primary sources: [Compound III interest rates](https://docs.compound.finance/interest-rates/), [Comet repository](https://github.com/compound-finance/comet), [Base deployments](https://docs.compound.finance/).
 - Strength: `getSupplyRate(u)` permits exact counterfactual rate queries.
@@ -74,9 +74,9 @@ Utilization is `totalBorrow / totalSupply`; interest accrues each second from bl
 
 Moonwell documents a governance-set kink/jump utilization curve. Its Compound-style market model derives supplier return from borrower rate, utilization, and reserves, while WELL incentives are separate and volatile:
 
-\[
+$$
 r_s(u)=r_b(u)\,u\,(1-f),
-\]
+$$
 
 with a piecewise borrow curve whose base rate, multiplier, kink and jump multiplier are published per market. A post-deposit evaluator must distinguish base USDC yield from incentive APY and value only claimable, liquid rewards after swap cost/haircut.
 
@@ -86,13 +86,13 @@ with a piecewise borrow curve whose base rate, multiplier, kink and jump multipl
 
 ### Morpho Blue direct markets
 
-Each Morpho market is isolated by loan token, collateral token, oracle, IRM and LLTV. For an eligible market with fee (f), supplier rate is approximately
+Each Morpho market is isolated by loan token, collateral token, oracle, IRM and LLTV. For an eligible market with fee $f$, supplier rate is approximately
 
-\[
+$$
 r_s(u,t)=r_b(u,t)u(1-f).
-\]
+$$
 
-The AdaptiveCurveIRM has target utilization (u^*=0.9), curve steepness 4, and a stateful target rate (r^*(t)). Utilization moves the instantaneous curve while persistent deviation makes (r^*(t)) drift up or down. Thus the post-deposit rate is path-dependent: a deposit lowers utilization immediately and, if low utilization persists, pushes the future curve downward. A static kink model cannot reproduce this.
+The AdaptiveCurveIRM has target utilization $u^*=0.9$, curve steepness 4, and a stateful target rate $r^*(t)$. Utilization moves the instantaneous curve while persistent deviation makes $r^*(t)$ drift up or down. Thus the post-deposit rate is path-dependent: a deposit lowers utilization immediately and, if low utilization persists, pushes the future curve downward. A static kink model cannot reproduce this.
 
 - Primary sources: [Morpho IRM technical reference](https://docs.morpho.org/get-started/resources/contracts/irm/), [interest-rate concepts](https://docs.morpho.org/learn/concepts/irm/), [Morpho Blue repository](https://github.com/morpho-org/morpho-blue), [IRM repository](https://github.com/morpho-org/morpho-blue-irm), [Morpho risk disclosures](https://docs.morpho.org/learn/resources/risks/).
 - Strength: immutable market tuple and open stateful rate mechanism allow exact simulation.
@@ -100,14 +100,14 @@ The AdaptiveCurveIRM has target utilization (u^*=0.9), curve steepness 4, and a 
 
 ## 2. Realized-yield objective and reproducible baselines
 
-For horizon (H), define realized net return:
+For horizon $H$, define realized net return:
 
-\[
+$$
 Y_{t,H}=\sum_i\int_t^{t+H} w_i(\tau)r_{s,i}(\tau)d\tau
 +I_{t,H}^{\text{realized}}-G_{t,H}-S_{t,H}-L_{t,H},
-\]
+$$
 
-where incentives (I) are counted only when claimable and conservatively converted to USDC; (G) is gas; (S) is swap/price impact; and (L) is realized loss or unavailable capital under the declared withdrawal policy. This avoids using displayed APY as the dependent variable.
+where incentives $I$ are counted only when claimable and conservatively converted to USDC; $G$ is gas; $S$ is swap/price impact; and $L$ is realized loss or unavailable capital under the declared withdrawal policy. This avoids using displayed APY as the dependent variable.
 
 Minimum reproducible baselines:
 
@@ -126,11 +126,11 @@ All baselines must use the same block-level states, exact protocol adapters, rew
 
 ### Deterministic robust counterpart
 
-If horizon return vector is only known to lie in set (mathcal U_t), choose
+If the horizon return vector is only known to lie in set $\mathcal U_t$, choose
 
-\[
+$$
 \max_{w\in\mathcal W_t}\min_{r\in\mathcal U_t}w^Tr-C(w-w_{t-1}).
-\]
+$$
 
 Box uncertainty is tractable but overly conservative and ignores co-movement. Ellipsoidal/factor sets can represent common Base demand, USDC incentive, or protocol-shared shocks but depend on stable covariance/factor estimates.
 
@@ -138,10 +138,10 @@ Box uncertainty is tractable but overly conservative and ignores co-movement. El
 
 Esfahani and Kuhn optimize worst-case expectation over distributions in a Wasserstein ball around empirical samples:
 
-\[
+$$
 \sup_{w\in\mathcal W}\inf_{P:W(P,\hat P_N)\le\varepsilon}
 \mathbb E_P[U(w,R)].
-\]
+$$
 
 They give finite-dimensional convex reformulations and finite-sample guarantees under stated assumptions. Cost-sensitive DRO portfolio work incorporates general convex transaction costs. These are strong mathematical templates, but neither models DeFi's endogenous post-deposit rates, stateful Morpho curve, permission changes, or censored withdrawal liquidity.
 
@@ -155,16 +155,16 @@ They give finite-dimensional convex reformulations and finite-sample guarantees 
 
 A deterministic net-gain trigger is
 
-\[
+$$
 \text{rebalance iff}\quad
 \widehat{\Delta Y}_{t,H}>C_t(z)+m_t,
-\]
+$$
 
-where (m_t) is a safety margin. Under uncertainty, a more defensible gate is
+where $m_t$ is a safety margin. Under uncertainty, a more defensible gate is
 
-\[
+$$
 Q_{\alpha}(\Delta Y_{t,H})>C_t(z)+m_t,
-\]
+$$
 
 or a lower confidence bound. This naturally creates a no-trade region. Explicit cooldown, minimum residence time, and reversal penalty can prevent oscillation, but they must not block safety exits.
 
@@ -189,14 +189,14 @@ Transfer limits: direct lending exposes rates for every market on chain, so this
 
 ## 5. Exit-liquidity stress as a hard constraint
 
-Immediate accounting liquidity is approximately (A_i=S_i-B_i), but safe withdrawable amount must use exact protocol state and controls. Define stress demand (q\) and stressed available liquidity (A_i^{(s)}). A simple hard constraint is
+Immediate accounting liquidity is approximately $A_i=S_i-B_i$, but safe withdrawable amount must use exact protocol state and controls. Define stress demand $q$ and stressed available liquidity $A_i^{(s)}$. A simple hard constraint is
 
-\[
+$$
 \sum_i\min(w_iV,A_i^{(s)})+V_{idle}\ge qV
 \quad\forall s\in\mathcal S,
-\]
+$$
 
-or require an ordered unwind to satisfy time-bucket demands (q_{24h},q_{7d}). Scenarios should include borrower utilization jumps, supplier runs, frozen/paused markets, oracle incidents, gas spikes, and zero liquidity in one protocol. Treating high utilization merely as a smooth yield penalty is insufficient because withdrawal feasibility is discontinuous.
+or require an ordered unwind to satisfy time-bucket demands $q_{24h}$ and $q_{7d}$. Scenarios should include borrower utilization jumps, supplier runs, frozen/paused markets, oracle incidents, gas spikes, and zero liquidity in one protocol. Treating high utilization merely as a smooth yield penalty is insufficient because withdrawal feasibility is discontinuous.
 
 Protocol-specific observations:
 
@@ -208,11 +208,11 @@ No primary source found in this pass publishes a complete direct-lending allocat
 
 ## 6. Correlated dependency constraints
 
-Market count is not diversification. Define binary/exposure matrix (D_{ig}) for dependency group (g): protocol implementation, admin/governance, oracle provider/feed, collateral asset, liquidation venue, USDC itself, sequencer/Base, incentive token, and keeper/data path. Enforce
+Market count is not diversification. Define binary/exposure matrix $D_{ig}$ for dependency group $g$: protocol implementation, admin/governance, oracle provider/feed, collateral asset, liquidation venue, USDC itself, sequencer/Base, incentive token, and keeper/data path. Enforce
 
-\[
+$$
 \sum_i D_{ig}w_i\le C_g\quad\forall g.
-\]
+$$
 
 For Morpho, multiple markets can share an oracle, collateral family or liquidation venue while appearing separate. For Aave, Compound and Moonwell, all USDC allocation shares Base and USDC failure modes, so those risks cannot be diversified within scope; they require explicit acceptance/emergency policy rather than a misleading cap.
 

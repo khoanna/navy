@@ -20,7 +20,7 @@ The research will not assume superiority. It will test whether the controller im
 - Initial protocol families: Aave V3, Compound III, Moonwell, and explicitly eligible Morpho Blue markets.
 - Curated allocator vaults such as MetaMorpho are comparison material, not allocation destinations.
 - Historical walk-forward backtesting plus transaction replay on a Base mainnet fork.
-- Portfolio tiers: $10,000, $100,000, $1 million, and $10 million.
+- Portfolio tiers: \$10,000, \$100,000, \$1 million, and \$10 million.
 
 The same controller and safety policy apply across portfolio tiers. Market impact, capacity, gas sensitivity, feasible diversification, and allocation outcomes change endogenously with portfolio size.
 
@@ -41,13 +41,13 @@ Supplying USDC moves the underlying tokens into a lending protocol, but the vaul
 
 The accounting value is:
 
-\[
+$$
 \mathrm{totalAssets}_t =
 \mathrm{USDC}_{idle,t}
 +\sum_i \mathrm{USDCValue}(position_{i,t})
 -\mathrm{recognizedLosses}_t
 -\mathrm{liabilities}_t.
-\]
+$$
 
 Forecast values and displayed APYs never enter share pricing. Positions are valued from their accrued underlying claims using protocol-specific, manipulation-resistant accounting.
 
@@ -60,22 +60,22 @@ The system maintains separate measurements for:
 
 Existing profits belong to existing shares. A later depositor enters at the current pre-deposit share price:
 
-\[
+$$
 p_t=\frac{\mathrm{totalAssets}_t}{\mathrm{totalSupply}_t},
 \qquad
 \mathrm{sharesMinted}=\frac{\mathrm{depositAssets}}{p_t}.
-\]
+$$
 
 After entry, all shares receive the same proportional change in asset value. A later depositor receives no yield accrued before entry.
 
 For reporting, user profit is:
 
-\[
+$$
 \mathrm{profit}_u(t)=
 \mathrm{redeemValue}(shares_{u,t})
 +\mathrm{priorWithdrawals}_u
 -\mathrm{totalDeposits}_u.
-\]
+$$
 
 The contract provides correct share accounting. An event-based indexer reconstructs deposits, withdrawals, transfers, realized profit, unrealized profit, money-weighted return, and time-weighted return. Transferable shares require explicit cost-basis reconstruction rather than inference from the current wallet balance.
 
@@ -129,11 +129,11 @@ Morpho eligibility is assessed per isolated market because collateral, oracle, L
 
 Protocol adapters must reproduce exact deployed behavior and integer arithmetic where necessary. A generic interest-rate approximation is insufficient.
 
-For market supply \(S_i\), borrows \(B_i\), and proposed deposit \(x_i\), a first-order post-deposit utilization is:
+For market supply $S_i$, borrows $B_i$, and proposed deposit $x_i$, a first-order post-deposit utilization is:
 
-\[
+$$
 u'_i(x_i)=\frac{B_i}{S_i+x_i}.
-\]
+$$
 
 The adapter then applies the deployed market's actual rate mechanics:
 
@@ -160,11 +160,11 @@ Candidate features include:
 - Governance and parameter-change indicators.
 - Morpho AdaptiveCurveIRM target state and utilization history.
 
-For horizon \(H\):
+For horizon $H$:
 
-\[
+$$
 \widehat R_{i,t:t+H}\sim P(R\mid X_t,w_i).
-\]
+$$
 
 Candidate horizons are 6 hours, 24 hours, 3 days, and 7 days. The controller uses a calibrated lower quantile or lower-confidence bound. Rolling historical quantiles and Wasserstein distributionally robust optimization remain comparison methods.
 
@@ -172,28 +172,28 @@ Training uses chronological walk-forward evaluation. Features, parameters, seeds
 
 ## 9. Optimization objective
 
-Let \(w_0\) be the idle-USDC weight and \(w_i\) the weight for lending market \(i\). The target allocation is:
+Let $w_0$ be the idle-USDC weight and $w_i$ the weight for lending market $i$. The target allocation is:
 
-\[
+$$
 w_t^*=\arg\max_{w\in\mathcal W_t}
 LCB_\alpha\left[\sum_i w_iR_{i,t:t+H}(w_i)\right]
 -C_t(w,w_{t-1}).
-\]
+$$
 
 Realized net yield is:
 
-\[
+$$
 Y_{t,H}=\sum_i\int_t^{t+H}w_i(\tau)r_i(\tau)d\tau
 +I^{realized}_{t,H}-G_{t,H}-S_{t,H}-L_{t,H},
-\]
+$$
 
-where incentives are counted only when claimable and conservatively convertible to USDC, \(G\) is gas, \(S\) is swap or execution impact, and \(L\) is realized loss under the declared withdrawal policy.
+where incentives are counted only when claimable and conservatively convertible to USDC, $G$ is gas, $S$ is swap or execution impact, and $L$ is realized loss under the declared withdrawal policy.
 
 The allocation satisfies:
 
-\[
+$$
 w_0+\sum_iw_i=1,\qquad w_i\ge0.
-\]
+$$
 
 Each market allocation is capped by market, protocol, utilization, liquidity, collateral, oracle, governance, and shared-dependency constraints.
 
@@ -201,21 +201,21 @@ Each market allocation is capped by market, protocol, utilization, liquidity, co
 
 The idle reserve is optimized rather than fixed arbitrarily:
 
-\[
+$$
 R_t=\max\left(
 R_{min},
 Q_\beta(\mathrm{withdrawals}_{t:t+H_w}),
 \mathrm{stressLiquidityShortfall}_t
 \right).
-\]
+$$
 
 The target reserve can rise during high utilization, withdrawal pressure, gas spikes, stale data, regime changes, or protocol incidents.
 
-Under stress scenario \(s\), the portfolio must satisfy:
+Under stress scenario $s$, the portfolio must satisfy:
 
-\[
+$$
 V_{idle}+\sum_i\min(Vw_i,L^{withdrawable}_{i,s})\ge q_sV.
-\]
+$$
 
 Immediate and longer time-bucket requirements will be calibrated and tested through sensitivity analysis, not presented as universal safety constants.
 
@@ -241,10 +241,10 @@ New deposits, idle USDC, and normal cash flows move the portfolio toward its tar
 
 Existing capital moves only when:
 
-\[
+$$
 LCB_\alpha(\Delta Y_H)>
 C_{gas}+C_{transition}+C_{reversal}+M_{uncertainty}.
-\]
+$$
 
 The controller can trade only to the nearest acceptable boundary instead of the frictionless optimum. Normal actions also respect minimum residence time, cooldown, turnover budget, gas budget, and a higher hurdle for reversing recent transfers.
 
