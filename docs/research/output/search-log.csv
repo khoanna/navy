@@ -9,3 +9,4 @@ Q007,2026-08-01,Official protocol sources,"Morpho Blue AdaptiveCurveIRM MetaMorp
 Q008,2026-08-01,Official protocol sources,"Aave V3 Base USDC rate model address book governance","official code address book governance",4,"Rate mechanics and mutable Base parameters"
 Q009,2026-08-01,Official protocol sources,"Compound III Base USDC supply rate Comet","official docs repository deployments",3,"Direct supply curve and deployment source"
 Q010,2026-08-01,Official protocol sources,"Moonwell Base USDC interest rate curve contracts","official docs and repository",3,"Kink curve and incentive separation"
+Q011,2026-08-01,Official protocol sources,"Euler Earn allocator rebalancing caps queues liquidity","official developer documentation",3,"Strong safety and liquidity mechanics; curator policy remains external"

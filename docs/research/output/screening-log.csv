@@ -11,3 +11,4 @@ S009,yearn-v3-vault,2026-08-01,include,"Official vault accounting debt and safet
 S010,morpho-adaptive-irm,2026-08-01,include,"Official stateful Morpho interest-rate mechanism",https://docs.morpho.org/get-started/resources/contracts/irm/
 S011,ryan2026siphon,2026-08-01,exclude-out-of-scope,"Concentrated-liquidity residual reallocation is outside direct lending scope",https://doi.org/10.2139/ssrn.6374838
 S012,tekaat2023qe,2026-08-01,exclude-out-of-scope,"Macroeconomic quantitative-easing portfolio rebalancing is unrelated to DeFi controller design",https://ssrn.com/abstract=4451017
+S013,euler-earn,2026-08-01,include,"Official caps queues timelocks liquidity reserve and emergency workflow; no canonical optimizer",https://docs.euler.finance/developers/euler-earn/allocator-handbook
