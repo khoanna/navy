@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SRCLA Experiment Manifest",
+  "type": "object",
+  "required": ["experimentId", "datasetHash", "registryHash", "trainBlocks", "validationBlocks", "testBlocks", "portfolioUsd", "baseline", "policyHash", "modelHash", "seed", "costModel", "stressScenario", "outputHash"],
+  "properties": {
+    "experimentId": {"type": "string"},
+    "datasetHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "registryHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "trainBlocks": {"$ref": "#/$defs/range"},
+    "validationBlocks": {"$ref": "#/$defs/range"},
+    "testBlocks": {"$ref": "#/$defs/range"},
+    "portfolioUsd": {"enum": [10000, 100000, 1000000, 10000000]},
+    "baseline": {"enum": ["B0", "B1", "B2", "B3", "B4", "B5", "SRCLA"]},
+    "policyHash": {"type": "string"},
+    "modelHash": {"type": "string"},
+    "seed": {"type": "integer"},
+    "decisionCadenceSeconds": {"type": "integer", "minimum": 1},
+    "executionDelaySeconds": {"type": "integer", "minimum": 0},
+    "costModel": {"type": "object"},
+    "stressScenario": {"type": "string"},
+    "outputHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "range": {
+      "type": "object", "required": ["start", "end"],
+      "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
