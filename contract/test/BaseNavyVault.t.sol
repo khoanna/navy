@@ -248,6 +248,15 @@ contract BaseNavyVaultTest is Test {
         assertEq(vault.maxMint(alice), 0);
     }
 
+    function test_revertingRewardAccountantRead_closesMaxDepositAndMaxMint() public {
+        vm.prank(admin);
+        vault.setRewardAccountant(address(rewardAccountant));
+        rewardAccountant.setRevertRecognizedRead(true);
+
+        assertEq(vault.maxDeposit(alice), 0);
+        assertEq(vault.maxMint(alice), 0);
+    }
+
     function _admitAdapter() internal {
         vm.prank(admin);
         vault.addAdapter(address(adapter));

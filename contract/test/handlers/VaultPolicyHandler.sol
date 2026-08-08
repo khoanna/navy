@@ -28,6 +28,10 @@ contract NavyVaultPolicyHarness is NavyVault {
     function setActivePlanReserveForTest(uint256 reserve_) external {
         activePlanReserve = reserve_;
     }
+
+    function syncRewardAccountantForTest(bool issuingShares) external {
+        _syncRewardAccountant(issuingShares);
+    }
 }
 
 contract PolicyStrategyAdapter is IStrategyAdapter {
@@ -179,56 +183,79 @@ contract VaultPolicyHandler is Test {
     }
 
     function setDependencyLimit(uint16 capBps, uint96 absoluteCap) external {
-        uint256 nav = vault.totalAssets();
-        uint256 exposure = vault.dependencyExposure(PROTOCOL_GROUP);
-        uint256 requiredBps = nav == 0 ? 0 : Math.ceilDiv(exposure * 10_000, nav);
-        uint16 boundedBps = uint16(bound(uint256(capBps), requiredBps, 10_000));
-        uint256 boundedAbsoluteCap = bound(uint256(absoluteCap), exposure, 250_000e6);
+        uint16 boundedBps = uint16(bound(uint256(capBps), 0, 12_000));
+        uint256 boundedAbsoluteCap = bound(uint256(absoluteCap), 0, 250_000e6);
 
         vm.prank(admin);
-        vault.setDependencyCap(PROTOCOL_GROUP, boundedBps, boundedAbsoluteCap);
+        uint256 nav = vault.totalAssets();
+        uint256 exposure = vault.dependencyExposure(PROTOCOL_GROUP);
+        uint256 effectiveCap =
+            boundedBps > 10_000 ? 0 : Math.min(Math.mulDiv(nav, boundedBps, 10_000), boundedAbsoluteCap);
+        if (boundedBps > 10_000) {
+            vm.expectRevert(NavyVault.InvalidDependencyCap.selector);
+            vault.setDependencyCap(PROTOCOL_GROUP, boundedBps, boundedAbsoluteCap);
+        } else if (exposure > effectiveCap) {
+            vm.expectRevert(NavyVault.DependencyCapExceeded.selector);
+            vault.setDependencyCap(PROTOCOL_GROUP, boundedBps, boundedAbsoluteCap);
+        } else {
+            vault.setDependencyCap(PROTOCOL_GROUP, boundedBps, boundedAbsoluteCap);
+        }
     }
 
     function setAdapterAExposure(uint96 desiredAssets) external {
-        _setAdapterExposure(adapterA, desiredAssets, vault.strategyAssets(address(adapterB)));
+        _setAdapterExposure(adapterA, desiredAssets);
     }
 
     function setAdapterBExposure(uint96 desiredAssets) external {
-        _setAdapterExposure(adapterB, desiredAssets, vault.strategyAssets(address(adapterA)));
+        _setAdapterExposure(adapterB, desiredAssets);
     }
 
     function redeem(uint16 shareBps) external {
-        if (vault.dependencyExposure(PROTOCOL_GROUP) != 0) return;
-
         uint256 shareBalance = vault.balanceOf(actor);
         if (shareBalance == 0) return;
 
         uint256 shares = Math.mulDiv(shareBalance, bound(uint256(shareBps), 1, 10_000), 10_000);
         if (shares == 0) shares = 1;
+        uint256 assets = vault.previewRedeem(shares);
+        _normalizeExposureForProjectedNav(assets);
 
         vm.prank(actor);
         vault.redeem(shares, actor, actor);
     }
 
     function _setAdapterLimits(PolicyStrategyAdapter adapter, uint16 capBps, uint96 absoluteCap) internal {
-        uint256 nav = vault.totalAssets();
-        uint256 currentAssets = vault.strategyAssets(address(adapter));
-        uint256 requiredBps = nav == 0 ? 0 : Math.ceilDiv(currentAssets * 10_000, nav);
-        uint16 boundedBps = uint16(bound(uint256(capBps), requiredBps, 10_000));
-        uint256 boundedAbsoluteCap = bound(uint256(absoluteCap), currentAssets, 250_000e6);
+        uint16 boundedBps = uint16(bound(uint256(capBps), 0, 12_000));
+        uint256 boundedAbsoluteCap = bound(uint256(absoluteCap), 0, 250_000e6);
 
         vm.prank(admin);
-        vault.setAdapterLimits(address(adapter), boundedBps, boundedAbsoluteCap, 0, type(uint256).max);
+        uint256 nav = vault.totalAssets();
+        uint256 currentAssets = vault.strategyAssets(address(adapter));
+        uint256 effectiveCap =
+            boundedBps > 10_000 ? 0 : Math.min(Math.mulDiv(nav, boundedBps, 10_000), boundedAbsoluteCap);
+        if (boundedBps > 10_000) {
+            vm.expectRevert(NavyVault.InvalidAdapterStatus.selector);
+            vault.setAdapterLimits(address(adapter), boundedBps, boundedAbsoluteCap, 0, type(uint256).max);
+        } else if (currentAssets > effectiveCap) {
+            vm.expectRevert(NavyVault.AdapterCapExceeded.selector);
+            vault.setAdapterLimits(address(adapter), boundedBps, boundedAbsoluteCap, 0, type(uint256).max);
+        } else {
+            vault.setAdapterLimits(address(adapter), boundedBps, boundedAbsoluteCap, 0, type(uint256).max);
+        }
     }
 
-    function _setAdapterExposure(PolicyStrategyAdapter adapter, uint96 desiredAssets, uint256 otherExposure) internal {
+    function _setAdapterExposure(PolicyStrategyAdapter adapter, uint96 desiredAssets) internal {
         uint256 nav = vault.totalAssets();
         if (nav == 0) return;
 
-        uint256 maxAdapterExposure = vault.effectiveAdapterCap(address(adapter));
-        uint256 maxDependencyExposure = vault.dependencyCap(PROTOCOL_GROUP);
-        uint256 groupHeadroom = maxDependencyExposure > otherExposure ? maxDependencyExposure - otherExposure : 0;
-        uint256 boundedDesired = bound(uint256(desiredAssets), 0, Math.min(maxAdapterExposure, groupHeadroom));
+        uint256 boundedDesired = bound(uint256(desiredAssets), 0, 250_000e6);
+        bytes4 expectedRevert = _expectedProjectedRevert(adapter, boundedDesired);
+        if (expectedRevert != bytes4(0)) {
+            vm.expectRevert(expectedRevert);
+            vault.validateProjectedDeployment(address(adapter), boundedDesired);
+            return;
+        }
+
+        vault.validateProjectedDeployment(address(adapter), boundedDesired);
         uint256 currentAssets = vault.strategyAssets(address(adapter));
 
         if (boundedDesired > currentAssets) {
@@ -246,5 +273,103 @@ contract VaultPolicyHandler is Test {
 
         adapter.setReportedAssets(boundedDesired);
         adapter.setMaxWithdrawable(boundedDesired);
+    }
+
+    function _normalizeExposureForProjectedNav(uint256 assetsOut) internal {
+        uint256 nav = vault.totalAssets();
+        uint256 projectedNav = assetsOut >= nav ? 0 : nav - assetsOut;
+
+        uint256 adapterAAssets = vault.strategyAssets(address(adapterA));
+        uint256 adapterBAssets = vault.strategyAssets(address(adapterB));
+
+        uint256 adapterACap = _adapterCapForNav(address(adapterA), projectedNav);
+        uint256 adapterBCap = _adapterCapForNav(address(adapterB), projectedNav);
+
+        if (adapterAAssets > adapterACap) {
+            adapterAAssets = adapterACap;
+            _applyAdapterExposure(adapterA, adapterAAssets);
+        }
+        if (adapterBAssets > adapterBCap) {
+            adapterBAssets = adapterBCap;
+            _applyAdapterExposure(adapterB, adapterBAssets);
+        }
+
+        uint256 dependencyCap_ = _dependencyCapForNav(PROTOCOL_GROUP, projectedNav);
+        uint256 dependencyExposure_ = adapterAAssets + adapterBAssets;
+        if (dependencyExposure_ > dependencyCap_) {
+            uint256 excess = dependencyExposure_ - dependencyCap_;
+            uint256 reduceB = Math.min(adapterBAssets, excess);
+            adapterBAssets -= reduceB;
+            excess -= reduceB;
+            if (reduceB != 0) _applyAdapterExposure(adapterB, adapterBAssets);
+            if (excess != 0) {
+                adapterAAssets -= excess;
+                _applyAdapterExposure(adapterA, adapterAAssets);
+            }
+        }
+    }
+
+    function _applyAdapterExposure(PolicyStrategyAdapter adapter, uint256 desiredAssets) internal {
+        uint256 currentAssets = vault.strategyAssets(address(adapter));
+
+        if (desiredAssets > currentAssets) {
+            uint256 increase = desiredAssets - currentAssets;
+            uint256 idle = usdc.balanceOf(address(vault));
+            if (idle < increase) {
+                usdc.mint(address(vault), increase - idle);
+            }
+            vm.prank(address(vault));
+            usdc.transfer(address(adapter), increase);
+        } else if (currentAssets > desiredAssets) {
+            vm.prank(address(adapter));
+            usdc.transfer(address(vault), currentAssets - desiredAssets);
+        }
+
+        adapter.setReportedAssets(desiredAssets);
+        adapter.setMaxWithdrawable(desiredAssets);
+    }
+
+    function _expectedProjectedRevert(PolicyStrategyAdapter adapter, uint256 projectedAssets)
+        internal
+        view
+        returns (bytes4)
+    {
+        (, uint16 capBps, uint256 absoluteCap,,) = vault.adapterConfig(address(adapter));
+        uint256 nav = vault.totalAssets();
+        uint256 adapterCap = Math.min(Math.mulDiv(nav, capBps, 10_000), absoluteCap);
+        if (projectedAssets > adapterCap) {
+            return NavyVault.AdapterCapExceeded.selector;
+        }
+
+        bytes32[] memory dependencyIds = vault.adapterDependencies(address(adapter));
+        uint256 currentAssets = vault.strategyAssets(address(adapter));
+        for (uint256 i; i < dependencyIds.length; ++i) {
+            bytes32 dependencyId = dependencyIds[i];
+            uint256 dependencyHeadroom = _dependencyHeadroom(dependencyId, currentAssets);
+            if (projectedAssets > dependencyHeadroom) {
+                return NavyVault.DependencyCapExceeded.selector;
+            }
+        }
+
+        return bytes4(0);
+    }
+
+    function _dependencyHeadroom(bytes32 dependencyId, uint256 currentAssets) internal view returns (uint256) {
+        uint256 exposure = vault.dependencyExposure(dependencyId);
+        uint256 cap = vault.dependencyCap(dependencyId);
+        uint256 otherExposure = exposure > currentAssets ? exposure - currentAssets : 0;
+        if (cap <= otherExposure) return 0;
+        return cap - otherExposure;
+    }
+
+    function _adapterCapForNav(address adapter, uint256 nav) internal view returns (uint256) {
+        (, uint16 capBps, uint256 absoluteCap,,) = vault.adapterConfig(adapter);
+        return Math.min(Math.mulDiv(nav, capBps, 10_000), absoluteCap);
+    }
+
+    function _dependencyCapForNav(bytes32 dependencyId, uint256 nav) internal view returns (uint256) {
+        (uint16 capBps, uint256 absoluteCap, bool configured) = vault.dependencyConfig(dependencyId);
+        if (!configured) return type(uint256).max;
+        return Math.min(Math.mulDiv(nav, capBps, 10_000), absoluteCap);
     }
 }

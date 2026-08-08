@@ -41,6 +41,16 @@ contract VaultPolicyTest is Test {
         assertEq(vault.effectiveAdapterCap(address(adapterA)), 40_000e6);
     }
 
+    function test_effectiveCapShrinksWhenOtherAdapterConsumesDependencyHeadroom() public {
+        _depositAlice(100_000e6);
+
+        vm.prank(admin);
+        vault.setDependencyCap(PROTOCOL_GROUP, 6_000, 60_000e6);
+        _seedAdapterExposure(adapterB, 25_000e6);
+
+        assertEq(vault.effectiveAdapterCap(address(adapterA)), 35_000e6);
+    }
+
     function test_effectiveCapTracksPercentageAfterNavChange() public {
         _setLimits(adapterA, 5_000, type(uint256).max, 0);
         _depositAlice(100_000e6);
@@ -104,6 +114,35 @@ contract VaultPolicyTest is Test {
         vm.expectRevert(NavyVault.DependencyCapExceeded.selector);
         vault.setAdapterDependencies(address(adapterB), _dependencies(PROTOCOL_GROUP));
         vm.stopPrank();
+    }
+
+    function test_validateProjectedDeployment_allowsExposureWithinAdapterAndDependencyHeadroom() public {
+        _depositAlice(100_000e6);
+
+        vm.prank(admin);
+        vault.setDependencyCap(PROTOCOL_GROUP, 6_000, 60_000e6);
+        _seedAdapterExposure(adapterB, 25_000e6);
+
+        vault.validateProjectedDeployment(address(adapterA), 35_000e6);
+    }
+
+    function test_validateProjectedDeployment_rejectsAdapterCapBreach() public {
+        _depositAlice(100_000e6);
+        _setLimits(adapterA, 4_000, type(uint256).max, 0);
+
+        vm.expectRevert(NavyVault.AdapterCapExceeded.selector);
+        vault.validateProjectedDeployment(address(adapterA), 40_001e6);
+    }
+
+    function test_validateProjectedDeployment_rejectsDependencyBreach() public {
+        _depositAlice(100_000e6);
+
+        vm.prank(admin);
+        vault.setDependencyCap(PROTOCOL_GROUP, 6_000, 60_000e6);
+        _seedAdapterExposure(adapterB, 25_000e6);
+
+        vm.expectRevert(NavyVault.DependencyCapExceeded.selector);
+        vault.validateProjectedDeployment(address(adapterA), 35_001e6);
     }
 
     function test_requiredIdleUsesAdminFloorUntilPlanReserveIsHigher() public {

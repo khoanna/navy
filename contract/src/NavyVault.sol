@@ -233,6 +233,10 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         return _configuredAdapters.length;
     }
 
+    function adapterDependencies(address adapter) external view returns (bytes32[] memory dependencyIds) {
+        return _adapterDependencies[adapter];
+    }
+
     function adapterStatus(address adapter) external view returns (VaultTypes.AdapterStatus) {
         return adapterConfig[adapter].status;
     }
@@ -242,11 +246,31 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     }
 
     function effectiveAdapterCap(address adapter) public view returns (uint256) {
-        return _effectiveCap(totalAssets(), adapterConfig[adapter].capBps, adapterConfig[adapter].absoluteCap);
+        uint256 nav = totalAssets();
+        uint256 effectiveCap_ = _effectiveCap(nav, adapterConfig[adapter].capBps, adapterConfig[adapter].absoluteCap);
+        bytes32[] storage dependencyIds = _adapterDependencies[adapter];
+        uint256 dependencyCount_ = dependencyIds.length;
+        uint256 currentAssets = _recognizedStrategyAssets(adapter);
+
+        for (uint256 i; i < dependencyCount_; ++i) {
+            uint256 dependencyHeadroom = _dependencyHeadroom(dependencyIds[i], currentAssets, nav);
+            effectiveCap_ = Math.min(effectiveCap_, dependencyHeadroom);
+        }
+
+        return effectiveCap_;
     }
 
     function dependencyCap(bytes32 dependencyId) public view returns (uint256) {
         return _dependencyCap(dependencyId, totalAssets());
+    }
+
+    function dependencyConfig(bytes32 dependencyId)
+        public
+        view
+        returns (uint16 capBps, uint256 absoluteCap, bool configured)
+    {
+        DependencyConfig memory config = _dependencyConfig[dependencyId];
+        return (config.capBps, config.absoluteCap, config.configured);
     }
 
     function dependencyExposure(bytes32 dependencyId) public view returns (uint256 exposure_) {
@@ -261,6 +285,12 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
 
     function requiredIdle() public view returns (uint256) {
         return adminIdleFloor > activePlanReserve ? adminIdleFloor : activePlanReserve;
+    }
+
+    function validateProjectedDeployment(address adapter, uint256 projectedAssets) public view {
+        if (!_knownAdapters[adapter]) revert UnknownAdapter();
+        if (adapterConfig[adapter].status != VaultTypes.AdapterStatus.Active) revert InvalidAdapterStatus();
+        _checkExposure(adapter, projectedAssets, totalAssets());
     }
 
     function addAdapter(address adapter) external onlyOwner {
@@ -580,13 +610,22 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
 
         for (uint256 i; i < dependencyCount_; ++i) {
             bytes32 dependencyId = dependencyIds[i];
-            uint256 exposure = dependencyExposure(dependencyId);
-            uint256 adjustedExposure = exposure + projectedAssets;
-            if (currentAssets <= exposure) {
-                adjustedExposure -= currentAssets;
+            if (projectedAssets > _dependencyHeadroom(dependencyId, currentAssets, nav)) {
+                revert DependencyCapExceeded();
             }
-            if (adjustedExposure > _dependencyCap(dependencyId, nav)) revert DependencyCapExceeded();
         }
+    }
+
+    function _dependencyHeadroom(bytes32 dependencyId, uint256 currentAssets, uint256 nav)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 cap = _dependencyCap(dependencyId, nav);
+        uint256 exposure = dependencyExposure(dependencyId);
+        uint256 otherExposure = exposure > currentAssets ? exposure - currentAssets : 0;
+        if (cap <= otherExposure) return 0;
+        return cap - otherExposure;
     }
 
     function _allowedLoss(uint256 amount, uint16 maxLossBps) internal pure returns (uint256) {
