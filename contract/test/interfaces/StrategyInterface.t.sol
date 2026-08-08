@@ -40,4 +40,72 @@ contract StrategyInterfaceTest is Test {
         assertEq(uint8(VaultTypes.AdapterStatus.Impaired), 3);
         assertEq(uint8(VaultTypes.AdapterStatus.Removed), 4);
     }
+
+    function test_adapterConfigLayout_isStable() public pure {
+        VaultTypes.AdapterConfig memory config = VaultTypes.AdapterConfig({
+            status: VaultTypes.AdapterStatus.Impaired,
+            capBps: 1_111,
+            absoluteCap: 2_222,
+            maxLossBps: 3_333,
+            accountingCap: 4_444
+        });
+
+        bytes memory encoded = abi.encode(config);
+
+        assertEq(encoded.length, 5 * 32);
+        assertEq(
+            keccak256(encoded),
+            keccak256(
+                abi.encode(
+                    uint8(VaultTypes.AdapterStatus.Impaired),
+                    uint16(1_111),
+                    uint256(2_222),
+                    uint16(3_333),
+                    uint256(4_444)
+                )
+            )
+        );
+    }
+
+    function test_planHeaderLayout_isStable() public pure {
+        VaultTypes.PlanHeader memory header = VaultTypes.PlanHeader({
+            planId: 11,
+            policyVersion: 22,
+            createdAt: 33,
+            expiresAt: 44,
+            actionCount: 55,
+            snapshotBlockNumber: 66,
+            snapshotHash: bytes32(uint256(77)),
+            decisionHash: bytes32(uint256(88)),
+            configurationDigest: bytes32(uint256(99)),
+            reserve: 111,
+            minFinalAssets: 222,
+            maxRecognizedLoss: 333,
+            turnoverLimit: 444
+        });
+
+        bytes memory encoded = abi.encode(header);
+
+        assertEq(encoded.length, 13 * 32);
+        assertEq(
+            keccak256(encoded),
+            keccak256(
+                abi.encode(
+                    uint256(11),
+                    uint64(22),
+                    uint64(33),
+                    uint64(44),
+                    uint32(55),
+                    uint256(66),
+                    bytes32(uint256(77)),
+                    bytes32(uint256(88)),
+                    bytes32(uint256(99)),
+                    uint256(111),
+                    uint256(222),
+                    uint256(333),
+                    uint256(444)
+                )
+            )
+        );
+    }
 }
