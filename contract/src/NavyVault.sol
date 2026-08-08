@@ -7,10 +7,12 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IRewardAccountant} from "./interfaces/IRewardAccountant.sol";
 import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
+import {PlanHash} from "./libraries/PlanHash.sol";
 import {VaultTypes} from "./libraries/VaultTypes.sol";
 
 /// @title NavyVault
@@ -24,6 +26,23 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         bool configured;
     }
 
+    struct PlanState {
+        bytes32 actionsRoot;
+        bytes32 configurationDigest;
+        uint256 reserve;
+        uint256 minFinalAssets;
+        uint256 maxRecognizedLoss;
+        uint256 turnoverLimit;
+        uint256 turnoverUsed;
+        uint64 policyVersion;
+        uint64 expiresAt;
+        uint32 actionCount;
+        bool registered;
+        bool cancelled;
+        bool completed;
+        bool deployStarted;
+    }
+
     address public owner;
     address public pendingOwner;
     address public allocator;
@@ -32,19 +51,24 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     bool public paused;
     uint256 public adminIdleFloor;
     uint256 public activePlanReserve;
+    uint64 public policyVersion = 1;
 
     uint256 public constant MAX_ADAPTERS = 10;
     uint256 public constant LOSS_DUST = 10;
+    bytes32 private constant CONFIG_DIGEST_SEED = keccak256("NAVY_VAULT_CONFIGURATION");
 
     mapping(address => VaultTypes.AdapterConfig) public adapterConfig;
     mapping(address => uint256) public adapterImpairments;
     mapping(address => bytes32) public adapterConfigurationDigests;
     mapping(address => uint256) public storedStrategyAssets;
+    mapping(uint256 => uint32) public nextActionIndex;
     mapping(bytes32 => DependencyConfig) private _dependencyConfig;
     mapping(address => bytes32[]) private _adapterDependencies;
     mapping(address => mapping(bytes32 => bool)) private _adapterDependencyMembership;
+    mapping(uint256 => PlanState) private _plans;
 
     address[] private _configuredAdapters;
+    uint256 private _activeReservePlanId;
     mapping(address => bool) private _knownAdapters;
     mapping(address => bool) private _enumeratedAdapters;
 
@@ -67,6 +91,12 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event PausedSet(bool paused);
+    event PlanRegistered(uint256 indexed planId, bytes32 headerHash, bytes32 actionsRoot, uint256 reserve);
+    event PlanCancellation(uint256 indexed planId);
+    event PlanActionExecuted(
+        uint256 indexed planId, uint32 indexed index, uint8 indexed kind, address adapter, uint256 amount
+    );
+    event EmergencyDivestExecuted(address indexed adapter, uint256 requestedAssets, uint256 returnedAssets);
 
     error NotOwner();
     error NotAllocator();
@@ -89,6 +119,20 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     error DuplicateDependencyGroup();
     error InsufficientSynchronousLiquidity();
     error WithdrawalLossExceeded();
+    error InvalidPlanPolicy();
+    error InvalidPlanConfiguration();
+    error InvalidPlanExpiry();
+    error InvalidPlanActionCount();
+    error InvalidPlanProof();
+    error InvalidPlanActionOrder();
+    error PlanAlreadyRegistered();
+    error PlanCancelled();
+    error PlanExpired();
+    error TurnoverLimitExceeded();
+    error FinalAssetsTooLow();
+    error LossLimitExceeded();
+    error RecognizedLossLimitExceeded();
+    error PauseRequired();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -245,6 +289,15 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         return _recognizedStrategyAssets(adapter);
     }
 
+    function configurationDigest() public view returns (bytes32 digest) {
+        digest = CONFIG_DIGEST_SEED;
+        uint256 adapterCount_ = _configuredAdapters.length;
+        for (uint256 i; i < adapterCount_; ++i) {
+            address adapter = _configuredAdapters[i];
+            digest = keccak256(abi.encode(digest, adapter, adapterConfigurationDigests[adapter]));
+        }
+    }
+
     function effectiveAdapterCap(address adapter) public view returns (uint256) {
         uint256 nav = totalAssets();
         uint256 effectiveCap_ = _effectiveCap(nav, adapterConfig[adapter].capBps, adapterConfig[adapter].absoluteCap);
@@ -293,6 +346,121 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         _checkExposure(adapter, projectedAssets, totalAssets());
     }
 
+    function registerPlan(VaultTypes.PlanHeader calldata header, bytes32 actionsRoot)
+        external
+        onlyAllocator
+        nonReentrant
+    {
+        if (actionsRoot == bytes32(0)) revert InvalidPlanProof();
+        if (header.actionCount == 0) revert InvalidPlanActionCount();
+        if (
+            header.createdAt > block.timestamp || header.expiresAt <= block.timestamp
+                || header.expiresAt < header.createdAt
+        ) {
+            revert InvalidPlanExpiry();
+        }
+        if (header.policyVersion != policyVersion) revert InvalidPlanPolicy();
+        if (header.configurationDigest != configurationDigest()) revert InvalidPlanConfiguration();
+
+        PlanState storage plan = _plans[header.planId];
+        if (plan.registered) revert PlanAlreadyRegistered();
+
+        plan.actionsRoot = actionsRoot;
+        bytes32 headerHash = PlanHash.hashPlanHeader(header);
+        plan.configurationDigest = header.configurationDigest;
+        plan.reserve = header.reserve;
+        plan.minFinalAssets = header.minFinalAssets;
+        plan.maxRecognizedLoss = header.maxRecognizedLoss;
+        plan.turnoverLimit = header.turnoverLimit;
+        plan.policyVersion = header.policyVersion;
+        plan.expiresAt = header.expiresAt;
+        plan.actionCount = header.actionCount;
+        plan.registered = true;
+
+        _activeReservePlanId = header.planId;
+        activePlanReserve = header.reserve;
+
+        emit PlanRegistered(header.planId, headerHash, actionsRoot, header.reserve);
+    }
+
+    function executeDivest(VaultTypes.Action calldata action, bytes32[] calldata proof)
+        external
+        onlyAllocator
+        nonReentrant
+    {
+        PlanState storage plan = _validateAction(action, proof, VaultTypes.ActionKind.Divest);
+
+        uint256 beforeAssets = IERC20(asset()).balanceOf(address(this));
+        uint256 returned = IStrategyAdapter(action.adapter).withdraw(action.amount);
+        uint256 delta = IERC20(asset()).balanceOf(address(this)) - beforeAssets;
+        if (returned != delta || delta < action.minOut) revert LossLimitExceeded();
+        _enforceWithdrawalLoss(action.adapter, action.amount, delta);
+
+        _refreshStrategyAsset(action.adapter);
+        _enforcePlanPostConditions(plan);
+        _markActionConsumed(plan, action);
+        plan.turnoverUsed += action.amount;
+
+        emit PlanActionExecuted(action.planId, action.index, uint8(action.kind), action.adapter, delta);
+    }
+
+    function executeDeploy(VaultTypes.Action calldata action, bytes32[] calldata proof)
+        external
+        onlyAllocator
+        nonReentrant
+    {
+        if (paused) revert EnforcedPause();
+
+        PlanState storage plan = _validateAction(action, proof, VaultTypes.ActionKind.Deploy);
+        uint256 beforeAssets = IERC20(asset()).balanceOf(address(this));
+        uint256 planRequiredIdle = Math.max(requiredIdle(), plan.reserve);
+        if (beforeAssets < action.amount || beforeAssets - action.amount < planRequiredIdle) {
+            revert InsufficientSynchronousLiquidity();
+        }
+
+        uint256 currentAssets = _recognizedStrategyAssets(action.adapter);
+        validateProjectedDeployment(action.adapter, currentAssets + action.amount);
+
+        IERC20(asset()).safeTransfer(action.adapter, action.amount);
+        uint256 credited = IStrategyAdapter(action.adapter).deposit(action.amount);
+        uint256 delta = beforeAssets - IERC20(asset()).balanceOf(address(this));
+        if (delta != action.amount || credited < action.minOut) revert LossLimitExceeded();
+
+        _refreshStrategyAsset(action.adapter);
+        _enforcePlanPostConditions(plan);
+        _markActionConsumed(plan, action);
+        plan.turnoverUsed += action.amount;
+
+        emit PlanActionExecuted(action.planId, action.index, uint8(action.kind), action.adapter, credited);
+    }
+
+    function cancelPlan(uint256 planId) external {
+        if (msg.sender != owner && msg.sender != allocator) revert NotAllocator();
+
+        PlanState storage plan = _plans[planId];
+        if (!plan.registered) revert InvalidPlanActionOrder();
+        if (plan.cancelled) revert PlanCancelled();
+
+        plan.cancelled = true;
+        _clearPlanReserve(planId);
+        emit PlanCancellation(planId);
+    }
+
+    function emergencyDivest(address adapter, uint256 amount, uint256 minOut) external onlyAllocator nonReentrant {
+        if (!paused) revert PauseRequired();
+        if (!_knownAdapters[adapter]) revert UnknownAdapter();
+        _validateAdapterConfiguration(adapter);
+
+        uint256 beforeAssets = IERC20(asset()).balanceOf(address(this));
+        uint256 returned = IStrategyAdapter(adapter).withdraw(amount);
+        uint256 delta = IERC20(asset()).balanceOf(address(this)) - beforeAssets;
+        if (returned != delta || delta < minOut) revert LossLimitExceeded();
+        _enforceWithdrawalLoss(adapter, amount, delta);
+
+        _refreshStrategyAsset(adapter);
+        emit EmergencyDivestExecuted(adapter, amount, delta);
+    }
+
     function addAdapter(address adapter) external onlyOwner {
         if (adapter == address(0)) revert ZeroAddress();
         if (_knownAdapters[adapter]) revert AdapterExists();
@@ -300,8 +468,8 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         if (IStrategyAdapter(adapter).asset() != asset()) revert InvalidAdapterAsset();
         if (IStrategyAdapter(adapter).vault() != address(this)) revert InvalidAdapterVault();
 
-        bytes32 configurationDigest = IStrategyAdapter(adapter).configurationDigest();
-        if (configurationDigest == bytes32(0)) revert InvalidAdapterConfiguration();
+        bytes32 adapterConfigurationDigest = IStrategyAdapter(adapter).configurationDigest();
+        if (adapterConfigurationDigest == bytes32(0)) revert InvalidAdapterConfiguration();
 
         _knownAdapters[adapter] = true;
         _enumeratedAdapters[adapter] = true;
@@ -314,10 +482,11 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             maxLossBps: 0,
             accountingCap: type(uint256).max
         });
-        adapterConfigurationDigests[adapter] = configurationDigest;
+        adapterConfigurationDigests[adapter] = adapterConfigurationDigest;
         _refreshStrategyAsset(adapter);
+        _bumpPolicyVersion();
 
-        emit AdapterAdded(adapter, configurationDigest);
+        emit AdapterAdded(adapter, adapterConfigurationDigest);
     }
 
     function setAdapterStatus(address adapter, VaultTypes.AdapterStatus status) external onlyOwner {
@@ -337,6 +506,8 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         } else {
             _refreshStrategyAsset(adapter);
         }
+
+        _bumpPolicyVersion();
     }
 
     function setAdapterLimits(
@@ -359,6 +530,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         config.accountingCap = accountingCap;
 
         _refreshStrategyAsset(adapter);
+        _bumpPolicyVersion();
         emit AdapterLimitsSet(adapter, capBps, absoluteCap, maxLossBps, accountingCap);
     }
 
@@ -369,6 +541,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         }
 
         _dependencyConfig[dependencyId] = DependencyConfig({capBps: capBps, absoluteCap: absoluteCap, configured: true});
+        _bumpPolicyVersion();
         emit DependencyCapSet(dependencyId, capBps, absoluteCap);
     }
 
@@ -402,18 +575,21 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             }
         }
 
+        _bumpPolicyVersion();
         emit AdapterDependenciesSet(adapter, dependencyIds);
     }
 
     function setAdminIdleFloor(uint256 newFloor) external onlyOwner {
         uint256 previousFloor = adminIdleFloor;
         adminIdleFloor = newFloor;
+        _bumpPolicyVersion();
         emit AdminIdleFloorSet(previousFloor, newFloor);
     }
 
     function setRewardAccountant(address accountant) external onlyOwner {
         address previous = address(rewardAccountant);
         rewardAccountant = IRewardAccountant(accountant);
+        _bumpPolicyVersion();
         emit RewardAccountantSet(previous, accountant);
     }
 
@@ -526,6 +702,86 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     function _syncRewardAccountant(bool issuingShares) internal {
         if (address(rewardAccountant) != address(0)) {
             rewardAccountant.syncForShareAction(issuingShares);
+        }
+    }
+
+    function _validateAction(
+        VaultTypes.Action calldata action,
+        bytes32[] calldata proof,
+        VaultTypes.ActionKind expectedKind
+    ) internal view returns (PlanState storage plan) {
+        plan = _plans[action.planId];
+        if (!plan.registered || plan.completed) revert InvalidPlanActionOrder();
+        if (plan.cancelled) revert PlanCancelled();
+        if (block.timestamp >= plan.expiresAt) revert PlanExpired();
+        if (plan.policyVersion != policyVersion) revert InvalidPlanPolicy();
+        if (plan.configurationDigest != configurationDigest()) revert InvalidPlanConfiguration();
+        if (recognizedLosses > plan.maxRecognizedLoss) revert RecognizedLossLimitExceeded();
+        if (
+            action.kind != expectedKind || action.index != nextActionIndex[action.planId]
+                || action.index >= plan.actionCount
+        ) {
+            revert InvalidPlanActionOrder();
+        }
+        if (plan.turnoverUsed + action.amount > plan.turnoverLimit) revert TurnoverLimitExceeded();
+        if (!_knownAdapters[action.adapter]) revert UnknownAdapter();
+        _validateAdapterConfiguration(action.adapter);
+
+        VaultTypes.AdapterStatus status = adapterConfig[action.adapter].status;
+        bool canDivest = status == VaultTypes.AdapterStatus.Active || status == VaultTypes.AdapterStatus.Disabled
+            || status == VaultTypes.AdapterStatus.Impaired;
+        if (expectedKind == VaultTypes.ActionKind.Divest) {
+            if (plan.deployStarted) revert InvalidPlanActionOrder();
+            if (!canDivest) revert InvalidAdapterStatus();
+        } else if (status != VaultTypes.AdapterStatus.Active) {
+            revert InvalidAdapterStatus();
+        }
+
+        if (!MerkleProof.verify(proof, plan.actionsRoot, PlanHash.hashAction(action))) revert InvalidPlanProof();
+    }
+
+    function _markActionConsumed(PlanState storage plan, VaultTypes.Action calldata action) internal {
+        if (action.kind == VaultTypes.ActionKind.Deploy) {
+            plan.deployStarted = true;
+        }
+        uint32 nextIndex = action.index + 1;
+        nextActionIndex[action.planId] = nextIndex;
+        if (nextIndex == plan.actionCount) {
+            plan.completed = true;
+            _clearPlanReserve(action.planId);
+        }
+    }
+
+    function _enforcePlanPostConditions(PlanState storage plan) internal view {
+        if (totalAssets() < plan.minFinalAssets) revert FinalAssetsTooLow();
+        if (recognizedLosses > plan.maxRecognizedLoss) revert RecognizedLossLimitExceeded();
+    }
+
+    function _validateAdapterConfiguration(address adapter) internal view {
+        if (IStrategyAdapter(adapter).configurationDigest() != adapterConfigurationDigests[adapter]) {
+            revert InvalidPlanConfiguration();
+        }
+    }
+
+    function _enforceWithdrawalLoss(address adapter, uint256 requestedAssets, uint256 receivedAssets) internal view {
+        if (
+            requestedAssets > receivedAssets
+                && requestedAssets - receivedAssets > _allowedLoss(requestedAssets, adapterConfig[adapter].maxLossBps)
+        ) {
+            revert LossLimitExceeded();
+        }
+    }
+
+    function _clearPlanReserve(uint256 planId) internal {
+        if (_activeReservePlanId == planId) {
+            _activeReservePlanId = 0;
+            activePlanReserve = 0;
+        }
+    }
+
+    function _bumpPolicyVersion() internal {
+        unchecked {
+            ++policyVersion;
         }
     }
 
