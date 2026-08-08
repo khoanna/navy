@@ -1,5 +1,21 @@
 # NavyPayments — Deployments
 
+## Base SRCLA vault (mainnet)
+
+| | |
+|---|---|
+| Chain ID | `8453` |
+| Asset | Circle native USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| NavyVault | _Not deployed; record `DeployBaseVault` output here_ |
+| Admin | _Derived from `BASE_ADMIN_PRIVATE_KEY` at deployment_ |
+| Allocator | _Set from `SRCLA_ALLOCATOR_ADDRESS` at deployment_ |
+| Strategies | _Outputs of the Base strategy deployment plan; not embedded in the core_ |
+| RewardExecutor | _Output of the reward-executor deployment plan; not embedded in the core_ |
+
+The Base vault core is immutable and has no relayer state. Deployment is rejected outside Base or for any asset
+other than the canonical Circle USDC address. Newly deployed cores contain no admitted adapters and no reward
+accountant; those addresses are recorded only after their pinned Base-fork conformance gates pass.
+
 ## Ethereum Sepolia (testnet)
 
 | | |
