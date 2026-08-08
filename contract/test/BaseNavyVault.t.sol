@@ -35,12 +35,9 @@ contract BaseNavyVaultTest is Test {
 
     function setUp() public {
         usdc = new MockBaseUsdc();
-        vault = new NavyVault(IERC20(address(usdc)), admin);
+        vault = new NavyVault(IERC20(address(usdc)), admin, allocator);
         adapter = new MockStrategyAdapter(address(vault), address(usdc), keccak256("adapter-config"));
         rewardAccountant = new MockRewardAccountant();
-
-        vm.prank(admin);
-        vault.setAllocator(allocator, true);
     }
 
     function test_constructor_setsImmutableAssetAndRoles() public view {
@@ -91,6 +88,25 @@ contract BaseNavyVaultTest is Test {
         vault.addAdapter(address(adapter));
     }
 
+    function test_legacyRelayerSurface_isAbsent() public {
+        vm.prank(admin);
+        (bool ok,) = address(vault).call(abi.encodeWithSignature("setRelayer(address,bool)", alice, true));
+        assertFalse(ok);
+    }
+
+    function test_legacyAllocatorCompatibilitySurface_isAbsent() public {
+        vm.prank(admin);
+        (bool ok,) = address(vault).call(abi.encodeWithSignature("setAllocator(address,bool)", bob, true));
+        assertFalse(ok);
+    }
+
+    function test_legacyAdapterOverload_isAbsent() public {
+        vm.prank(admin);
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSignature("addAdapter(address,uint16,uint16)", address(adapter), 5_000, 10_000));
+        assertFalse(ok);
+    }
+
     function test_twoStepOwnershipTransfer() public {
         vm.prank(admin);
         vault.transferOwnership(bob);
@@ -106,6 +122,13 @@ contract BaseNavyVaultTest is Test {
 
         assertEq(vault.owner(), bob);
         assertEq(vault.pendingOwner(), address(0));
+    }
+
+    function test_setAllocator_rotatesAllocator() public {
+        vm.prank(admin);
+        vault.setAllocator(bob);
+
+        assertEq(vault.allocator(), bob);
     }
 
     function test_totalAssets_includesIdleStrategiesRewardsAndLoss() public {
@@ -134,18 +157,19 @@ contract BaseNavyVaultTest is Test {
         assertEq(uint8(vault.adapterStatus(address(adapter))), uint8(VaultTypes.AdapterStatus.Disabled));
     }
 
-    function test_removedAdapterRemainsEnumeratedUntilAssetsReachZero() public {
+    function test_removedAdapterRequiresZeroAccountedAndLiveAssets() public {
         _admitAdapter();
         adapter.setReportedAssets(40_000e6);
 
         vm.startPrank(admin);
         vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Disabled);
         vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Impaired);
+        vm.expectRevert(NavyVault.AdapterNotEmpty.selector);
         vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Removed);
         vm.stopPrank();
 
         assertEq(vault.configuredAdapters().length, 1);
-        assertEq(uint8(vault.adapterStatus(address(adapter))), uint8(VaultTypes.AdapterStatus.Removed));
+        assertEq(uint8(vault.adapterStatus(address(adapter))), uint8(VaultTypes.AdapterStatus.Impaired));
 
         adapter.setReportedAssets(0);
 
@@ -153,6 +177,20 @@ contract BaseNavyVaultTest is Test {
         vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Removed);
 
         assertEq(vault.configuredAdapters().length, 0);
+    }
+
+    function test_revertingAdapterRead_cannotBypassRemovalSafety() public {
+        _admitAdapter();
+        adapter.setReportedAssets(40_000e6);
+
+        vm.prank(admin);
+        vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Disabled);
+
+        adapter.setRevertAssetReads(true);
+
+        vm.prank(admin);
+        vm.expectRevert(NavyVault.AdapterNotEmpty.selector);
+        vault.setAdapterStatus(address(adapter), VaultTypes.AdapterStatus.Removed);
     }
 
     function test_recordImpairment_rejectsAmountsAboveRecognizedStrategyAssets() public {
