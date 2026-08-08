@@ -68,6 +68,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     mapping(uint256 => PlanState) private _plans;
 
     address[] private _configuredAdapters;
+    address[] private _withdrawalOrder;
     uint256 private _activeReservePlanId;
     mapping(address => bool) private _knownAdapters;
     mapping(address => bool) private _enumeratedAdapters;
@@ -97,6 +98,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         uint256 indexed planId, uint32 indexed index, uint8 indexed kind, address adapter, uint256 amount
     );
     event EmergencyDivestExecuted(address indexed adapter, uint256 requestedAssets, uint256 returnedAssets);
+    event WithdrawalOrderSet(address[] adapters);
 
     error NotOwner();
     error NotAllocator();
@@ -133,6 +135,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
     error LossLimitExceeded();
     error RecognizedLossLimitExceeded();
     error PauseRequired();
+    error InvalidWithdrawalOrder();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -189,6 +192,16 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         return type(uint256).max;
     }
 
+    function maxWithdraw(address owner_) public view override returns (uint256) {
+        uint256 claim = convertToAssets(balanceOf(owner_));
+        return Math.min(claim, _synchronousLiquidity());
+    }
+
+    function maxRedeem(address owner_) public view override returns (uint256) {
+        uint256 liquidityCappedShares = _convertToShares(_synchronousLiquidity(), Math.Rounding.Floor);
+        return Math.min(balanceOf(owner_), liquidityCappedShares);
+    }
+
     function _decimalsOffset() internal pure override returns (uint8) {
         return 6;
     }
@@ -228,7 +241,6 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         returns (uint256 shares)
     {
         _refreshStrategyAccountingOrRevert();
-        _syncRewardAccountant(false);
         return super.withdraw(assets, receiver, owner_);
     }
 
@@ -239,7 +251,6 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         returns (uint256 assets)
     {
         _refreshStrategyAccountingOrRevert();
-        _syncRewardAccountant(false);
         return super.redeem(shares, receiver, owner_);
     }
 
@@ -269,8 +280,32 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         emit PausedSet(paused_);
     }
 
+    function setWithdrawalOrder(address[] calldata order) external onlyOwner {
+        if (order.length != _configuredAdapters.length) revert InvalidWithdrawalOrder();
+
+        for (uint256 i; i < order.length; ++i) {
+            address adapter = order[i];
+            if (!_knownAdapters[adapter] || !_enumeratedAdapters[adapter]) revert InvalidWithdrawalOrder();
+
+            for (uint256 j = i + 1; j < order.length; ++j) {
+                if (adapter == order[j]) revert InvalidWithdrawalOrder();
+            }
+        }
+
+        delete _withdrawalOrder;
+        for (uint256 i; i < order.length; ++i) {
+            _withdrawalOrder.push(order[i]);
+        }
+
+        emit WithdrawalOrderSet(order);
+    }
+
     function configuredAdapters() external view returns (address[] memory adapters_) {
         return _configuredAdapters;
+    }
+
+    function withdrawalOrder() external view returns (address[] memory order_) {
+        return _withdrawalOrder;
     }
 
     function adapterCount() external view returns (uint256) {
@@ -474,6 +509,7 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         _knownAdapters[adapter] = true;
         _enumeratedAdapters[adapter] = true;
         _configuredAdapters.push(adapter);
+        _withdrawalOrder.push(adapter);
 
         adapterConfig[adapter] = VaultTypes.AdapterConfig({
             status: VaultTypes.AdapterStatus.Active,
@@ -679,6 +715,17 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             }
         }
 
+        uint256 withdrawalCount_ = _withdrawalOrder.length;
+        for (uint256 i; i < withdrawalCount_; ++i) {
+            if (_withdrawalOrder[i] == adapter) {
+                for (uint256 j = i; j + 1 < withdrawalCount_; ++j) {
+                    _withdrawalOrder[j] = _withdrawalOrder[j + 1];
+                }
+                _withdrawalOrder.pop();
+                break;
+            }
+        }
+
         emit AdapterRemoved(adapter);
     }
 
@@ -800,10 +847,10 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
         uint256 totalRequested;
         uint256 totalReceived;
         uint256 totalAllowedLoss;
-        uint256 adapterCount_ = _configuredAdapters.length;
+        uint256 adapterCount_ = _withdrawalOrder.length;
 
         for (uint256 i; i < adapterCount_ && needed > 0; ++i) {
-            address adapter = _configuredAdapters[i];
+            address adapter = _withdrawalOrder[i];
             (bool ok, uint256 maxWithdrawable_) = _readMaxWithdrawable(adapter);
             if (!ok || maxWithdrawable_ == 0) continue;
 
@@ -838,6 +885,19 @@ contract NavyVault is ERC4626, ERC20Permit, ReentrancyGuard {
             revert WithdrawalLossExceeded();
         }
         if (needed != 0) revert InsufficientSynchronousLiquidity();
+    }
+
+    function _synchronousLiquidity() internal view returns (uint256 liquidity) {
+        liquidity = IERC20(asset()).balanceOf(address(this));
+
+        uint256 adapterCount_ = _withdrawalOrder.length;
+        for (uint256 i; i < adapterCount_; ++i) {
+            address adapter = _withdrawalOrder[i];
+            (bool ok, uint256 maxWithdrawable_) = _readMaxWithdrawable(adapter);
+            if (!ok) continue;
+
+            liquidity += Math.min(maxWithdrawable_, _recognizedStrategyAssets(adapter));
+        }
     }
 
     function _effectiveCap(uint256 nav, uint16 capBps, uint256 absoluteCap) internal pure returns (uint256) {

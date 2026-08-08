@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 import {IStrategyAdapter} from "../../src/interfaces/IStrategyAdapter.sol";
 
 contract MockStrategyAdapter is IStrategyAdapter {
+    using SafeERC20 for IERC20;
+
     address public immutable vaultAddress;
     address public immutable assetAddress;
     bytes32 public configuration;
 
     uint256 public reportedAssets;
     uint256 public withdrawableAssets;
+    uint256 public withdrawCallCount;
+    uint256 public lastWithdrawRequest;
     bool public revertAssetReads;
+    bool public revertWithdrawals;
 
     error NotVault();
+    error WithdrawFailed();
 
     constructor(address vault_, address asset_, bytes32 configuration_) {
         vaultAddress = vault_;
@@ -40,8 +49,16 @@ contract MockStrategyAdapter is IStrategyAdapter {
         withdrawableAssets = assets_;
     }
 
+    function setWithdrawable(uint256 assets_) external {
+        withdrawableAssets = assets_;
+    }
+
     function setRevertAssetReads(bool shouldRevert) external {
         revertAssetReads = shouldRevert;
+    }
+
+    function setRevertWithdrawals(bool shouldRevert) external {
+        revertWithdrawals = shouldRevert;
     }
 
     function vault() external view returns (address) {
@@ -72,6 +89,10 @@ contract MockStrategyAdapter is IStrategyAdapter {
     }
 
     function withdraw(uint256 assets) external onlyVault returns (uint256 returnedAssets) {
+        if (revertWithdrawals) revert WithdrawFailed();
+
+        withdrawCallCount += 1;
+        lastWithdrawRequest = assets;
         returnedAssets = assets > withdrawableAssets ? withdrawableAssets : assets;
         withdrawableAssets -= returnedAssets;
         if (reportedAssets > returnedAssets) {
@@ -79,5 +100,6 @@ contract MockStrategyAdapter is IStrategyAdapter {
         } else {
             reportedAssets = 0;
         }
+        IERC20(assetAddress).safeTransfer(vaultAddress, returnedAssets);
     }
 }
