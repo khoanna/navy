@@ -11,7 +11,6 @@ import {MockComet} from "../mocks/MockComet.sol";
 
 /// @notice Tests for CompoundV3Strategy
 contract CompoundV3StrategyTest is Test {
-
     MockUSDC public usdc;
     MockComet public comet;
     NavyVaultSRCLA public vault;
@@ -38,11 +37,7 @@ contract CompoundV3StrategyTest is Test {
         vault = new NavyVaultSRCLA(IERC20(address(usdc)));
 
         // Deploy CompoundV3Strategy
-        strategy = new CompoundV3Strategy(
-            address(vault),
-            address(usdc),
-            address(comet)
-        );
+        strategy = new CompoundV3Strategy(address(vault), address(usdc), address(comet));
 
         // Fund vault with USDC for testing
         usdc.mint(address(vault), 100_000 * USDC_DECIMALS);
@@ -60,18 +55,10 @@ contract CompoundV3StrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("deploy-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("deploy-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -84,18 +71,10 @@ contract CompoundV3StrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -120,9 +99,8 @@ contract CompoundV3StrategyTest is Test {
         assertGt(finalPosition, initialPosition);
         assertGt(uint256(finalPosition), 0);
 
-        // Verify cToken was received
-        address cTokenAddr = comet.cToken();
-        assertGt(IERC20(cTokenAddr).balanceOf(address(strategy)), 0);
+        // Comet has no cToken — position is tracked in base-token units
+        assertEq(uint256(finalPosition), depositAmount);
     }
 
     // ============================================================
@@ -181,14 +159,11 @@ contract CompoundV3StrategyTest is Test {
         });
 
         vault.executePlan(
-            bytes32("over-withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
+            bytes32("over-withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions
         );
 
-        // Compound V3 reverts when trying to withdraw more than balance
-        vm.expectRevert("Insufficient balance");
+        // The strategy's own pre-check reverts before hitting the Comet
+        vm.expectRevert(abi.encodeWithSignature("ExceedsPositiveBalance()"));
         vault.executeNextAction();
     }
 
@@ -265,17 +240,11 @@ contract CompoundV3StrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: 100 * USDC_DECIMALS,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: 100 * USDC_DECIMALS, minOut: 0
         });
 
         vault.executePlan(
-            bytes32("paused-withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
+            bytes32("paused-withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions
         );
 
         // The execution should revert due to paused withdrawals
@@ -330,18 +299,10 @@ contract CompoundV3StrategyTest is Test {
         // Deploy to strategy via vault
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: deployAmount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: deployAmount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("test-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("test-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         vault.executeNextAction();
 

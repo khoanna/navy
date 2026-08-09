@@ -11,7 +11,6 @@ import {MockMoonwell} from "../mocks/MockMoonwell.sol";
 
 /// @notice Tests for MoonwellStrategy
 contract MoonwellStrategyTest is Test {
-
     MockUSDC public usdc;
     MockMoonwell public mToken;
     NavyVaultSRCLA public vault;
@@ -38,11 +37,7 @@ contract MoonwellStrategyTest is Test {
         vault = new NavyVaultSRCLA(IERC20(address(usdc)));
 
         // Deploy MoonwellStrategy
-        strategy = new MoonwellStrategy(
-            address(vault),
-            address(usdc),
-            address(mToken)
-        );
+        strategy = new MoonwellStrategy(address(vault), address(usdc), address(mToken));
 
         // Fund vault with USDC for testing
         usdc.mint(address(vault), 100_000 * USDC_DECIMALS);
@@ -60,18 +55,10 @@ contract MoonwellStrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("deploy-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("deploy-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -84,18 +71,10 @@ contract MoonwellStrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -175,18 +154,10 @@ contract MoonwellStrategyTest is Test {
         // Try another deposit - should fail due to error code
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: 100 * USDC_DECIMALS,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: 100 * USDC_DECIMALS, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("error-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("error-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         vm.expectRevert(abi.encodeWithSignature("MintFailed(uint256)", 1));
         vault.executeNextAction();
@@ -210,7 +181,7 @@ contract MoonwellStrategyTest is Test {
         assertGt(mTokenBalance, 0);
 
         // Get initial exchange rate
-        uint256 initialExchangeRate = mToken.exchangeRate();
+        uint256 initialExchangeRate = mToken.exchangeRateStored();
 
         // Get initial total assets
         uint256 initialAssets = strategy.totalAssets();
@@ -225,7 +196,7 @@ contract MoonwellStrategyTest is Test {
         assertGt(assetsAfterInterest, initialAssets);
 
         // Verify exchange rate increased
-        uint256 finalExchangeRate = mToken.exchangeRate();
+        uint256 finalExchangeRate = mToken.exchangeRateStored();
         assertGt(finalExchangeRate, initialExchangeRate);
 
         // mToken balance should remain the same
@@ -325,18 +296,10 @@ contract MoonwellStrategyTest is Test {
         // Deploy to strategy via vault
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: deployAmount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: deployAmount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("test-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("test-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         vault.executeNextAction();
 
@@ -370,17 +333,11 @@ contract MoonwellStrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: 100 * USDC_DECIMALS,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: 100 * USDC_DECIMALS, minOut: 0
         });
 
         vault.executePlan(
-            bytes32("paused-withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
+            bytes32("paused-withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions
         );
 
         // The execution should revert due to paused redeem
@@ -403,17 +360,11 @@ contract MoonwellStrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: 100 * USDC_DECIMALS,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: 100 * USDC_DECIMALS, minOut: 0
         });
 
         vault.executePlan(
-            bytes32("error-redeem-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
+            bytes32("error-redeem-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions
         );
 
         vm.expectRevert(abi.encodeWithSignature("RedeemFailed(uint256)", 2));

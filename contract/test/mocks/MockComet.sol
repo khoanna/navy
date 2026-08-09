@@ -4,25 +4,23 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @notice Mock Compound V3 Comet for testing
-/// @dev Simulates Compound III Comet with int256 balances (can be negative for borrowing)
+/// @notice Mock Compound III Comet for testing
+/// @dev Mirrors the deployed Comet ABI: positions are tracked in base-token units (no cToken),
+///      `supply` pulls from msg.sender, `withdrawTo` sends to `to`.
 contract MockComet {
     using SafeERC20 for IERC20;
 
     /// @notice Address of the underlying asset (USDC)
     address public immutable underlying;
 
-    /// @notice Address of the cToken (cUSDCv3)
-    address public immutable cToken;
+    /// @notice Per-user principal balance (int256, negative if borrowed)
+    mapping(address => int256) public balanceOf;
 
     /// @notice Total cash available for withdrawals (positive = available)
     int256 public cash;
 
-    /// @notice Per-user balance (int256, negative if borrowed)
-    mapping(address => int256) public balanceOf;
-
-    /// @notice Total supply of cTokens
-    uint256 public totalSupply;
+    /// @notice Total supplied principal
+    uint256 public totalPrincipal;
 
     /// @notice Whether withdraw is paused
     bool public withdrawPaused;
@@ -39,61 +37,54 @@ contract MockComet {
     /// @notice Events
     event Supplied(address indexed from, address indexed to, uint256 amount);
     event Withdrawn(address indexed from, address indexed to, uint256 amount);
-    event AccruedInterest(uint256 interestAccrued);
 
     constructor(address underlying_) {
         underlying = underlying_;
         lastAccrualTime = block.timestamp;
-
-        // Create mock cToken
-        cToken = address(new MockCToken(address(this), underlying_));
     }
 
-    /// @notice Supply USDC to Compound
-    /// @param from Address supplying the USDC
+    /// @notice Supply USDC to Compound (pulls from msg.sender)
+    /// @param asset The asset to supply (must be the base token)
     /// @param amount Amount of USDC to supply
-    /// @param destination Address receiving the cTokens
-    function supply(address from, uint256 amount, address destination) external {
+    function supply(address asset, uint256 amount) external {
+        require(asset == underlying, "!base");
+
         // Transfer USDC from caller to this comet
-        IERC20(underlying).safeTransferFrom(from, address(this), amount);
+        IERC20(underlying).safeTransferFrom(msg.sender, address(this), amount);
 
         // Update balances
-        balanceOf[address(this)] += int256(amount); // Comet holds the asset
-        balanceOf[destination] += int256(amount);   // User gets the cToken balance
-
-        // Update total supply
-        totalSupply += amount;
+        balanceOf[msg.sender] += int256(amount);
+        totalPrincipal += amount;
 
         // Update cash (positive = available for withdrawal)
         cash += int256(amount);
 
-        // Mint cTokens to destination
-        MockCToken(cToken).mint(destination, amount);
-
-        emit Supplied(from, destination, amount);
+        emit Supplied(msg.sender, msg.sender, amount);
     }
 
     /// @notice Withdraw USDC from Compound
-    /// @param src Address to withdraw from
+    /// @param to Address receiving the USDC
+    /// @param asset The asset to withdraw (must be the base token)
     /// @param amount Amount of USDC to withdraw
-    /// @param destination Address receiving the USDC
-    function withdrawTo(address src, uint256 amount, address destination) external {
+    function withdrawTo(address to, address asset, uint256 amount) external {
+        require(asset == underlying, "!base");
         require(!withdrawPaused, "Withdraw is paused");
 
-        int256 srcBalance = balanceOf[src];
+        int256 srcBalance = balanceOf[msg.sender];
         require(srcBalance >= int256(amount), "Insufficient balance");
+        require(cash >= int256(amount), "Insufficient cash");
 
         // Update balances
-        balanceOf[src] = srcBalance - int256(amount);
-        balanceOf[address(this)] -= int256(amount);
+        balanceOf[msg.sender] = srcBalance - int256(amount);
+        totalPrincipal -= amount;
 
         // Update cash
         cash -= int256(amount);
 
         // Transfer USDC to destination
-        IERC20(underlying).safeTransfer(destination, amount);
+        IERC20(underlying).safeTransfer(to, amount);
 
-        emit Withdrawn(src, destination, amount);
+        emit Withdrawn(msg.sender, to, amount);
     }
 
     /// @notice Get the present value of a position (assets - liabilities)
@@ -107,7 +98,7 @@ contract MockComet {
     /// @notice Get total supply of underlying assets
     /// @return Total USDC held by the comet
     function totalSupplyUnderlying() external view returns (uint256) {
-        return totalSupply;
+        return totalPrincipal;
     }
 
     /// @notice Get available cash for withdrawals
@@ -116,23 +107,38 @@ contract MockComet {
         return cash > 0 ? uint256(cash) : 0;
     }
 
+    /// @notice Base token of the market
+    function baseToken() external view returns (address) {
+        return underlying;
+    }
+
+    /// @notice Whether withdrawals are paused
+    function isWithdrawPaused() external view returns (bool) {
+        return withdrawPaused;
+    }
+
+    /// @notice Utilization placeholder (mock)
+    function getUtilization() external pure returns (uint256) {
+        return 0;
+    }
+
+    /// @notice Supply rate placeholder (mock)
+    function getSupplyRate(uint256) external pure returns (uint64) {
+        return 0;
+    }
+
     /// @notice Simulate interest accrual
     /// @param deltaT Time elapsed in seconds
     function accrueInterest(uint256 deltaT) external {
-        if (totalSupply == 0) return;
+        if (totalPrincipal == 0) return;
 
-        // Calculate simple interest
-        uint256 interest = (totalSupply * baseInterestRate * deltaT) / 1e18;
+        // Calculate simple interest on the supplied principal
+        uint256 interest = (totalPrincipal * baseInterestRate * deltaT) / 1e18;
 
-        // Increase total supply (cTokens accrue value)
-        totalSupply += interest;
-
-        // Increase comet's balance (represents reserves)
+        // Interest becomes available cash (mimics suppliers' interest accrual)
         cash += int256(interest);
 
         lastAccrualTime = block.timestamp;
-
-        emit AccruedInterest(interest);
     }
 
     /// @notice Set cash amount for testing
@@ -155,48 +161,20 @@ contract MockComet {
         int256 oldBalance = balanceOf[user];
         balanceOf[user] = balance_;
 
-        // Update total supply if needed
+        // Update total principal if needed
         if (oldBalance > 0) {
             if (balance_ > oldBalance) {
-                totalSupply += uint256(balance_ - oldBalance);
+                totalPrincipal += uint256(balance_ - oldBalance);
             } else {
-                totalSupply -= uint256(oldBalance - balance_);
+                totalPrincipal -= uint256(oldBalance - balance_);
             }
         } else if (balance_ > 0) {
-            totalSupply += uint256(balance_);
+            totalPrincipal += uint256(balance_);
         }
     }
 
     /// @notice Accrue COMP-like rewards for an account
     function accrueRewards(address account, uint256 amount) external {
         accruedRewards += amount;
-    }
-}
-
-/// @notice Mock cToken (cUSDCv3) for testing
-contract MockCToken {
-    using SafeERC20 for IERC20;
-
-    address public immutable comet;
-    address public immutable underlying;
-
-    mapping(address => uint256) public balanceOf;
-
-    constructor(address comet_, address underlying_) {
-        comet = comet_;
-        underlying = underlying_;
-    }
-
-    /// @notice Mint cTokens
-    function mint(address user, uint256 amount) external {
-        require(msg.sender == comet, "MockCToken: caller not comet");
-        balanceOf[user] += amount;
-    }
-
-    /// @notice Burn cTokens
-    function burn(address user, uint256 amount) external {
-        require(msg.sender == comet, "MockCToken: caller not comet");
-        require(balanceOf[user] >= amount, "burn exceeds balance");
-        balanceOf[user] -= amount;
     }
 }

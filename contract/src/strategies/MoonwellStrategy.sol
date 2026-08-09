@@ -6,36 +6,34 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
 
-/// @notice Interface for Moonwell mToken
+/// @notice Interface for Moonwell mToken (Compound-v2-style ABI)
 interface IMToken {
-    /// @notice Mint mTokens by depositing underlying
-    function mint(address minter, uint256 assets) external returns (uint256 mTokensMinted, uint256 code);
+    /// @notice Mint mTokens by depositing underlying (pulls from msg.sender)
+    /// @return code 0 = success, non-zero = error code
+    function mint(uint256 underlyingAmount) external returns (uint256 code);
 
-    /// @notice Redeem mTokens for underlying
-    function redeemUnderlying(address redeemer, uint256 assets)
-        external
-        returns (uint256 mTokensRedeemed, uint256 code);
+    /// @notice Redeem mTokens for underlying (sends underlying to msg.sender)
+    /// @return code 0 = success, non-zero = error code
+    function redeemUnderlying(uint256 redeemAmount) external returns (uint256 code);
 
-    /// @notice Get available cash for withdrawals
+    /// @notice Available cash for withdrawals
     function getCash() external view returns (uint256);
 
-    /// @notice Get mToken balance for an account
-    function getMTokenBalance(address account) external view returns (uint256);
-
-    /// @notice Exchange rate: mToken * exchangeRate / 1e18 = underlying
-    function exchangeRate() external view returns (uint256);
+    /// @notice Exchange rate: mToken * exchangeRateStored / 1e18 = underlying
+    function exchangeRateStored() external view returns (uint256);
 
     /// @notice Get underlying asset address
     function underlying() external view returns (address);
 }
 
 /// @title MoonwellStrategy
-/// @notice Strategy adapter for Moonwell protocol
-/// @dev Deposits USDC to Moonwell mUSDC, tracks position via mToken balance with accrued interest
+/// @notice Strategy adapter for Moonwell (mUSDC) on Base
+/// @dev Deposits USDC to Moonwell's mUSDC market. Position = mToken balance converted by the
+///      stored exchange rate; withdrawal is capped by protocol cash. The strategy never borrows.
 contract MoonwellStrategy is IStrategyAdapter {
     using SafeERC20 for IERC20;
 
-    /// @notice Exchange rate precision
+    /// @notice Exchange rate precision (Compound-style expScale)
     uint256 public constant EXCHANGE_RATE_PRECISION = 1e18;
 
     /// @notice Address of the vault
@@ -77,23 +75,26 @@ contract MoonwellStrategy is IStrategyAdapter {
     }
 
     /// @notice Deposit assets into Moonwell
-    /// @dev Vault sends USDC before calling this function
+    /// @dev Vault sends USDC before calling this function. Credited is measured as the USDC
+    ///      actually pulled by the mToken (an exact transferFrom of `assets`), matching the
+    ///      balance-delta pattern of the Aave/Compound strategies — the contract never calls its
+    ///      own interface-overriding `totalAssets()` internally (unreliable under solc 0.8.24).
     /// @param assets Amount of USDC to deposit
-    /// @return credited Amount of mTokens received (credited position)
+    /// @return credited Amount of underlying credited to the position
     function deposit(uint256 assets) external override returns (uint256 credited) {
         if (msg.sender != vault) revert OnlyVault();
         if (assets == 0) return 0;
 
+        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
+
         // Approve mToken to spend USDC
         _approveIfNeeded(IERC20(asset), address(mToken), assets);
 
-        // Mint mTokens
-        (uint256 mTokensMinted, uint256 code) = mToken.mint(address(this), assets);
-
-        // Check for error code
+        // Mint mTokens; Moonwell returns a non-zero error code on failure
+        uint256 code = mToken.mint(assets);
         if (code != 0) revert MintFailed(code);
 
-        return mTokensMinted;
+        credited = balanceBefore - IERC20(asset).balanceOf(address(this));
     }
 
     /// @dev Helper to approve token spending
@@ -112,63 +113,51 @@ contract MoonwellStrategy is IStrategyAdapter {
 
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
 
-        // Redeem mTokens for underlying
-        (uint256 mTokensRedeemed, uint256 code) = mToken.redeemUnderlying(address(this), assets);
-
-        // Check for error code
+        // Redeem mTokens for underlying; underlying is sent to this strategy
+        uint256 code = mToken.redeemUnderlying(assets);
         if (code != 0) revert RedeemFailed(code);
 
-        // Transfer to vault
-        uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
-        returned = balanceAfter - balanceBefore;
+        returned = IERC20(asset).balanceOf(address(this)) - balanceBefore;
 
-        if (returned > 0) {
-            IERC20(asset).safeTransfer(vault, returned);
-        }
+        // Forward to the vault
+        IERC20(asset).safeTransfer(vault, returned);
 
-        // Verify we received enough
-        if (returned < assets) {
-            revert InsufficientAssets();
-        }
+        // Redeem must not return less than requested
+        if (returned < assets) revert InsufficientAssets();
     }
 
     /// @notice Total assets held in strategy
     /// @return Total USDC value including accrued interest
     function totalAssets() external view override returns (uint256) {
-        // mToken balance * exchangeRate = underlying value
         uint256 mTokenBalance = IERC20(address(mToken)).balanceOf(address(this));
         return _mTokenToUnderlying(mTokenBalance);
     }
 
     /// @notice Maximum amount that can be withdrawn in a single transaction
-    /// @return Maximum withdrawable USDC
+    /// @return Maximum withdrawable USDC (position capped by protocol cash)
     function maxWithdrawable() external view override returns (uint256) {
-        // Get our mToken balance
         uint256 mTokenBalance = IERC20(address(mToken)).balanceOf(address(this));
         if (mTokenBalance == 0) return 0;
 
-        // Convert to underlying value
         uint256 positionValue = _mTokenToUnderlying(mTokenBalance);
-
-        // Limit by protocol cash (available liquidity)
         uint256 protocolCash = mToken.getCash();
 
         return positionValue < protocolCash ? positionValue : protocolCash;
     }
 
     /// @notice Convert mToken amount to underlying amount
-    /// @param mTokens Amount of mTokens
-    /// @return Underlying amount
+    /// @dev Compound-style: exchangeRateStored = (cash + borrows - reserves) * 1e18 / totalSupply,
+    ///      so underlying = mTokens * exchangeRateStored / 1e18 (verified against the Base market).
     function _mTokenToUnderlying(uint256 mTokens) internal view returns (uint256) {
-        uint256 rate = mToken.exchangeRate();
+        uint256 rate = mToken.exchangeRateStored();
         if (rate == 0) return 0;
         return (mTokens * rate) / EXCHANGE_RATE_PRECISION;
     }
 
     /// @notice List of reward tokens
     /// @return Array of reward token addresses
-    function rewardTokens() external view override returns (address[] memory) {
-        // Moonwell may have WELL rewards, return empty for basic implementation
+    function rewardTokens() external pure override returns (address[] memory) {
+        // Moonwell distributes WELL on Base; reward harvesting arrives in Phase 3.
         address[] memory empty = new address[](0);
         return empty;
     }
@@ -176,8 +165,14 @@ contract MoonwellStrategy is IStrategyAdapter {
     /// @notice Claimable reward amount
     /// @param /*token*/ Token address to check rewards for
     /// @return Amount of claimable rewards
-    function claimableReward(address /*token*/) external pure override returns (uint256) {
-        // Simplified: return 0 for mock testing
+    function claimableReward(
+        address /*token*/
+    )
+        external
+        pure
+        override
+        returns (uint256)
+    {
         return 0;
     }
 

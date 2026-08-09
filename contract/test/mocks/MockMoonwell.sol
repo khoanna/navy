@@ -5,7 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @notice Mock Moonwell mToken for testing
-/// @dev Simulates Moonwell mToken with exchange rate mechanics like cTokens
+/// @dev Mirrors the deployed Moonwell mToken ABI (Compound-v2-style): `mint(uint256)` and
+///      `redeemUnderlying(uint256)` operate on msg.sender and return a non-zero error code on failure.
 contract MockMoonwell {
     using SafeERC20 for IERC20;
 
@@ -21,8 +22,8 @@ contract MockMoonwell {
     /// @notice Per-user mToken balance
     mapping(address => uint256) public balanceOf;
 
-    /// @notice Exchange rate: mToken * exchangeRate / 1e18 = underlying
-    uint256 public exchangeRate;
+    /// @notice Exchange rate: mToken * exchangeRateStored / 1e18 = underlying
+    uint256 public exchangeRateStored;
 
     /// @notice Return code for mint (0 = success, non-zero = error)
     uint256 public mintReturnCode;
@@ -49,27 +50,22 @@ contract MockMoonwell {
 
     constructor(address underlying_) {
         underlying = underlying_;
-        exchangeRate = INITIAL_EXCHANGE_RATE;
+        exchangeRateStored = INITIAL_EXCHANGE_RATE;
         lastAccrualTime = block.timestamp;
     }
 
-    /// @notice Mint mTokens by depositing underlying
-    /// @param minter Address receiving the mTokens
+    /// @notice Mint mTokens by depositing underlying (pulls from msg.sender)
     /// @param assets Amount of underlying to deposit
-    /// @return mTokensMinted Amount of mTokens minted
     /// @return code 0 = success, non-zero = error code
-    function mint(address minter, uint256 assets)
-        external
-        returns (uint256 mTokensMinted, uint256 code)
-    {
+    function mint(uint256 assets) external returns (uint256 code) {
         // Transfer underlying from caller
         IERC20(underlying).safeTransferFrom(msg.sender, address(this), assets);
 
         // Calculate mTokens to mint
-        mTokensMinted = _underlyingToMToken(assets);
+        uint256 mTokensMinted = _underlyingToMToken(assets);
 
         // Update balance
-        balanceOf[minter] += mTokensMinted;
+        balanceOf[msg.sender] += mTokensMinted;
 
         // Update total supply
         totalSupply += mTokensMinted;
@@ -79,26 +75,21 @@ contract MockMoonwell {
 
         // Check error code
         if (mintReturnCode != 0) {
-            return (mTokensMinted, mintReturnCode);
+            return mintReturnCode;
         }
 
-        emit Minted(minter, assets, mTokensMinted);
-        return (mTokensMinted, 0);
+        emit Minted(msg.sender, assets, mTokensMinted);
+        return 0;
     }
 
-    /// @notice Redeem mTokens for underlying
-    /// @param redeemer Address receiving the underlying
+    /// @notice Redeem mTokens for underlying (sends underlying to msg.sender)
     /// @param assets Amount of underlying to redeem
-    /// @return mTokensRedeemed Amount of mTokens burned
     /// @return code 0 = success, non-zero = error code
-    function redeemUnderlying(address redeemer, uint256 assets)
-        external
-        returns (uint256 mTokensRedeemed, uint256 code)
-    {
+    function redeemUnderlying(uint256 assets) external returns (uint256 code) {
         if (redeemPaused) revert("Redeem is paused");
 
         // Calculate mTokens needed
-        mTokensRedeemed = _underlyingToMToken(assets);
+        uint256 mTokensRedeemed = _underlyingToMToken(assets);
 
         // Check balance
         require(balanceOf[msg.sender] >= mTokensRedeemed, "Insufficient balance");
@@ -117,14 +108,14 @@ contract MockMoonwell {
 
         // Check error code
         if (redeemReturnCode != 0) {
-            return (mTokensRedeemed, redeemReturnCode);
+            return redeemReturnCode;
         }
 
         // Transfer underlying
-        IERC20(underlying).safeTransfer(redeemer, assets);
+        IERC20(underlying).safeTransfer(msg.sender, assets);
 
-        emit Redeemed(redeemer, assets, mTokensRedeemed);
-        return (mTokensRedeemed, 0);
+        emit Redeemed(msg.sender, assets, mTokensRedeemed);
+        return 0;
     }
 
     /// @notice Get available cash for withdrawals
@@ -144,21 +135,21 @@ contract MockMoonwell {
     /// @param assets Amount of underlying
     /// @return mToken amount
     function _underlyingToMToken(uint256 assets) internal view returns (uint256) {
-        if (exchangeRate == 0) return 0;
-        return (assets * 1e18) / exchangeRate;
+        if (exchangeRateStored == 0) return 0;
+        return (assets * 1e18) / exchangeRateStored;
     }
 
     /// @notice Convert mToken amount to underlying amount
     /// @param mTokens Amount of mTokens
     /// @return Underlying amount
     function _mTokenToUnderlying(uint256 mTokens) internal view returns (uint256) {
-        return (mTokens * exchangeRate) / 1e18;
+        return (mTokens * exchangeRateStored) / 1e18;
     }
 
     /// @notice Set exchange rate for testing
     function setExchangeRate(uint256 rate_) external {
         require(rate_ > 0, "Exchange rate must be positive");
-        exchangeRate = rate_;
+        exchangeRateStored = rate_;
         emit ExchangeRateUpdated(rate_);
     }
 
@@ -192,8 +183,7 @@ contract MockMoonwell {
     function accrueInterest(uint256 deltaT) external {
         if (totalSupply == 0) return; // No deposits
 
-        uint256 totalMTokens = totalSupply;
-        uint256 underlyingValue = _mTokenToUnderlying(totalMTokens);
+        uint256 underlyingValue = _mTokenToUnderlying(totalSupply);
 
         // Calculate interest
         uint256 interest = (underlyingValue * baseInterestRate * deltaT) / 1e18;
@@ -202,9 +192,8 @@ contract MockMoonwell {
         cash += interest;
 
         // Update exchange rate: newRate = oldRate * (underlying + interest) / underlying
-        // Simplified: increase exchange rate proportionally
-        uint256 newRate = exchangeRate + (exchangeRate * interest) / underlyingValue;
-        exchangeRate = newRate;
+        uint256 newRate = exchangeRateStored + (exchangeRateStored * interest) / underlyingValue;
+        exchangeRateStored = newRate;
 
         lastAccrualTime = block.timestamp;
 
