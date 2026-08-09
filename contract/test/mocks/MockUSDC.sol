@@ -14,10 +14,12 @@ contract MockUSDC {
     );
 
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
     mapping(address => mapping(bytes32 => bool)) public authorizationState;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
 
     constructor() {
         DOMAIN_SEPARATOR = keccak256(
@@ -38,6 +40,21 @@ contract MockUSDC {
 
     function transfer(address to, uint256 value) external returns (bool) {
         _transfer(msg.sender, to, value);
+        return true;
+    }
+
+    function approve(address spender, uint256 value) external returns (bool) {
+        allowance[msg.sender][spender] = value;
+        emit Approval(msg.sender, spender, value);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 value) external returns (bool) {
+        if (allowance[from][msg.sender] != type(uint256).max) {
+            require(allowance[from][msg.sender] >= value, "insufficient allowance");
+            allowance[from][msg.sender] -= value;
+        }
+        _transfer(from, to, value);
         return true;
     }
 
