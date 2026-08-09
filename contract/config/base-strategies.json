@@ -1,0 +1,53 @@
+{
+  "chainId": 8453,
+  "name": "Base Mainnet",
+  "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "rpcUrl": "${BASE_RPC_URL}",
+  "forkBlock": "${BASE_FORK_BLOCK}",
+  "strategies": {
+    "aaveV3": {
+      "name": "Aave V3",
+      "pool": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+      "aToken": "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB",
+      "incentivesController": null,
+      "expectedApy": "0.03-0.08",
+      "riskLevel": "low",
+      "notes": "Largest DeFi lending protocol, battle-tested"
+    },
+    "compoundV3": {
+      "name": "Compound V3",
+      "comet": "0xb125E6687d4313864e53df431d5425969c15Eb2F",
+      "expectedApy": "0.02-0.06",
+      "riskLevel": "low",
+      "notes": "Compound III has no cToken; supplier positions are tracked in base-token units (comet.balanceOf)"
+    },
+    "moonwell": {
+      "name": "Moonwell",
+      "mToken": "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
+      "unitroller": "0x52aEeBC9142dF07b8D4E7A7F4Cb84c5E29e39D25",
+      "expectedApy": "0.02-0.07",
+      "riskLevel": "medium",
+      "notes": "Multi-chain lending on Base, incentivized with WELL"
+    }
+  },
+  "deployment": {
+    "NavyVaultSRCLA": {
+      "expected": "TBD - to be deployed",
+      "requiredRoles": {
+        "admin": "Multi-sig or governance",
+        "allocator": "Keeper bot"
+      }
+    }
+  },
+  "testing": {
+    "forkTests": [
+      "test/fork/AaveV3BaseFork.t.sol",
+      "test/fork/CompoundV3BaseFork.t.sol",
+      "test/fork/MoonwellBaseFork.t.sol"
+    ],
+    "envVars": {
+      "BASE_RPC_URL": "Base mainnet RPC (e.g., from Alchemy or Infura)",
+      "BASE_FORK_BLOCK": "Optional: block number to fork at"
+    }
+  }
+}
