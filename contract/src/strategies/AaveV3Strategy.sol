@@ -74,13 +74,7 @@ contract AaveV3Strategy is IStrategyAdapter {
     /// @param pool_ Address of the Aave V3 Pool
     /// @param aToken_ Address of the aToken
     /// @param incentivesController_ Address of the Aave incentives controller
-    constructor(
-        address vault_,
-        address asset_,
-        address pool_,
-        address aToken_,
-        address incentivesController_
-    ) {
+    constructor(address vault_, address asset_, address pool_, address aToken_, address incentivesController_) {
         if (vault_ == address(0)) revert ZeroAddress();
         if (asset_ == address(0)) revert ZeroAddress();
         if (pool_ == address(0)) revert ZeroAddress();
@@ -179,7 +173,14 @@ contract AaveV3Strategy is IStrategyAdapter {
     /// @notice Claimable reward amount
     /// @param /*token*/ Token address to check rewards for
     /// @return Amount of claimable rewards
-    function claimableReward(address /*token*/) external pure override returns (uint256) {
+    function claimableReward(
+        address /*token*/
+    )
+        external
+        pure
+        override
+        returns (uint256)
+    {
         // Simplified: return 0 for mock testing
         // Real implementation would query incentives controller
         return 0;

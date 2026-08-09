@@ -11,7 +11,6 @@ import {MockAaveV3} from "../mocks/MockAaveV3.sol";
 
 /// @notice Tests for AaveV3Strategy
 contract AaveV3StrategyTest is Test {
-
     MockUSDC public usdc;
     MockAaveV3 public aave;
     NavyVaultSRCLA public vault;
@@ -59,18 +58,10 @@ contract AaveV3StrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("deploy-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("deploy-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -83,18 +74,10 @@ contract AaveV3StrategyTest is Test {
 
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Divest,
-            adapter: address(strategy),
-            amount: amount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Divest, adapter: address(strategy), amount: amount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("withdraw-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("withdraw-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         // Execute the action
         vault.executeNextAction();
@@ -296,18 +279,10 @@ contract AaveV3StrategyTest is Test {
         // Deploy to strategy via vault
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(strategy),
-            amount: deployAmount,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Deploy, adapter: address(strategy), amount: deployAmount, minOut: 0
         });
 
-        vault.executePlan(
-            bytes32("test-plan"),
-            keccak256("decision"),
-            uint64(block.timestamp + 1 hours),
-            actions
-        );
+        vault.executePlan(bytes32("test-plan"), keccak256("decision"), uint64(block.timestamp + 1 hours), actions);
 
         vault.executeNextAction();
 
