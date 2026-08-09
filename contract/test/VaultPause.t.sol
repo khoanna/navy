@@ -210,12 +210,11 @@ contract VaultPauseTest is Test {
         });
     }
 
-    function _buildDeployAction(
-        uint256 planId,
-        uint32 index,
-        address adapterAddr,
-        uint256 amount
-    ) internal pure returns (VaultTypes.Action memory) {
+    function _buildDeployAction(uint256 planId, uint32 index, address adapterAddr, uint256 amount)
+        internal
+        pure
+        returns (VaultTypes.Action memory)
+    {
         return VaultTypes.Action({
             planId: planId,
             kind: VaultTypes.ActionKind.Deploy,

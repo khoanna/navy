@@ -238,12 +238,11 @@ contract VaultRolesTest is Test {
         });
     }
 
-    function _buildDeployAction(
-        uint256 planId,
-        uint32 index,
-        address adapterAddr,
-        uint256 amount
-    ) internal view returns (VaultTypes.Action memory) {
+    function _buildDeployAction(uint256 planId, uint32 index, address adapterAddr, uint256 amount)
+        internal
+        view
+        returns (VaultTypes.Action memory)
+    {
         return VaultTypes.Action({
             planId: planId,
             kind: VaultTypes.ActionKind.Deploy,
@@ -254,12 +253,11 @@ contract VaultRolesTest is Test {
         });
     }
 
-    function _buildDivestAction(
-        uint256 planId,
-        uint32 index,
-        address adapterAddr,
-        uint256 amount
-    ) internal view returns (VaultTypes.Action memory) {
+    function _buildDivestAction(uint256 planId, uint32 index, address adapterAddr, uint256 amount)
+        internal
+        view
+        returns (VaultTypes.Action memory)
+    {
         return VaultTypes.Action({
             planId: planId,
             kind: VaultTypes.ActionKind.Divest,

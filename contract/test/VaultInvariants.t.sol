@@ -55,16 +55,9 @@ contract InvariantMockUSDC {
     }
 
     /// @dev For testing: ERC-4626 compatibility - vault handles accounting
-    function depositWithAuthorization(
-        address,
-        address,
-        uint256,
-        uint256,
-        uint256,
-        bytes32,
-        bytes32,
-        bytes calldata
-    ) external pure {
+    function depositWithAuthorization(address, address, uint256, uint256, uint256, bytes32, bytes32, bytes calldata)
+        external
+        pure {
         // Does nothing - vault handles accounting
     }
 
@@ -218,8 +211,9 @@ contract VaultInvariantHandler is Test {
 
         actorBalances[actor] -= assets;
         try vault.deposit(assets, actor) {
-            // success
-        } catch {
+        // success
+        }
+            catch {
             // deposit may fail for various reasons - that's ok
         }
     }
@@ -238,8 +232,9 @@ contract VaultInvariantHandler is Test {
         if (IERC20(vaultAsset).balanceOf(actor) < assets) return;
 
         try vault.mint(shares, actor) {
-            // success
-        } catch {
+        // success
+        }
+            catch {
             // mint may fail - that's ok
         }
     }
@@ -275,8 +270,9 @@ contract VaultInvariantHandler is Test {
     /// @notice Admin registers a new adapter
     function registerNewAdapter(address newAdapter) external {
         try vault.registerAdapter(newAdapter, 5000, 100, "New Adapter") {
-            // success
-        } catch {
+        // success
+        }
+            catch {
             // may fail if already registered or invalid
         }
     }
@@ -284,8 +280,9 @@ contract VaultInvariantHandler is Test {
     /// @notice Admin sets adapter state
     function setAdapterState(address adapter, uint8 state) external {
         try vault.setAdapterState(adapter, state) {
-            // success
-        } catch {
+        // success
+        }
+            catch {
             // may fail
         }
     }

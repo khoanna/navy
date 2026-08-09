@@ -159,7 +159,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return activePlanActionCount;
     }
 
-    function getActivePlanAction(uint256 index) external view returns (ActionKind kind, address adapter, uint256 amount, uint256 minOut) {
+    function getActivePlanAction(uint256 index)
+        external
+        view
+        returns (ActionKind kind, address adapter, uint256 amount, uint256 minOut)
+    {
         Action memory action = _planActions[activePlanId][index];
         return (action.kind, action.adapter, action.amount, action.minOut);
     }
@@ -243,12 +247,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     // ---- Admin Functions ----
 
     /// @notice Register a new adapter
-    function registerAdapter(
-        address adapter,
-        uint16 capBps,
-        uint16 maxLossBps,
-        string calldata name
-    ) external onlyRole(ADMIN_ROLE) {
+    function registerAdapter(address adapter, uint16 capBps, uint16 maxLossBps, string calldata name)
+        external
+        onlyRole(ADMIN_ROLE)
+    {
         if (adapter == address(0)) revert ZeroAddress();
         if (adapters[adapter].state != AdapterState.Removed && adapters[adapter].state != AdapterState(0)) {
             revert AdapterAlreadyRegistered();
@@ -258,12 +260,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (a.asset() != asset()) revert AdapterAssetMismatch();
         if (a.vault() != address(this)) revert AdapterVaultMismatch();
 
-        adapters[adapter] = AdapterConfig({
-            capBps: capBps,
-            maxLossBps: maxLossBps,
-            state: AdapterState.Active,
-            lastSyncIdleBase: 0
-        });
+        adapters[adapter] =
+            AdapterConfig({capBps: capBps, maxLossBps: maxLossBps, state: AdapterState.Active, lastSyncIdleBase: 0});
 
         _activeAdapters.push(adapter);
         strategyAssets[adapter] = 0;
@@ -324,12 +322,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     // ---- Plan Execution Functions ----
 
     /// @notice Create and activate a new execution plan
-    function executePlan(
-        bytes32 planId,
-        bytes32 decisionHash,
-        uint64 expiresAt,
-        Action[] calldata actions
-    ) external onlyRole(ALLOCATOR_ROLE) {
+    function executePlan(bytes32 planId, bytes32 decisionHash, uint64 expiresAt, Action[] calldata actions)
+        external
+        onlyRole(ALLOCATOR_ROLE)
+    {
         if (usedPlanIds[planId]) revert PlanAlreadyExecuted();
         if (activePlanId != bytes32(0)) revert PlanAlreadyActive();
         if (expiresAt < block.timestamp) revert PlanExecutionExpired();
@@ -368,12 +364,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             _clearActivePlan();
             emit PlanCompleted(completedPlanId);
         } else {
-            emit PlanActionExecuted(
-                activePlanId,
-                nextIndex,
-                keccak256(abi.encode(action.kind)),
-                action.amount
-            );
+            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(action.kind)), action.amount);
         }
     }
 
@@ -424,9 +415,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     function _divest(address adapter, uint256 amount, uint256 minOut) internal {
         if (adapters[adapter].state == AdapterState.Removed) revert AdapterNotFound();
         if (
-            adapters[adapter].state != AdapterState.Active &&
-            adapters[adapter].state != AdapterState.Disabled &&
-            adapters[adapter].state != AdapterState.Impaired
+            adapters[adapter].state != AdapterState.Active && adapters[adapter].state != AdapterState.Disabled
+                && adapters[adapter].state != AdapterState.Impaired
         ) {
             revert AdapterNotActive();
         }
@@ -522,8 +512,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         uint256 adapterCount = _activeAdapters.length;
         for (uint256 i = 0; i < adapterCount; i++) {
             address adapter = _activeAdapters[i];
-            if (adapters[adapter].state == AdapterState.Active ||
-                adapters[adapter].state == AdapterState.Disabled) {
+            if (adapters[adapter].state == AdapterState.Active || adapters[adapter].state == AdapterState.Disabled) {
                 // slither-disable-next-line calls-loop
                 try IStrategyAdapterVault(adapter).maxWithdrawable() returns (uint256 maxWd) {
                     uint256 assets = strategyAssets[adapter];
@@ -543,12 +532,25 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     }
 
     /// @notice Convert shares to assets
-    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override(ERC4626) returns (uint256) {
+    function _convertToShares(uint256 assets, Math.Rounding rounding)
+        internal
+        view
+        override(ERC4626)
+        returns (uint256)
+    {
         return VaultMath.convertToShares(assets, totalAssets(), totalSupply(), rounding == Math.Rounding.Ceil);
     }
 
     /// @notice Convert assets to shares
-    function _convertToAssets(uint256 shares, Math.Rounding /* rounding */) internal view override(ERC4626) returns (uint256) {
+    function _convertToAssets(
+        uint256 shares,
+        Math.Rounding /* rounding */
+    )
+        internal
+        view
+        override(ERC4626)
+        returns (uint256)
+    {
         return VaultMath.convertToAssets(shares, totalAssets(), totalSupply());
     }
 }

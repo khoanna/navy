@@ -13,12 +13,11 @@ library VaultMath {
     /// @param totalShares The total shares outstanding
     /// @param roundUp Whether to round up on division
     /// @return shares The resulting share amount
-    function convertToShares(
-        uint256 assets,
-        uint256 totalAssets,
-        uint256 totalShares,
-        bool roundUp
-    ) internal pure returns (uint256 shares) {
+    function convertToShares(uint256 assets, uint256 totalAssets, uint256 totalShares, bool roundUp)
+        internal
+        pure
+        returns (uint256 shares)
+    {
         if (totalAssets == 0) {
             return assets;
         }
@@ -33,11 +32,11 @@ library VaultMath {
     /// @param totalAssets The total assets in the vault
     /// @param totalShares The total shares outstanding
     /// @return assets The resulting asset amount
-    function convertToAssets(
-        uint256 shares,
-        uint256 totalAssets,
-        uint256 totalShares
-    ) internal pure returns (uint256 assets) {
+    function convertToAssets(uint256 shares, uint256 totalAssets, uint256 totalShares)
+        internal
+        pure
+        returns (uint256 assets)
+    {
         if (totalShares == 0) {
             return shares;
         }
@@ -45,49 +44,32 @@ library VaultMath {
     }
 
     /// @notice Safe multiplication with division
-    /// @dev Reverts on division by zero
+    /// @dev Reverts on division by zero or multiplication overflow
     /// @param a The first operand
     /// @param b The second operand
     /// @param denominator The divisor
     /// @return result The result of (a * b) / denominator
-    function mulDiv(
-        uint256 a,
-        uint256 b,
-        uint256 denominator
-    ) internal pure returns (uint256 result) {
+    function mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
         if (denominator == 0) {
             revert DivisionByZero();
         }
 
-        assembly {
-            let prod1 := 0
-            let prod2 := 0
-
-            // Check for overflow: if either factor is non-zero and product would overflow
-            if iszero(iszero(mul(a, b))) {
-                prod1 := mul(a, b)
-                prod2 := div(prod1, denominator)
-            }
-
-            // If prod1 != 0 && prod1 * b / denominator overflowed, revert
-            if iszero(iszero(prod1)) {
-                if iszero(eq(div(prod1, a), b)) {
-                    revert(0, 0)
-                }
-            }
-
-            result := prod2
+        // Overflow check: if a != 0 and prod / a != b, overflow occurred
+        // prod = a * b (may overflow to low 256 bits)
+        // If no overflow: prod / a = b
+        // If overflow: prod / a ≠ b (div wraps to different value)
+        uint256 prod = a * b;
+        if (a != 0 && prod / a != b) {
+            assembly { revert(0, 0) } // overflow panic
         }
+        result = prod / denominator;
     }
 
     /// @notice Preview deposit, respecting max deposit limit
     /// @param assets The requested deposit amount
     /// @param maxDeposit The maximum allowed deposit
     /// @return The actual deposit amount (min of assets and maxDeposit)
-    function previewDeposit(
-        uint256 assets,
-        uint256 maxDeposit
-    ) internal pure returns (uint256) {
+    function previewDeposit(uint256 assets, uint256 maxDeposit) internal pure returns (uint256) {
         if (maxDeposit == 0) {
             return 0;
         }

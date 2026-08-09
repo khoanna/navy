@@ -134,14 +134,16 @@ contract VaultStagedPlansTest is Test {
             expiresAt: uint64(block.timestamp + 1 days)
         });
 
-        bytes32 actionLeaf = _actionLeaf(VaultTypes.Action({
-            planId: planId,
-            index: 0,
-            kind: VaultTypes.ActionKind.Divest,
-            adapter: address(adapter),
-            amount: 10_000e6,
-            minOut: 9_000e6
-        }));
+        bytes32 actionLeaf = _actionLeaf(
+            VaultTypes.Action({
+                planId: planId,
+                index: 0,
+                kind: VaultTypes.ActionKind.Divest,
+                adapter: address(adapter),
+                amount: 10_000e6,
+                minOut: 9_000e6
+            })
+        );
 
         vm.prank(allocator);
         vault.registerPlan(header, actionLeaf);
@@ -153,14 +155,17 @@ contract VaultStagedPlansTest is Test {
         bytes32[] memory proof = new bytes32[](0);
         vm.prank(allocator);
         vm.expectRevert(NavyVault.PlanExpired.selector);
-        vault.executeDivest(VaultTypes.Action({
-            planId: planId,
-            index: 0,
-            kind: VaultTypes.ActionKind.Divest,
-            adapter: address(adapter),
-            amount: 10_000e6,
-            minOut: 9_000e6
-        }), proof);
+        vault.executeDivest(
+            VaultTypes.Action({
+                planId: planId,
+                index: 0,
+                kind: VaultTypes.ActionKind.Divest,
+                adapter: address(adapter),
+                amount: 10_000e6,
+                minOut: 9_000e6
+            }),
+            proof
+        );
     }
 
     // =========================================================
@@ -196,14 +201,17 @@ contract VaultStagedPlansTest is Test {
         bytes32[] memory proof = new bytes32[](0);
         vm.prank(allocator);
         vm.expectRevert(NavyVault.PlanCancelled.selector);
-        vault.executeDivest(VaultTypes.Action({
-            planId: planId,
-            index: 0,
-            kind: VaultTypes.ActionKind.Divest,
-            adapter: address(adapter),
-            amount: 10_000e6,
-            minOut: 9_000e6
-        }), proof);
+        vault.executeDivest(
+            VaultTypes.Action({
+                planId: planId,
+                index: 0,
+                kind: VaultTypes.ActionKind.Divest,
+                adapter: address(adapter),
+                amount: 10_000e6,
+                minOut: 9_000e6
+            }),
+            proof
+        );
     }
 
     // =========================================================

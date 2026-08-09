@@ -338,10 +338,7 @@ contract NavyVaultSRCLACoreTest is Test {
     function test_executePlan_createsActivePlan() public {
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Harvest,
-            adapter: address(adapter),
-            amount: 0,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Harvest, adapter: address(adapter), amount: 0, minOut: 0
         });
 
         bytes32 planId = keccak256("plan-1");
@@ -358,10 +355,7 @@ contract NavyVaultSRCLACoreTest is Test {
     function test_executePlan_rejectsActivePlan() public {
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Harvest,
-            adapter: address(adapter),
-            amount: 0,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Harvest, adapter: address(adapter), amount: 0, minOut: 0
         });
 
         bytes32 planId1 = keccak256("plan-1");
@@ -380,10 +374,7 @@ contract NavyVaultSRCLACoreTest is Test {
         // Setup plan with harvest action
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Harvest,
-            adapter: address(adapter),
-            amount: 0,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Harvest, adapter: address(adapter), amount: 0, minOut: 0
         });
 
         bytes32 planId = keccak256("plan-1");
@@ -401,10 +392,7 @@ contract NavyVaultSRCLACoreTest is Test {
     function test_cancelPlan_clearsActivePlan() public {
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
-            kind: NavyVaultSRCLA.ActionKind.Harvest,
-            adapter: address(adapter),
-            amount: 0,
-            minOut: 0
+            kind: NavyVaultSRCLA.ActionKind.Harvest, adapter: address(adapter), amount: 0, minOut: 0
         });
 
         bytes32 planId = keccak256("plan-1");

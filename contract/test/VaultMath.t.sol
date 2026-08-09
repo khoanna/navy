@@ -8,14 +8,14 @@ import {VaultMath} from "../src/libraries/VaultMath.sol";
 /// @notice Tests for the VaultMath library
 contract VaultMathTest is Test {
     // Precision constants
-    uint256 internal constant USDC_PRECISION = 1e6;  // 6 decimals for USDC
+    uint256 internal constant USDC_PRECISION = 1e6; // 6 decimals for USDC
     uint256 internal constant SHARE_PRECISION = 1e12; // 12 decimals for shares
 
     function test_convertToSharesRoundsUp() public pure {
         // Scenario: 100 USDC deposited when 1 share = 1.5 USDC
         // Shares = 100e6 * 100e12 / 150e6 = 66666.6666... shares
         // Should round up to 66667 (exact value: 66666666666667)
-        uint256 assets = 100 * USDC_PRECISION;      // 100 USDC
+        uint256 assets = 100 * USDC_PRECISION; // 100 USDC
         uint256 totalAssets = 150 * USDC_PRECISION; // 150 USDC in vault
         uint256 totalShares = 100 * SHARE_PRECISION; // 100 shares outstanding
         bool roundUp = true;
@@ -31,7 +31,7 @@ contract VaultMathTest is Test {
         // Scenario: 100 USDC deposited when 1 share = 1.5 USDC
         // Shares = 100e6 * 100e12 / 150e6 = 66666.6666... shares
         // Should round down to 66666 (exact value: 66666666666666)
-        uint256 assets = 100 * USDC_PRECISION;      // 100 USDC
+        uint256 assets = 100 * USDC_PRECISION; // 100 USDC
         uint256 totalAssets = 150 * USDC_PRECISION; // 150 USDC in vault
         uint256 totalShares = 100 * SHARE_PRECISION; // 100 shares outstanding
         bool roundUp = false;
@@ -46,7 +46,7 @@ contract VaultMathTest is Test {
     function test_convertToAssetsRoundsDown() public pure {
         // Scenario: 10 shares redeemed when 1 share = 1.5 USDC
         // Assets = 10e12 * 150e6 / 100e12 = 15e6 = 15 USDC (exact)
-        uint256 shares = 10 * SHARE_PRECISION;       // 10 shares
+        uint256 shares = 10 * SHARE_PRECISION; // 10 shares
         uint256 totalAssets = 150 * USDC_PRECISION; // 150 USDC in vault
         uint256 totalShares = 100 * SHARE_PRECISION; // 100 shares outstanding
 
@@ -87,10 +87,10 @@ contract VaultMathTest is Test {
     }
 
     function test_mulDivDivisionByZero() public {
-        // Test division by zero reverts using a wrapper contract
-        VaultMathWrapper wrapper = new VaultMathWrapper();
+        // Test that mulDiv reverts with DivisionByZero when denominator is 0
+        VaultMathTestHarness harness = new VaultMathTestHarness();
         vm.expectRevert();
-        wrapper.testMulDiv(10, 100, 0);
+        harness.callMulDiv(10, 100, 0);
     }
 
     function test_previewDepositRespectsMaxDeposit() public pure {
@@ -143,11 +143,35 @@ contract VaultMathTest is Test {
         uint256 assets = VaultMath.convertToAssets(shares, totalAssets, totalShares);
         assertEq(assets, shares, "convertToAssets: should return shares when totalShares is 0");
     }
+
+    function test_mulDivHandlesLargeValues() public pure {
+        // Test with large but safe values (no overflow)
+        // Use a * b < type(uint256).max
+        uint256 a = 1e30;
+        uint256 b = 1e30;
+        uint256 denominator = 1e20;
+
+        // 1e30 * 1e30 / 1e20 = 1e40
+        uint256 result = VaultMath.mulDiv(a, b, denominator);
+        assertEq(result, 1e40, "mulDiv: should handle large values");
+    }
+
+    function test_mulDivNoOverflowWithSmallValues() public pure {
+        // Verify mulDiv works with typical vault values
+        // USDC: 1e6 precision, Shares: 1e12 precision
+        uint256 a = 1000 * 1e6; // 1000 USDC
+        uint256 b = 100 * 1e12; // 100 shares
+        uint256 denominator = 100 * 1e6; // 100 USDC total assets
+
+        // 1000e6 * 100e12 / 100e6 = 1000e12 (1000 shares)
+        uint256 result = VaultMath.mulDiv(a, b, denominator);
+        assertEq(result, 1000 * 1e12, "mulDiv: should handle typical vault values");
+    }
 }
 
-/// @notice Wrapper contract to test library external call reverts
-contract VaultMathWrapper {
-    function testMulDiv(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256) {
-        return VaultMath.mulDiv(a, b, denominator);
+/// @notice Test harness to call VaultMath library functions externally
+contract VaultMathTestHarness {
+    function callMulDiv(uint256 a, uint256 b, uint256 denominator) external pure {
+        VaultMath.mulDiv(a, b, denominator);
     }
 }
