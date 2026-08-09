@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IStrategyAdapter} from "../../src/interfaces/IStrategyAdapter.sol";
 
-contract MockStrategyAdapter is IStrategyAdapter {
+contract MockAdapter is IStrategyAdapter {
     using SafeERC20 for IERC20;
 
     address public immutable vaultAddress;
@@ -20,11 +20,11 @@ contract MockStrategyAdapter is IStrategyAdapter {
     bool public revertAssetReads;
     bool public revertWithdrawals;
 
-    error NotVault();
-    error WithdrawFailed();
-
     address[] private _rewardTokens;
     mapping(address => uint256) public rewards;
+
+    error NotVault();
+    error WithdrawFailed();
 
     constructor(address vault_, address asset_, bytes32 configuration_) {
         vaultAddress = vault_;

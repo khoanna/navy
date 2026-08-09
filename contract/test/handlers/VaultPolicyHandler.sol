@@ -46,6 +46,9 @@ contract PolicyStrategyAdapter is IStrategyAdapter {
     uint16 public withdrawLossBps;
     uint256 public withdrawLossBase;
 
+    address[] private _rewardTokens;
+    mapping(address => uint256) public rewards;
+
     error NotVault();
 
     constructor(address vault_, address asset_, bytes32 configuration_) {
@@ -79,6 +82,14 @@ contract PolicyStrategyAdapter is IStrategyAdapter {
         withdrawLossBase = baseLoss;
     }
 
+    function setRewardTokens(address[] memory tokens_) external {
+        _rewardTokens = tokens_;
+    }
+
+    function setClaimableReward(address token, uint256 amount) external {
+        rewards[token] = amount;
+    }
+
     function vault() external view returns (address) {
         return vaultAddress;
     }
@@ -97,6 +108,14 @@ contract PolicyStrategyAdapter is IStrategyAdapter {
 
     function maxWithdrawable() external view returns (uint256) {
         return withdrawableAssets;
+    }
+
+    function rewardTokens() external view returns (address[] memory) {
+        return _rewardTokens;
+    }
+
+    function claimableReward(address token) external view returns (uint256) {
+        return rewards[token];
     }
 
     function deposit(uint256 assets) external onlyVault returns (uint256 credited) {
