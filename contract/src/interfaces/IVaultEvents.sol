@@ -2,20 +2,7 @@
 pragma solidity ^0.8.24;
 
 interface IVaultEvents {
-    event Deposit(
-        address indexed sender,
-        address indexed owner,
-        uint256 assets,
-        uint256 shares
-    );
-
-    event Withdraw(
-        address indexed sender,
-        address indexed receiver,
-        address indexed owner,
-        uint256 assets,
-        uint256 shares
-    );
+    // Note: Deposit and Withdraw events are inherited from IERCC4626
 
     event AdapterRegistered(
         address indexed adapter,
@@ -43,7 +30,6 @@ interface IVaultEvents {
     );
 
     event PlanCompleted(bytes32 indexed planId);
-    event PlanExpired(bytes32 indexed planId);
     event PlanCancelled(bytes32 indexed planId);
 
     event EmergencyExit(

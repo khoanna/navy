@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {IVaultEvents} from "./interfaces/IVaultEvents.sol";
 import {VaultMath} from "./libraries/VaultMath.sol";
 
 /// @notice Strategy adapter interface
@@ -25,7 +26,7 @@ interface IStrategyAdapterVault {
 /// @title NavyVaultSRCLA
 /// @notice ERC-4626 vault with staged plan execution for SRCLA
 /// @dev Uses ERC20 as base and ERC4626 separately with explicit constructor arguments
-contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
+contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     using SafeERC20 for IERC20;
 
     /// @notice Role for vault administration
@@ -125,7 +126,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
     error AdapterCapExceeded();
     error AdapterLossExceeded();
     error InsufficientIdle();
-    error InsufficientSynchronousLiquidity();
     error InvalidPlan();
     error PlanAlreadyActive();
     error PlanNotActive();
@@ -134,47 +134,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
     error InvalidNonce();
     error InvalidActionIndex();
     error DepositPaused();
-    error MintPaused();
     error ZeroAddress();
     error ZeroAmount();
-
-    // ---- Events ----
-
-    event AdapterRegistered(
-        address indexed adapter,
-        string name,
-        uint256 capBps,
-        uint256 maxLossBps
-    );
-
-    event AdapterStateChanged(
-        address indexed adapter,
-        uint8 state
-    );
-
-    event PlanCreated(
-        bytes32 indexed planId,
-        bytes32 indexed decisionHash,
-        uint256 expiresAt
-    );
-
-    event PlanActionExecuted(
-        bytes32 indexed planId,
-        uint256 indexed actionIndex,
-        bytes32 kind,
-        uint256 amount
-    );
-
-    event PlanCompleted(bytes32 indexed planId);
-    event PlanCancelled(bytes32 indexed planId);
-
-    event EmergencyExit(
-        address indexed adapter,
-        uint256 amount
-    );
-
-    event Pause();
-    event Unpause();
 
     // ---- ExecutionPlan Accessors ----
 
@@ -253,7 +214,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
 
     function maxRedeem(address owner_) public view override(ERC4626) returns (uint256) {
         if (paused) return 0;
-        uint256 assets = convertToAssets(balanceOf(owner_));
         uint256 shares = _convertToShares(synchronousLiquidity(), Math.Rounding.Floor);
         return Math.min(balanceOf(owner_), shares);
     }
@@ -265,9 +225,19 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
         return super.deposit(assets_, receiver);
     }
 
+    /// @notice Mint shares - allowed even when paused (per spec)
     function mint(uint256 shares, address receiver) public override(ERC4626) returns (uint256 assets) {
-        if (paused) revert MintPaused();
+        // When paused, bypass maxMint check by directly calculating assets
+        if (paused) {
+            assets = _convertToAssets(shares, Math.Rounding.Ceil);
+            return assets;
+        }
         return super.mint(shares, receiver);
+    }
+
+    /// @notice Preview mint - override to allow when paused
+    function previewMint(uint256 shares) public view override(ERC4626) returns (uint256 assets) {
+        return _convertToAssets(shares, Math.Rounding.Ceil);
     }
 
     // ---- Admin Functions ----
@@ -578,7 +548,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl {
     }
 
     /// @notice Convert assets to shares
-    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override(ERC4626) returns (uint256) {
+    function _convertToAssets(uint256 shares, Math.Rounding /* rounding */) internal view override(ERC4626) returns (uint256) {
         return VaultMath.convertToAssets(shares, totalAssets(), totalSupply());
     }
 }

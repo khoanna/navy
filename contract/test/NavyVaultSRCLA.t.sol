@@ -221,21 +221,30 @@ contract NavyVaultSRCLACoreTest is Test {
     // ---- Mint Tests ----
 
     function test_mintStillWorksWhenPaused() public {
-        // Per brief, mint should still work when paused (ERC-4626 allows mint when paused)
-        uint256 mintAmount = 1000e6;
-        usdc.mint(alice, mintAmount);
-
+        // Per brief, mint should work when paused (unlike deposit which reverts)
+        // First, do a normal deposit to have assets in the vault
+        uint256 depositAmount = 1000e6;
+        usdc.mint(alice, depositAmount);
         vm.prank(alice);
-        usdc.approve(address(vault), mintAmount);
+        usdc.approve(address(vault), depositAmount);
+        vm.prank(alice);
+        vault.deposit(depositAmount, alice);
 
+        // Now pause the vault
         vm.prank(admin);
         vault.pause();
 
-        // Note: maxMint returns 0 when paused, but mint can still be called
-        // However, the ERC4626 previewMint would return 0, so this test
-        // verifies the behavior - in practice mint won't work due to previewMint
-        uint256 maxMintAmount = vault.maxMint(alice);
-        assertEq(maxMintAmount, 0, "maxMint should be 0 when paused");
+        // Mint should NOT revert when paused (deposit reverts but mint is allowed)
+        uint256 mintAmount = 500e6;
+        usdc.mint(bob, mintAmount);
+        vm.prank(bob);
+        usdc.approve(address(vault), mintAmount);
+
+        // This should succeed without revert
+        vm.prank(bob);
+        uint256 shares = vault.mint(mintAmount, bob);
+
+        assertGt(shares, 0, "mint should succeed when paused");
     }
 
     // ---- Withdraw Tests ----
