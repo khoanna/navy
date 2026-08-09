@@ -72,11 +72,9 @@ contract MoonwellBaseForkTest is BaseForkTest {
 
         // Verify underlying() call returns USDC
         (bool success, bytes memory data) = M_USDC.staticcall(abi.encodeWithSignature("underlying()"));
-
-        if (success) {
-            address underlying = abi.decode(data, (address));
-            assertEq(underlying, BASE_USDC, "mToken underlying should be USDC");
-        }
+        assertTrue(success, "underlying() should succeed");
+        address underlying = abi.decode(data, (address));
+        assertEq(underlying, BASE_USDC, "mToken underlying should be USDC");
     }
 
     // ============================================================
@@ -164,11 +162,9 @@ contract MoonwellBaseForkTest is BaseForkTest {
 
     function test_forkMoonwellGetCash() public skipWithoutFork {
         (bool success, bytes memory data) = M_USDC.staticcall(abi.encodeWithSignature("getCash()"));
-
-        if (success) {
-            uint256 cash = abi.decode(data, (uint256));
-            console.log("Moonwell cash:", cash);
-            assertGe(cash, 0, "Cash should be non-negative");
-        }
+        assertTrue(success, "getCash() should succeed");
+        uint256 cash = abi.decode(data, (uint256));
+        console.log("Moonwell cash:", cash);
+        assertGe(cash, 0, "Cash should be non-negative");
     }
 }

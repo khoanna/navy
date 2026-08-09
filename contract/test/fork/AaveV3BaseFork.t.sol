@@ -147,29 +147,28 @@ contract AaveV3BaseForkTest is BaseForkTest {
 
     function test_forkAaveSupplyRateIsReasonable() public skipWithoutFork {
         // The strategy doesn't have a direct supplyRatePerYear, but we can
-        // verify the pool's normalized income is changing over time
+        // verify the pool's normalized income is positive and accrues forward
         (bool success1, bytes memory data1) =
             AAVE_POOL.staticcall(abi.encodeWithSignature("getReserveNormalizedIncome(address)", BASE_USDC));
+        assertTrue(success1, "getReserveNormalizedIncome should succeed");
 
-        if (success1) {
-            uint256 income1 = abi.decode(data1, (uint256));
+        uint256 income1 = abi.decode(data1, (uint256));
+        assertGt(income1, 0, "USDC reserve normalized income should be positive");
 
-            // Warp time forward (if on live chain, this won't work for historical data)
-            // This is more of a smoke test
-            vm.roll(block.number + 100);
-            vm.warp(block.timestamp + 1 hours);
+        // Warp time forward; Aave's liquidity index accrues with the block timestamp
+        vm.roll(block.number + 100);
+        vm.warp(block.timestamp + 1 hours);
 
-            (bool success2, bytes memory data2) =
-                AAVE_POOL.staticcall(abi.encodeWithSignature("getReserveNormalizedIncome(address)", BASE_USDC));
+        (bool success2, bytes memory data2) =
+            AAVE_POOL.staticcall(abi.encodeWithSignature("getReserveNormalizedIncome(address)", BASE_USDC));
+        assertTrue(success2, "getReserveNormalizedIncome should succeed after warp");
 
-            if (success2) {
-                uint256 income2 = abi.decode(data2, (uint256));
-                // Income should not decrease (in normal conditions)
-                // Note: This may fail on historical blocks, so we just log it
-                console.log("Income before:", income1);
-                console.log("Income after:", income2);
-            }
-        }
+        uint256 income2 = abi.decode(data2, (uint256));
+        assertGt(income2, 0, "USDC reserve normalized income should be positive after warp");
+        assertGe(income2, income1, "Normalized income should not decrease after warping forward");
+
+        console.log("Income before:", income1);
+        console.log("Income after:", income2);
     }
 
     // ============================================================

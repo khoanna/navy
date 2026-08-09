@@ -3,7 +3,8 @@
   "name": "Base Mainnet",
   "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   "rpcUrl": "${BASE_RPC_URL}",
-  "forkBlock": "${BASE_FORK_BLOCK}",
+  "forkBlock": 49436925,
+  "verifiedAt": "2026-08-09",
   "strategies": {
     "aaveV3": {
       "name": "Aave V3",
