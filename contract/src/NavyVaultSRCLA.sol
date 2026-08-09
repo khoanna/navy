@@ -214,8 +214,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     function maxRedeem(address owner_) public view override(ERC4626) returns (uint256) {
         if (paused) return 0;
-        uint256 shares = _convertToShares(synchronousLiquidity(), Math.Rounding.Floor);
-        return Math.min(balanceOf(owner_), shares);
+        uint256 maxSharesFromLiquidity = _convertToShares(synchronousLiquidity(), Math.Rounding.Floor);
+        return Math.min(balanceOf(owner_), maxSharesFromLiquidity);
     }
 
     // ---- ERC4626 Deposit/Mint ----
