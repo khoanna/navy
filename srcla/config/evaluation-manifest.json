@@ -1,0 +1,18 @@
+{
+  "evaluationId": "srcla-eval-001",
+  "startDate": "2025-01-01T00:00:00Z",
+  "endDate": "2026-06-30T23:59:59Z",
+  "forecastMethod": {
+    "method": "ew-residual",
+    "config": {
+      "decay": 0.95,
+      "residualQuantile": 0.05
+    }
+  },
+  "horizons": [86400, 604800],
+  "tiers": ["10000000000", "100000000000", "1000000000000", "10000000000000"],
+  "regimes": ["normal", "stressed", "recovery"],
+  "coverageTarget": 0.95,
+  "significanceLevel": 0.05,
+  "createdAt": "2026-08-10"
+}
