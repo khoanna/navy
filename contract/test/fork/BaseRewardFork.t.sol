@@ -44,9 +44,7 @@ contract BaseRewardForkTest is BaseForkTest {
         address feed = 0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56;
 
         // Call latestRoundData
-        (bool ok, bytes memory data) = feed.call(
-            abi.encodeWithSignature("latestRoundData()")
-        );
+        (bool ok, bytes memory data) = feed.call(abi.encodeWithSignature("latestRoundData()"));
 
         // Skip if feed not available - will be updated with real address
         if (!ok || data.length == 0) {
@@ -54,7 +52,7 @@ contract BaseRewardForkTest is BaseForkTest {
         }
 
         if (ok && data.length > 0) {
-            (, int256 answer, , ,) = abi.decode(data, (uint80, int256, uint256, uint256, uint80));
+            (, int256 answer,,,) = abi.decode(data, (uint80, int256, uint256, uint256, uint80));
             assertGt(answer, 0);
         }
     }
@@ -64,14 +62,8 @@ contract BaseRewardForkTest is BaseForkTest {
         address weth = 0x4200000000000000000000000000000000000006;
 
         // Check WETH/USDC 0.05% pool
-        (bool ok, bytes memory data) = factory.call(
-            abi.encodeWithSignature(
-                "getPool(address,address,uint24)",
-                weth,
-                BASE_USDC,
-                uint24(500)
-            )
-        );
+        (bool ok, bytes memory data) =
+            factory.call(abi.encodeWithSignature("getPool(address,address,uint24)", weth, BASE_USDC, uint24(500)));
 
         if (ok) {
             address pool = abi.decode(data, (address));

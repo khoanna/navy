@@ -28,9 +28,12 @@ contract MockSwapRouter is ISwapRouter02 {
         return mockPriceOverride != 0 ? mockPriceOverride : MOCK_PRICE;
     }
 
-    function exactInput(
-        ISwapRouter02.ExactInputParams calldata params
-    ) external payable override returns (uint256 amountOut) {
+    function exactInput(ISwapRouter02.ExactInputParams calldata params)
+        external
+        payable
+        override
+        returns (uint256 amountOut)
+    {
         // Parse from path - path format: [inputToken (20 bytes)][fee (3 bytes)][outputToken (20 bytes)]
         bytes memory pathMem = params.path;
         require(pathMem.length >= 43, "Invalid path length");

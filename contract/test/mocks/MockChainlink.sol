@@ -12,13 +12,11 @@ contract MockChainlink {
         updatedAt_ = block.timestamp;
     }
 
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    ) {
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+    {
         return (1, answer_, block.timestamp, updatedAt_, 1);
     }
 

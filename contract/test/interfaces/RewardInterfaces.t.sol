@@ -63,12 +63,8 @@ contract RewardInterfacesTest {
     function test_ISwapRouter02HasExactInput() public {
         MockSwapRouter02 mock = new MockSwapRouter02();
         ISwapRouter02 router = ISwapRouter02(address(mock));
-        ISwapRouter02.ExactInputParams memory params = ISwapRouter02.ExactInputParams({
-            path: "",
-            recipient: address(0),
-            amountIn: 0,
-            amountOutMinimum: 0
-        });
+        ISwapRouter02.ExactInputParams memory params =
+            ISwapRouter02.ExactInputParams({path: "", recipient: address(0), amountIn: 0, amountOutMinimum: 0});
         router.exactInput(params);
     }
 }

@@ -46,12 +46,7 @@ contract RewardExecutorTest is Test {
         router = new MockSwapRouter();
         rewardSource = new MockRewardSource();
 
-        executor = new RewardExecutor(
-            vault,
-            admin,
-            address(router),
-            address(usdc)
-        );
+        executor = new RewardExecutor(vault, admin, address(router), address(usdc));
 
         executor.grantRole(executor.ALLOCATOR_ROLE(), allocator);
     }
@@ -116,13 +111,7 @@ contract RewardExecutorTest is Test {
         vm.prank(address(0xBAD));
         vm.expectRevert();
         executor.harvest(
-            address(0xAD07),
-            address(rewardToken),
-            bytes32("TEST_ROUTE"),
-            100e18,
-            0,
-            block.timestamp + 60,
-            bytes32(0)
+            address(0xAD07), address(rewardToken), bytes32("TEST_ROUTE"), 100e18, 0, block.timestamp + 60, bytes32(0)
         );
     }
 
@@ -145,13 +134,7 @@ contract RewardExecutorTest is Test {
         vm.prank(allocator);
         vm.expectRevert();
         executor.harvest(
-            address(0xAD07),
-            address(rewardToken),
-            bytes32("TEST_ROUTE"),
-            100e18,
-            0,
-            block.timestamp + 60,
-            bytes32(0)
+            address(0xAD07), address(rewardToken), bytes32("TEST_ROUTE"), 100e18, 0, block.timestamp + 60, bytes32(0)
         );
     }
 

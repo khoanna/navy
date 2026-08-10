@@ -27,9 +27,9 @@ contract RewardExecutor is AccessControl {
     /// @notice Route configuration (storage struct)
     struct Route {
         address inputToken;
-        bytes path;           // Encoded V3 path
+        bytes path; // Encoded V3 path
         address outputToken;
-        address oracleFeed;   // Chainlink price feed
+        address oracleFeed; // Chainlink price feed
         uint256 maxOracleAge;
         uint256 maxPriceImpactBps;
         uint256 maxDailyNotional;
@@ -84,12 +84,7 @@ contract RewardExecutor is AccessControl {
     error InvalidPath();
     error DecisionAlreadyUsed();
 
-    constructor(
-        address vault_,
-        address admin_,
-        address router_,
-        address usdc_
-    ) {
+    constructor(address vault_, address admin_, address router_, address usdc_) {
         require(vault_ != address(0), "zero vault");
         require(admin_ != address(0), "zero admin");
         require(router_ != address(0), "zero router");
@@ -189,7 +184,7 @@ contract RewardExecutor is AccessControl {
         // Convert amountIn to USDC notional using oracle price
         // Formula: amountIn * price / 1e8 / 1e12, where price has 8 decimals
         // For 100 COMP at $0.50: 100e18 * 50e6 / 1e8 / 1e12 = 50e6 = 50 USDC
-        (, int256 answer, , ,) = IAggregatorV3(oracleFeed).latestRoundData();
+        (, int256 answer,,,) = IAggregatorV3(oracleFeed).latestRoundData();
         uint256 amountInNotional = uint256(answer) * amountIn / 1e8 / 1e12;
         if (dailyUsed + amountInNotional > dailyCap) revert DailyCapExceeded();
     }
@@ -226,12 +221,11 @@ contract RewardExecutor is AccessControl {
         IERC20 usdcIERC20 = IERC20(usdc);
         uint256 usdcBefore = usdcIERC20.balanceOf(vault);
 
-        router.exactInput(ISwapRouter02.ExactInputParams({
-            path: path,
-            recipient: vault,
-            amountIn: claimed,
-            amountOutMinimum: actualMinOut
-        }));
+        router.exactInput(
+            ISwapRouter02.ExactInputParams({
+                path: path, recipient: vault, amountIn: claimed, amountOutMinimum: actualMinOut
+            })
+        );
 
         // Step 5: Reset allowance
         rewardIERC20.forceApprove(address(router), 0);
@@ -265,7 +259,7 @@ contract RewardExecutor is AccessControl {
 
     /// @notice Check oracle price and revert if stale
     function _verifyOracle(address feed, uint256 maxAge) internal view {
-        (, int256 answer, , uint256 updatedAt,) = IAggregatorV3(feed).latestRoundData();
+        (, int256 answer,, uint256 updatedAt,) = IAggregatorV3(feed).latestRoundData();
         require(answer > 0, "Invalid oracle answer");
         if (block.timestamp - updatedAt > maxAge) revert StaleOracle();
     }
@@ -275,7 +269,7 @@ contract RewardExecutor is AccessControl {
     ///      Chainlink returns 8 decimals for price (e.g., 1e8 = $1)
     ///      Formula: minOut = amountIn * price / 1e8 / 1e12 (normalize from 18 to 6 decimals)
     function _getOracleFloor(address feed, uint256 amountIn) internal view returns (uint256) {
-        (, int256 answer, , ,) = IAggregatorV3(feed).latestRoundData();
+        (, int256 answer,,,) = IAggregatorV3(feed).latestRoundData();
 
         // Chainlink returns 8 decimals for price
         // For 100 COMP at $0.50: 100e18 * 50e6 / 1e8 / 1e12 = 50e6 = 50 USDC
