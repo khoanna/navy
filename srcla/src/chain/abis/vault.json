@@ -1,0 +1,55 @@
+{
+  "_format": "ethers-sol-namespace-abi",
+  "contractName": "NavyVaultSRCLA",
+  "abi": [
+    {
+      "type": "function",
+      "name": "totalAssets",
+      "outputs": [{ "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "synchronousLiquidity",
+      "outputs": [{ "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "adapters",
+      "inputs": [{ "name": "", "type": "address" }],
+      "outputs": [
+        { "name": "capBps", "type": "uint256" },
+        { "name": "maxLossBps", "type": "uint256" },
+        { "name": "state", "type": "uint8" },
+        { "name": "lastSyncIdleBase", "type": "uint256" }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "paused",
+      "outputs": [{ "type": "bool" }]
+    },
+    {
+      "type": "function",
+      "name": "minIdleBps",
+      "outputs": [{ "name": "", "type": "uint256" }]
+    },
+    {
+      "type": "event",
+      "name": "AdapterRegistered",
+      "inputs": [
+        { "name": "adapter", "type": "address", "indexed": true },
+        { "name": "name", "type": "string" },
+        { "name": "capBps", "type": "uint256" },
+        { "name": "maxLossBps", "type": "uint256" }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "AdapterStateChanged",
+      "inputs": [
+        { "name": "adapter", "type": "address", "indexed": true },
+        { "name": "state", "type": "uint8" }
+      ]
+    }
+  ]
+}
