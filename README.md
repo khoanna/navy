@@ -39,7 +39,7 @@ Navy is structured as four independent, focused applications within a single mon
 
 | Directory | Stack | Core Role |
 | :--- | :--- | :--- |
-| **`contract/`** | Foundry, Solidity `0.8.24` | On-chain contracts: `NavyPayments.sol` (gasless payments) and `NavyVault.sol` (pooled ERC-4626 yield vault with yield adapters). |
+| **`contract/`** | Foundry, Solidity `0.8.24` | On-chain contracts: `NavyPayments.sol` (gasless payments) and `NavyVaultSRCLA.sol` (pooled ERC-4626 yield vault with yield adapters). |
 | **`be/`** | NestJS 11, Prisma 7 (Postgres), `ethers` v6 | Core API, Privy & JWT auth, gasless EIP-712 relayers, `ChainWatcherService` settlement, rebalancing keeper cron, OpenRouter AI assistant server. |
 | **`fe/`** | Next.js 16 (App Router), React 19, Three.js, GSAP | Web application for **Admins** (approvals, metrics) and **Merchants** (catalog, invoices, payout wallet configuration, Webhook settings). |
 | **`expo-wallet/`** | Expo 54, React Native, `@privy-io/expo` | Mobile wallet for end-user payers: passkey/social onboarding, scan-to-pay QR, EIP-3009/2612 signing, vault position management, streaming AI assistant. |
@@ -54,9 +54,9 @@ Navy is structured as four independent, focused applications within a single mon
 - **Automated Payout & Fee Split:** Executes an instant on-chain split: **99%** directly to the merchant’s payout wallet and **1%** to the Navy protocol treasury.
 - **Self-Healing Settlement:** `ChainWatcherService` listens for on-chain `InvoicePaid` events, verifies logs, updates invoice statuses to `paid`, and dispatches cryptographically signed HMAC webhooks to merchant endpoints.
 
-### 2. Auto-Rebalancing Yield Vault (`NavyVault`)
+### 2. Auto-Rebalancing Yield Vault (`NavyVaultSRCLA`)
 - **Pooled ERC-4626 Vault:** Users deposit USDC to mint `navUSDC` shares. Deposits utilize gasless EIP-3009 authorizations, and redemptions utilize EIP-2612 share permits.
-- **Multi-Venue Yield Optimization:** An automated keeper cron evaluates live yield opportunities across allowlisted protocols (e.g., **Compound III**, **Morpho Blue**) using a framework-free strategy considering target weights, drift bands, gas break-evens, and idle buffers.
+- **Multi-Venue Yield Optimization:** An automated keeper cron evaluates live yield opportunities across allowlisted protocols (e.g., **Compound III**) using a framework-free strategy considering target weights, drift bands, gas break-evens, and idle buffers.
 - **On-Chain Risk Safety:** Reallocations are constrained by contract-level risk guards (`capBps`, `minIdleBps`, `maxLossBps`). The keeper can only shift capital between verified yield adapters, never to an arbitrary address.
 
 ### 3. In-Wallet Streaming AI Assistant
@@ -77,7 +77,7 @@ Navy is structured as four independent, focused applications within a single mon
 | Contract | Address | Description |
 | :--- | :--- | :--- |
 | **`NavyPayments`** | [`0xb135C49Ef6c0505F7fB55932F31A9E93eba6e907`](https://sepolia.etherscan.io/address/0xb135C49Ef6c0505F7fB55932F31A9E93eba6e907) | Gasless invoice settlement & fee splitter |
-| **`NavyVault`** | [`0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE`](https://sepolia.etherscan.io/address/0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE) | ERC-4626 auto-rebalancing yield vault |
+| **`NavyVaultSRCLA`** | [`0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE`](https://sepolia.etherscan.io/address/0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE) | ERC-4626 auto-rebalancing yield vault |
 | **`CompoundAdapter`** | [`0x24d4173e6b9734a52c20190a9c5681ef350D8fE2`](https://sepolia.etherscan.io/address/0x24d4173e6b9734a52c20190a9c5681ef350D8fE2) | Yield adapter connected to Compound III Comet |
 | **Circle USDC (Sepolia)** | [`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`](https://sepolia.etherscan.io/address/0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238) | Native Circle USDC (EIP-3009 + EIP-2612) |
 
@@ -195,7 +195,7 @@ Each application consumes configuration via local environment files (`.env`). Re
 | **`be`** | `DATABASE_URL` | PostgreSQL connection string |
 | **`be`** | `SEPOLIA_RPC_URL` | Sepolia Ethereum RPC provider URL |
 | **`be`** | `NAVY_PAYMENTS_ADDRESS` | Address of deployed `NavyPayments.sol` |
-| **`be`** | `NAVY_VAULT_ADDRESS` | Address of deployed `NavyVault.sol` |
+| **`be`** | `NAVY_VAULT_ADDRESS` | Address of deployed `NavyVaultSRCLA.sol` |
 | **`be`** | `NAVY_RELAYER_PRIVATE_KEY` | Private key for payment/transfer relayer |
 | **`be`** | `NAVY_KEEPER_PRIVATE_KEY` | Private key for vault rebalancing keeper |
 | **`be`** | `OPENROUTER_API_KEY` | OpenRouter key powering the AI assistant |
@@ -208,7 +208,7 @@ Each application consumes configuration via local environment files (`.env`). Re
 
 ## 🔒 Security & Audit
 
-- **Vault Audit:** The `NavyVault` smart contracts underwent a formal security audit (`contract/audit/NavyVault-security-audit-2026-07-28.md`). All findings, including adapter isolation, zero-share protection, 2-step ownership transfers, and reentrancy guards, have been addressed.
+- **Vault Audit:** The `NavyVaultSRCLA` smart contracts underwent a formal security audit (`contract/audit/NavyVault-security-audit-2026-07-28.md`). All findings, including adapter isolation, zero-share protection, 2-step ownership transfers, and reentrancy guards, have been addressed.
 - **EIP-7702 Notice:** Circle USDC EIP-3009 requires valid ECDSA signatures from plain EOAs (`getCode == 0x`). Signers delegated via EIP-7702 smart accounts must use standard EIP-1271 verification.
 
 ---

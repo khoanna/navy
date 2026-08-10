@@ -11,7 +11,7 @@ describe('ProductsService', () => {
 
   it('creates a product scoped to the merchant, serializing BigInt price', async () => {
     prisma.product.create.mockResolvedValue({ id: 'p1', merchantId: 'm1', name: 'Tee', sku: 'T', unitPrice: 1_000_000n, active: true });
-    const r = await svc.create('m1', { name: 'Tee', sku: 'T', unitPrice: 1_000_000n });
+    const r = await svc.create('m1', { name: 'Tee', sku: 'T', unitPrice: 1_000_000n, imageUrl: '', imagePublicId: '' });
     expect(prisma.product.create).toHaveBeenCalledWith({ data: { merchantId: 'm1', name: 'Tee', sku: 'T', unitPrice: 1_000_000n } });
     expect(r.unitPrice).toBe('1000000');
   });

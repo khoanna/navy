@@ -2,19 +2,9 @@
 
 ## Base SRCLA vault (mainnet)
 
-| | |
-|---|---|
-| Chain ID | `8453` |
-| Asset | Circle native USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| NavyVault | _Not deployed; record `DeployBaseVault` output here_ |
-| Admin | _Derived from `BASE_ADMIN_PRIVATE_KEY` at deployment_ |
-| Allocator | _Set from `SRCLA_ALLOCATOR_ADDRESS` at deployment_ |
-| Strategies | _Outputs of the Base strategy deployment plan; not embedded in the core_ |
-| RewardExecutor | _Output of the reward-executor deployment plan; not embedded in the core_ |
-
-The Base vault core is immutable and has no relayer state. Deployment is rejected outside Base or for any asset
-other than the canonical Circle USDC address. Newly deployed cores contain no admitted adapters and no reward
-accountant; those addresses are recorded only after their pinned Base-fork conformance gates pass.
+Not yet deployed. See `docs/superpowers/specs/srcla-phase-07-ablation-design.md` for the deployment plan.
+Production on Base requires: professional audit, timelock + owner→multisig, KMS/HSM keys, ERC-4337 paymaster,
+MorphoAdapter live-verified Circle-USDC market — see `docs/PRODUCTION.md`.
 
 ## Ethereum Sepolia (testnet)
 
@@ -47,31 +37,19 @@ Provision subwallet → fund with Circle USDC + Sepolia ETH → `approve` + Come
 - **Circle USDC uses `SignatureChecker`** for both permit and EIP-3009 → the payer must be a plain EOA (or an EIP-1271 contract wallet). Plain EOAs work via ecrecover.
 - **`forge script --slow`** is only needed against a 7702-delegated sender (gapped-nonce); a plain-EOA deployer doesn't need it.
 
-## NavyVault / Morpho market (Sepolia)
-
-- Morpho Blue: `0xd011EE229E7459ba1ddd22631eF7bF528d424A14`
-- Circle USDC (loanToken): `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`
-- Market id: `<TO RESOLVE — run script/ResolveMorphoMarket.s.sol against a candidate id>`
-- marketParams (loanToken / collateralToken / oracle / irm / lltv): `<TO RESOLVE>`
-- Source: `<existing market url, or "created via createMarket in tx 0x…">`
-
-> Resolve with: `MORPHO_ADDRESS=0xd011EE229E7459ba1ddd22631eF7bF528d424A14 MORPHO_MARKET_ID=<candidate> forge script script/ResolveMorphoMarket.s.sol --rpc-url sepolia`
-> If no live Circle-USDC market exists, create one via Morpho.createMarket(marketParams) with loanToken = Circle USDC and record its id here.
-
 ## NavyVault — Plan 1 review follow-ups (tracked)
 
 From the final security review of the contracts (branch `feat/navy-vault-rebalancing`). No Critical issues; the custody invariant (allocator can only move funds between owner-allowlisted adapters, never to an EOA; adapters return funds only to the vault) is verified correct. Follow-ups before this vault holds real money:
 
-1. **Live-verify `MorphoAdapter` before registering it.** Its `deposit`/`withdraw`/`totalAssets`/`supplyRatePerYear` have never executed on-chain (no resolved Sepolia Circle-USDC market). Resolve the market (section above), set the `MORPHO_*` env vars, and run `forge test --match-contract MorphoAdapterForkTest` against a real RPC (Alchemy/Infura — public RPCs are flaky for this) until green. Do NOT `addAdapter(morpho, …)` in production before this passes. `CompoundAdapter` is already verified live.
-2. **`_ensureIdle` aggregate-loss semantics (mainnet gate).** The `maxLossBps` bound is enforced per-adapter-pull, not aggregated across the redemption. Under genuinely lossy withdrawals across multiple venues the total realized shortfall could exceed `maxLossBps` of the redeemed amount (socialized loss). Latent on testnet (Compound/Morpho are not lossy in normal operation). Before mainnet: bound total realized loss across the `_ensureIdle` loop, or reprice `assets` after the pulls.
-3. **SafeERC20 — intentionally NOT adopted.** The money layer uses bare `transfer`/`approve` on Circle USDC (which reverts on failure), matching the documented `NavyPayments` convention ("no SafeERC20 dependency"). The vault asset is fixed to Circle USDC at construction, so this is correct here. Recorded so it isn't "fixed" later by mistake.
+1. **`_ensureIdle` aggregate-loss semantics (mainnet gate).** The `maxLossBps` bound is enforced per-adapter-pull, not aggregated across the redemption. Under genuinely lossy withdrawals across multiple venues the total realized shortfall could exceed `maxLossBps` of the redeemed amount (socialized loss). Latent on testnet (Compound is not lossy in normal operation). Before mainnet: bound total realized loss across the `_ensureIdle` loop, or reprice `assets` after the pulls.
+2. **SafeERC20 — intentionally NOT adopted.** The money layer uses bare `transfer`/`approve` on Circle USDC (which reverts on failure), matching the documented `NavyPayments` convention ("no SafeERC20 dependency"). The vault asset is fixed to Circle USDC at construction, so this is correct here. Recorded so it isn't "fixed" later by mistake.
 
-## NavyVault deployment (Sepolia) — DEPLOYED 2026-07-28
+## NavyVaultSRCLA deployment (Sepolia) — DEPLOYED 2026-07-28
 
-- NavyVault: `0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE`
+- NavyVaultSRCLA: `0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE`
 - CompoundAdapter: `0x24d4173e6b9734a52c20190a9c5681ef350D8fE2`
 - owner / keeper(allocator) / relayer: `0xd5de8324D526A201672B30584e495C71BeBb3e9A` (single devnet key)
 - asset: Circle USDC `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`; Comet `0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e`
 - share token: name "Navy Vault USDC", version "1"; minIdleBps 1000, maxLossBps 50
-- MorphoAdapter: not yet deployed (pending resolved market — do NOT register until live-fork-verified)
+- MorphoAdapter: not deployed (Morpho never registered on Sepolia; can revisit when a live Circle-USDC market exists)
 - **Live E2E verified** (`be/scripts/vault-e2e.mjs`, real Sepolia): deposit 0x002f4c84…055a67 · deployToAdapter 0xb0b756c8…c43979 · permit+redeem 0x822faf33…e9466. Deposit→rebalance(Compound)→redeem-with-liquidity-pull all green.
