@@ -7,7 +7,8 @@ import { UserService } from '../user/user.service';
 import { PriceService } from '../market/price.service';
 import { spendingSeries } from './analytics';
 import { userSpecifiedAmount, CLARIFY } from './amount-guard';
-import type { ToolHandlers } from './types';
+import type { ToolHandlers, ToolResult } from './types';
+import type { TransactionProposal } from '../farming-chain/farming-chain.types';
 
 @Injectable()
 export class AgentToolsService {
@@ -87,11 +88,29 @@ export class AgentToolsService {
       },
       build_farming_deposit: async (a) => {
         if (!hasAmount) return { error: CLARIFY.farming_deposit };
-        return { display: { kind: 'action', action: 'farming_deposit' }, amountBase: String(a.amountBase) };
+        const amountBase = String(a.amountBase);
+        try {
+          const transactions = await this.vault.buildDepositTransactions(walletAddress, amountBase);
+          return { display: { kind: 'action', action: 'farming_deposit' }, amountBase, transactions };
+        } catch (e) {
+          return { error: (e as Error).message };
+        }
       },
       build_farming_withdraw: async (a) => {
         if (!hasAmount) return { error: CLARIFY.farming_withdraw };
-        return { display: { kind: 'action', action: 'farming_withdraw' }, amount: String(a.amount) };
+        const amount = String(a.amount);
+        // Accept "all" — resolve to max redeemable shares
+        let sharesBase: string = amount;
+        if (amount === 'all') {
+          const pos = await this.vault.getPosition(walletAddress);
+          sharesBase = pos.sharesBase;
+        }
+        try {
+          const transactions = await this.vault.buildRedeemTransactions(walletAddress, sharesBase);
+          return { display: { kind: 'action', action: 'farming_withdraw' }, sharesBase, transactions };
+        } catch (e) {
+          return { error: (e as Error).message };
+        }
       },
       get_token_info: async (a) => {
         const info = await this.prices.tokenInfo(String(a.query ?? ''));
