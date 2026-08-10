@@ -249,7 +249,7 @@ contract RewardExecutorTest is Test {
                 oracleFeed: address(oracle),
                 maxOracleAge: 3600,
                 maxPriceImpactBps: 500, // Allow up to 5% slippage (within 1000 limit)
-                maxDailyNotional: 100e18, // Same scale as amountIn (in reward token units)
+                maxDailyNotional: 100e6, // Cap in USDC terms (100 USDC = 100e6)
                 enabled: true
             })
         );

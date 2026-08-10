@@ -153,7 +153,7 @@ contract RewardExecutor is AccessControl {
 
         // Verify oracle freshness and check daily cap
         _verifyOracle(routeData.oracleFeed, routeData.maxOracleAge);
-        _checkDailyCap(routeId, amountIn, routeData.maxDailyNotional);
+        _checkDailyCap(routeId, amountIn, routeData.maxDailyNotional, routeData.oracleFeed);
 
         // Mark decision as used
         usedDecisions[decisionHash] = true;
@@ -161,9 +161,10 @@ contract RewardExecutor is AccessControl {
         // Claim rewards and execute swap
         amountOut = _executeSwap(adapter, rewardToken, routeData, amountIn, minOut, routeData.maxPriceImpactBps);
 
-        // Update daily notional tracking
+        // Update daily notional tracking (in USDC terms for accurate cap comparison)
         uint256 todayIndex = block.timestamp / 1 days;
-        dailyNotional[routeId][todayIndex] += amountIn;
+        uint256 amountInNotional = _getOracleFloor(routeData.oracleFeed, amountIn); // Already in USDC terms (6 decimals)
+        dailyNotional[routeId][todayIndex] += amountInNotional;
 
         emit Harvested(adapter, rewardToken, routeId, amountIn, amountOut, decisionHash);
     }
@@ -182,10 +183,15 @@ contract RewardExecutor is AccessControl {
     }
 
     /// @notice Internal helper to check daily notional cap
-    function _checkDailyCap(bytes32 routeId, uint256 amountIn, uint256 dailyCap) internal view {
+    function _checkDailyCap(bytes32 routeId, uint256 amountIn, uint256 dailyCap, address oracleFeed) internal view {
         uint256 todayIndex = block.timestamp / 1 days;
         uint256 dailyUsed = dailyNotional[routeId][todayIndex];
-        if (dailyUsed + amountIn > dailyCap) revert DailyCapExceeded();
+        // Convert amountIn to USDC notional using oracle price
+        // Formula: amountIn * price / 1e8 / 1e12, where price has 8 decimals
+        // For 100 COMP at $0.50: 100e18 * 50e6 / 1e8 / 1e12 = 50e6 = 50 USDC
+        (, int256 answer, , ,) = IAggregatorV3(oracleFeed).latestRoundData();
+        uint256 amountInNotional = uint256(answer) * amountIn / 1e8 / 1e12;
+        if (dailyUsed + amountInNotional > dailyCap) revert DailyCapExceeded();
     }
 
     /// @notice Internal helper to execute the swap
@@ -213,9 +219,8 @@ contract RewardExecutor is AccessControl {
 
         // Step 3: Get oracle price for minOut and price impact verification
         uint256 expectedOut = _getOracleFloor(routeData.oracleFeed, claimed);
-        // Normalize expectedOut to USDC decimals (6) for comparison with actualOut
-        uint256 expectedOutUSDC = expectedOut / 1e12;
-        uint256 actualMinOut = minOut > expectedOutUSDC ? minOut : expectedOutUSDC;
+        // expectedOut is in USDC (6 decimals)
+        uint256 actualMinOut = minOut > expectedOut ? minOut : expectedOut;
 
         // Step 4: Execute swap
         IERC20 usdcIERC20 = IERC20(usdc);
@@ -242,18 +247,19 @@ contract RewardExecutor is AccessControl {
     }
 
     /// @notice Validate that actual price impact does not exceed maxPriceImpactBps
-    /// @dev expectedOut is in reward token decimals (18), actualOut is in USDC decimals (6)
-    ///      We normalize actualOut to reward token decimals by multiplying by 1e12
+    /// @dev Both expectedOut and actualOut are in USDC decimals (6)
     function _validatePriceImpact(uint256 expectedOut, uint256 actualOut, uint256 maxPriceImpactBps) internal pure {
         if (maxPriceImpactBps == 0) return; // Skip validation if set to 0
-
-        // Normalize actualOut to reward token decimals (18) by multiplying by 1e12
-        // actualOut is in USDC (6 dec), expectedOut is in reward token (18 dec)
-        uint256 normalizedActual = actualOut * 1e12;
         if (expectedOut == 0) return; // Avoid division by zero
 
-        // Calculate price impact in bps: (expected - actual) * 10_000 / expected
-        uint256 priceImpactBps = (expectedOut - normalizedActual) * 10_000 / expectedOut;
+        // Calculate price impact in bps
+        // If actual >= expected (good slippage), impact is 0
+        uint256 priceImpactBps;
+        if (actualOut >= expectedOut) {
+            priceImpactBps = 0;
+        } else {
+            priceImpactBps = (expectedOut - actualOut) * 10_000 / expectedOut;
+        }
         if (priceImpactBps > maxPriceImpactBps) revert PriceImpactTooHigh();
     }
 
@@ -265,18 +271,15 @@ contract RewardExecutor is AccessControl {
     }
 
     /// @notice Get minimum output from oracle price
-    /// @dev Assumes reward token price is ~$1 USD (1 USDC), so oracle returns ~1e8
-    ///      and the output in USDC (6 decimals) is: amountIn * 1e6 / 1e18 (scaled)
+    /// @dev Returns USDC amount in 6-decimal terms
     ///      Chainlink returns 8 decimals for price (e.g., 1e8 = $1)
-    ///      Formula: minOut = amountIn * price / 1e8
-    ///      This assumes reward tokens are ~$1 stablecoins with 18 decimals
+    ///      Formula: minOut = amountIn * price / 1e8 / 1e12 (normalize from 18 to 6 decimals)
     function _getOracleFloor(address feed, uint256 amountIn) internal view returns (uint256) {
         (, int256 answer, , ,) = IAggregatorV3(feed).latestRoundData();
 
         // Chainlink returns 8 decimals for price
-        // Assuming ~$1 reward token price (1 USDC), answer is ~1e8
-        // minOut = amountIn * price / 1e8
-        return uint256(answer) * amountIn / 1e8;
+        // For 100 COMP at $0.50: 100e18 * 50e6 / 1e8 / 1e12 = 50e6 = 50 USDC
+        return uint256(answer) * amountIn / 1e8 / 1e12;
     }
 
     /// @notice Get current daily used notional for a route

@@ -28,6 +28,8 @@ contract MockChainlink {
     }
 
     function setStale() external {
-        updatedAt_ = block.timestamp - 4000;
+        // Set updatedAt to be significantly in the past relative to current block.timestamp
+        // Use a large value that will always be stale (maxAge in tests is 3600)
+        updatedAt_ = block.timestamp < 5000 ? 1 : block.timestamp - 5000;
     }
 }
