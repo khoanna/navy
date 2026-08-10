@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chain State
+// ─────────────────────────────────────────────────────────────
+
+model ChainBlock {
+  id          String   @id @default(cuid())
+  chainId     Int
+  blockNumber BigInt
+  blockHash   String   @unique
+  timestamp   DateTime
+
+  @@index([chainId, blockNumber])
+  @@index([timestamp])
+}
+
+model MarketSnapshot {
+  id               String   @id @default(cuid())
+  marketId         String
+  blockHash        String
+  timestamp        DateTime
+
+  // Core metrics
+  totalAssetsBase  String   // BigInt as string
+  idleBase         String
+  supplyRateE18    String
+  utilizationE18   String
+  cashBase         String
+  borrowsBase      String
+  reservesBase     String
+
+  // Configuration
+  capBps           Int
+  paused           Boolean
+  configDigest     String
+
+  // Relations
+  regime           ContractRegime? @relation(fields: [regimeId], references: [id])
+  regimeId         String?
+
+  @@unique([marketId, blockHash])
+  @@index([marketId, timestamp])
+  @@index([timestamp])
+}
+
+model ContractRegime {
+  id       String   @id @default(cuid())
+  marketId String
+  digest   String   @unique
+  activatedAt DateTime
+
+  snapshots MarketSnapshot[]
+
+  @@index([marketId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Policy
+// ─────────────────────────────────────────────────────────────
+
+model PolicyVersion {
+  id           String   @id @default(cuid())
+  version      String   @unique
+  payload      Json
+  artifactHash String   @unique
+  createdAt    DateTime @default(now())
+  activatedAt  DateTime?
+  deactivatedAt DateTime?
+
+  decisions Decision[]
+
+  @@index([activatedAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Forecasting
+// ─────────────────────────────────────────────────────────────
+
+model ForecastLabel {
+  id               String   @id @default(cuid())
+  marketId         String
+  originTimestamp  DateTime
+  horizonSeconds   Int
+  realizedReturnE18 String  // BigInt as string
+  availableAt      DateTime
+
+  @@index([marketId, availableAt])
+  @@index([availableAt])
+}
+
+model ForecastCalibration {
+  id           String   @id @default(cuid())
+  method       String   // 'rolling' | 'ew-residual' | 'arx'
+  config       Json     // Method-specific config
+  lossMetrics  Json     // Loss values
+  artifactHash String?
+  selected     Boolean @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([method, selected])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Decisions
+// ─────────────────────────────────────────────────────────────
+
+model Decision {
+  id             String   @id @default(cuid())
+  decisionHash   String   @unique
+  policyVersion  String
+  snapshotHash   String
+  blockNumber    BigInt
+  timestamp      DateTime
+
+  // Decision components
+  admissions     Json     // Array of admission results
+  forecasts      Json     // Array of forecast results
+  reserveBase    String   // BigInt
+  allocation     Json     // Allocation result
+
+  // Action decision
+  actionDecision Json
+
+  // Relations
+  policy         PolicyVersion @relation(fields: [policyVersion], references: [version])
+  plans          ExecutionPlan[]
+
+  @@index([timestamp])
+  @@index([snapshotHash])
+}
+
+model ExecutionPlan {
+  id            String   @id @default(cuid())
+  planId        String   @unique
+  decisionHash  String
+  status        String   // 'pending' | 'active' | 'completed' | 'expired' | 'cancelled'
+  createdAt     DateTime
+  expiresAt     DateTime
+
+  // Relations
+  decision      Decision @relation(fields: [decisionHash], references: [decisionHash])
+  actions       PlanAction[]
+
+  @@index([status])
+  @@index([decisionHash])
+}
+
+model PlanAction {
+  id          String   @id @default(cuid())
+  planId     String
+  actionIndex Int
+  kind       String   // 'deploy' | 'divest' | 'harvest' | 'emergency'
+  adapter    String
+  amountBase String   // BigInt as string
+  status     String   // 'pending' | 'prepared' | 'submitted' | 'confirmed' | 'failed'
+  txHash     String?
+  error      String?
+
+  // Relations
+  plan        ExecutionPlan @relation(fields: [planId], references: [planId])
+
+  @@unique([planId, actionIndex])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Rewards
+// ─────────────────────────────────────────────────────────────
+
+model RewardObservation {
+  id          String   @id @default(cuid())
+  timestamp   DateTime
+  adapter     String
+  rewardToken String
+  claimable   String   // BigInt as string
+  priceUsd    String   // BigInt with 8 decimals
+  valueBase   String   // BigInt as string
+
+  @@index([adapter, timestamp])
+  @@index([rewardToken, timestamp])
+}
+
+model HarvestRecord {
+  id             String   @id @default(cuid())
+  timestamp      DateTime
+  adapter        String
+  rewardToken    String
+  routeId        String
+  amountIn       String   // BigInt as string
+  amountOutBase  String   // BigInt as string
+  decisionHash   String
+
+  @@index([timestamp])
+  @@index([adapter, timestamp])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Evaluations
+// ─────────────────────────────────────────────────────────────
+
+model EvaluationRun {
+  id           String   @id @default(cuid())
+  manifestHash String   @unique
+  status       String   // 'running' | 'passed' | 'failed'
+  results      Json?
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+
+  @@index([status])
+}
