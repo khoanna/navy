@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { SrclaClient } from './srcla-client';
+import { NavyConfigService } from '../config/config.service';
 
 describe('SrclaClient', () => {
   let client: SrclaClient;
@@ -10,12 +10,9 @@ describe('SrclaClient', () => {
       providers: [
         SrclaClient,
         {
-          provide: ConfigService,
+          provide: NavyConfigService,
           useValue: {
-            get: jest.fn().mockImplementation((key: string, fallback?: string) => {
-              if (key === 'SRCLA_API_URL') return 'http://localhost:3100';
-              return fallback;
-            }),
+            srclaApiUrl: 'http://localhost:3100',
           },
         },
       ],
@@ -63,8 +60,10 @@ describe('SrclaClient', () => {
   });
 
   it('should throw on service unavailable', async () => {
+    // Simulate a real Node.js FetchError where ECONNREFUSED lives in cause.code
+    const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3100'), { code: 'ECONNREFUSED' });
     jest.spyOn(global, 'fetch').mockRejectedValueOnce(
-      Object.assign(new Error('ECONNREFUSED'), { message: 'ECONNREFUSED' }),
+      Object.assign(new Error('fetch failed'), { cause }),
     );
 
     await expect(client.getHealth()).rejects.toThrow(/unavailable/);

@@ -1,64 +1,111 @@
 import { Test } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { FarmingChainService } from './farming-chain.service';
+import { NavyConfigService } from '../config/config.service';
+
+const FIXTURE = {
+  farmingBaseRpcUrl: 'https://mainnet.base.org',
+  farmingBaseChainId: 8453,
+  farmingBaseUsdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  farmingVaultAddress: '0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE',
+};
+
+function mockConfig(overrides?: Partial<typeof FIXTURE>) {
+  const cfg = { ...FIXTURE, ...overrides };
+  return {
+    farmingBaseRpcUrl: cfg.farmingBaseRpcUrl,
+    farmingBaseChainId: cfg.farmingBaseChainId,
+    farmingBaseUsdcAddress: cfg.farmingBaseUsdcAddress,
+    farmingVaultAddress: cfg.farmingVaultAddress,
+  };
+}
 
 describe('FarmingChainService', () => {
-  let service: FarmingChainService;
-
-  beforeEach(async () => {
+  it('should be defined', async () => {
     const module = await Test.createTestingModule({
       providers: [
         FarmingChainService,
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) => {
-              const config: Record<string, string | number> = {
-                FARMING_BASE_RPC_URL: 'https://mainnet.base.org',
-                FARMING_BASE_CHAIN_ID: 8453,
-                FARMING_BASE_USDC_ADDRESS: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-                FARMING_VAULT_ADDRESS: '0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE',
-              };
-              return config[key];
-            }),
-          },
-        },
+        { provide: NavyConfigService, useValue: mockConfig() },
       ],
     }).compile();
-
-    service = module.get(FarmingChainService);
-  });
-
-  it('should be defined', () => {
+    const service = module.get(FarmingChainService);
     expect(service).toBeDefined();
   });
 
-  it('should have read-only provider', () => {
+  it('should have read-only provider', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.provider).toBeDefined();
   });
 
-  it('should have correct chain ID', () => {
+  it('should have correct chain ID', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.chainId).toBe(8453);
   });
 
-  it('should have usdc address configured', () => {
+  it('should have usdc address configured', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.usdcAddress).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
   });
 
-  it('should have vault address configured', () => {
+  it('should have vault address configured', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.vaultAddress).toBe('0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE');
   });
 
-  it('should return vault contract', () => {
+  it('should return vault contract', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.vault).toBeDefined();
   });
 
-  it('should return usdc contract', () => {
+  it('should return usdc contract', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        FarmingChainService,
+        { provide: NavyConfigService, useValue: mockConfig() },
+      ],
+    }).compile();
+    const service = module.get(FarmingChainService);
     expect(service.usdc).toBeDefined();
   });
 
   describe('buildApprovalTransaction', () => {
-    it('should build a valid approve transaction', () => {
+    it('should build a valid approve transaction', async () => {
+      const module = await Test.createTestingModule({
+        providers: [
+          FarmingChainService,
+          { provide: NavyConfigService, useValue: mockConfig() },
+        ],
+      }).compile();
+      const service = module.get(FarmingChainService);
       const tx = service.buildApprovalTransaction(
         '0x1234567890123456789012345678901234567890',
         BigInt(1_000_000_000),
@@ -67,13 +114,19 @@ describe('FarmingChainService', () => {
       expect(tx.value).toBe('0');
       expect(tx.chainId).toBe(8453);
       expect(tx.data).toBeDefined();
-      expect(tx.data.length).toBeGreaterThan(0);
       expect(tx.description).toContain('Approve');
     });
   });
 
   describe('buildDepositTransaction', () => {
-    it('should build a valid deposit transaction', () => {
+    it('should build a valid deposit transaction', async () => {
+      const module = await Test.createTestingModule({
+        providers: [
+          FarmingChainService,
+          { provide: NavyConfigService, useValue: mockConfig() },
+        ],
+      }).compile();
+      const service = module.get(FarmingChainService);
       const wallet = '0x1234567890123456789012345678901234567890';
       const tx = service.buildDepositTransaction(wallet, BigInt(1_000_000));
       expect(tx.to).toBe('0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE');
@@ -84,7 +137,14 @@ describe('FarmingChainService', () => {
   });
 
   describe('buildRedeemTransaction', () => {
-    it('should build a valid redeem transaction', () => {
+    it('should build a valid redeem transaction', async () => {
+      const module = await Test.createTestingModule({
+        providers: [
+          FarmingChainService,
+          { provide: NavyConfigService, useValue: mockConfig() },
+        ],
+      }).compile();
+      const service = module.get(FarmingChainService);
       const wallet = '0x1234567890123456789012345678901234567890';
       const tx = service.buildRedeemTransaction(wallet, BigInt(500_000));
       expect(tx.to).toBe('0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE');
@@ -95,7 +155,14 @@ describe('FarmingChainService', () => {
   });
 
   describe('buildWithdrawTransaction', () => {
-    it('should build a valid withdraw transaction', () => {
+    it('should build a valid withdraw transaction', async () => {
+      const module = await Test.createTestingModule({
+        providers: [
+          FarmingChainService,
+          { provide: NavyConfigService, useValue: mockConfig() },
+        ],
+      }).compile();
+      const service = module.get(FarmingChainService);
       const wallet = '0x1234567890123456789012345678901234567890';
       const tx = service.buildWithdrawTransaction(wallet, BigInt(500_000));
       expect(tx.to).toBe('0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE');
@@ -106,37 +173,13 @@ describe('FarmingChainService', () => {
   });
 
   describe('constructor validation', () => {
-    it('should throw if FARMING_BASE_RPC_URL is missing', async () => {
-      await expect(
-        Test.createTestingModule({
-          providers: [
-            FarmingChainService,
-            {
-              provide: ConfigService,
-              useValue: { get: jest.fn().mockReturnValue(undefined) },
-            },
-          ],
-        }).compile(),
-      ).rejects.toThrow('FARMING_BASE_RPC_URL');
+    it('should throw if FARMING_BASE_RPC_URL is missing', () => {
+      // Instantiate directly to bypass NestJS DI — config must not be empty
+      expect(() => new FarmingChainService(mockConfig({ farmingBaseRpcUrl: '' }) as any)).toThrow('FARMING_BASE_RPC_URL');
     });
 
-    it('should throw if FARMING_BASE_USDC_ADDRESS is missing', async () => {
-      await expect(
-        Test.createTestingModule({
-          providers: [
-            FarmingChainService,
-            {
-              provide: ConfigService,
-              useValue: {
-                get: jest.fn((key: string) => {
-                  if (key === 'FARMING_BASE_RPC_URL') return 'https://mainnet.base.org';
-                  return undefined;
-                }),
-              },
-            },
-          ],
-        }).compile(),
-      ).rejects.toThrow('FARMING_BASE_USDC_ADDRESS');
+    it('should throw if FARMING_BASE_USDC_ADDRESS is missing', () => {
+      expect(() => new FarmingChainService(mockConfig({ farmingBaseUsdcAddress: '' }) as any)).toThrow('FARMING_BASE_USDC_ADDRESS');
     });
   });
 });

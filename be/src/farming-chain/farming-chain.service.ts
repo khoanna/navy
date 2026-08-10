@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { NavyConfigService } from '../config/config.service';
 import { ethers } from 'ethers';
 import type { VaultPosition, TransactionProposal } from './farming-chain.types';
 
@@ -34,24 +34,18 @@ export class FarmingChainService {
   readonly usdc: ethers.Contract;
   readonly vault: ethers.Contract;
 
-  constructor(private readonly configService: ConfigService) {
-    const rpcUrl = this.configService.get<string>('FARMING_BASE_RPC_URL');
-    if (!rpcUrl) {
-      throw new Error('Missing required env var: FARMING_BASE_RPC_URL');
-    }
+  constructor(private readonly config: NavyConfigService) {
+    const rpcUrl = config.farmingBaseRpcUrl;
+    this.chainId = config.farmingBaseChainId;
+    this.usdcAddress = config.farmingBaseUsdcAddress;
+    this.vaultAddress = config.farmingVaultAddress;
 
-    this.chainId = this.configService.get<number>('FARMING_BASE_CHAIN_ID') ?? 8453;
-    this.usdcAddress = this.configService.get<string>('FARMING_BASE_USDC_ADDRESS') ?? '';
-    this.vaultAddress = this.configService.get<string>('FARMING_VAULT_ADDRESS') ?? '';
+    // Explicit validation — ethers.Contract accepts empty strings silently
+    if (!rpcUrl) throw new Error('Missing required env var: FARMING_BASE_RPC_URL');
+    if (!this.usdcAddress) throw new Error('Missing required env var: FARMING_BASE_USDC_ADDRESS');
+    if (!this.vaultAddress) throw new Error('Missing required env var: FARMING_VAULT_ADDRESS');
 
-    if (!this.usdcAddress) {
-      throw new Error('Missing required env var: FARMING_BASE_USDC_ADDRESS');
-    }
-    if (!this.vaultAddress) {
-      throw new Error('Missing required env var: FARMING_VAULT_ADDRESS');
-    }
-
-    // Read-only provider - no signer attached
+    // Read-only provider — no signer attached
     this.provider = new ethers.JsonRpcProvider(rpcUrl, this.chainId);
     this.usdc = new ethers.Contract(this.usdcAddress, ERC20_ABI, this.provider);
     this.vault = new ethers.Contract(this.vaultAddress, VAULT_ABI, this.provider);

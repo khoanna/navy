@@ -83,4 +83,14 @@ export class NavyConfigService {
   get cloudinaryCloudName(): string { return this.req('CLOUDINARY_CLOUD_NAME'); }
   get cloudinaryApiKey(): string { return this.req('CLOUDINARY_API_KEY'); }
   get cloudinaryApiSecret(): string { return this.req('CLOUDINARY_API_SECRET'); }
+  // --- Farming Chain (Base Mainnet) ---
+  get farmingBaseRpcUrl(): string { return this.req('FARMING_BASE_RPC_URL'); }
+  get farmingBaseChainId(): number {
+    const n = parseInt(this.env.FARMING_BASE_CHAIN_ID ?? '8453', 10);
+    return Number.isFinite(n) ? n : 8453;
+  }
+  get farmingBaseUsdcAddress(): string { return this.req('FARMING_BASE_USDC_ADDRESS'); }
+  get farmingVaultAddress(): string { return this.req('FARMING_VAULT_ADDRESS'); }
+  // --- SRCLA Service ---
+  get srclaApiUrl(): string { return this.env.SRCLA_API_URL ?? 'http://localhost:3100'; }
 }

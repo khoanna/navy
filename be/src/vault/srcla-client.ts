@@ -3,7 +3,7 @@
  * Uses native fetch to match the existing codebase pattern (see CoinGeckoClient, OpenRouterClient).
  */
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { NavyConfigService } from '../config/config.service';
 
 export interface StrategyAllocation {
   totalAssets: string;
@@ -53,8 +53,8 @@ export class SrclaClient {
   private readonly baseUrl: string;
   private readonly timeout = 5000;
 
-  constructor(private readonly config: ConfigService) {
-    this.baseUrl = this.config.get('SRCLA_API_URL', 'http://localhost:3100');
+  constructor(private readonly config: NavyConfigService) {
+    this.baseUrl = config.srclaApiUrl;
   }
 
   async getCurrentAllocation(): Promise<StrategyAllocation> {
@@ -118,8 +118,11 @@ export class SrclaClient {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`SRCLA request timeout after ${this.timeout}ms`);
       }
-      if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
-        throw new Error(`SRCLA service unavailable at ${this.baseUrl}`);
+      if (error instanceof Error) {
+        const cause = (error as any).cause as { code?: string } | undefined;
+        if (error.message.includes('ECONNREFUSED') || cause?.code === 'ECONNREFUSED') {
+          throw new Error(`SRCLA service unavailable at ${this.baseUrl}`);
+        }
       }
       throw error;
     }
