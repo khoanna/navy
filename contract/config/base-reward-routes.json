@@ -1,0 +1,28 @@
+{
+  "chainId": 8453,
+  "uniswap": {
+    "factory": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+    "router": "0x2626664c2603336E57B271c5C0b26F421741e481"
+  },
+  "chainlink": {
+    "USDC_USD": "0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56",
+    "WETH_USD": "0x7105eC27F7F0AD0FEC6fF5CaaC52d34B8cD6d10E"
+  },
+  "rewardTokens": {
+    "COMP": {
+      "address": "0x9e1028F5F1D7eDA25761Aa6dA96721Ee2eE42b1E",
+      "decimals": 18,
+      "usdcPriceFeed": "0x...",
+      "pool": "0x...",
+      "feeTier": 3000
+    },
+    "WELL": {
+      "address": "0x511aB53F793096356fedaNcF8B2c3092d435E8B0",
+      "decimals": 18,
+      "usdcPriceFeed": "0x...",
+      "pool": "0x...",
+      "feeTier": 3000
+    }
+  },
+  "verifiedAt": "2026-08-09"
+}
