@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-const ConfigSchema = z.object({
+const DependencyGroupSchema = z.object({
+  id: z.string(),
+  capBps: z.bigint(),
+  adapters: z.array(z.string().regex(/^0x[a-fA-F0-9]{40}$/)),
+});
+
+export const ConfigSchema = z.object({
   // Chain
   baseRpcUrl: z.string().url(),
   sepoliaRpcUrl: z.string().url(),
@@ -26,9 +32,13 @@ const ConfigSchema = z.object({
   collectorIntervalMs: z.number().int().min(60000).default(900000), // 15 min
   controllerEnabled: z.boolean().default(true),
   controllerIntervalMs: z.number().int().min(60000).default(3600000), // 1 hour
+
+  // Optimizer - Dependency Groups
+  dependencyGroups: z.array(DependencyGroupSchema).default([]),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+export type DependencyGroup = z.infer<typeof DependencyGroupSchema>;
 
 let cachedConfig: Config | null = null;
 
@@ -52,8 +62,22 @@ export function loadConfig(): Config {
     collectorIntervalMs: parseInt(process.env.COLLECTOR_INTERVAL_MS ?? '900000', 10),
     controllerEnabled: process.env.CONTROLLER_ENABLED !== 'false',
     controllerIntervalMs: parseInt(process.env.CONTROLLOR_INTERVAL_MS ?? '3600000', 10),
+    dependencyGroups: parseDependencyGroupsEnv(),
   };
 
   cachedConfig = ConfigSchema.parse(raw);
   return cachedConfig;
+}
+
+function parseDependencyGroupsEnv(): DependencyGroup[] {
+  const env = process.env.DEPENDENCY_GROUPS;
+  if (!env) return [];
+
+  try {
+    const parsed = JSON.parse(env);
+    return DependencyGroupSchema.array().parse(parsed);
+  } catch {
+    console.warn('Invalid DEPENDENCY_GROUPS env var, using empty groups');
+    return [];
+  }
 }
