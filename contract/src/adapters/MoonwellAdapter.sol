@@ -20,7 +20,14 @@ contract MoonwellAdapter is IYieldAdapter {
     IMComptroller public immutable comptroller;
     IMInterestRateModel public immutable interestRateModel;
 
+    /// @dev WELL reward token on Base
+    address private constant WELL = 0xc94dDc6D8637F041c6E2c1f4c5e4D7f7c2E6b4f8;
+
+    /// @dev List of reward tokens this adapter can claim
+    address[] private _rewardTokens = [WELL];
+
     error NotVault();
+    error UnsupportedRewardToken();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -48,10 +55,9 @@ contract MoonwellAdapter is IYieldAdapter {
     }
 
     /// @notice Withdraw USDC from Moonwell by redeeming mUSDC
-    /// @dev Redeems underlying USDC to the vault
-    function withdraw(uint256 amount, address to) external {
-        require(msg.sender == vault, "only vault");
-        // redeemUnderlying returns underlying to the caller (vault)
+    /// @dev Redeems underlying USDC to `to`. Only callable by the vault.
+    function withdraw(uint256 amount, address to) external onlyVault {
+        // redeemUnderlying sends underlying to the `redeemer` address
         mUsdc.redeemUnderlying(to, amount);
     }
 
@@ -116,5 +122,39 @@ contract MoonwellAdapter is IYieldAdapter {
         // Reserve factor is typically stored in the interest rate model or mToken
         // For Moonwell Base, this is typically 0.25e18 (25%)
         return 0.25e18; // 25% reserve factor
+    }
+
+    /// @notice Maximum amount withdrawable in same transaction
+    /// @dev For Moonwell, we can withdraw up to the underlying equivalent of mToken balance.
+    ///      Implements IStrategyAdapter.maxWithdrawable()
+    function maxWithdrawable() external view returns (uint256) {
+        uint256 mTokenBalance = mUsdc.balanceOf(address(this));
+        uint256 exchangeRate = mUsdc.exchangeRateStored();
+        return (mTokenBalance * exchangeRate) / MTOKEN_MANTISSA;
+    }
+
+    /// @notice Unique digest of current protocol configuration
+    /// @dev Implements IStrategyAdapter.configurationDigest()
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(
+            address(mUsdc),
+            address(comptroller),
+            address(usdc),
+            block.chainid
+        ));
+    }
+
+    /// @notice List of reward tokens this strategy can claim
+    /// @dev Implements IStrategyAdapter.rewardTokens()
+    function rewardTokens() external view returns (address[] memory) {
+        return _rewardTokens;
+    }
+
+    /// @notice Claimable reward amount for a given token
+    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards are integrated.
+    function claimableReward(address token) external view returns (uint256) {
+        if (token != WELL) revert UnsupportedRewardToken();
+        // Moonwell rewards integration deferred for Phase 2
+        return 0;
     }
 }

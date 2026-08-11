@@ -15,7 +15,14 @@ contract CompoundAdapter is IYieldAdapter {
     IERC20 public immutable usdc;
     IComet public immutable comet;
 
+    /// @dev COMP reward token on Base
+    address private constant COMP = address(0x9a7AE3b9d0805248597Df825DC469D0D4B3Ec26E);
+
+    /// @dev List of reward tokens this adapter can claim
+    address[] private _rewardTokens = [COMP];
+
     error NotVault();
+    error UnsupportedRewardToken();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -49,5 +56,35 @@ contract CompoundAdapter is IYieldAdapter {
 
     function asset() external view returns (address) {
         return address(usdc);
+    }
+
+    /// @notice Maximum amount withdrawable in same transaction
+    /// @dev Comet supplier balance is always withdrawable. Implements IStrategyAdapter.maxWithdrawable()
+    function maxWithdrawable() external view returns (uint256) {
+        return comet.balanceOf(address(this));
+    }
+
+    /// @notice Unique digest of current protocol configuration
+    /// @dev Implements IStrategyAdapter.configurationDigest()
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(
+            address(comet),
+            address(usdc),
+            block.chainid
+        ));
+    }
+
+    /// @notice List of reward tokens this strategy can claim
+    /// @dev Implements IStrategyAdapter.rewardTokens()
+    function rewardTokens() external view returns (address[] memory) {
+        return _rewardTokens;
+    }
+
+    /// @notice Claimable reward amount for a given token
+    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards are integrated.
+    function claimableReward(address token) external view returns (uint256) {
+        if (token != COMP) revert UnsupportedRewardToken();
+        // Compound rewards integration deferred for Phase 2
+        return 0;
     }
 }

@@ -18,7 +18,14 @@ contract AaveV3Adapter is IYieldAdapter {
     IAaveV3Pool public immutable pool;
     IAaveV3AToken public immutable aUsdc;
 
+    /// @dev COMP reward token on Base
+    address private constant COMP = address(0x9a7AE3b9d0805248597Df825DC469D0D4B3Ec26E);
+
+    /// @dev List of reward tokens this adapter can claim
+    address[] private _rewardTokens = [COMP];
+
     error NotVault();
+    error UnsupportedRewardToken();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -76,5 +83,36 @@ contract AaveV3Adapter is IYieldAdapter {
     /// @notice Returns the Aave Pool address
     function aavePool() external view returns (address) {
         return address(pool);
+    }
+
+    /// @notice Maximum amount withdrawable in same transaction
+    /// @dev aUSDC is 1:1 mint/burn, always fully redeemable. Implements IStrategyAdapter.maxWithdrawable()
+    function maxWithdrawable() external view returns (uint256) {
+        return aUsdc.balanceOf(address(this));
+    }
+
+    /// @notice Unique digest of current protocol configuration
+    /// @dev Implements IStrategyAdapter.configurationDigest()
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(
+            address(pool),
+            address(aUsdc),
+            address(usdc),
+            block.chainid
+        ));
+    }
+
+    /// @notice List of reward tokens this strategy can claim
+    /// @dev Implements IStrategyAdapter.rewardTokens()
+    function rewardTokens() external view returns (address[] memory) {
+        return _rewardTokens;
+    }
+
+    /// @notice Claimable reward amount for a given token
+    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards controller is integrated.
+    function claimableReward(address token) external view returns (uint256) {
+        if (token != COMP) revert UnsupportedRewardToken();
+        // Aave V3 rewards controller integration deferred for Phase 2
+        return 0;
     }
 }
