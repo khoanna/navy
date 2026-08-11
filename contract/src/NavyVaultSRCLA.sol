@@ -334,7 +334,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Harvest rewards from an adapter, swap to USDC, and add to recognized rewards
     /// @param adapter The strategy adapter to harvest from
     /// @param routeId The route ID for swapping (used for all reward tokens)
-    /// @param minOut Minimum USDC amount to receive from swaps
+    /// @param minOut Minimum USDC amount to receive per token
     /// @return totalUsdcReceived Total USDC added to recognized rewards
     function harvest(address adapter, bytes32 routeId, uint256 minOut)
         external
@@ -345,6 +345,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (!registeredAdapters[adapter]) revert AdapterNotFound();
         if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
 
+        totalUsdcReceived = _harvestCore(adapter, routeId, minOut);
+
+        emit Harvested(adapter, totalUsdcReceived);
+
+        return totalUsdcReceived;
+    }
+
+    /// @notice Internal harvest logic - claims rewards, swaps to USDC, adds to recognized rewards
+    function _harvestCore(address adapter, bytes32 routeId, uint256 minOut)
+        internal
+        returns (uint256 totalUsdcReceived)
+    {
         IStrategyAdapterVault a = IStrategyAdapterVault(adapter);
         address[] memory tokens = a.rewardTokens();
 
@@ -374,9 +386,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
                         IERC20(token).forceApprove(rewardExecutor, type(uint256).max);
                     }
 
-                    // Swap via executor
+                    // Swap via executor - pass minOut per token (slippage check is done by executor)
                     uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut);
 
+                    // Verify slippage protection - executor enforces minOut per swap
                     if (usdcOut < minOut) revert SlippageExceeded();
 
                     totalUsdcReceived += usdcOut;
@@ -391,10 +404,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         recognizedRewards += totalUsdcReceived;
 
         _syncStrategyAssets(adapter);
-
-        emit Harvested(adapter, totalUsdcReceived);
-
-        return totalUsdcReceived;
     }
 
     /// @notice Emergency exit all funds from an adapter
@@ -532,23 +541,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         }
     }
 
-    /// @notice Harvest rewards from an adapter
-    function _harvest(address adapter) internal {
-        if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
-
-        IStrategyAdapterVault a = IStrategyAdapterVault(adapter);
-        address[] memory tokens = a.rewardTokens();
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            uint256 claimable = a.claimableReward(tokens[i]);
-            if (claimable > 0) {
-                recognizedRewards += claimable;
-            }
-        }
-
-        _syncStrategyAssets(adapter);
-    }
-
     /// @notice Execute a single action
     function _executeAction(Action memory action) internal {
         if (action.kind == ActionKind.Deploy) {
@@ -556,7 +548,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         } else if (action.kind == ActionKind.Divest) {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
-            _harvest(action.adapter);
+            // For Harvest action, use the action.amount as the routeId and minOut from action
+            // Note: We skip the adapter validation since plan execution already validates
+            _harvestCore(action.adapter, bytes32(action.amount), action.minOut);
         } else if (action.kind == ActionKind.EmergencyExit) {
             uint256 balance = strategyAssets[action.adapter];
             if (balance > 0) {

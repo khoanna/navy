@@ -246,8 +246,8 @@ contract MockRewardExecutor {
         // e.g., 10e18 COMP * 0.9 / 1e12 = 9e6 USDC
         amountOut = (amountIn * swapRatioBps) / 1_000_000 / SWAP_OUTPUT_SCALAR;
 
-        // For very small amounts that round to 0, return 0 instead of reverting
-        require(amountOut >= minAmountOut || (amountIn > 0 && amountOut == 0 && minAmountOut == 0), "slippage exceeded");
+        // Note: We don't revert on slippage here - let the vault handle that check
+        // This allows testing the vault's SlippageExceeded error
 
         return amountOut;
     }
@@ -421,7 +421,7 @@ contract VaultHarvestTest is Test {
         // 10 COMP * 0.4 = 4e6 USDC (below 5e6 minOut)
         // The first token (COMP) will revert in the mock
         vm.prank(allocator);
-        vm.expectRevert("slippage exceeded");
+        vm.expectRevert(NavyVaultSRCLA.SlippageExceeded.selector);
         vault.harvest(address(adapter), compRouteId, 5e6);
     }
 
@@ -529,29 +529,35 @@ contract VaultHarvestTest is Test {
 
     function test_harvestViaPlanExecution() public {
         // Create a plan with harvest action
+        // For Harvest, amount is used as routeId and minOut is passed through
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
-            amount: 0,
+            amount: uint256(compRouteId), // amount = routeId for harvest
             minOut: 0
         });
 
         bytes32 planId = keccak256("harvest-plan");
         bytes32 decisionHash = keccak256("harvest-decision");
 
+        // Set swap ratio
+        executor.setSwapRatioBps(900000);
+
         // Execute plan (sets up the active plan)
         vm.prank(allocator);
         vault.executePlan(planId, decisionHash, uint64(block.timestamp + 3600), actions);
 
         // Execute the harvest action via plan execution
-        // Note: The internal _harvest just adds claimable amounts directly (no swap)
         uint256 recognizedBefore = vault.recognizedRewards();
         vm.prank(allocator);
         vault.executeNextAction();
 
         // Plan should complete
         assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be completed");
+
+        // Verify recognized rewards increased (27e6 USDC from swaps)
+        assertGt(vault.recognizedRewards(), recognizedBefore, "rewards should be recognized");
     }
 
     // ---- Edge Cases ----
