@@ -10,6 +10,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IVaultEvents} from "./interfaces/IVaultEvents.sol";
 import {VaultMath} from "./libraries/VaultMath.sol";
+import {IRewardExecutor} from "./interfaces/IRewardExecutor.sol";
 
 /// @notice Strategy adapter interface
 interface IStrategyAdapterVault {
@@ -71,6 +72,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Minimum idle base units to maintain
     uint256 public minIdleBps = 50; // 0.5%
+
+    /// @notice Reward executor for swapping reward tokens to USDC
+    address public rewardExecutor;
+
+    /// @notice Mapping from reward token to route ID for swapping
+    mapping(address => bytes32) public rewardTokenRoutes;
 
     /// @notice Recognized rewards from strategies
     uint256 public recognizedRewards;
@@ -136,6 +143,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error DepositPaused();
     error ZeroAddress();
     error ZeroAmount();
+    error RewardExecutorNotSet();
+    error InvalidRewardRoute();
+    error SlippageExceeded();
 
     // ---- ExecutionPlan Accessors ----
 
@@ -304,6 +314,87 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     function unpause() external onlyRole(ADMIN_ROLE) {
         paused = false;
         emit Unpause();
+    }
+
+    /// @notice Set the reward executor address
+    function setRewardExecutor(address executor) external onlyRole(ADMIN_ROLE) {
+        if (executor == address(0)) revert ZeroAddress();
+        rewardExecutor = executor;
+        emit RewardExecutorSet(executor);
+    }
+
+    /// @notice Set the route for a reward token
+    function setRewardTokenRoute(address token, bytes32 routeId) external onlyRole(ADMIN_ROLE) {
+        if (token == address(0)) revert ZeroAddress();
+        if (routeId == bytes32(0)) revert InvalidRewardRoute();
+        rewardTokenRoutes[token] = routeId;
+        emit RewardTokenRouteSet(token, routeId);
+    }
+
+    /// @notice Harvest rewards from an adapter, swap to USDC, and add to recognized rewards
+    /// @param adapter The strategy adapter to harvest from
+    /// @param routeId The route ID for swapping (used for all reward tokens)
+    /// @param minOut Minimum USDC amount to receive from swaps
+    /// @return totalUsdcReceived Total USDC added to recognized rewards
+    function harvest(address adapter, bytes32 routeId, uint256 minOut)
+        external
+        onlyRole(ALLOCATOR_ROLE)
+        returns (uint256 totalUsdcReceived)
+    {
+        if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
+        if (!registeredAdapters[adapter]) revert AdapterNotFound();
+        if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
+
+        IStrategyAdapterVault a = IStrategyAdapterVault(adapter);
+        address[] memory tokens = a.rewardTokens();
+
+        // Get USDC address
+        address usdcAddr = asset();
+
+        // Approve reward executor to pull reward tokens
+        for (uint256 i = 0; i < tokens.length; i++) {
+            address token = tokens[i];
+            uint256 claimable = a.claimableReward(token);
+
+            if (claimable > 0) {
+                // Claim the reward (adapter should handle claim logic internally)
+                // Note: The adapter's claimableReward might require a claim call first
+                // For tokens that need claiming, this is handled by the adapter
+
+                // For tokens that go through swap
+                if (token != usdcAddr) {
+                    // Check if we have a route for this token
+                    bytes32 tokenRouteId = rewardTokenRoutes[token];
+                    if (tokenRouteId == bytes32(0)) {
+                        tokenRouteId = routeId; // Fall back to provided routeId
+                    }
+
+                    // Check allowance and approve if needed
+                    if (IERC20(token).allowance(address(this), rewardExecutor) < claimable) {
+                        IERC20(token).forceApprove(rewardExecutor, type(uint256).max);
+                    }
+
+                    // Swap via executor
+                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut);
+
+                    if (usdcOut < minOut) revert SlippageExceeded();
+
+                    totalUsdcReceived += usdcOut;
+                } else {
+                    // Token is already USDC, add directly
+                    totalUsdcReceived += claimable;
+                }
+            }
+        }
+
+        // Add the received USDC to recognized rewards
+        recognizedRewards += totalUsdcReceived;
+
+        _syncStrategyAssets(adapter);
+
+        emit Harvested(adapter, totalUsdcReceived);
+
+        return totalUsdcReceived;
     }
 
     /// @notice Emergency exit all funds from an adapter

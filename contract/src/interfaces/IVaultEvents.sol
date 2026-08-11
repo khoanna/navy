@@ -20,6 +20,12 @@ interface IVaultEvents {
 
     event EmergencyExit(address indexed adapter, uint256 amount);
 
+    event RewardExecutorSet(address indexed executor);
+
+    event RewardTokenRouteSet(address indexed token, bytes32 indexed routeId);
+
+    event Harvested(address indexed adapter, uint256 usdcReceived);
+
     event Pause();
     event Unpause();
 }
