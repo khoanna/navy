@@ -530,16 +530,18 @@ contract VaultHarvestTest is Test {
     function test_harvestViaPlanExecution() public {
         // Create a plan with harvest action
         // For Harvest, amount is used as routeId and minOut is passed through
+        bytes32 planId = keccak256("harvest-plan");
+        bytes32 decisionHash = keccak256("harvest-decision");
+
         NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
         actions[0] = NavyVaultSRCLA.Action({
+            planId: uint256(planId),
+            index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
             amount: uint256(compRouteId), // amount = routeId for harvest
             minOut: 0
         });
-
-        bytes32 planId = keccak256("harvest-plan");
-        bytes32 decisionHash = keccak256("harvest-decision");
 
         // Set swap ratio
         executor.setSwapRatioBps(900000);

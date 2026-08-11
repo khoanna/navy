@@ -11,6 +11,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IVaultEvents} from "./interfaces/IVaultEvents.sol";
 import {VaultMath} from "./libraries/VaultMath.sol";
 import {IRewardExecutor} from "./interfaces/IRewardExecutor.sol";
+import {MerkleTree} from "./libraries/MerkleTree.sol";
+import {VaultTypes} from "./libraries/VaultTypes.sol";
 
 /// @notice Strategy adapter interface
 interface IStrategyAdapterVault {
@@ -62,6 +64,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Action for execution plans
     struct Action {
+        uint256 planId;
+        uint32 index;
         ActionKind kind;
         address adapter;
         uint256 amount;
@@ -103,6 +107,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Total actions in active plan
     uint64 public activePlanActionCount;
 
+    /// @notice Merkle root for active plan
+    bytes32 public activePlanMerkleRoot;
+
     /// @notice Tracks used plan IDs for replay protection
     mapping(bytes32 => bool) public usedPlanIds;
 
@@ -136,8 +143,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error InvalidPlan();
     error PlanAlreadyActive();
     error PlanNotActive();
+    error PlanAlreadyUsed();
     error PlanExecutionExpired();
     error PlanAlreadyExecuted();
+    error InvalidMerkleProof();
     error InvalidNonce();
     error InvalidActionIndex();
     error DepositPaused();
@@ -169,13 +178,17 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return activePlanActionCount;
     }
 
+    function getActivePlanMerkleRoot() external view returns (bytes32) {
+        return activePlanMerkleRoot;
+    }
+
     function getActivePlanAction(uint256 index)
         external
         view
-        returns (ActionKind kind, address adapter, uint256 amount, uint256 minOut)
+        returns (uint256 planId, uint32 actionIndex, ActionKind kind, address adapter, uint256 amount, uint256 minOut)
     {
         Action memory action = _planActions[activePlanId][index];
-        return (action.kind, action.adapter, action.amount, action.minOut);
+        return (action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut);
     }
 
     // ---- Constructor ----
@@ -440,7 +453,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         activePlanDecisionHash = decisionHash;
         activePlanExpiresAt = expiresAt;
         activePlanNextActionIndex = 0;
-        activePlanActionCount = uint64(actions.length);
+        activePlanActionCount = uint32(actions.length);
 
         emit PlanCreated(planId, decisionHash, expiresAt);
     }
@@ -454,6 +467,59 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
 
         Action memory action = _planActions[activePlanId][nextIndex];
+        _executeAction(action);
+
+        activePlanNextActionIndex = uint64(nextIndex + 1);
+
+        if (activePlanNextActionIndex >= activePlanActionCount) {
+            usedPlanIds[activePlanId] = true;
+            bytes32 completedPlanId = activePlanId;
+            _clearActivePlan();
+            emit PlanCompleted(completedPlanId);
+        } else {
+            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(action.kind)), action.amount);
+        }
+    }
+
+    /// @notice Submit a plan with Merkle root for verified execution
+    /// @param header Plan header containing plan metadata
+    /// @param merkleRoot The Merkle root for action verification
+    function submitPlan(VaultTypes.PlanHeader calldata header, bytes32 merkleRoot) external onlyRole(ALLOCATOR_ROLE) {
+        bytes32 planId = bytes32(header.planId);
+        if (usedPlanIds[planId]) revert PlanAlreadyUsed();
+        if (activePlanId != bytes32(0)) revert PlanAlreadyActive();
+        if (header.expiresAt < block.timestamp) revert PlanExecutionExpired();
+        if (header.actionCount == 0) revert InvalidPlan();
+
+        activePlanId = planId;
+        activePlanDecisionHash = header.decisionHash;
+        activePlanExpiresAt = header.expiresAt;
+        activePlanActionCount = header.actionCount;
+        activePlanMerkleRoot = merkleRoot;
+        activePlanNextActionIndex = 0;
+
+        emit PlanSubmitted(planId, merkleRoot);
+    }
+
+    /// @notice Execute the next action with Merkle proof verification
+    /// @param merkleProof The Merkle proof for the action
+    /// @param action The action to execute
+    function executeNextActionWithProof(bytes32[] calldata merkleProof, Action calldata action)
+        external
+        onlyRole(ALLOCATOR_ROLE)
+    {
+        if (activePlanId == bytes32(0)) revert PlanNotActive();
+        if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
+
+        uint256 nextIndex = activePlanNextActionIndex;
+        if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
+
+        // Build the action leaf and verify Merkle proof
+        bytes32 actionLeaf = keccak256(abi.encode(action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut));
+        if (!MerkleTree.verifyProof(actionLeaf, merkleProof, activePlanMerkleRoot)) {
+            revert InvalidMerkleProof();
+        }
+
         _executeAction(action);
 
         activePlanNextActionIndex = uint64(nextIndex + 1);
@@ -485,6 +551,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         delete activePlanExpiresAt;
         delete activePlanNextActionIndex;
         delete activePlanActionCount;
+        delete activePlanMerkleRoot;
     }
 
     // ---- Internal Helpers ----

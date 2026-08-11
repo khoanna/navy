@@ -13,6 +13,8 @@ interface IVaultEvents {
 
     event PlanCreated(bytes32 indexed planId, bytes32 indexed decisionHash, uint256 expiresAt);
 
+    event PlanSubmitted(bytes32 indexed planId, bytes32 merkleRoot);
+
     event PlanActionExecuted(bytes32 indexed planId, uint256 indexed actionIndex, bytes32 kind, uint256 amount);
 
     event PlanCompleted(bytes32 indexed planId);
