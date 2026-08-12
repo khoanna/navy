@@ -20,8 +20,9 @@ contract MoonwellAdapter is IYieldAdapter {
     IMComptroller public immutable comptroller;
     IMInterestRateModel public immutable interestRateModel;
 
-    /// @dev WELL reward token on Base
-    address private constant WELL = 0xc94dDc6D8637F041c6E2c1f4c5e4D7f7c2E6b4f8;
+    /// @dev WELL reward token on Base (native xWELL, not Wormhole)
+    /// @notice From Moonwell token registry: 0xA88594D404727625A9437C3f886C7643872296AE
+    address private constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
 
     /// @dev List of reward tokens this adapter can claim
     address[] private _rewardTokens = [WELL];

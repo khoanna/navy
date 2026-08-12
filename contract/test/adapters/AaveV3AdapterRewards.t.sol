@@ -15,7 +15,9 @@ contract AaveV3AdapterRewardsTest is Test {
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant AAVE_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
     address constant A_USDC = 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB;
-    address constant COMP = 0x9a7AE3b9d0805248597Df825DC469D0D4B3Ec26E;
+    // COMP reward token on Base (same as Compound — both use Comet rewards)
+    // https://github.com/compound-finance/comet/blob/f766f515/deployments/base/usdc/roots.json
+    address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
 
     address VAULT;
     AaveV3Adapter adapter;

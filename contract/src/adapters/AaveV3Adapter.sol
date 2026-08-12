@@ -19,7 +19,8 @@ contract AaveV3Adapter is IYieldAdapter {
     IAaveV3AToken public immutable aUsdc;
 
     /// @dev COMP reward token on Base
-    address private constant COMP = address(0x9a7AE3b9d0805248597Df825DC469D0D4B3Ec26E);
+    /// @notice From official compound-finance/comet roots: 0x9e1028F5F1D5eDE59748FFceE5532509976840E0
+    address private constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
 
     /// @dev List of reward tokens this adapter can claim
     address[] private _rewardTokens = [COMP];

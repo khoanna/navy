@@ -13,7 +13,9 @@ contract CompoundAdapterRewardsTest is Test {
     // Base mainnet addresses
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
-    address constant COMP = 0x9a7AE3b9d0805248597Df825DC469D0D4B3Ec26E;
+    // COMP token on Base (from compound-finance/comet roots)
+    // https://github.com/compound-finance/comet/blob/f766f515/deployments/base/usdc/roots.json
+    address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
 
     address VAULT;
     CompoundAdapter adapter;

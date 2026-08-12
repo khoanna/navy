@@ -16,8 +16,9 @@ contract MoonwellAdapterRewardsTest is Test {
     address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
     address constant COMPTROLLER = 0x73D8A3bF62aACa6690791E57EBaEE4e1d875d8Fe;
     address constant INTEREST_RATE_MODEL = 0x54dC357F7461BcEEE5BdbA80996f5CB7d7512445;
-    // WELL reward token (placeholder - verify from Moonwell)
-    address constant WELL = 0xc94dDc6D8637F041c6E2c1f4c5e4D7f7c2E6b4f8;
+    // WELL reward token on Base (native xWELL from Moonwell registry)
+    // https://docs.moonwell.fi/moonwell/protocol-information/contracts
+    address constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
 
     address VAULT;
     MoonwellAdapter adapter;
