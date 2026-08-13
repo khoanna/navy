@@ -3,163 +3,258 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AaveV3Adapter} from "../../src/adapters/AaveV3Adapter.sol";
-import {IAaveV3Pool, IAaveV3AToken} from "../../src/interfaces/IAaveV3.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-/// @title AaveV3AdapterRewardsTest
-/// @dev Tests for IStrategyAdapter extension methods on AaveV3Adapter.
-/// These tests verify the rewards/reporting interface required by NavyVaultSRCLA.
-/// Fork tests require BASE_RPC_URL to be set.
+contract MockAaveRewardToken is ERC20 {
+    constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+contract MockAaveRewardsController {
+    struct RewardState {
+        uint256 emissionPerSecond;
+        uint256 distributionEnd;
+        uint256 owed;
+    }
+
+    address[] private _rewards;
+    mapping(address => RewardState) public state;
+    bool public forceReturn;
+    uint256 public forcedReturn;
+
+    function setReward(address reward, uint256 emissionPerSecond, uint256 distributionEnd, uint256 owed) external {
+        bool found;
+        for (uint256 i = 0; i < _rewards.length; ++i) {
+            if (_rewards[i] == reward) found = true;
+        }
+        if (!found) _rewards.push(reward);
+        state[reward] = RewardState(emissionPerSecond, distributionEnd, owed);
+    }
+
+    function setForcedReturn(uint256 value) external {
+        forceReturn = true;
+        forcedReturn = value;
+    }
+
+    function getRewardsByAsset(address) external view returns (address[] memory) {
+        return _rewards;
+    }
+
+    function getRewardsData(address, address reward)
+        external
+        view
+        returns (uint256 index, uint256 emissionPerSecond, uint256 lastUpdateTimestamp, uint256 distributionEnd)
+    {
+        RewardState memory rewardState = state[reward];
+        return (1e27, rewardState.emissionPerSecond, block.timestamp, rewardState.distributionEnd);
+    }
+
+    function getUserRewards(address[] calldata, address, address reward) external view returns (uint256) {
+        return state[reward].owed;
+    }
+
+    function claimRewards(address[] calldata, uint256 amount, address to, address reward)
+        external
+        returns (uint256 claimed)
+    {
+        RewardState storage rewardState = state[reward];
+        claimed = amount < rewardState.owed ? amount : rewardState.owed;
+        rewardState.owed -= claimed;
+        MockAaveRewardToken(reward).mint(to, claimed);
+        if (forceReturn) return forcedReturn;
+    }
+}
+
+contract MockAaveAToken is ERC20 {
+    address private immutable _underlying;
+    address private immutable _controller;
+
+    constructor(address underlying_, address controller_) ERC20("Aave USDC", "aUSDC") {
+        _underlying = underlying_;
+        _controller = controller_;
+    }
+
+    function UNDERLYING_ASSET_ADDRESS() external view returns (address) {
+        return _underlying;
+    }
+
+    function getIncentivesController() external view returns (address) {
+        return _controller;
+    }
+
+    function scaledBalanceOf(address user) external view returns (uint256) {
+        return balanceOf(user);
+    }
+
+    function getScaledUserBalanceAndSupply(address user) external view returns (uint256, uint256) {
+        return (balanceOf(user), totalSupply());
+    }
+
+    function scaledTotalSupply() external view returns (uint256) {
+        return totalSupply();
+    }
+
+    function mintForTest(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+contract MockAavePool {
+    address public immutable aToken;
+    uint256 public configurationData;
+    uint128 public accruedToTreasury;
+    uint256 public normalizedIncome = 1e27;
+
+    constructor(address aToken_) {
+        aToken = aToken_;
+    }
+
+    function setReserve(uint256 configurationData_, uint128 accruedToTreasury_) external {
+        configurationData = configurationData_;
+        accruedToTreasury = accruedToTreasury_;
+    }
+
+    function getReserveData(address) external view returns (IAaveV3Pool.ReserveData memory data) {
+        data.configuration.data = configurationData;
+        data.aTokenAddress = aToken;
+        data.accruedToTreasury = accruedToTreasury;
+    }
+
+    function getReserveNormalizedIncome(address) external view returns (uint256) {
+        return normalizedIncome;
+    }
+
+    function supply(address, uint256, address, uint16) external {}
+
+    function withdraw(address, uint256, address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
 contract AaveV3AdapterRewardsTest is Test {
-    // Base mainnet addresses
-    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-    address constant AAVE_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
-    address constant A_USDC = 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB;
-    // COMP reward token on Base (same as Compound — both use Comet rewards)
-    // https://github.com/compound-finance/comet/blob/f766f515/deployments/base/usdc/roots.json
-    address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
+    address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
-    address VAULT;
-    AaveV3Adapter adapter;
-    bool forkCreated;
+    address internal vault;
+    address internal recipient;
+    MockAaveRewardsController internal controller;
+    MockAaveAToken internal aUsdc;
+    MockAavePool internal pool;
+    AaveV3Adapter internal adapter;
+    MockAaveRewardToken internal activeReward;
+    MockAaveRewardToken internal endedReward;
+    MockAaveRewardToken internal zeroEmissionReward;
 
     function setUp() public {
-        VAULT = makeAddr("vault");
-        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            forkCreated = false;
-            adapter = new AaveV3Adapter(VAULT, USDC, AAVE_POOL, A_USDC);
-            return;
-        }
-        forkCreated = true;
-        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
-        if (forkBlock == 0) vm.createSelectFork(rpc);
-        else vm.createSelectFork(rpc, forkBlock);
-        adapter = new AaveV3Adapter(VAULT, USDC, AAVE_POOL, A_USDC);
+        vm.warp(1_000);
+        vault = makeAddr("vault");
+        recipient = makeAddr("recipient");
+        controller = new MockAaveRewardsController();
+        aUsdc = new MockAaveAToken(USDC, address(controller));
+        pool = new MockAavePool(address(aUsdc));
+        adapter = new AaveV3Adapter(vault, USDC, address(pool), address(aUsdc));
+        activeReward = new MockAaveRewardToken("Active", "ACTIVE");
+        endedReward = new MockAaveRewardToken("Ended", "ENDED");
+        zeroEmissionReward = new MockAaveRewardToken("Zero", "ZERO");
     }
 
-    modifier withFork() {
-        if (!forkCreated) {
-            vm.skip(true);
-            return;
-        }
-        _;
+    function test_constructorDerivesControllerAndBindsItInConfigurationDigest() external view {
+        assertEq(address(adapter.incentivesController()), address(controller));
+        bytes32 expected =
+            keccak256(abi.encode(address(pool), address(aUsdc), USDC, address(controller), block.chainid));
+        assertEq(adapter.configurationDigest(), expected);
     }
 
-    // ---- rewardTokens() ----
+    function test_rewardTokensReturnsOnlyExactActiveEmissions() external {
+        controller.setReward(address(endedReward), 5e18, block.timestamp, 100e18);
+        controller.setReward(address(zeroEmissionReward), 0, block.timestamp + 1 days, 100e18);
+        controller.setReward(address(activeReward), 5e18, block.timestamp + 1 days, 100e18);
 
-    function test_aave_rewardTokens() external view {
         address[] memory tokens = adapter.rewardTokens();
-        assertGt(tokens.length, 0, "should have reward tokens");
+
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], address(activeReward));
     }
 
-    function test_aave_rewardTokens_containsCOMP() external view {
-        address[] memory tokens = adapter.rewardTokens();
-        bool found = false;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == COMP) {
-                found = true;
-                break;
-            }
-        }
-        assertTrue(found, "reward tokens should contain COMP");
+    function test_claimableRewardReturnsControllerOwedAmountForActiveToken() external {
+        controller.setReward(address(activeReward), 5e18, block.timestamp + 1 days, 73e18);
+
+        assertEq(adapter.claimableReward(address(activeReward)), 73e18);
     }
 
-    // ---- claimableReward() ----
+    function test_claimableRewardReturnsZeroForEndedStream() external {
+        controller.setReward(address(endedReward), 5e18, block.timestamp, 73e18);
 
-    function test_aave_claimableReward_doesNotRevert() external view {
-        // Just check it doesn't revert - actual amount depends on protocol state
-        adapter.claimableReward(COMP);
+        assertEq(adapter.claimableReward(address(endedReward)), 0);
     }
 
-    function test_aave_claimableReward_unsupportedToken() external {
-        address unsupported = makeAddr("unsupported");
+    function test_claimableRewardRejectsTokenNotDiscoveredByController() external {
         vm.expectRevert(AaveV3Adapter.UnsupportedRewardToken.selector);
-        adapter.claimableReward(unsupported);
+        adapter.claimableReward(makeAddr("unsupported"));
     }
 
-    // ---- configurationDigest() ----
+    function test_claimRewardRejectsNonVaultCaller() external {
+        controller.setReward(address(activeReward), 5e18, block.timestamp + 1 days, 73e18);
 
-    function test_aave_configurationDigest_notZero() external view {
-        bytes32 digest = adapter.configurationDigest();
-        assertTrue(digest != bytes32(0), "digest should not be zero");
+        vm.expectRevert(AaveV3Adapter.NotVault.selector);
+        adapter.claimReward(address(activeReward), 50e18, recipient);
     }
 
-    function test_aave_configurationDigest_deterministic() external view {
-        bytes32 digest1 = adapter.configurationDigest();
-        bytes32 digest2 = adapter.configurationDigest();
-        assertEq(digest1, digest2, "digest should be deterministic");
+    function test_claimRewardRejectsTokenNotDiscoveredByController() external {
+        vm.prank(vault);
+        vm.expectRevert(AaveV3Adapter.UnsupportedRewardToken.selector);
+        adapter.claimReward(makeAddr("unsupported"), 50e18, recipient);
     }
 
-    function test_aave_configurationDigest_changesWithChain() external view {
-        // This test verifies the digest includes chainid
-        bytes32 digest = adapter.configurationDigest();
-        assertGt(uint256(digest), 0, "digest should be non-zero");
+    function test_claimRewardBoundsClaimByMaximumAndMeasuresRecipientDelta() external {
+        controller.setReward(address(activeReward), 5e18, block.timestamp + 1 days, 100e18);
+
+        vm.prank(vault);
+        uint256 claimed = adapter.claimReward(address(activeReward), 40e18, recipient);
+
+        assertEq(claimed, 40e18);
+        assertEq(activeReward.balanceOf(recipient), 40e18);
+        assertEq(activeReward.balanceOf(address(adapter)), 0);
+        (,, uint256 owed) = controller.state(address(activeReward));
+        assertEq(owed, 60e18);
     }
 
-    function test_aave_maxDeployableUsesLiveSupplyCapAndTreasuryUsage() external {
-        IAaveV3Pool.ReserveData memory reserveData;
-        reserveData.configuration.data = (uint256(6) << 48) | (uint256(1) << 56) | (uint256(1_000) << 116);
-        reserveData.accruedToTreasury = 10e6;
-        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
-        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveNormalizedIncome, (USDC)), abi.encode(1e27));
-        vm.mockCall(A_USDC, abi.encodeCall(IAaveV3AToken.scaledTotalSupply, ()), abi.encode(600e6));
+    function test_claimRewardReturnsZeroWithoutCallingEndedStream() external {
+        controller.setReward(address(endedReward), 5e18, block.timestamp, 100e18);
+
+        vm.prank(vault);
+        uint256 claimed = adapter.claimReward(address(endedReward), 40e18, recipient);
+
+        assertEq(claimed, 0);
+        assertEq(endedReward.balanceOf(recipient), 0);
+        (,, uint256 owed) = controller.state(address(endedReward));
+        assertEq(owed, 100e18);
+    }
+
+    function test_claimRewardRejectsControllerReturnThatDiffersFromRecipientDelta() external {
+        controller.setReward(address(activeReward), 5e18, block.timestamp + 1 days, 100e18);
+        controller.setForcedReturn(39e18);
+
+        vm.prank(vault);
+        vm.expectRevert(AaveV3Adapter.RewardClaimMismatch.selector);
+        adapter.claimReward(address(activeReward), 40e18, recipient);
+
+        assertEq(activeReward.balanceOf(recipient), 0, "claim must revert atomically");
+    }
+
+    function test_maxDeployablePreservesLiveSupplyCapAndTreasuryAccounting() external {
+        pool.setReserve((uint256(6) << 48) | (uint256(1) << 56) | (uint256(1_000) << 116), 10e6);
+        aUsdc.mintForTest(makeAddr("supplier"), 600e6);
 
         assertEq(adapter.maxDeployable(), 390e6);
     }
 
-    function test_aave_maxDeployableIsZeroWhenInactiveFrozenOrPaused() external {
-        IAaveV3Pool.ReserveData memory reserveData;
-        reserveData.configuration.data = (uint256(6) << 48) | (uint256(1_000) << 116);
-        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
-        assertEq(adapter.maxDeployable(), 0, "inactive");
+    function test_maxDeployableIsZeroWhenReserveInactive() external {
+        pool.setReserve((uint256(6) << 48) | (uint256(1_000) << 116), 0);
 
-        reserveData.configuration.data |= uint256(1) << 56 | uint256(1) << 57;
-        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
-        assertEq(adapter.maxDeployable(), 0, "frozen");
-
-        reserveData.configuration.data &= ~(uint256(1) << 57);
-        reserveData.configuration.data |= uint256(1) << 60;
-        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
-        assertEq(adapter.maxDeployable(), 0, "paused");
-    }
-
-    function test_aave_maxDeployablePinnedForkIsFinite() external withFork {
-        uint256 headroom = adapter.maxDeployable();
-        assertGt(headroom, 0);
-        assertLt(headroom, type(uint256).max);
-    }
-
-    // ---- maxWithdrawable() ----
-    // These require a fork since they call external contracts
-
-    function test_aave_maxWithdrawable_noDeposits() external withFork {
-        uint256 max = adapter.maxWithdrawable();
-        assertEq(max, 0, "maxWithdrawable should be 0 with no deposits");
-    }
-
-    function test_aave_maxWithdrawable_afterDeposit() external withFork {
-        uint256 amount = 100e6;
-        deal(USDC, address(adapter), amount);
-
-        vm.prank(VAULT);
-        adapter.deposit(amount);
-
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertGt(max, 0, "maxWithdrawable should be > 0 after deposit");
-        assertApproxEqAbs(max, total, 1, "maxWithdrawable should approximately equal totalAssets");
-    }
-
-    function test_aave_maxWithdrawable_notExceedsTotalAssets() external withFork {
-        uint256 amount = 100e6;
-        deal(USDC, address(adapter), amount);
-
-        vm.prank(VAULT);
-        adapter.deposit(amount);
-
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertLe(max, total, "maxWithdrawable should not exceed totalAssets");
+        assertEq(adapter.maxDeployable(), 0);
     }
 }

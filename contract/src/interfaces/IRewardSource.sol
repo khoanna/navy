@@ -7,11 +7,12 @@ interface IRewardSource {
     function rewardTokens() external view returns (address[] memory);
 
     /// @notice Claimable amount of a specific reward token
-    function claimableReward(address token) external view returns (uint256);
+    function claimableReward(address token) external returns (uint256);
 
-    /// @notice Claim rewards and transfer to caller
+    /// @notice Claim rewards and transfer them to an explicit recipient
     /// @param token Reward token to claim
     /// @param maxAmount Maximum amount to claim
-    /// @return claimed Actual amount claimed
-    function claimReward(address token, uint256 maxAmount) external returns (uint256 claimed);
+    /// @param recipient Address whose exact reward-token balance delta is credited
+    /// @return claimed Actual amount received by recipient
+    function claimReward(address token, uint256 maxAmount, address recipient) external returns (uint256 claimed);
 }

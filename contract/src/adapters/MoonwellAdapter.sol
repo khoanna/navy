@@ -176,6 +176,12 @@ contract MoonwellAdapter is IStrategyAdapter {
         return 0;
     }
 
+    /// @dev Fail-closed until the exact multi-reward integration is installed.
+    function claimReward(address token, uint256, address) external view onlyVault returns (uint256) {
+        if (token != WELL) revert UnsupportedRewardToken();
+        return 0;
+    }
+
     function _positionAssets() internal view returns (uint256) {
         return (mUsdc.balanceOf(address(this)) * mUsdc.exchangeRateStored()) / MANTISSA;
     }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
-import {IAaveV3Pool, IAaveV3AToken} from "../interfaces/IAaveV3.sol";
+import {IAaveV3Pool, IAaveV3AToken, IAaveV3RewardsController} from "../interfaces/IAaveV3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -21,13 +21,7 @@ contract AaveV3Adapter is IStrategyAdapter {
     IERC20 public immutable usdc;
     IAaveV3Pool public immutable pool;
     IAaveV3AToken public immutable aUsdc;
-
-    /// @dev COMP reward token on Base
-    /// @notice From official compound-finance/comet roots: 0x9e1028F5F1D5eDE59748FFceE5532509976840E0
-    address private constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
-
-    /// @dev List of reward tokens this adapter can claim
-    address[] private _rewardTokens = [COMP];
+    IAaveV3RewardsController public immutable incentivesController;
 
     error NotVault();
     error UnsupportedRewardToken();
@@ -35,6 +29,8 @@ contract AaveV3Adapter is IStrategyAdapter {
     error DepositFailed();
     error WithdrawFailed();
     error InvalidConfiguration();
+    error InvalidRecipient();
+    error RewardClaimMismatch();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -45,14 +41,17 @@ contract AaveV3Adapter is IStrategyAdapter {
         if (_vault == address(0) || _usdc == address(0) || _pool == address(0) || _aUsdc == address(0)) {
             revert InvalidConfiguration();
         }
-        if (_aUsdc.code.length != 0) {
-            if (IAaveV3AToken(_aUsdc).UNDERLYING_ASSET_ADDRESS() != _usdc) revert InvalidConfiguration();
-            if (IAaveV3Pool(_pool).getReserveData(_usdc).aTokenAddress != _aUsdc) revert InvalidConfiguration();
-        }
+        if (_aUsdc.code.length == 0 || _pool.code.length == 0) revert InvalidConfiguration();
+        IAaveV3AToken aToken_ = IAaveV3AToken(_aUsdc);
+        if (aToken_.UNDERLYING_ASSET_ADDRESS() != _usdc) revert InvalidConfiguration();
+        if (IAaveV3Pool(_pool).getReserveData(_usdc).aTokenAddress != _aUsdc) revert InvalidConfiguration();
+        address controller_ = aToken_.getIncentivesController();
+        if (controller_ == address(0) || controller_.code.length == 0) revert InvalidConfiguration();
         vault = _vault;
         usdc = IERC20(_usdc);
         pool = IAaveV3Pool(_pool);
-        aUsdc = IAaveV3AToken(_aUsdc);
+        aUsdc = aToken_;
+        incentivesController = IAaveV3RewardsController(controller_);
     }
 
     /// @notice Supply USDC to Aave V3 Pool
@@ -159,21 +158,81 @@ contract AaveV3Adapter is IStrategyAdapter {
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {
-        return keccak256(abi.encode(address(pool), address(aUsdc), address(usdc), block.chainid));
+        return keccak256(
+            abi.encode(address(pool), address(aUsdc), address(usdc), address(incentivesController), block.chainid)
+        );
     }
 
     /// @notice List of reward tokens this strategy can claim
     /// @dev Implements IStrategyAdapter.rewardTokens()
     function rewardTokens() external view returns (address[] memory) {
-        return _rewardTokens;
+        address[] memory configured = incentivesController.getRewardsByAsset(address(aUsdc));
+        address[] memory active = new address[](configured.length);
+        uint256 cursor;
+        for (uint256 i = 0; i < configured.length; ++i) {
+            if (_isActiveReward(configured[i])) active[cursor++] = configured[i];
+        }
+        assembly ("memory-safe") {
+            mstore(active, cursor)
+        }
+        return active;
     }
 
     /// @notice Claimable reward amount for a given token
-    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards controller is integrated.
-    function claimableReward(address token) external pure returns (uint256) {
-        if (token != COMP) revert UnsupportedRewardToken();
-        // Aave V3 rewards controller integration deferred for Phase 2
-        return 0;
+    /// @dev Ended and zero-emission controller entries remain discoverable but contribute zero.
+    function claimableReward(address token) external view returns (uint256) {
+        (bool discovered, bool active) = _rewardState(token);
+        if (!discovered) revert UnsupportedRewardToken();
+        if (!active) return 0;
+        return incentivesController.getUserRewards(_assets(), address(this), token);
+    }
+
+    /// @notice Claims at most `maxAmount` of one exact active Aave reward to `recipient`.
+    /// @dev The controller return is not trusted: it must equal the recipient's measured balance delta.
+    function claimReward(address token, uint256 maxAmount, address recipient)
+        external
+        onlyVault
+        returns (uint256 claimed)
+    {
+        if (recipient == address(0)) revert InvalidRecipient();
+        (bool discovered, bool active) = _rewardState(token);
+        if (!discovered) revert UnsupportedRewardToken();
+        if (!active || maxAmount == 0) return 0;
+
+        address[] memory assets = _assets();
+        uint256 owed = incentivesController.getUserRewards(assets, address(this), token);
+        uint256 requested = owed < maxAmount ? owed : maxAmount;
+        if (requested == 0) return 0;
+
+        uint256 beforeBalance = IERC20(token).balanceOf(recipient);
+        uint256 controllerClaimed = incentivesController.claimRewards(assets, requested, recipient, token);
+        uint256 afterBalance = IERC20(token).balanceOf(recipient);
+        if (afterBalance < beforeBalance) revert RewardClaimMismatch();
+        claimed = afterBalance - beforeBalance;
+        if (claimed != controllerClaimed || claimed > requested) revert RewardClaimMismatch();
+    }
+
+    function _rewardState(address token) internal view returns (bool discovered, bool active) {
+        address[] memory configured = incentivesController.getRewardsByAsset(address(aUsdc));
+        for (uint256 i = 0; i < configured.length; ++i) {
+            if (configured[i] == token) {
+                discovered = true;
+                active = _isActiveReward(token);
+                break;
+            }
+        }
+    }
+
+    function _isActiveReward(address token) internal view returns (bool) {
+        if (token == address(0) || token.code.length == 0) return false;
+        (, uint256 emissionPerSecond,, uint256 distributionEnd) =
+            incentivesController.getRewardsData(address(aUsdc), token);
+        return emissionPerSecond != 0 && block.timestamp < distributionEnd;
+    }
+
+    function _assets() internal view returns (address[] memory assets) {
+        assets = new address[](1);
+        assets[0] = address(aUsdc);
     }
 
     function _rayMul(uint256 a, uint256 b) internal pure returns (uint256) {

@@ -46,4 +46,21 @@ interface IAaveV3AToken {
     function totalSupply() external view returns (uint256);
     function scaledTotalSupply() external view returns (uint256);
     function UNDERLYING_ASSET_ADDRESS() external view returns (address);
+    function getIncentivesController() external view returns (address);
+}
+
+/// @dev Aave V3 RewardsController surface used for exact aToken reward discovery and claiming.
+interface IAaveV3RewardsController {
+    function getRewardsByAsset(address asset) external view returns (address[] memory);
+
+    function getRewardsData(address asset, address reward)
+        external
+        view
+        returns (uint256 index, uint256 emissionPerSecond, uint256 lastUpdateTimestamp, uint256 distributionEnd);
+
+    function getUserRewards(address[] calldata assets, address user, address reward) external view returns (uint256);
+
+    function claimRewards(address[] calldata assets, uint256 amount, address to, address reward)
+        external
+        returns (uint256);
 }

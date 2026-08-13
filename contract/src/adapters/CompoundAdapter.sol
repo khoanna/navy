@@ -124,4 +124,10 @@ contract CompoundAdapter is IStrategyAdapter {
         // Compound rewards integration deferred for Phase 2
         return 0;
     }
+
+    /// @dev Fail-closed until the exact CometRewards integration is installed.
+    function claimReward(address token, uint256, address) external view onlyVault returns (uint256) {
+        if (token != COMP) revert UnsupportedRewardToken();
+        return 0;
+    }
 }
