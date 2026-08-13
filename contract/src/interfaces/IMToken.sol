@@ -38,6 +38,8 @@ interface IMToken {
     function totalBorrows() external view returns (uint256);
     function totalReserves() external view returns (uint256);
     function reserveFactorMantissa() external view returns (uint256);
+    function accrualBlockTimestamp() external view returns (uint256);
+    function borrowRatePerTimestamp() external view returns (uint256);
 }
 
 /// @dev Moonwell Comptroller interface

@@ -16,6 +16,7 @@ contract MoonwellAdapter is IStrategyAdapter {
     uint256 private constant SECONDS_PER_YEAR = 365 days;
     uint256 private constant MANTISSA = 1e18;
     uint256 private constant MTOKEN_MANTISSA = 1e8; // mToken has 8 decimals
+    uint256 private constant BORROW_RATE_MAX_MANTISSA = 0.0005e16;
 
     address public immutable vault;
     IERC20 public immutable usdc;
@@ -144,10 +145,13 @@ contract MoonwellAdapter is IStrategyAdapter {
 
     /// @notice Live Moonwell mint headroom, including the market pause and supply cap.
     function maxDeployable() public view returns (uint256) {
+        (bool isListed,) = comptroller.markets(address(mUsdc));
+        if (!isListed) return 0;
         if (comptroller.mintGuardianPaused(address(mUsdc))) return 0;
         uint256 supplyCap = comptroller.supplyCaps(address(mUsdc));
         if (supplyCap == 0) return type(uint256).max;
-        uint256 marketSupply = mUsdc.getCash() + mUsdc.totalBorrows() - mUsdc.totalReserves();
+        (bool valid, uint256 marketSupply) = _projectedMarketSupply();
+        if (!valid) return 0;
         if (marketSupply >= supplyCap - 1) return 0;
         return supplyCap - marketSupply - 1;
     }
@@ -174,5 +178,41 @@ contract MoonwellAdapter is IStrategyAdapter {
 
     function _positionAssets() internal view returns (uint256) {
         return (mUsdc.balanceOf(address(this)) * mUsdc.exchangeRateStored()) / MANTISSA;
+    }
+
+    /// @dev Mirrors MToken.accrueInterest floor arithmetic without mutating protocol state.
+    function _projectedMarketSupply() internal view returns (bool valid, uint256 supply) {
+        uint256 cash = mUsdc.getCash();
+        uint256 borrows = mUsdc.totalBorrows();
+        uint256 reserves = mUsdc.totalReserves();
+        uint256 accruedAt = mUsdc.accrualBlockTimestamp();
+        if (accruedAt == 0 || accruedAt > block.timestamp) return (false, 0);
+
+        uint256 elapsed = block.timestamp - accruedAt;
+        if (elapsed != 0) {
+            uint256 rate;
+            try mUsdc.borrowRatePerTimestamp() returns (uint256 currentRate) {
+                rate = currentRate;
+            } catch {
+                return (false, 0);
+            }
+            if (rate > BORROW_RATE_MAX_MANTISSA || rate > type(uint256).max / elapsed) return (false, 0);
+            uint256 simpleInterestFactor = rate * elapsed;
+            if (simpleInterestFactor != 0 && borrows > type(uint256).max / simpleInterestFactor) return (false, 0);
+            uint256 interestAccumulated = (simpleInterestFactor * borrows) / MANTISSA;
+            uint256 reserveFactor = mUsdc.reserveFactorMantissa();
+            if (reserveFactor > MANTISSA) return (false, 0);
+            if (reserveFactor != 0 && interestAccumulated > type(uint256).max / reserveFactor) return (false, 0);
+            uint256 reservesAccrued = (reserveFactor * interestAccumulated) / MANTISSA;
+            if (interestAccumulated > type(uint256).max - borrows) return (false, 0);
+            if (reservesAccrued > type(uint256).max - reserves) return (false, 0);
+            borrows += interestAccumulated;
+            reserves += reservesAccrued;
+        }
+
+        if (cash > type(uint256).max - borrows) return (false, 0);
+        uint256 supplied = cash + borrows;
+        if (reserves > supplied) return (false, 0);
+        return (true, supplied - reserves);
     }
 }

@@ -99,21 +99,25 @@ contract MoonwellAdapterRewardsTest is Test {
     }
 
     function test_moonwell_maxDeployableUsesLiveSupplyCapHeadroom() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
         vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(false));
         vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.supplyCaps, (M_USDC)), abi.encode(1_000e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.getCash, ()), abi.encode(500e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalBorrows, ()), abi.encode(150e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalReserves, ()), abi.encode(50e6));
+        vm.mockCall(M_USDC, abi.encodeCall(IMToken.accrualBlockTimestamp, ()), abi.encode(block.timestamp));
 
         assertEq(adapter.maxDeployable(), 399_999_999, "returned amount must stay strictly below cap");
     }
 
     function test_moonwell_maxDeployableExactBoundaryIsAcceptedAndNextUnitRejected() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
         vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(false));
         vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.supplyCaps, (M_USDC)), abi.encode(1_000e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.getCash, ()), abi.encode(500e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalBorrows, ()), abi.encode(150e6));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalReserves, ()), abi.encode(50e6));
+        vm.mockCall(M_USDC, abi.encodeCall(IMToken.accrualBlockTimestamp, ()), abi.encode(block.timestamp));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.balanceOf, (address(adapter))), abi.encode(0));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.exchangeRateStored, ()), abi.encode(1e18));
         vm.mockCall(M_USDC, abi.encodeCall(IMToken.mint, (399_999_999)), abi.encode(0));
@@ -129,20 +133,29 @@ contract MoonwellAdapterRewardsTest is Test {
     }
 
     function test_moonwell_maxDeployableIsZeroWhenMintPaused() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
         vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(true));
 
         assertEq(adapter.maxDeployable(), 0);
     }
 
-    function test_moonwell_maxDeployablePinnedForkDepositStaysStrictlyBelowCap() external withFork {
+    function test_moonwell_maxDeployableIsZeroWhenMarketUnlisted() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(false, 0));
+
+        assertEq(adapter.maxDeployable(), 0);
+    }
+
+    function test_moonwell_maxDeployablePinnedForkBoundaryActuallyMints() external withFork {
         uint256 headroom = adapter.maxDeployable();
         uint256 cap = adapter.comptroller().supplyCaps(M_USDC);
         if (cap == 0) {
             assertEq(headroom, type(uint256).max);
         } else {
-            uint256 currentSupply =
-                adapter.mUsdc().getCash() + adapter.mUsdc().totalBorrows() - adapter.mUsdc().totalReserves();
-            assertLt(currentSupply + headroom, cap);
+            assertGt(headroom, 0);
+            deal(USDC, address(adapter), headroom);
+            vm.prank(VAULT);
+            uint256 credited = adapter.deposit(headroom);
+            assertGt(credited, 0, "reported boundary must be accepted by Moonwell after accrual");
         }
     }
 
