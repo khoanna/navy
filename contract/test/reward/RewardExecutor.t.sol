@@ -67,11 +67,23 @@ contract MockERC20 {
 /// @title Mock Chainlink Aggregator for testing
 contract MockChainlinkFeed {
     int256 private _price;
-    uint256 private _timestamp;
+    uint256 private _startedAt;
+    uint256 private _updatedAt;
+    uint80 private _roundId = 1;
+    uint80 private _answeredInRound = 1;
 
     constructor(int256 price) {
         _price = price;
-        _timestamp = block.timestamp;
+        _startedAt = 1;
+        _updatedAt = block.timestamp;
+    }
+
+    function description() external pure returns (string memory) {
+        return "TOKEN / USD";
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 8;
     }
 
     function latestAnswer() external view returns (int256) {
@@ -79,22 +91,38 @@ contract MockChainlinkFeed {
     }
 
     function latestTimestamp() external view returns (uint256) {
-        return _timestamp;
+        return _updatedAt;
+    }
+
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+    {
+        return (_roundId, _price, _startedAt, _updatedAt, _answeredInRound);
     }
 
     function setPrice(int256 price) external {
         _price = price;
-        _timestamp = block.timestamp;
+        _updatedAt = block.timestamp;
+        _roundId++;
+        _answeredInRound = _roundId;
     }
 
     function setStalePrice(int256 price, uint256 age) external {
         _price = price;
         // Set timestamp to a past value that is older than age from current block
         if (block.timestamp > age) {
-            _timestamp = block.timestamp - age;
+            _updatedAt = block.timestamp - age;
         } else {
-            _timestamp = 1;
+            _updatedAt = 1;
         }
+        _roundId++;
+        _answeredInRound = _roundId;
+    }
+
+    function setAnsweredInRound(uint80 answered) external {
+        _answeredInRound = answered;
     }
 }
 
@@ -115,9 +143,7 @@ contract MockUniswapV3Router {
     /// @notice Mock exactInputSingle for Uniswap V3
     /// @dev For testing, we return the configured output amount
     ///      The USDC is assumed to already be in the executor (minted directly for testing)
-    function exactInputSingle(
-        ISwapRouter.ExactInputSingleParams calldata params
-    ) external returns (uint256 amountOut) {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
         lastAmountIn = params.amountIn;
         if (shouldFail) revert("swap failed");
 
@@ -125,9 +151,7 @@ contract MockUniswapV3Router {
     }
 
     /// @notice Mock exactInput for multi-hop swaps
-    function exactInput(
-        ISwapRouter.ExactInputParams calldata params
-    ) external returns (uint256 amountOut) {
+    function exactInput(ISwapRouter.ExactInputParams calldata params) external returns (uint256 amountOut) {
         lastAmountIn = params.amountIn;
         if (shouldFail) revert("swap failed");
 
@@ -142,7 +166,6 @@ abstract contract ISwapRouter {
         address tokenOut;
         uint24 fee;
         address recipient;
-        uint256 deadline;
         uint256 amountIn;
         uint256 amountOutMinimum;
         uint160 sqrtPriceLimitX96;
@@ -151,7 +174,6 @@ abstract contract ISwapRouter {
     struct ExactInputParams {
         bytes path;
         address recipient;
-        uint256 deadline;
         uint256 amountIn;
         uint256 amountOutMinimum;
     }
@@ -195,7 +217,7 @@ contract RewardExecutorTest is Test {
         usdc = new MockERC20("USD Coin", "USDC", 6);
         comp = new MockERC20("Compound", "COMP", 18);
         well = new MockERC20("Moonwell", "WELL", 18);
-        compFeed = new MockChainlinkFeed(150_000_000_000); // ~$150 in USD (8 decimals)
+        compFeed = new MockChainlinkFeed(90_000_000); // $0.90 in mock USD terms (8 decimals)
         wellFeed = new MockChainlinkFeed(500_000_000); // ~$0.005 in USD (8 decimals)
         router = new MockUniswapV3Router();
         routerAddr = address(router);
@@ -228,7 +250,8 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 1, // 0.01% minimum (allows mock output to pass)
             maxPriceImpactBps: 100, // 1% max price impact
-            chainlinkFeed: address(0), // Disable chainlink for simpler testing
+            feeTier: 3000,
+            chainlinkFeed: address(compFeed),
             maxFeedAge: 3600, // 1 hour
             maxDailyNotional: type(uint256).max, // No limit for testing
             routeDigest: bytes32(0)
@@ -249,6 +272,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 9800, // 98% minimum output
             maxPriceImpactBps: 150, // 1.5% max price impact
+            feeTier: 3000,
             chainlinkFeed: address(wellFeed),
             maxFeedAge: 3600,
             maxDailyNotional: 50_000_000, // $50k daily limit
@@ -270,6 +294,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 1, // 0.01% minimum
             maxPriceImpactBps: 100,
+            feeTier: 3000,
             chainlinkFeed: address(compFeed), // Enable chainlink
             maxFeedAge: 3600,
             maxDailyNotional: type(uint256).max,
@@ -289,6 +314,32 @@ contract RewardExecutorTest is Test {
 
     function test_constructor_vaultIsAdmin() public {
         assertTrue(executor.hasRole(executor.ADMIN_ROLE(), vault), "vault should have admin role");
+    }
+
+    function test_constructor_deployerCanAdministerRoutes() public {
+        assertTrue(executor.hasRole(executor.ADMIN_ROLE(), address(this)), "deployer governance must be reachable");
+    }
+
+    function test_approveRoute_rejectsMismatchedEndpoints() public {
+        address[] memory path = new address[](2);
+        path[0] = address(well);
+        path[1] = address(usdc);
+        IRewardExecutor.Route memory route = IRewardExecutor.Route({
+            inputToken: address(comp),
+            outputToken: address(usdc),
+            path: path,
+            minOutBps: 9900,
+            maxPriceImpactBps: 100,
+            feeTier: 3000,
+            chainlinkFeed: address(compFeed),
+            maxFeedAge: 3600,
+            maxDailyNotional: 1_000e6,
+            routeDigest: bytes32(0)
+        });
+
+        vm.prank(vault);
+        vm.expectRevert(bytes4(keccak256("InvalidPath()")));
+        executor.approveRoute(keccak256("bad-endpoints"), route);
     }
 
     // ---- Route Approval Tests ----
@@ -314,6 +365,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 9900,
             maxPriceImpactBps: 100,
+            feeTier: 3000,
             chainlinkFeed: address(compFeed),
             maxFeedAge: 3600,
             maxDailyNotional: 100_000_000,
@@ -338,6 +390,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 9900,
             maxPriceImpactBps: 100,
+            feeTier: 3000,
             chainlinkFeed: address(compFeed),
             maxFeedAge: 3600,
             maxDailyNotional: 100_000_000,
@@ -384,9 +437,18 @@ contract RewardExecutorTest is Test {
         bytes32[] memory routeIds = executor.getRouteIds();
 
         assertEq(routeIds.length, 3, "should have 3 routes");
-        assertTrue(routeIds[0] == compRouteId || routeIds[0] == wellRouteId || routeIds[0] == compWithChainlinkRouteId, "should contain compRouteId");
-        assertTrue(routeIds[1] == compRouteId || routeIds[1] == wellRouteId || routeIds[1] == compWithChainlinkRouteId, "should contain wellRouteId");
-        assertTrue(routeIds[2] == compRouteId || routeIds[2] == wellRouteId || routeIds[2] == compWithChainlinkRouteId, "should contain compWithChainlinkRouteId");
+        assertTrue(
+            routeIds[0] == compRouteId || routeIds[0] == wellRouteId || routeIds[0] == compWithChainlinkRouteId,
+            "should contain compRouteId"
+        );
+        assertTrue(
+            routeIds[1] == compRouteId || routeIds[1] == wellRouteId || routeIds[1] == compWithChainlinkRouteId,
+            "should contain wellRouteId"
+        );
+        assertTrue(
+            routeIds[2] == compRouteId || routeIds[2] == wellRouteId || routeIds[2] == compWithChainlinkRouteId,
+            "should contain compWithChainlinkRouteId"
+        );
     }
 
     function test_isRouteApproved_returnsCorrectStatus() public {
@@ -474,7 +536,8 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 1, // 0.01% minimum
             maxPriceImpactBps: 100,
-            chainlinkFeed: address(0),
+            feeTier: 3000,
+            chainlinkFeed: address(compFeed),
             maxFeedAge: 3600,
             maxDailyNotional: 100e6, // 100 USDC limit
             routeDigest: bytes32(0)
@@ -541,11 +604,7 @@ contract RewardExecutorTest is Test {
         executor.swap(compRouteId, amountIn, 0);
 
         // Check daily volume was updated
-        assertEq(
-            executor.dailyVolume(compRouteId, currentDay),
-            expectedOut,
-            "daily volume should be updated"
-        );
+        assertEq(executor.dailyVolume(compRouteId, currentDay), expectedOut, "daily volume should be updated");
     }
 
     function test_swap_emitsEvent() public {
@@ -679,7 +738,7 @@ contract RewardExecutorTest is Test {
 
     // ---- Multi-Hop Route Tests ----
 
-    function test_approveRoute_multiHopPath() public {
+    function test_approveRoute_rejectsMultiHopWithoutPerHopFees() public {
         // Create a multi-hop route (COMP -> WETH -> USDC)
         bytes32 multiHopRouteId = keccak256("multi-hop");
         address[] memory path = new address[](3);
@@ -693,6 +752,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 9850,
             maxPriceImpactBps: 200,
+            feeTier: 3000,
             chainlinkFeed: address(compFeed),
             maxFeedAge: 3600,
             maxDailyNotional: 200_000_000,
@@ -700,22 +760,16 @@ contract RewardExecutorTest is Test {
         });
 
         vm.prank(vault);
+        vm.expectRevert(bytes4(keccak256("InvalidPath()")));
         executor.approveRoute(multiHopRouteId, route);
-
-        IRewardExecutor.Route memory storedRoute = executor.getRoute(multiHopRouteId);
-        assertEq(storedRoute.path.length, 3, "path should have 3 tokens");
-        assertEq(storedRoute.path[0], address(comp), "first hop should be COMP");
-        assertEq(storedRoute.path[1], address(0x4200000000000000000000000000000000000006), "second hop should be WETH");
-        assertEq(storedRoute.path[2], address(usdc), "final hop should be USDC");
     }
 
     // ---- Edge Cases ----
 
-    function test_swap_zeroAmount() public {
-        // Zero amount should return 0 (no transfer needed)
+    function test_swap_zeroAmountReverts() public {
         vm.prank(vault);
-        uint256 amountOut = executor.swap(compRouteId, 0, 0);
-        assertEq(amountOut, 0, "zero input should return zero output");
+        vm.expectRevert(RewardExecutor.ZeroAmount.selector);
+        executor.swap(compRouteId, 0, 0);
     }
 
     function test_revokeNonExistentRoute() public {
@@ -736,6 +790,7 @@ contract RewardExecutorTest is Test {
             path: path,
             minOutBps: 9950, // Changed from 9900
             maxPriceImpactBps: 50, // Changed from 100
+            feeTier: 3000,
             chainlinkFeed: address(compFeed),
             maxFeedAge: 7200, // Changed from 3600
             maxDailyNotional: 200_000_000, // Changed from 100_000_000

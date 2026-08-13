@@ -17,8 +17,8 @@ contract MoonwellAdapterForkTest is Test {
 
     // Moonwell Base Comptroller and Interest Rate Model
     // Per Moonwell registry: https://github.com/moonwell-fi/moonwell-contracts-v2/blob/main/chains/8453.json
-    address constant COMPTROLLER = 0x73D8A3bF62aACa6690791E57EBaEE4e1d875d8Fe;
-    address constant INTEREST_MODEL = 0x54dC357F7461BcEEE5BdbA80996f5CB7d7512445;
+    address constant COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
+    address constant INTEREST_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
 
     address VAULT;
     MoonwellAdapter adapter;
@@ -38,7 +38,10 @@ contract MoonwellAdapterForkTest is Test {
     }
 
     modifier withFork() {
-        if (!forkCreated) return;
+        if (!forkCreated) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 
@@ -80,11 +83,9 @@ contract MoonwellAdapterForkTest is Test {
         vm.prank(VAULT);
         adapter.deposit(depositAmount);
 
-        uint256 mUsdcBalance = IMToken(M_USDC).balanceOf(address(adapter));
-
         uint256 vaultBalanceBefore = IERC20(USDC).balanceOf(VAULT);
         vm.prank(VAULT);
-        adapter.withdraw(mUsdcBalance, VAULT);
+        adapter.withdraw(depositAmount);
 
         uint256 vaultBalanceAfter = IERC20(USDC).balanceOf(VAULT);
         assertGt(vaultBalanceAfter, vaultBalanceBefore, "should receive USDC");
@@ -104,7 +105,7 @@ contract MoonwellAdapterForkTest is Test {
         address alice = makeAddr("alice");
         vm.prank(alice);
         vm.expectRevert(MoonwellAdapter.NotVault.selector);
-        adapter.withdraw(100e6, alice);
+        adapter.withdraw(100e6);
     }
 
     // ---- Core Functionality Tests ----
@@ -132,7 +133,7 @@ contract MoonwellAdapterForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        adapter.withdraw(assets, VAULT);
+        adapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5, "should return USDC");
@@ -156,7 +157,7 @@ contract MoonwellAdapterForkTest is Test {
             adapter.deposit(amount);
             uint256 assets = adapter.totalAssets();
             vm.prank(VAULT);
-            adapter.withdraw(assets, VAULT);
+            adapter.withdraw(assets);
         }
 
         assertEq(adapter.totalAssets(), 0, "should be 0 after cycles");

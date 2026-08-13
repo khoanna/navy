@@ -10,6 +10,7 @@ interface IRewardExecutor {
         address[] path; /// @dev Uniswap V3 path (token addresses for multi-hop)
         uint256 minOutBps; /// @dev Minimum output as basis points of input (e.g., 9900 = 99%)
         uint256 maxPriceImpactBps; /// @dev Max price impact in basis points (e.g., 100 = 1%)
+        uint24 feeTier; /// @dev Uniswap V3 fee tier (e.g., 500=0.05%, 3000=0.3%, 10000=1%)
         address chainlinkFeed; /// @dev Chainlink price feed for validation
         uint256 maxFeedAge; /// @dev Max age of Chainlink price data in seconds
         uint256 maxDailyNotional; /// @dev Max notional value per day for this route

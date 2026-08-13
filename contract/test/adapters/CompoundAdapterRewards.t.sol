@@ -35,7 +35,10 @@ contract CompoundAdapterRewardsTest is Test {
     }
 
     modifier withFork() {
-        if (!forkCreated) return;
+        if (!forkCreated) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 

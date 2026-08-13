@@ -7,9 +7,7 @@ import {MerkleTree} from "../../src/libraries/MerkleTree.sol";
 contract MerkleTreeTest is Test {
     // Helper to compute sorted hash of two nodes
     function sortedHash(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return a < b
-            ? keccak256(abi.encodePacked(a, b))
-            : keccak256(abi.encodePacked(b, a));
+        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
 
     function test_verifyProof_singleNode() public {
@@ -278,8 +276,8 @@ contract MerkleTreeTest is Test {
 
         bytes32[] memory proof = new bytes32[](3);
         proof[0] = leaves[2]; // sibling at level 1
-        proof[1] = h01;       // sibling at level 2
-        proof[2] = h4567;     // sibling at level 3
+        proof[1] = h01; // sibling at level 2
+        proof[2] = h4567; // sibling at level 3
 
         bool result = MerkleTree.verifyProof(leaves[3], proof, root);
         assertTrue(result);

@@ -25,7 +25,8 @@
     "moonwell": {
       "name": "Moonwell",
       "mToken": "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
-      "unitroller": "0x52aEeBC9142dF07b8D4E7A7F4Cb84c5E29e39D25",
+      "comptroller": "0xfBb21d0380beE3312B33c4353c8936a0F13EF26C",
+      "interestRateModel": "0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C",
       "expectedApy": "0.02-0.07",
       "riskLevel": "medium",
       "notes": "Multi-chain lending on Base, incentivized with WELL"

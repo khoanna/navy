@@ -35,13 +35,7 @@ contract MockAggregator {
     function latestRoundData()
         external
         view
-        returns (
-            uint80 roundId_,
-            int256 answer_,
-            uint256 startedAt_,
-            uint256 updatedAt_,
-            uint80 answeredInRound_
-        )
+        returns (uint80 roundId_, int256 answer_, uint256 startedAt_, uint256 updatedAt_, uint80 answeredInRound_)
     {
         return (roundId, answer, startedAt, updatedAt, answeredInRound);
     }
@@ -128,6 +122,29 @@ contract ChainlinkPriceFeedTest is Test {
         assertEq(result, newPrice);
     }
 
+    function test_updateLastPrice_rejectsUnauthorizedCaller() public {
+        vm.prank(owner);
+        vm.expectRevert(ChainlinkPriceFeed.Unauthorized.selector);
+        priceFeed.updateLastPrice(ETH_USD_PRICE);
+    }
+
+    function test_setUpdater_rotatesAuthority() public {
+        priceFeed.setUpdater(owner);
+        aggregator.setAnswer(ETH_USD_PRICE + 1);
+
+        vm.expectRevert(ChainlinkPriceFeed.Unauthorized.selector);
+        priceFeed.updateLastPrice(ETH_USD_PRICE + 1);
+
+        vm.prank(owner);
+        priceFeed.updateLastPrice(ETH_USD_PRICE + 1);
+    }
+
+    function test_latestAnswer_rejectsStalePrice() public {
+        vm.warp(block.timestamp + 2 hours);
+        vm.expectRevert();
+        priceFeed.latestAnswer();
+    }
+
     function test_getPriceWithDeviation_revertsForLargeDeviation() public {
         // Set initial price
         aggregator.setAnswer(ETH_USD_PRICE);
@@ -198,15 +215,23 @@ contract ChainlinkPriceFeedTest is Test {
     }
 
     function test_updateLastPrice_rejectsZero() public {
-        priceFeed.updateLastPrice(1);
+        // First update to the actual Chainlink price (3500e8)
+        priceFeed.updateLastPrice(ETH_USD_PRICE);
+        assertEq(priceFeed.getLastPrice(), ETH_USD_PRICE);
+
+        // Try to update to a non-Chainlink value (0) - should revert
+        vm.expectRevert(ChainlinkPriceFeed.Unauthorized.selector);
         priceFeed.updateLastPrice(0);
-        assertEq(priceFeed.getLastPrice(), 1); // Should remain unchanged
     }
 
     function test_updateLastPrice_rejectsNegative() public {
-        priceFeed.updateLastPrice(1);
+        // First update to the actual Chainlink price (3500e8)
+        priceFeed.updateLastPrice(ETH_USD_PRICE);
+        assertEq(priceFeed.getLastPrice(), ETH_USD_PRICE);
+
+        // Try to update to a non-Chainlink value (-1) - should revert
+        vm.expectRevert(ChainlinkPriceFeed.Unauthorized.selector);
         priceFeed.updateLastPrice(-1);
-        assertEq(priceFeed.getLastPrice(), 1); // Should remain unchanged
     }
 
     // ---- Edge Cases ----

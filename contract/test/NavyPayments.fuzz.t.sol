@@ -32,7 +32,7 @@ contract NavyPaymentsFuzzTest is Test {
         returns (uint8 v, bytes32 r, bytes32 s)
     {
         address payer = vm.addr(payerPk);
-        bytes32 nonce = keccak256(abi.encodePacked(MID, invoiceId));
+        bytes32 nonce = navy.authorizationNonce(MID, invoiceId);
         bytes32 structHash = keccak256(
             abi.encode(
                 usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), payer, address(navy), amount, validAfter, validBefore, nonce

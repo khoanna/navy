@@ -10,14 +10,16 @@
   },
   "rewardTokens": {
     "COMP": {
-      "address": "0x9e1028F5F1D7eDA25761Aa6dA96721Ee2eE42b1E",
+      "address": "0x9e1028F5F1D5eDE59748FFceE5532509976840E0",
+      "enabled": false,
       "decimals": 18,
       "usdcPriceFeed": "0x...",
       "pool": "0x...",
       "feeTier": 3000
     },
     "WELL": {
-      "address": "0x511aB53F793096356fedaNcF8B2c3092d435E8B0",
+      "address": "0xA88594D404727625A9437C3f886C7643872296AE",
+      "enabled": false,
       "decimals": 18,
       "usdcPriceFeed": "0x...",
       "pool": "0x...",

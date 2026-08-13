@@ -26,8 +26,8 @@ contract AllProtocolsForkTest is Test {
 
     // Moonwell (Section 6.5)
     address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
-    address constant COMPTROLLER = 0x73D8A3bF62aACa6690791E57EBaEE4e1d875d8Fe;
-    address constant INTEREST_MODEL = 0x54dC357F7461BcEEE5BdbA80996f5CB7d7512445;
+    address constant COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
+    address constant INTEREST_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
 
     AaveV3Adapter aaveAdapter;
     CompoundAdapter compoundAdapter;
@@ -52,7 +52,10 @@ contract AllProtocolsForkTest is Test {
     }
 
     modifier withFork() {
-        if (!forkCreated) return;
+        if (!forkCreated) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 
@@ -63,25 +66,13 @@ contract AllProtocolsForkTest is Test {
     /// @dev Per paper Section 2.1: verify all three protocols use the same Circle USDC
     function test_allProtocols_useSameCircleUsdc() external withFork {
         // Aave V3 uses Circle USDC
-        assertEq(
-            IAaveV3AToken(A_USDC).UNDERLYING_ASSET_ADDRESS(),
-            USDC,
-            "Aave must use Circle USDC"
-        );
+        assertEq(IAaveV3AToken(A_USDC).UNDERLYING_ASSET_ADDRESS(), USDC, "Aave must use Circle USDC");
 
         // Compound III uses Circle USDC
-        assertEq(
-            IComet(COMET).baseToken(),
-            USDC,
-            "Compound must use Circle USDC"
-        );
+        assertEq(IComet(COMET).baseToken(), USDC, "Compound must use Circle USDC");
 
         // Moonwell uses Circle USDC
-        assertEq(
-            IMToken(M_USDC).underlying(),
-            USDC,
-            "Moonwell must use Circle USDC"
-        );
+        assertEq(IMToken(M_USDC).underlying(), USDC, "Moonwell must use Circle USDC");
     }
 
     // ============================================
@@ -174,7 +165,7 @@ contract AllProtocolsForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        aaveAdapter.withdraw(assets, VAULT);
+        aaveAdapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5);
@@ -193,7 +184,7 @@ contract AllProtocolsForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        compoundAdapter.withdraw(assets, VAULT);
+        compoundAdapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5);
@@ -212,7 +203,7 @@ contract AllProtocolsForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        moonwellAdapter.withdraw(assets, VAULT);
+        moonwellAdapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5);
@@ -262,7 +253,7 @@ contract AllProtocolsForkTest is Test {
         aaveAdapter.deposit(amount);
         uint256 aaveAssets = aaveAdapter.totalAssets();
         vm.prank(VAULT);
-        aaveAdapter.withdraw(aaveAssets, VAULT);
+        aaveAdapter.withdraw(aaveAssets);
         assertEq(aaveAdapter.totalAssets(), 0, "Aave should be 0 after withdraw");
 
         // Compound cycles
@@ -271,7 +262,7 @@ contract AllProtocolsForkTest is Test {
         compoundAdapter.deposit(amount);
         uint256 compoundAssets = compoundAdapter.totalAssets();
         vm.prank(VAULT);
-        compoundAdapter.withdraw(compoundAssets, VAULT);
+        compoundAdapter.withdraw(compoundAssets);
         assertEq(compoundAdapter.totalAssets(), 0, "Compound should be 0 after withdraw");
 
         // Moonwell cycles
@@ -280,7 +271,7 @@ contract AllProtocolsForkTest is Test {
         moonwellAdapter.deposit(amount);
         uint256 moonwellAssets = moonwellAdapter.totalAssets();
         vm.prank(VAULT);
-        moonwellAdapter.withdraw(moonwellAssets, VAULT);
+        moonwellAdapter.withdraw(moonwellAssets);
         assertEq(moonwellAdapter.totalAssets(), 0, "Moonwell should be 0 after withdraw");
     }
 }

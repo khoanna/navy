@@ -27,7 +27,10 @@ contract CompoundAdapterForkTest is Test {
     }
 
     modifier withFork() {
-        if (address(adapter) == address(0)) return;
+        if (address(adapter) == address(0)) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 
@@ -71,7 +74,7 @@ contract CompoundAdapterForkTest is Test {
 
         uint256 vaultBalanceBefore = IERC20(USDC).balanceOf(VAULT);
         vm.prank(VAULT);
-        adapter.withdraw(balance, VAULT);
+        adapter.withdraw(balance);
 
         uint256 vaultBalanceAfter = IERC20(USDC).balanceOf(VAULT);
         assertGt(vaultBalanceAfter, vaultBalanceBefore);
@@ -91,7 +94,7 @@ contract CompoundAdapterForkTest is Test {
         address alice = makeAddr("alice");
         vm.prank(alice);
         vm.expectRevert(CompoundAdapter.NotVault.selector);
-        adapter.withdraw(100e6, alice);
+        adapter.withdraw(100e6);
     }
 
     // ---- Core Functionality Tests ----
@@ -129,7 +132,7 @@ contract CompoundAdapterForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        adapter.withdraw(assets, VAULT);
+        adapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5);
@@ -161,7 +164,7 @@ contract CompoundAdapterForkTest is Test {
             uint256 assets = adapter.totalAssets();
 
             vm.prank(VAULT);
-            adapter.withdraw(assets, VAULT);
+            adapter.withdraw(assets);
         }
 
         // Final balance should be 0

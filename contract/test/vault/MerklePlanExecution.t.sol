@@ -100,6 +100,10 @@ contract MockAdapter {
         return reportedAssets;
     }
 
+    function sync() external view returns (uint256) {
+        return reportedAssets;
+    }
+
     function maxWithdrawable() external view returns (uint256) {
         return withdrawableAssets;
     }
@@ -111,6 +115,10 @@ contract MockAdapter {
 
     function claimableReward(address) external pure returns (uint256) {
         return 0;
+    }
+
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(vaultAddress, assetAddress, block.chainid));
     }
 
     function deposit(uint256 assets) external onlyVault returns (uint256 credited) {
@@ -183,7 +191,7 @@ contract MerklePlanExecutionTest is Test {
             snapshotBlockNumber: block.number,
             snapshotHash: keccak256("snapshot"),
             decisionHash: keccak256("decision"),
-            configurationDigest: bytes32(0),
+            configurationDigest: vault.currentConfigurationDigest(),
             reserve: 0,
             minFinalAssets: 0,
             maxRecognizedLoss: 0,
@@ -191,7 +199,7 @@ contract MerklePlanExecutionTest is Test {
         });
     }
 
-    function _buildLeaves(uint256 planIdVal, uint32 actionCount, uint8 kind)
+    function _buildLeaves(VaultTypes.PlanHeader memory header, uint32 actionCount, uint8 kind)
         internal
         view
         returns (bytes32[] memory leaves)
@@ -200,7 +208,15 @@ contract MerklePlanExecutionTest is Test {
         // We encode with the vault's ActionKind values directly
         leaves = new bytes32[](actionCount);
         for (uint32 i = 0; i < actionCount; i++) {
-            leaves[i] = keccak256(abi.encode(planIdVal, i, kind, address(adapter), 100e6, 99e6));
+            NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
+                planId: header.planId,
+                index: i,
+                kind: NavyVaultSRCLA.ActionKind(kind),
+                adapter: address(adapter),
+                amount: 100e6,
+                minOut: 99e6
+            });
+            leaves[i] = vault.hashPlanAction(vault.planDomain(header), action);
         }
     }
 
@@ -216,7 +232,7 @@ contract MerklePlanExecutionTest is Test {
     function test_submitPlan_storesMerkleRoot() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 3, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 3, uint8(0));
+        bytes32[] memory leaves = _buildLeaves(header, 3, uint8(0));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -230,7 +246,7 @@ contract MerklePlanExecutionTest is Test {
     function test_submitPlan_emitsPlanSubmittedEvent() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 2, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 2, uint8(0));
+        bytes32[] memory leaves = _buildLeaves(header, 2, uint8(0));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -242,7 +258,7 @@ contract MerklePlanExecutionTest is Test {
     function test_submitPlan_revertsForUsedPlanId() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Deploy));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Deploy));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         // First submission
@@ -278,7 +294,7 @@ contract MerklePlanExecutionTest is Test {
         uint256 planIdVal2 = 67890;
         VaultTypes.PlanHeader memory header1 = _buildPlanHeader(planIdVal1, 2, uint64(block.timestamp + 3600));
         VaultTypes.PlanHeader memory header2 = _buildPlanHeader(planIdVal2, 2, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal1, 2, uint8(NavyVaultSRCLA.ActionKind.Deploy));
+        bytes32[] memory leaves = _buildLeaves(header1, 2, uint8(NavyVaultSRCLA.ActionKind.Deploy));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -292,7 +308,7 @@ contract MerklePlanExecutionTest is Test {
     function test_submitPlan_revertsForExpiredPlan() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 2, uint64(block.timestamp - 1));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 2, uint8(0));
+        bytes32[] memory leaves = _buildLeaves(header, 2, uint8(0));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -314,7 +330,7 @@ contract MerklePlanExecutionTest is Test {
     function test_submitPlan_onlyAllocator() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 2, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 2, uint8(0));
+        bytes32[] memory leaves = _buildLeaves(header, 2, uint8(0));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(nonAllocator);
@@ -327,7 +343,7 @@ contract MerklePlanExecutionTest is Test {
     function test_executeActionWithProof_verifiesMerkle() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Deploy));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Deploy));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -354,7 +370,7 @@ contract MerklePlanExecutionTest is Test {
     function test_executeActionWithProof_success() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -390,7 +406,7 @@ contract MerklePlanExecutionTest is Test {
     function test_executeActionWithProof_revertsForWrongActionData() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -434,7 +450,7 @@ contract MerklePlanExecutionTest is Test {
     function test_executeActionWithProof_revertsWhenExpired() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 1));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -462,18 +478,18 @@ contract MerklePlanExecutionTest is Test {
     function test_executeActionWithProof_revertsForInvalidIndex() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
         vault.submitPlan(header, root);
 
-        // Try to execute index 1 (only 0 exists) - will fail Merkle first
+        // Try to execute index 1 (only 0 exists) - index check fails first
         bytes32[] memory proof = new bytes32[](0);
 
         NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: planIdVal,
-            index: 1, // Wrong index
+            index: 1, // Wrong index - only 0 exists
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
@@ -481,15 +497,15 @@ contract MerklePlanExecutionTest is Test {
         });
 
         vm.prank(allocator);
-        // Merkle verification fails first since action data doesn't match
-        vm.expectRevert(NavyVaultSRCLA.InvalidMerkleProof.selector);
+        // Index validation fails first before Merkle verification
+        vm.expectRevert(NavyVaultSRCLA.InvalidActionIndex.selector);
         vault.executeNextActionWithProof(proof, action);
     }
 
     function test_executeActionWithProof_onlyAllocator() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 1, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 1, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -519,7 +535,15 @@ contract MerklePlanExecutionTest is Test {
 
         // Build deploy action leaf
         bytes32[] memory leaves = new bytes32[](1);
-        leaves[0] = keccak256(abi.encode(planIdVal, 0, 0, address(adapter), 500e6, 499e6));
+        NavyVaultSRCLA.Action memory deployAction = NavyVaultSRCLA.Action({
+            planId: planIdVal,
+            index: 0,
+            kind: NavyVaultSRCLA.ActionKind.Deploy,
+            adapter: address(adapter),
+            amount: 500e6,
+            minOut: 499e6
+        });
+        leaves[0] = vault.hashPlanAction(vault.planDomain(header), deployAction);
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -549,7 +573,7 @@ contract MerklePlanExecutionTest is Test {
     function test_cancelPlan_clearsMerkleRoot() public {
         uint256 planIdVal = 12345;
         VaultTypes.PlanHeader memory header = _buildPlanHeader(planIdVal, 2, uint64(block.timestamp + 3600));
-        bytes32[] memory leaves = _buildLeaves(planIdVal, 2, uint8(NavyVaultSRCLA.ActionKind.Divest));
+        bytes32[] memory leaves = _buildLeaves(header, 2, uint8(NavyVaultSRCLA.ActionKind.Divest));
         bytes32 root = MerkleTree.computeRoot(leaves);
 
         vm.prank(allocator);
@@ -562,8 +586,7 @@ contract MerklePlanExecutionTest is Test {
         assertEq(vault.activePlanMerkleRoot(), bytes32(0), "merkle root should be cleared");
     }
 
-    function test_executePlan_vs_submitPlan() public {
-        // Test that the original executePlan still works alongside submitPlan
+    function test_executePlan_legacyUncommittedPathIsDisabled() public {
         NavyVaultSRCLA.Action[] memory plainActions = new NavyVaultSRCLA.Action[](1);
         plainActions[0] = NavyVaultSRCLA.Action({
             planId: 0,
@@ -577,10 +600,24 @@ contract MerklePlanExecutionTest is Test {
         bytes32 plainPlanId = keccak256("plain-plan");
 
         vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.InvalidPlan.selector);
         vault.executePlan(plainPlanId, keccak256("decision"), uint64(block.timestamp + 3600), plainActions);
+    }
 
-        assertEq(vault.activePlanId(), plainPlanId, "plain plan should be active");
-        assertEq(vault.activePlanMerkleRoot(), bytes32(0), "no merkle root for plain plan");
+    function test_submitPlan_rejectsWrongConfigurationDigest() public {
+        VaultTypes.PlanHeader memory header = _buildPlanHeader(12345, 1, uint64(block.timestamp + 3600));
+        header.configurationDigest = bytes32(uint256(1));
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.InvalidConfigurationDigest.selector);
+        vault.submitPlan(header, bytes32(uint256(1)));
+    }
+
+    function test_planDomainDiffersAcrossVaults() public {
+        NavyVaultSRCLA secondVault = new NavyVaultSRCLA(IERC20(address(usdc)));
+        VaultTypes.PlanHeader memory header = _buildPlanHeader(12345, 1, uint64(block.timestamp + 3600));
+
+        assertTrue(vault.planDomain(header) != secondVault.planDomain(header));
     }
 }
 

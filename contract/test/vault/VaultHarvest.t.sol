@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
 import {IRewardExecutor} from "../../src/interfaces/IRewardExecutor.sol";
 import {IVaultEvents} from "../../src/interfaces/IVaultEvents.sol";
+import {VaultTypes} from "../../src/libraries/VaultTypes.sol";
 
 /// @title Mock USDC for testing (6 decimals like real USDC)
 contract MockUSDC {
@@ -153,6 +154,7 @@ contract MockAdapterWithRewards {
 
     function setClaimableReward(address token, uint256 amount) external {
         claimableAmounts[token] = amount;
+        if (amount > 0) MockRewardToken(token).mint(vaultAddress, amount);
     }
 
     function addRewardToken(address token) external {
@@ -171,6 +173,10 @@ contract MockAdapterWithRewards {
         return reportedAssets;
     }
 
+    function sync() external view returns (uint256) {
+        return reportedAssets;
+    }
+
     function maxWithdrawable() external view returns (uint256) {
         return withdrawableAssets;
     }
@@ -181,6 +187,10 @@ contract MockAdapterWithRewards {
 
     function claimableReward(address token) external view returns (uint256) {
         return claimableAmounts[token];
+    }
+
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(vaultAddress, assetAddress, block.chainid));
     }
 
     function deposit(uint256 assets) external onlyVault returns (uint256 credited) {
@@ -210,6 +220,7 @@ contract MockRewardExecutor {
     uint256 private constant SWAP_OUTPUT_SCALAR = 1e12;
 
     mapping(bytes32 => bool) public approvedRoutes;
+    mapping(bytes32 => address) public routeTokens;
     mapping(address => uint256) public balanceOf;
 
     // Configurable swap ratio for testing (e.g., 900000 for 0.9)
@@ -223,8 +234,9 @@ contract MockRewardExecutor {
         shouldFail = fail;
     }
 
-    function approveRoute(bytes32 routeId) external {
+    function approveRoute(bytes32 routeId, address token) external {
         approvedRoutes[routeId] = true;
+        routeTokens[routeId] = token;
     }
 
     function revokeRoute(bytes32 routeId) external {
@@ -241,10 +253,13 @@ contract MockRewardExecutor {
 
         lastRouteId = routeId;
         lastAmountIn = amountIn;
+        MockRewardToken(routeTokens[routeId]).transferFrom(msg.sender, address(this), amountIn);
 
         // Simulate swap: converts 18-decimal reward token amount to 6-decimal USDC
         // e.g., 10e18 COMP * 0.9 / 1e12 = 9e6 USDC
         amountOut = (amountIn * swapRatioBps) / 1_000_000 / SWAP_OUTPUT_SCALAR;
+
+        MockUSDC(NavyVaultSRCLA(msg.sender).asset()).mint(msg.sender, amountOut);
 
         // Note: We don't revert on slippage here - let the vault handle that check
         // This allows testing the vault's SlippageExceeded error
@@ -312,8 +327,8 @@ contract VaultHarvestTest is Test {
         vault.setRewardTokenRoute(address(well), wellRouteId);
 
         // Approve routes in executor
-        executor.approveRoute(compRouteId);
-        executor.approveRoute(wellRouteId);
+        executor.approveRoute(compRouteId, address(comp));
+        executor.approveRoute(wellRouteId, address(well));
 
         // Set up adapter with assets and rewards
         adapter.setReportedAssets(1000e6);
@@ -456,8 +471,7 @@ contract VaultHarvestTest is Test {
         MockRewardToken newComp = new MockRewardToken("NewCOMP", "NCOMP", 18);
         address[] memory newRewardTokens = new address[](1);
         newRewardTokens[0] = address(newComp);
-        MockAdapterWithRewards newAdapter =
-            new MockAdapterWithRewards(address(vault), address(usdc), newRewardTokens);
+        MockAdapterWithRewards newAdapter = new MockAdapterWithRewards(address(vault), address(usdc), newRewardTokens);
 
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
@@ -488,7 +502,7 @@ contract VaultHarvestTest is Test {
         // Test that a different routeId parameter can be used
         // Set up a new route for a different token
         bytes32 differentRouteId = keccak256("different-route");
-        executor.approveRoute(differentRouteId);
+        executor.approveRoute(differentRouteId, address(well));
         vm.prank(admin);
         vault.setRewardTokenRoute(address(well), differentRouteId);
 
@@ -506,8 +520,7 @@ contract VaultHarvestTest is Test {
         // Create adapter with single reward token
         address[] memory singleToken = new address[](1);
         singleToken[0] = address(comp);
-        MockAdapterWithRewards singleAdapter =
-            new MockAdapterWithRewards(address(vault), address(usdc), singleToken);
+        MockAdapterWithRewards singleAdapter = new MockAdapterWithRewards(address(vault), address(usdc), singleToken);
         singleAdapter.setReportedAssets(500e6);
         singleAdapter.setWithdrawable(500e6);
         singleAdapter.setClaimableReward(address(comp), 100e18);
@@ -533,8 +546,7 @@ contract VaultHarvestTest is Test {
         bytes32 planId = keccak256("harvest-plan");
         bytes32 decisionHash = keccak256("harvest-decision");
 
-        NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
-        actions[0] = NavyVaultSRCLA.Action({
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(planId),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
@@ -546,14 +558,30 @@ contract VaultHarvestTest is Test {
         // Set swap ratio
         executor.setSwapRatioBps(900000);
 
-        // Execute plan (sets up the active plan)
+        VaultTypes.PlanHeader memory header = VaultTypes.PlanHeader({
+            planId: uint256(planId),
+            policyVersion: 1,
+            createdAt: uint64(block.timestamp),
+            expiresAt: uint64(block.timestamp + 3600),
+            actionCount: 1,
+            snapshotBlockNumber: block.number,
+            snapshotHash: keccak256("snapshot"),
+            decisionHash: decisionHash,
+            configurationDigest: vault.currentConfigurationDigest(),
+            reserve: 0,
+            minFinalAssets: 0,
+            maxRecognizedLoss: type(uint256).max,
+            turnoverLimit: type(uint256).max
+        });
+        bytes32 leaf = vault.hashPlanAction(vault.planDomain(header), action);
+
         vm.prank(allocator);
-        vault.executePlan(planId, decisionHash, uint64(block.timestamp + 3600), actions);
+        vault.submitPlan(header, leaf);
 
         // Execute the harvest action via plan execution
         uint256 recognizedBefore = vault.recognizedRewards();
         vm.prank(allocator);
-        vault.executeNextAction();
+        vault.executeNextActionWithProof(new bytes32[](0), action);
 
         // Plan should complete
         assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be completed");

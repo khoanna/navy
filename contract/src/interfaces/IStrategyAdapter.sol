@@ -21,6 +21,9 @@ interface IStrategyAdapter {
     /// @notice Total USDC value held in this strategy
     function totalAssets() external view returns (uint256);
 
+    /// @notice Accrue protocol state and return the current USDC position value.
+    function sync() external returns (uint256);
+
     /// @notice Maximum amount withdrawable in same transaction
     function maxWithdrawable() external view returns (uint256);
 

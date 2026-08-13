@@ -2,11 +2,7 @@
 pragma solidity ^0.8.24;
 
 library MerkleTree {
-    function verifyProof(
-        bytes32 leaf,
-        bytes32[] memory proof,
-        bytes32 root
-    ) internal pure returns (bool) {
+    function verifyProof(bytes32 leaf, bytes32[] memory proof, bytes32 root) internal pure returns (bool) {
         bytes32 computedHash = leaf;
         for (uint256 i = 0; i < proof.length; i++) {
             computedHash = computedHash < proof[i]

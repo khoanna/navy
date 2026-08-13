@@ -14,8 +14,8 @@ contract MoonwellAdapterRewardsTest is Test {
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     // Moonwell Base addresses from registry
     address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
-    address constant COMPTROLLER = 0x73D8A3bF62aACa6690791E57EBaEE4e1d875d8Fe;
-    address constant INTEREST_RATE_MODEL = 0x54dC357F7461BcEEE5BdbA80996f5CB7d7512445;
+    address constant COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
+    address constant INTEREST_RATE_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
     // WELL reward token on Base (native xWELL from Moonwell registry)
     // https://docs.moonwell.fi/moonwell/protocol-information/contracts
     address constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
@@ -38,7 +38,10 @@ contract MoonwellAdapterRewardsTest is Test {
     }
 
     modifier withFork() {
-        if (!forkCreated) return;
+        if (!forkCreated) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 

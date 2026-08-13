@@ -55,6 +55,7 @@ contract NavyPaymentsForkTest is Test {
     function test_fork_realUsdcReceiveWithAuthorization() public {
         if (address(navy) == address(0)) {
             emit log("SKIP: set SEPOLIA_RPC_URL to run the fork test");
+            vm.skip(true);
             return;
         }
         address payer = vm.addr(payerPk);
@@ -72,7 +73,7 @@ contract NavyPaymentsForkTest is Test {
 
         bytes16 invoiceId = bytes16(hex"22222222222222222222222222222222");
         uint256 validBefore = block.timestamp + 3600;
-        bytes32 nonce = keccak256(abi.encodePacked(MID, invoiceId));
+        bytes32 nonce = navy.authorizationNonce(MID, invoiceId);
         (uint8 v, bytes32 r, bytes32 s) = _signAuth(payer, amount, validBefore, nonce);
 
         vm.prank(relayer);

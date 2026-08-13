@@ -2,11 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {IEIP3009} from "./interfaces/IEIP3009.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title NavyPayments — EIP-3009 gasless invoice payments with an enforced fee split.
 /// @dev The payment token is Circle Sepolia USDC, which reverts on failed ERC-20 transfers,
 /// so return values are intentionally unchecked (no SafeERC20 dependency).
 contract NavyPayments {
+    using SafeERC20 for IERC20;
     uint16 public constant MAX_FEE_BPS = 1000; // 10% ceiling
     uint256 public constant MIN_INVOICE_AMOUNT = 10_000; // 0.01 USDC (6 decimals)
 
@@ -14,6 +17,7 @@ contract NavyPayments {
     address public treasury;
     IEIP3009 public usdc;
     uint16 public feeBps;
+    uint64 public configVersion;
 
     mapping(address => bool) public relayers;
 
@@ -24,6 +28,7 @@ contract NavyPayments {
     }
 
     mapping(bytes16 => Merchant) public merchants;
+    mapping(bytes16 => uint64) public merchantVersion;
     mapping(bytes32 => bool) public invoicePaid; // keccak256(merchantId, invoiceId) => paid
 
     event InvoicePaid(
@@ -39,6 +44,8 @@ contract NavyPayments {
     event MerchantActiveSet(bytes16 indexed merchantId, bool active);
     event ConfigSet(uint16 feeBps, address treasury);
     event RelayerSet(address indexed relayer, bool allowed);
+    event ExcessRecovered(address indexed to, uint256 amount);
+    event NativeRecovered(address indexed to, uint256 amount);
 
     error NotOwner();
     error NotRelayer();
@@ -49,6 +56,8 @@ contract NavyPayments {
     error AmountTooSmall();
     error AlreadyPaid();
     error ZeroAddress();
+    error InvalidPayout();
+    error NativeTransferFailed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -67,6 +76,7 @@ contract NavyPayments {
         treasury = _treasury;
         feeBps = _feeBps;
         owner = _owner;
+        configVersion = 1;
     }
 
     function setConfig(uint16 _feeBps, address _treasury) external onlyOwner {
@@ -74,6 +84,7 @@ contract NavyPayments {
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
         feeBps = _feeBps;
         treasury = _treasury;
+        configVersion++;
         emit ConfigSet(_feeBps, _treasury);
     }
 
@@ -84,8 +95,10 @@ contract NavyPayments {
 
     function registerMerchant(bytes16 merchantId, address payout) external onlyOwner {
         if (payout == address(0)) revert ZeroAddress();
+        if (payout == address(this) || payout == address(usdc)) revert InvalidPayout();
         if (merchants[merchantId].exists) revert MerchantExists();
         merchants[merchantId] = Merchant({payout: payout, active: true, exists: true});
+        merchantVersion[merchantId] = 1;
         emit MerchantRegistered(merchantId, payout);
     }
 
@@ -97,8 +110,10 @@ contract NavyPayments {
 
     function setMerchantPayout(bytes16 merchantId, address payout) external onlyOwner {
         if (payout == address(0)) revert ZeroAddress();
+        if (payout == address(this) || payout == address(usdc)) revert InvalidPayout();
         if (!merchants[merchantId].exists) revert MerchantUnknown();
         merchants[merchantId].payout = payout;
+        merchantVersion[merchantId]++;
         emit MerchantPayoutSet(merchantId, payout);
     }
 
@@ -113,26 +128,59 @@ contract NavyPayments {
         bytes32 r,
         bytes32 s
     ) external onlyRelayer {
-        bytes32 key = keccak256(abi.encodePacked(merchantId, invoiceId));
+        bytes32 key = invoiceKey(merchantId, invoiceId);
         if (invoicePaid[key]) revert AlreadyPaid();
 
         Merchant memory m = merchants[merchantId];
         if (!m.exists || !m.active) revert MerchantInactive();
         if (amount < MIN_INVOICE_AMOUNT) revert AmountTooSmall();
 
-        // Effects before interactions. `key` is the EIP-3009 authorization nonce → it binds
-        // merchant+invoice+amount+payer+expiry into the signed message. `receiveWithAuthorization`
-        // requires msg.sender == to, so only this contract can redeem the authorization (and the
-        // token's per-nonce authorizationState prevents any signature replay).
+        // Effects before interactions. The stable invoice key prevents invoice replay, while the
+        // EIP-3009 nonce also commits the currently selected payout and fee configuration.
         invoicePaid[key] = true;
-        usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, key, v, r, s);
+        bytes32 nonce = authorizationNonce(merchantId, invoiceId);
+        usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, nonce, v, r, s);
 
         uint256 fee = (amount * feeBps) / 10000; // floors
-        // USDC reverts on failed transfers, so return values are unchecked by design.
-        usdc.transfer(m.payout, amount - fee);
+        IERC20(address(usdc)).safeTransfer(m.payout, amount - fee);
         if (fee > 0) {
-            usdc.transfer(treasury, fee);
+            IERC20(address(usdc)).safeTransfer(treasury, fee);
         }
         emit InvoicePaid(merchantId, invoiceId, payer, amount, fee, block.timestamp);
+    }
+
+    function invoiceKey(bytes16 merchantId, bytes16 invoiceId) public pure returns (bytes32) {
+        return keccak256(abi.encode(merchantId, invoiceId));
+    }
+
+    function authorizationNonce(bytes16 merchantId, bytes16 invoiceId) public view returns (bytes32) {
+        Merchant memory merchant = merchants[merchantId];
+        return keccak256(
+            abi.encode(
+                invoiceKey(merchantId, invoiceId),
+                merchant.payout,
+                treasury,
+                feeBps,
+                configVersion,
+                merchantVersion[merchantId]
+            )
+        );
+    }
+
+    /// @notice Recover only USDC that was sent outside an atomic invoice call.
+    function recoverExcess(address to) external onlyOwner returns (uint256 amount) {
+        if (to == address(0) || to == address(this)) revert ZeroAddress();
+        amount = usdc.balanceOf(address(this));
+        if (amount > 0) IERC20(address(usdc)).safeTransfer(to, amount);
+        emit ExcessRecovered(to, amount);
+    }
+
+    /// @notice Recover native currency forcibly sent to this non-payable contract.
+    function recoverNative(address payable to) external onlyOwner returns (uint256 amount) {
+        if (to == address(0) || to == address(this)) revert ZeroAddress();
+        amount = address(this).balance;
+        (bool success,) = to.call{value: amount}("");
+        if (!success) revert NativeTransferFailed();
+        emit NativeRecovered(to, amount);
     }
 }

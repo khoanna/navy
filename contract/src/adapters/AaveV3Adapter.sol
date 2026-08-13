@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IYieldAdapter} from "../interfaces/IYieldAdapter.sol";
+import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
 import {IAaveV3Pool, IAaveV3AToken} from "../interfaces/IAaveV3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title AaveV3Adapter — supplies the vault's USDC to Aave V3 on Base.
 /// @dev The adapter is msg.sender to Aave Pool, so Aave credits this contract.
 /// totalAssets reads the aUSDC balance (indexed value). Only the vault may move funds.
 /// Per SRCLA paper Section 6.3.
-contract AaveV3Adapter is IYieldAdapter {
-    uint256 private constant SECONDS_PER_YEAR = 365 days;
-    uint256 private constant RAY = 1e27; // Aave ray unit for rate calculations
+contract AaveV3Adapter is IStrategyAdapter {
+    using SafeERC20 for IERC20;
 
     address public immutable vault;
     IERC20 public immutable usdc;
@@ -27,6 +27,10 @@ contract AaveV3Adapter is IYieldAdapter {
 
     error NotVault();
     error UnsupportedRewardToken();
+    error ProtocolPaused();
+    error DepositFailed();
+    error WithdrawFailed();
+    error InvalidConfiguration();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -34,6 +38,13 @@ contract AaveV3Adapter is IYieldAdapter {
     }
 
     constructor(address _vault, address _usdc, address _pool, address _aUsdc) {
+        if (_vault == address(0) || _usdc == address(0) || _pool == address(0) || _aUsdc == address(0)) {
+            revert InvalidConfiguration();
+        }
+        if (_aUsdc.code.length != 0) {
+            if (IAaveV3AToken(_aUsdc).UNDERLYING_ASSET_ADDRESS() != _usdc) revert InvalidConfiguration();
+            if (IAaveV3Pool(_pool).getReserveData(_usdc).aTokenAddress != _aUsdc) revert InvalidConfiguration();
+        }
         vault = _vault;
         usdc = IERC20(_usdc);
         pool = IAaveV3Pool(_pool);
@@ -42,15 +53,28 @@ contract AaveV3Adapter is IYieldAdapter {
 
     /// @notice Supply USDC to Aave V3 Pool
     /// @dev Approves pool to pull USDC, then calls supply
-    function deposit(uint256 amount) external onlyVault {
-        usdc.approve(address(pool), amount);
-        pool.supply(address(usdc), amount, address(this), 0);
+    /// @dev Uses try/catch for protocol pause resilience
+    function deposit(uint256 amount) external onlyVault returns (uint256 credited) {
+        uint256 beforeAssets = aUsdc.balanceOf(address(this));
+        usdc.forceApprove(address(pool), amount);
+        try pool.supply(address(usdc), amount, address(this), 0) {}
+        catch {
+            revert DepositFailed();
+        }
+        usdc.forceApprove(address(pool), 0);
+        credited = aUsdc.balanceOf(address(this)) - beforeAssets;
     }
 
     /// @notice Withdraw USDC from Aave V3 Pool
     /// @dev Calls withdraw on the pool, sends to vault
-    function withdraw(uint256 amount, address to) external onlyVault {
-        pool.withdraw(address(usdc), amount, to);
+    /// @dev Uses try/catch for protocol pause resilience
+    function withdraw(uint256 amount) external onlyVault returns (uint256 returned) {
+        uint256 beforeBalance = usdc.balanceOf(vault);
+        try pool.withdraw(address(usdc), amount, vault) returns (uint256) {}
+        catch {
+            revert WithdrawFailed();
+        }
+        returned = usdc.balanceOf(vault) - beforeBalance;
     }
 
     /// @notice Current value of Aave position in USDC terms
@@ -59,16 +83,17 @@ contract AaveV3Adapter is IYieldAdapter {
         return aUsdc.balanceOf(address(this));
     }
 
+    function sync() external view returns (uint256) {
+        return aUsdc.balanceOf(address(this));
+    }
+
     /// @notice Annualized supply rate (APY) as 1e18-scaled integer
     /// @dev Reads current liquidity rate from pool reserve data.
-    ///      currentLiquidityRate is in RAY (1e27) as a per-second rate.
-    ///      To convert to annual APY in 1e18 scale: (rate_per_sec * 365 days) / RAY
+    ///      currentLiquidityRate is already annualized in RAY (1e27).
     function supplyRatePerYear() external view returns (uint256) {
         IAaveV3Pool.ReserveData memory reserveData = pool.getReserveData(address(usdc));
-        // currentLiquidityRate in RAY (1e27) — per second
-        // Convert: (RAY_rate * 1 year) / RAY = dimensionless * 1e18
-        // So: (liquidityRate * 365 days) / 1e27
-        return (uint256(reserveData.currentLiquidityRate) * SECONDS_PER_YEAR) / RAY;
+        // Convert the annualized RAY value directly to WAD.
+        return uint256(reserveData.currentLiquidityRate) / 1e9;
     }
 
     /// @notice Returns the vault asset (USDC)
@@ -88,19 +113,17 @@ contract AaveV3Adapter is IYieldAdapter {
 
     /// @notice Maximum amount withdrawable in same transaction
     /// @dev aUSDC is 1:1 mint/burn, always fully redeemable. Implements IStrategyAdapter.maxWithdrawable()
+    /// @dev Note: Aave V3 allows instant withdrawals as aTokens are rebasing
     function maxWithdrawable() external view returns (uint256) {
-        return aUsdc.balanceOf(address(this));
+        uint256 position = aUsdc.balanceOf(address(this));
+        uint256 cash = usdc.balanceOf(address(aUsdc));
+        return position < cash ? position : cash;
     }
 
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {
-        return keccak256(abi.encode(
-            address(pool),
-            address(aUsdc),
-            address(usdc),
-            block.chainid
-        ));
+        return keccak256(abi.encode(address(pool), address(aUsdc), address(usdc), block.chainid));
     }
 
     /// @notice List of reward tokens this strategy can claim
@@ -111,7 +134,7 @@ contract AaveV3Adapter is IYieldAdapter {
 
     /// @notice Claimable reward amount for a given token
     /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards controller is integrated.
-    function claimableReward(address token) external view returns (uint256) {
+    function claimableReward(address token) external pure returns (uint256) {
         if (token != COMP) revert UnsupportedRewardToken();
         // Aave V3 rewards controller integration deferred for Phase 2
         return 0;

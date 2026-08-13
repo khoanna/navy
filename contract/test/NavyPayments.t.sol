@@ -145,8 +145,22 @@ contract NavyPaymentsTest is Test {
         return vm.addr(payerPk);
     }
 
-    function _invoiceKey(bytes16 merchantId, bytes16 invoiceId) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(merchantId, invoiceId));
+    function _invoiceKey(bytes16 merchantId, bytes16 invoiceId) internal view returns (bytes32) {
+        return navy.authorizationNonce(merchantId, invoiceId);
+    }
+
+    function test_configurationChangeInvalidatesPendingAuthorization() public {
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"dddddddddddddddddddddddddddddddd");
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signAuth(MID, invoiceId, 500_000, 0, validBefore);
+
+        vm.prank(owner);
+        navy.setMerchantPayout(MID, address(0xBEEF));
+
+        vm.prank(relayer);
+        vm.expectRevert();
+        navy.payInvoice(MID, invoiceId, 500_000, 0, validBefore, _payer(), v, r, s);
     }
 
     /// @dev Sign an EIP-3009 ReceiveWithAuthorization whose nonce = keccak256(merchantId, invoiceId).
@@ -197,7 +211,7 @@ contract NavyPaymentsTest is Test {
         assertEq(usdc.balanceOf(merchantPayout), 990_000);
         assertEq(usdc.balanceOf(treasury), 10_000);
         assertEq(usdc.balanceOf(_payer()), 0);
-        assertTrue(navy.invoicePaid(_invoiceKey(MID, invoiceId)));
+        assertTrue(navy.invoicePaid(navy.invoiceKey(MID, invoiceId)));
     }
 
     function test_payInvoice_zeroFeeWhenFeeBpsZero() public {

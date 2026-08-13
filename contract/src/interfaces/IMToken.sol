@@ -4,13 +4,13 @@ pragma solidity ^0.8.24;
 /// @dev Moonwell mToken interface (Compound-like with 8 decimals)
 interface IMToken {
     /// @notice Mints mTokens to the recipient
-    function mint(address recipient, uint256 mintAmount) external returns (uint256);
+    function mint(uint256 mintAmount) external returns (uint256);
 
     /// @notice Redeems mTokens for underlying
-    function redeem(address redeemTokens, uint256 redeemAmount) external returns (uint256);
+    function redeem(uint256 redeemTokens) external returns (uint256);
 
     /// @notice Redeems underlying for mTokens
-    function redeemUnderlying(address redeemer, uint256 redeemAmount) external returns (uint256);
+    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);
 
     /// @notice Get cash balance (available underlying)
     function getCash() external view returns (uint256);
@@ -35,12 +35,9 @@ interface IMToken {
 
     /// @notice Interest rate model
     function interestRateModel() external view returns (address);
-
-    /// @notice Supply cap
-    function supplyCap() external view returns (uint256);
-
-    /// @notice Mint paused check
-    function mintGuardianPaused() external view returns (bool);
+    function totalBorrows() external view returns (uint256);
+    function totalReserves() external view returns (uint256);
+    function reserveFactorMantissa() external view returns (uint256);
 }
 
 /// @dev Moonwell Comptroller interface
@@ -50,10 +47,18 @@ interface IMComptroller {
     function enterMarkets(address[] memory markets) external returns (uint256[] memory);
     function exitMarket(address market) external returns (uint256);
     function claimReward(uint8 rewardType, address holder, address[] memory realms, bool verbose) external;
+    function mintGuardianPaused(address market) external view returns (bool);
+    function supplyCaps(address market) external view returns (uint256);
 }
 
 /// @dev Moonwell Interest Rate Model
 interface IMInterestRateModel {
-    function getSupplyRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa) external view returns (uint256);
-    function getBorrowRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa) external view returns (uint256);
+    function getSupplyRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa)
+        external
+        view
+        returns (uint256);
+    function getBorrowRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa)
+        external
+        view
+        returns (uint256);
 }

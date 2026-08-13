@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {NavyVaultSRCLA} from "../src/NavyVaultSRCLA.sol";
+import {VaultTypes} from "../src/libraries/VaultTypes.sol";
 
 /// @title Mock USDC for testing
 contract MockUSDCForSRCLA {
@@ -107,6 +108,10 @@ contract MockAdapterForSRCLA {
         return reportedAssets;
     }
 
+    function sync() external view returns (uint256) {
+        return reportedAssets;
+    }
+
     function maxWithdrawable() external view returns (uint256) {
         return withdrawableAssets;
     }
@@ -133,7 +138,7 @@ contract MockAdapterForSRCLA {
         } else {
             reportedAssets = 0;
         }
-        // Transfer is handled separately in the vault context
+        MockUSDCForSRCLA(assetAddress).transfer(vaultAddress, returnedAssets);
     }
 }
 
@@ -160,6 +165,39 @@ contract NavyVaultSRCLACoreTest is Test {
         // Register adapter
         vm.prank(admin);
         vault.registerAdapter(address(adapter), 5000, 100, "Test Adapter");
+    }
+
+    function _singleActionPlan(NavyVaultSRCLA.Action memory action, bytes32 decisionHash)
+        internal
+        view
+        returns (VaultTypes.PlanHeader memory header, bytes32 leaf)
+    {
+        header = VaultTypes.PlanHeader({
+            planId: action.planId,
+            policyVersion: 1,
+            createdAt: uint64(block.timestamp),
+            expiresAt: uint64(block.timestamp + 1 hours),
+            actionCount: 1,
+            snapshotBlockNumber: block.number,
+            snapshotHash: keccak256("snapshot"),
+            decisionHash: decisionHash,
+            configurationDigest: vault.currentConfigurationDigest(),
+            reserve: 0,
+            minFinalAssets: 0,
+            maxRecognizedLoss: type(uint256).max,
+            turnoverLimit: type(uint256).max
+        });
+        leaf = vault.hashPlanAction(vault.planDomain(header), action);
+    }
+
+    function _submitSingleAction(NavyVaultSRCLA.Action memory action, bytes32 decisionHash) internal {
+        (VaultTypes.PlanHeader memory header, bytes32 leaf) = _singleActionPlan(action, decisionHash);
+        vm.prank(allocator);
+        vault.submitPlan(header, leaf);
+    }
+
+    function _executeSingleAction(NavyVaultSRCLA.Action memory action) internal {
+        vault.executeNextActionWithProof(new bytes32[](0), action);
     }
 
     // ---- Deposit Tests ----
@@ -218,8 +256,7 @@ contract NavyVaultSRCLACoreTest is Test {
 
     // ---- Mint Tests ----
 
-    function test_mintStillWorksWhenPaused() public {
-        // Per brief, mint should work when paused (unlike deposit which reverts)
+    function test_mintRevertsWhenPaused() public {
         // First, do a normal deposit to have assets in the vault
         uint256 depositAmount = 1000e6;
         usdc.mint(alice, depositAmount);
@@ -232,17 +269,16 @@ contract NavyVaultSRCLACoreTest is Test {
         vm.prank(admin);
         vault.pause();
 
-        // Mint should NOT revert when paused (deposit reverts but mint is allowed)
         uint256 mintAmount = 500e6;
         usdc.mint(bob, mintAmount);
         vm.prank(bob);
         usdc.approve(address(vault), mintAmount);
 
-        // This should succeed without revert
         vm.prank(bob);
-        uint256 shares = vault.mint(mintAmount, bob);
+        vm.expectRevert(NavyVaultSRCLA.DepositPaused.selector);
+        vault.mint(mintAmount, bob);
 
-        assertGt(shares, 0, "mint should succeed when paused");
+        assertEq(vault.balanceOf(bob), 0, "paused mint must not create shares");
     }
 
     // ---- Withdraw Tests ----
@@ -260,9 +296,9 @@ contract NavyVaultSRCLACoreTest is Test {
         // Withdraw
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        uint256 assetsWithdrawn = vault.withdraw(depositAmount, alice, alice);
+        uint256 sharesBurned = vault.withdraw(depositAmount, alice, alice);
 
-        assertEq(assetsWithdrawn, depositAmount, "should withdraw deposited amount");
+        assertEq(sharesBurned, shares, "withdraw returns the shares burned");
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore + depositAmount, "alice should receive USDC");
         assertEq(vault.balanceOf(alice), 0, "alice shares should be burned");
     }
@@ -284,15 +320,15 @@ contract NavyVaultSRCLACoreTest is Test {
         // Withdraw should still work (ERC-4626 spec)
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        uint256 assetsWithdrawn = vault.withdraw(depositAmount, alice, alice);
+        uint256 sharesBurned = vault.withdraw(depositAmount, alice, alice);
 
-        assertEq(assetsWithdrawn, depositAmount, "should withdraw when paused");
+        assertEq(sharesBurned, shares, "paused withdrawal returns shares burned");
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore + depositAmount, "alice should receive USDC");
     }
 
     // ---- Redeem Tests ----
 
-    function test_redeemZeroWhenPaused() public {
+    function test_redeemRemainsAvailableWhenPaused() public {
         uint256 depositAmount = 1000e6;
         usdc.mint(alice, depositAmount);
 
@@ -306,8 +342,12 @@ contract NavyVaultSRCLACoreTest is Test {
         vm.prank(admin);
         vault.pause();
 
-        // maxRedeem should return 0 when paused
-        assertEq(vault.maxRedeem(alice), 0, "maxRedeem should be 0 when paused");
+        uint256 shares = vault.balanceOf(alice);
+        assertEq(vault.maxRedeem(alice), shares, "pause must not disable exits");
+
+        vm.prank(alice);
+        uint256 assets = vault.redeem(shares, alice, alice);
+        assertEq(assets, depositAmount, "redeem should remain available while paused");
     }
 
     // ---- Adapter Tests ----
@@ -322,6 +362,20 @@ contract NavyVaultSRCLACoreTest is Test {
         vault.registerAdapter(address(wrongAssetAdapter), 5000, 100, "Wrong");
     }
 
+    function test_registerAdapter_rejectsDuplicateActiveAdapter() public {
+        vm.prank(admin);
+        vm.expectRevert(NavyVaultSRCLA.AdapterAlreadyRegistered.selector);
+        vault.registerAdapter(address(adapter), 5000, 100, "Duplicate");
+    }
+
+    function test_registerAdapter_rejectsInvalidBps() public {
+        MockAdapterForSRCLA another = new MockAdapterForSRCLA(address(vault), address(usdc), keccak256("another"));
+
+        vm.prank(admin);
+        vm.expectRevert(NavyVaultSRCLA.AdapterConfigInvalid.selector);
+        vault.registerAdapter(address(another), 10_001, 100, "Invalid cap");
+    }
+
     function test_adapterCanBeDisabled() public {
         // Simply verify that we can set the adapter state to disabled without errors
         vm.prank(admin);
@@ -334,8 +388,7 @@ contract NavyVaultSRCLACoreTest is Test {
     // ---- Plan Execution Tests ----
 
     function test_executePlan_createsActivePlan() public {
-        NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
-        actions[0] = NavyVaultSRCLA.Action({
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(keccak256("plan-1")),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
@@ -348,7 +401,7 @@ contract NavyVaultSRCLACoreTest is Test {
         bytes32 decisionHash = keccak256("decision");
 
         vm.prank(allocator);
-        vault.executePlan(planId, decisionHash, uint64(block.timestamp + 3600), actions);
+        _submitSingleAction(action, decisionHash);
 
         assertEq(vault.getActivePlanPlanId(), planId, "planId should be set");
         assertEq(vault.getActivePlanDecisionHash(), decisionHash, "decisionHash should be set");
@@ -356,8 +409,7 @@ contract NavyVaultSRCLACoreTest is Test {
     }
 
     function test_executePlan_rejectsActivePlan() public {
-        NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
-        actions[0] = NavyVaultSRCLA.Action({
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(keccak256("plan-1")),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
@@ -366,22 +418,19 @@ contract NavyVaultSRCLACoreTest is Test {
             minOut: 0
         });
 
-        bytes32 planId1 = keccak256("plan-1");
-        bytes32 planId2 = keccak256("plan-2");
-
         vm.prank(allocator);
-        vault.executePlan(planId1, keccak256("decision"), uint64(block.timestamp + 3600), actions);
+        _submitSingleAction(action, keccak256("decision"));
 
         // Try to create another plan while one is active
+        (VaultTypes.PlanHeader memory header, bytes32 leaf) = _singleActionPlan(action, keccak256("decision2"));
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.PlanAlreadyActive.selector);
-        vault.executePlan(planId2, keccak256("decision2"), uint64(block.timestamp + 7200), actions);
+        vault.submitPlan(header, leaf);
     }
 
     function test_executeNextAction_executesPlanAction() public {
         // Setup plan with harvest action
-        NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
-        actions[0] = NavyVaultSRCLA.Action({
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(keccak256("plan-1")),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
@@ -393,18 +442,17 @@ contract NavyVaultSRCLACoreTest is Test {
         bytes32 planId = keccak256("plan-1");
 
         vm.prank(allocator);
-        vault.executePlan(planId, keccak256("decision"), uint64(block.timestamp + 3600), actions);
+        _submitSingleAction(action, keccak256("decision"));
 
         vm.prank(allocator);
-        vault.executeNextAction();
+        _executeSingleAction(action);
 
         // Plan should be completed (single action)
         assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be completed and cleared");
     }
 
     function test_cancelPlan_clearsActivePlan() public {
-        NavyVaultSRCLA.Action[] memory actions = new NavyVaultSRCLA.Action[](1);
-        actions[0] = NavyVaultSRCLA.Action({
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(keccak256("plan-1")),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Harvest,
@@ -416,7 +464,7 @@ contract NavyVaultSRCLACoreTest is Test {
         bytes32 planId = keccak256("plan-1");
 
         vm.prank(allocator);
-        vault.executePlan(planId, keccak256("decision"), uint64(block.timestamp + 3600), actions);
+        _submitSingleAction(action, keccak256("decision"));
 
         vm.prank(allocator);
         vault.cancelPlan();
@@ -476,5 +524,97 @@ contract NavyVaultSRCLACoreTest is Test {
 
         uint256 assetsBack = vault.convertToAssets(shares);
         assertGt(assetsBack, depositAmount, "share value should increase with yield");
+    }
+
+    function test_withdrawOneAssetAfterYieldBurnsShares() public {
+        uint256 depositAmount = 100e6;
+        usdc.mint(alice, depositAmount);
+        vm.startPrank(alice);
+        usdc.approve(address(vault), depositAmount);
+        vault.deposit(depositAmount, alice);
+        vm.stopPrank();
+        usdc.mint(address(vault), 10e6);
+
+        uint256 sharesBefore = vault.balanceOf(alice);
+        vm.prank(alice);
+        uint256 burned = vault.withdraw(1, alice, alice);
+
+        assertGt(burned, 0, "positive withdrawal must burn shares");
+        assertEq(vault.balanceOf(alice), sharesBefore - burned);
+    }
+
+    function test_withdrawSourcesAdvertisedAdapterLiquidity() public {
+        uint256 depositAmount = 1_000e6;
+        usdc.mint(alice, depositAmount);
+        vm.startPrank(alice);
+        usdc.approve(address(vault), depositAmount);
+        vault.deposit(depositAmount, alice);
+        vm.stopPrank();
+
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
+            planId: uint256(keccak256("deploy-liquidity")),
+            index: 0,
+            kind: NavyVaultSRCLA.ActionKind.Deploy,
+            adapter: address(adapter),
+            amount: 400e6,
+            minOut: 400e6
+        });
+        _submitSingleAction(action, keccak256("deploy-decision"));
+        vm.prank(allocator);
+        _executeSingleAction(action);
+
+        assertEq(usdc.balanceOf(address(vault)), 600e6);
+        assertGe(vault.maxWithdraw(alice), 800e6);
+
+        vm.prank(alice);
+        vault.withdraw(800e6, alice, alice);
+        assertEq(usdc.balanceOf(alice), 800e6, "advertised strategy liquidity must execute");
+    }
+
+    function test_redeemSyncsAccruedStrategyYieldBeforePricing() public {
+        usdc.mint(alice, 100e6);
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 100e6);
+        vault.deposit(100e6, alice);
+        vm.stopPrank();
+
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
+            planId: uint256(keccak256("yield-sync")),
+            index: 0,
+            kind: NavyVaultSRCLA.ActionKind.Deploy,
+            adapter: address(adapter),
+            amount: 50e6,
+            minOut: 50e6
+        });
+        _submitSingleAction(action, keccak256("yield-sync-decision"));
+        vm.prank(allocator);
+        _executeSingleAction(action);
+
+        adapter.setReportedAssets(60e6);
+        adapter.setWithdrawable(60e6);
+        usdc.mint(address(adapter), 10e6);
+
+        uint256 shares = vault.balanceOf(alice);
+        vm.prank(alice);
+        uint256 assetsOut = vault.redeem(shares, alice, alice);
+
+        assertGt(assetsOut, 100e6, "redeemer must receive accrued strategy yield");
+    }
+
+    function test_donationCannotMakeVictimDepositMintZeroShares() public {
+        usdc.mint(alice, 1_000_001);
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 1);
+        vault.deposit(1, alice);
+        usdc.transfer(address(vault), 1_000_000);
+        vm.stopPrank();
+
+        usdc.mint(bob, 500_000);
+        vm.startPrank(bob);
+        usdc.approve(address(vault), 500_000);
+        uint256 victimShares = vault.deposit(500_000, bob);
+        vm.stopPrank();
+
+        assertGt(victimShares, 0, "donation must not zero-round victim shares");
     }
 }

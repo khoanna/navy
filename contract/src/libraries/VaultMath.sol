@@ -1,68 +1,49 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
 /// @title VaultMath Library
 /// @notice Library for share/asset conversions used by NavyVault
+/// @dev SECURITY: Implements proper ERC4626 rounding:
+///      - convertToShares: rounds DOWN (favors vault, prevents inflation attacks)
+///      - convertToAssets: rounds UP (favors vault for withdrawals)
+///      - Includes virtual offset to prevent first-depositor inflation attacks
 library VaultMath {
-    /// @notice Thrown when denominator is zero in mulDiv
-    error DivisionByZero();
+    /// @notice Virtual assets offset to prevent first-depositor inflation attacks
+    /// @dev Per OpenZeppelin ERC4626, this creates a minimum exchange rate on first deposit
+    uint256 private constant VIRTUAL_ASSETS = 1;
 
-    /// @notice Convert assets to shares with optional rounding up
+    /// @notice Virtual shares offset to prevent first-depositor inflation attacks
+    uint256 private constant VIRTUAL_SHARES = 1e6;
+
+    /// @notice Convert assets to shares with proper rounding (round DOWN per ERC4626)
     /// @param assets The amount of assets to convert
     /// @param totalAssets The total assets in the vault
     /// @param totalShares The total shares outstanding
-    /// @param roundUp Whether to round up on division
     /// @return shares The resulting share amount
-    function convertToShares(uint256 assets, uint256 totalAssets, uint256 totalShares, bool roundUp)
+    /// @dev SECURITY: Uses virtual offset to prevent first-depositor inflation attacks.
+    ///      Rounds DOWN so users get fewer shares, protecting against share price manipulation.
+    function convertToShares(uint256 assets, uint256 totalAssets, uint256 totalShares)
         internal
         pure
         returns (uint256 shares)
     {
-        if (totalAssets == 0) {
-            return assets;
-        }
-        shares = mulDiv(assets, totalShares, totalAssets);
-        if (roundUp && mulDiv(shares, totalAssets, totalShares) < assets) {
-            shares += 1;
-        }
+        shares = Math.mulDiv(assets, totalShares + VIRTUAL_SHARES, totalAssets + VIRTUAL_ASSETS, Math.Rounding.Floor);
     }
 
-    /// @notice Convert shares to assets (always rounds down)
+    /// @notice Convert shares to assets with proper rounding (round UP per ERC4626)
     /// @param shares The amount of shares to convert
     /// @param totalAssets The total assets in the vault
     /// @param totalShares The total shares outstanding
     /// @return assets The resulting asset amount
+    /// @dev SECURITY: Rounds UP so users get fewer assets on withdrawal (vault favorable).
     function convertToAssets(uint256 shares, uint256 totalAssets, uint256 totalShares)
         internal
         pure
         returns (uint256 assets)
     {
-        if (totalShares == 0) {
-            return shares;
-        }
-        assets = mulDiv(shares, totalAssets, totalShares);
-    }
-
-    /// @notice Safe multiplication with division
-    /// @dev Reverts on division by zero or multiplication overflow
-    /// @param a The first operand
-    /// @param b The second operand
-    /// @param denominator The divisor
-    /// @return result The result of (a * b) / denominator
-    function mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
-        if (denominator == 0) {
-            revert DivisionByZero();
-        }
-
-        // Overflow check: if a != 0 and prod / a != b, overflow occurred
-        // prod = a * b (may overflow to low 256 bits)
-        // If no overflow: prod / a = b
-        // If overflow: prod / a ≠ b (div wraps to different value)
-        uint256 prod = a * b;
-        if (a != 0 && prod / a != b) {
-            assembly { revert(0, 0) } // overflow panic
-        }
-        result = prod / denominator;
+        return Math.mulDiv(shares, totalAssets + VIRTUAL_ASSETS, totalShares + VIRTUAL_SHARES, Math.Rounding.Ceil);
     }
 
     /// @notice Preview deposit, respecting max deposit limit

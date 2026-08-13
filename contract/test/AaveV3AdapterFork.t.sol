@@ -33,7 +33,10 @@ contract AaveV3AdapterForkTest is Test {
     }
 
     modifier withFork() {
-        if (!forkCreated) return;
+        if (!forkCreated) {
+            vm.skip(true);
+            return;
+        }
         _;
     }
 
@@ -75,7 +78,7 @@ contract AaveV3AdapterForkTest is Test {
 
         uint256 vaultBalanceBefore = IERC20(USDC).balanceOf(VAULT);
         vm.prank(VAULT);
-        adapter.withdraw(aUsdcBalance, VAULT);
+        adapter.withdraw(aUsdcBalance);
 
         uint256 vaultBalanceAfter = IERC20(USDC).balanceOf(VAULT);
         assertGt(vaultBalanceAfter, vaultBalanceBefore, "should receive USDC");
@@ -95,7 +98,7 @@ contract AaveV3AdapterForkTest is Test {
         address alice = makeAddr("alice");
         vm.prank(alice);
         vm.expectRevert(AaveV3Adapter.NotVault.selector);
-        adapter.withdraw(100e6, alice);
+        adapter.withdraw(100e6);
     }
 
     // ---- Core Functionality Tests ----
@@ -123,7 +126,7 @@ contract AaveV3AdapterForkTest is Test {
 
         // Withdraw
         vm.prank(VAULT);
-        adapter.withdraw(assets, VAULT);
+        adapter.withdraw(assets);
 
         uint256 vaultBalance = IERC20(USDC).balanceOf(VAULT);
         assertApproxEqAbs(vaultBalance, assets, 5, "should return USDC");
@@ -149,7 +152,7 @@ contract AaveV3AdapterForkTest is Test {
             adapter.deposit(amount);
             uint256 assets = adapter.totalAssets();
             vm.prank(VAULT);
-            adapter.withdraw(assets, VAULT);
+            adapter.withdraw(assets);
         }
 
         assertEq(adapter.totalAssets(), 0, "should be 0 after cycles");

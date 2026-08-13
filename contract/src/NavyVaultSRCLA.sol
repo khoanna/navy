@@ -9,23 +9,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IVaultEvents} from "./interfaces/IVaultEvents.sol";
-import {VaultMath} from "./libraries/VaultMath.sol";
 import {IRewardExecutor} from "./interfaces/IRewardExecutor.sol";
 import {MerkleTree} from "./libraries/MerkleTree.sol";
 import {VaultTypes} from "./libraries/VaultTypes.sol";
+import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
 
 /// @notice Strategy adapter interface
-interface IStrategyAdapterVault {
-    function vault() external view returns (address);
-    function asset() external view returns (address);
-    function deposit(uint256 assets) external returns (uint256 credited);
-    function withdraw(uint256 assets) external returns (uint256 returned);
-    function totalAssets() external view returns (uint256);
-    function maxWithdrawable() external view returns (uint256);
-    function rewardTokens() external view returns (address[] memory);
-    function claimableReward(address token) external view returns (uint256);
-}
-
 /// @title NavyVaultSRCLA
 /// @notice ERC-4626 vault with staged plan execution for SRCLA
 /// @dev Uses ERC20 as base and ERC4626 separately with explicit constructor arguments
@@ -77,6 +66,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Minimum idle base units to maintain
     uint256 public minIdleBps = 50; // 0.5%
 
+    uint256 public constant MAX_ADAPTERS = 16;
+
     /// @notice Reward executor for swapping reward tokens to USDC
     address public rewardExecutor;
 
@@ -109,6 +100,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Merkle root for active plan
     bytes32 public activePlanMerkleRoot;
+
+    /// @notice Domain/configuration commitment for the active Merkle plan.
+    bytes32 public activePlanDomain;
+    bytes32 public activePlanConfigurationDigest;
+
+    /// @notice Risk limits committed by the active plan header.
+    uint256 public activePlanReserve;
+    uint256 public activePlanMinFinalAssets;
+    uint256 public activePlanMaxRecognizedLoss;
+    uint256 public activePlanStartingRecognizedLoss;
+    uint256 public activePlanTurnoverLimit;
+    uint256 public activePlanTurnover;
 
     /// @notice Tracks used plan IDs for replay protection
     mapping(bytes32 => bool) public usedPlanIds;
@@ -155,6 +158,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error RewardExecutorNotSet();
     error InvalidRewardRoute();
     error SlippageExceeded();
+    error TooManyAdapters();
+    error InvalidConfigurationDigest();
+    error PlanRiskLimitExceeded();
+    error RewardNotClaimed();
+    error InvalidSwapOutput();
 
     // ---- ExecutionPlan Accessors ----
 
@@ -215,13 +223,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             assets_ += strategyAssets[_activeAdapters[i]];
         }
 
-        assets_ += recognizedRewards;
-
-        if (assets_ >= recognizedLosses) {
-            assets_ -= recognizedLosses;
-        } else {
-            assets_ = 0;
-        }
+        // Realized rewards are already present in the idle asset balance and
+        // realized losses are already absent from live strategy values. The
+        // counters are cumulative telemetry, not additional NAV entries.
     }
 
     function maxDeposit(address) public view override(ERC4626) returns (uint256) {
@@ -240,7 +244,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     }
 
     function maxRedeem(address owner_) public view override(ERC4626) returns (uint256) {
-        if (paused) return 0;
         uint256 maxSharesFromLiquidity = _convertToShares(synchronousLiquidity(), Math.Rounding.Floor);
         return Math.min(balanceOf(owner_), maxSharesFromLiquidity);
     }
@@ -249,22 +252,47 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     function deposit(uint256 assets_, address receiver) public override(ERC4626) returns (uint256 shares) {
         if (paused) revert DepositPaused();
+        _syncAllStrategies();
         return super.deposit(assets_, receiver);
     }
 
-    /// @notice Mint shares - allowed even when paused (per spec)
     function mint(uint256 shares, address receiver) public override(ERC4626) returns (uint256 assets) {
-        // When paused, bypass maxMint check by directly calculating assets
-        if (paused) {
-            assets = _convertToAssets(shares, Math.Rounding.Ceil);
-            return assets;
-        }
+        if (paused) revert DepositPaused();
+        _syncAllStrategies();
         return super.mint(shares, receiver);
+    }
+
+    function withdraw(uint256 assets_, address receiver, address owner_)
+        public
+        override(ERC4626)
+        returns (uint256 shares)
+    {
+        _syncAllStrategies();
+        return super.withdraw(assets_, receiver, owner_);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner_)
+        public
+        override(ERC4626)
+        returns (uint256 assets_)
+    {
+        _syncAllStrategies();
+        return super.redeem(shares, receiver, owner_);
     }
 
     /// @notice Preview mint - override to allow when paused
     function previewMint(uint256 shares) public view override(ERC4626) returns (uint256 assets) {
         return _convertToAssets(shares, Math.Rounding.Ceil);
+    }
+
+    /// @dev Source strategy liquidity before OpenZeppelin burns shares and
+    /// transfers assets. The adapter order is the bounded registry order.
+    function _withdraw(address caller, address receiver, address owner_, uint256 assets, uint256 shares)
+        internal
+        override
+    {
+        _ensureIdle(assets);
+        super._withdraw(caller, receiver, owner_, assets, shares);
     }
 
     // ---- Admin Functions ----
@@ -275,11 +303,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         onlyRole(ADMIN_ROLE)
     {
         if (adapter == address(0)) revert ZeroAddress();
-        if (adapters[adapter].state != AdapterState.Removed && adapters[adapter].state != AdapterState(0)) {
-            revert AdapterAlreadyRegistered();
-        }
+        if (registeredAdapters[adapter]) revert AdapterAlreadyRegistered();
+        if (_activeAdapters.length >= MAX_ADAPTERS) revert TooManyAdapters();
+        if (capBps > 10_000 || maxLossBps > 10_000) revert AdapterConfigInvalid();
 
-        IStrategyAdapterVault a = IStrategyAdapterVault(adapter);
+        IStrategyAdapter a = IStrategyAdapter(adapter);
         if (a.asset() != asset()) revert AdapterAssetMismatch();
         if (a.vault() != address(this)) revert AdapterVaultMismatch();
 
@@ -314,6 +342,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Set minimum idle bps
     function setMinIdleBps(uint256 bps) external onlyRole(ADMIN_ROLE) {
+        if (bps > 10_000) revert AdapterConfigInvalid();
         minIdleBps = bps;
     }
 
@@ -370,7 +399,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         internal
         returns (uint256 totalUsdcReceived)
     {
-        IStrategyAdapterVault a = IStrategyAdapterVault(adapter);
+        IStrategyAdapter a = IStrategyAdapter(adapter);
         address[] memory tokens = a.rewardTokens();
 
         // Get USDC address
@@ -382,9 +411,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             uint256 claimable = a.claimableReward(token);
 
             if (claimable > 0) {
-                // Claim the reward (adapter should handle claim logic internally)
-                // Note: The adapter's claimableReward might require a claim call first
-                // For tokens that need claiming, this is handled by the adapter
+                // Never account or swap a reported amount that is not actually
+                // present in the vault.
+                if (IERC20(token).balanceOf(address(this)) < claimable) revert RewardNotClaimed();
 
                 // For tokens that go through swap
                 if (token != usdcAddr) {
@@ -394,13 +423,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
                         tokenRouteId = routeId; // Fall back to provided routeId
                     }
 
-                    // Check allowance and approve if needed
-                    if (IERC20(token).allowance(address(this), rewardExecutor) < claimable) {
-                        IERC20(token).forceApprove(rewardExecutor, type(uint256).max);
-                    }
+                    IERC20(token).forceApprove(rewardExecutor, claimable);
 
                     // Swap via executor - pass minOut per token (slippage check is done by executor)
+                    uint256 rewardBefore = IERC20(token).balanceOf(address(this));
+                    uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
                     uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut);
+                    IERC20(token).forceApprove(rewardExecutor, 0);
+                    if (rewardBefore - IERC20(token).balanceOf(address(this)) != claimable) {
+                        revert InvalidSwapOutput();
+                    }
+                    uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
+                    if (actualUsdcOut != usdcOut) revert InvalidSwapOutput();
 
                     // Verify slippage protection - executor enforces minOut per swap
                     if (usdcOut < minOut) revert SlippageExceeded();
@@ -439,46 +473,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         external
         onlyRole(ALLOCATOR_ROLE)
     {
-        if (usedPlanIds[planId]) revert PlanAlreadyExecuted();
-        if (activePlanId != bytes32(0)) revert PlanAlreadyActive();
-        if (expiresAt < block.timestamp) revert PlanExecutionExpired();
-        if (actions.length == 0) revert InvalidPlan();
-
-        // Store actions in the mapping
-        for (uint256 i = 0; i < actions.length; i++) {
-            _planActions[planId][i] = actions[i];
-        }
-
-        activePlanId = planId;
-        activePlanDecisionHash = decisionHash;
-        activePlanExpiresAt = expiresAt;
-        activePlanNextActionIndex = 0;
-        activePlanActionCount = uint32(actions.length);
-
-        emit PlanCreated(planId, decisionHash, expiresAt);
+        // The legacy unhashed plan path cannot bind chain, vault, asset, or
+        // configuration. It is intentionally disabled for production safety.
+        planId;
+        decisionHash;
+        expiresAt;
+        actions;
+        revert InvalidPlan();
     }
 
     /// @notice Execute the next action in the active plan
     function executeNextAction() external onlyRole(ALLOCATOR_ROLE) {
-        if (activePlanId == bytes32(0)) revert PlanNotActive();
-        if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
-
-        uint256 nextIndex = activePlanNextActionIndex;
-        if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
-
-        Action memory action = _planActions[activePlanId][nextIndex];
-        _executeAction(action);
-
-        activePlanNextActionIndex = uint64(nextIndex + 1);
-
-        if (activePlanNextActionIndex >= activePlanActionCount) {
-            usedPlanIds[activePlanId] = true;
-            bytes32 completedPlanId = activePlanId;
-            _clearActivePlan();
-            emit PlanCompleted(completedPlanId);
-        } else {
-            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(action.kind)), action.amount);
-        }
+        revert InvalidPlan();
     }
 
     /// @notice Submit a plan with Merkle root for verified execution
@@ -489,14 +495,30 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (usedPlanIds[planId]) revert PlanAlreadyUsed();
         if (activePlanId != bytes32(0)) revert PlanAlreadyActive();
         if (header.expiresAt < block.timestamp) revert PlanExecutionExpired();
-        if (header.actionCount == 0) revert InvalidPlan();
+        if (
+            planId == bytes32(0) || header.actionCount == 0 || merkleRoot == bytes32(0)
+                || header.decisionHash == bytes32(0) || header.snapshotHash == bytes32(0)
+                || header.createdAt > block.timestamp || header.expiresAt <= header.createdAt
+                || header.snapshotBlockNumber > block.number
+        ) revert InvalidPlan();
+
+        bytes32 configurationDigest_ = currentConfigurationDigest();
+        if (header.configurationDigest != configurationDigest_) revert InvalidConfigurationDigest();
 
         activePlanId = planId;
         activePlanDecisionHash = header.decisionHash;
         activePlanExpiresAt = header.expiresAt;
         activePlanActionCount = header.actionCount;
         activePlanMerkleRoot = merkleRoot;
+        activePlanDomain = planDomain(header);
+        activePlanConfigurationDigest = configurationDigest_;
         activePlanNextActionIndex = 0;
+        activePlanReserve = header.reserve;
+        activePlanMinFinalAssets = header.minFinalAssets;
+        activePlanMaxRecognizedLoss = header.maxRecognizedLoss;
+        activePlanStartingRecognizedLoss = recognizedLosses;
+        activePlanTurnoverLimit = header.turnoverLimit;
+        activePlanTurnover = 0;
 
         emit PlanSubmitted(planId, merkleRoot);
     }
@@ -510,21 +532,29 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     {
         if (activePlanId == bytes32(0)) revert PlanNotActive();
         if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
+        if (currentConfigurationDigest() != activePlanConfigurationDigest) revert InvalidConfigurationDigest();
 
         uint256 nextIndex = activePlanNextActionIndex;
         if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
 
+        // Enforce sequential action execution to prevent out-of-order execution
+        if (action.index != nextIndex) revert InvalidActionIndex();
+        if (action.planId != uint256(activePlanId)) revert InvalidPlan();
+
         // Build the action leaf and verify Merkle proof
-        bytes32 actionLeaf = keccak256(abi.encode(action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut));
+        bytes32 actionLeaf = hashPlanAction(activePlanDomain, action);
         if (!MerkleTree.verifyProof(actionLeaf, merkleProof, activePlanMerkleRoot)) {
             revert InvalidMerkleProof();
         }
 
         _executeAction(action);
+        activePlanTurnover += action.amount;
+        _enforceActivePlanRiskLimits(false);
 
         activePlanNextActionIndex = uint64(nextIndex + 1);
 
         if (activePlanNextActionIndex >= activePlanActionCount) {
+            _enforceActivePlanRiskLimits(true);
             usedPlanIds[activePlanId] = true;
             bytes32 completedPlanId = activePlanId;
             _clearActivePlan();
@@ -535,10 +565,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     }
 
     /// @notice Cancel the active plan
+    /// @dev Marks plan as used to prevent replay after cancellation
     function cancelPlan() external onlyRole(ALLOCATOR_ROLE) {
         if (activePlanId == bytes32(0)) revert PlanNotActive();
 
         bytes32 planId = activePlanId;
+        usedPlanIds[planId] = true; // Prevent plan replay after cancellation
         _clearActivePlan();
 
         emit PlanCancelled(planId);
@@ -552,6 +584,57 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         delete activePlanNextActionIndex;
         delete activePlanActionCount;
         delete activePlanMerkleRoot;
+        delete activePlanDomain;
+        delete activePlanConfigurationDigest;
+        delete activePlanReserve;
+        delete activePlanMinFinalAssets;
+        delete activePlanMaxRecognizedLoss;
+        delete activePlanStartingRecognizedLoss;
+        delete activePlanTurnoverLimit;
+        delete activePlanTurnover;
+    }
+
+    /// @notice Digest of the vault and registered strategy configuration.
+    function currentConfigurationDigest() public view returns (bytes32 digest) {
+        digest = keccak256(abi.encode(block.chainid, address(this), asset(), minIdleBps, rewardExecutor));
+        uint256 count = _activeAdapters.length;
+        for (uint256 i = 0; i < count; i++) {
+            address adapter = _activeAdapters[i];
+            AdapterConfig memory config = adapters[adapter];
+            digest = keccak256(
+                abi.encode(
+                    digest,
+                    adapter,
+                    config.capBps,
+                    config.maxLossBps,
+                    config.state,
+                    IStrategyAdapter(adapter).configurationDigest()
+                )
+            );
+        }
+    }
+
+    /// @notice Domain hash binding a plan header to this chain, vault and asset.
+    function planDomain(VaultTypes.PlanHeader calldata header) public view returns (bytes32) {
+        return keccak256(abi.encode(block.chainid, address(this), asset(), keccak256(abi.encode(header))));
+    }
+
+    /// @notice Canonical Merkle leaf for a domain-bound plan action.
+    function hashPlanAction(bytes32 domain, Action memory action) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(domain, action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut)
+        );
+    }
+
+    function _enforceActivePlanRiskLimits(bool finalCheck) internal view {
+        if (IERC20(asset()).balanceOf(address(this)) < activePlanReserve) revert PlanRiskLimitExceeded();
+        if (recognizedLosses - activePlanStartingRecognizedLoss > activePlanMaxRecognizedLoss) {
+            revert PlanRiskLimitExceeded();
+        }
+        if (activePlanTurnoverLimit != 0 && activePlanTurnover > activePlanTurnoverLimit) {
+            revert PlanRiskLimitExceeded();
+        }
+        if (finalCheck && totalAssets() < activePlanMinFinalAssets) revert PlanRiskLimitExceeded();
     }
 
     // ---- Internal Helpers ----
@@ -572,7 +655,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (currentStrategyAssets + amount > cap) revert AdapterCapExceeded();
 
         IERC20(asset()).safeTransfer(adapter, amount);
-        uint256 credited = IStrategyAdapterVault(adapter).deposit(amount);
+        uint256 credited = IStrategyAdapter(adapter).deposit(amount);
         if (credited < minOut) revert AdapterLossExceeded();
 
         strategyAssets[adapter] += credited;
@@ -589,7 +672,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         }
 
         uint256 beforeBalance = IERC20(asset()).balanceOf(address(this));
-        uint256 returned = IStrategyAdapterVault(adapter).withdraw(amount);
+        IStrategyAdapter(adapter).withdraw(amount);
         uint256 afterBalance = IERC20(asset()).balanceOf(address(this));
         uint256 received = afterBalance - beforeBalance;
 
@@ -601,11 +684,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         }
 
         if (received < minOut) revert AdapterLossExceeded();
-        if (strategyAssets[adapter] >= received) {
-            strategyAssets[adapter] -= received;
-        } else {
-            strategyAssets[adapter] = 0;
-        }
+        _syncStrategyAssetsStrict(adapter);
     }
 
     /// @notice Execute a single action
@@ -628,10 +707,25 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Sync strategy assets from adapter
     function _syncStrategyAssets(address adapter) internal {
-        try IStrategyAdapterVault(adapter).totalAssets() returns (uint256 assets_) {
+        try IStrategyAdapter(adapter).sync() returns (uint256 assets_) {
             strategyAssets[adapter] = assets_;
         } catch {
             // Keep existing value on read failure
+        }
+    }
+
+    function _syncStrategyAssetsStrict(address adapter) internal {
+        try IStrategyAdapter(adapter).sync() returns (uint256 assets_) {
+            strategyAssets[adapter] = assets_;
+        } catch {
+            revert AdapterConfigInvalid();
+        }
+    }
+
+    function _syncAllStrategies() internal {
+        uint256 count = _activeAdapters.length;
+        for (uint256 i = 0; i < count; i++) {
+            _syncStrategyAssetsStrict(_activeAdapters[i]);
         }
     }
 
@@ -657,6 +751,32 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return Math.mulDiv(totalAssets(), minIdleBps, 10_000);
     }
 
+    function _ensureIdle(uint256 assets) internal {
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        if (idle >= assets) return;
+
+        uint256 count = _activeAdapters.length;
+        for (uint256 i = 0; i < count && idle < assets; i++) {
+            address adapter = _activeAdapters[i];
+            AdapterState state = adapters[adapter].state;
+            if (state != AdapterState.Active && state != AdapterState.Disabled) continue;
+
+            uint256 available;
+            try IStrategyAdapter(adapter).maxWithdrawable() returns (uint256 value) {
+                available = Math.min(value, strategyAssets[adapter]);
+            } catch {
+                continue;
+            }
+            uint256 needed = assets - idle;
+            uint256 pull = Math.min(needed, available);
+            if (pull == 0) continue;
+            _divest(adapter, pull, pull);
+            idle = IERC20(asset()).balanceOf(address(this));
+        }
+
+        if (idle < assets) revert InsufficientIdle();
+    }
+
     /// @notice Get synchronous liquidity (idle + max withdrawable)
     function synchronousLiquidity() public view returns (uint256) {
         uint256 liquidity = IERC20(asset()).balanceOf(address(this));
@@ -666,11 +786,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             address adapter = _activeAdapters[i];
             if (adapters[adapter].state == AdapterState.Active || adapters[adapter].state == AdapterState.Disabled) {
                 // slither-disable-next-line calls-loop
-                try IStrategyAdapterVault(adapter).maxWithdrawable() returns (uint256 maxWd) {
+                try IStrategyAdapter(adapter).maxWithdrawable() returns (uint256 maxWd) {
                     uint256 assets = strategyAssets[adapter];
                     liquidity += maxWd < assets ? maxWd : assets;
                 } catch {
-                    liquidity += strategyAssets[adapter];
+                    // A failed liquidity read is not evidence of available liquidity.
                 }
             }
         }
@@ -683,26 +803,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return _activeAdapters;
     }
 
-    /// @notice Convert shares to assets
-    function _convertToShares(uint256 assets, Math.Rounding rounding)
-        internal
-        view
-        override(ERC4626)
-        returns (uint256)
-    {
-        return VaultMath.convertToShares(assets, totalAssets(), totalSupply(), rounding == Math.Rounding.Ceil);
-    }
-
-    /// @notice Convert assets to shares
-    function _convertToAssets(
-        uint256 shares,
-        Math.Rounding /* rounding */
-    )
-        internal
-        view
-        override(ERC4626)
-        returns (uint256)
-    {
-        return VaultMath.convertToAssets(shares, totalAssets(), totalSupply());
+    /// @dev Six extra share decimals strengthen OpenZeppelin's additive virtual
+    /// share protection for a six-decimal asset without changing asset units.
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 6;
     }
 }

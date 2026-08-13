@@ -16,8 +16,5 @@ interface IPriceFeed {
     /// @param maxAge Maximum age in seconds before reverting with stale price
     /// @param maxDeviationBps Maximum deviation in basis points from previous price
     /// @return The price if fresh and within deviation
-    function getPriceWithDeviation(uint256 maxAge, uint256 maxDeviationBps)
-        external
-        view
-        returns (int256);
+    function getPriceWithDeviation(uint256 maxAge, uint256 maxDeviationBps) external view returns (int256);
 }
