@@ -16,6 +16,11 @@ contract CompoundAdapterForkTest is Test {
     address constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
     address constant COMET_REWARDS = 0x123964802e6ABabBE1Bc9547D72Ef1B69B00A6b1;
     address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
+    address constant COMET_EXTENSION = 0x220Da2686dC870aC0A97498A1845e610d2f13431;
+    uint256 constant PINNED_BLOCK = 49_926_094;
+    bytes32 constant PINNED_BLOCK_HASH = 0xb0814321bf0e80894112f59df791bc1e471d6d63d0adfe5ff23f4b8eecaf004c;
+    bytes32 constant COMET_PROXY_CODEHASH = 0x64952234eab8f3aed74355c49119f627965640b1efeb6b28430b5a31b0d3b192;
+    bytes32 constant COMET_EXTENSION_CODEHASH = 0x89548b70bc59a9d58782d68b1da411568dbb9e9f40dabee5cab83393016138d0;
 
     address VAULT;
     CompoundAdapter adapter;
@@ -24,9 +29,9 @@ contract CompoundAdapterForkTest is Test {
         VAULT = makeAddr("vault");
         string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
-        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
-        if (forkBlock == 0) vm.createSelectFork(rpc);
-        else vm.createSelectFork(rpc, forkBlock);
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", PINNED_BLOCK);
+        require(forkBlock == PINNED_BLOCK, "Compound fork must use the audited pinned block");
+        vm.createSelectFork(rpc, forkBlock);
         adapter = new CompoundAdapter(VAULT, USDC, COMET);
     }
 
@@ -110,11 +115,22 @@ contract CompoundAdapterForkTest is Test {
         assertEq(config.rescaleFactor, 1e12);
         assertTrue(config.shouldUpscale);
         assertEq(config.multiplier, 1e18);
+        assertEq(IComet(COMET).extensionDelegate(), COMET_EXTENSION);
+        assertEq(COMET.codehash, COMET_PROXY_CODEHASH);
+        assertEq(COMET_EXTENSION.codehash, COMET_EXTENSION_CODEHASH);
+    }
+
+    function test_forkIsTheAuditedPinnedBlockAndHash() external withFork {
+        assertEq(block.number, PINNED_BLOCK);
+        vm.rollFork(PINNED_BLOCK + 1);
+        assertEq(blockhash(PINNED_BLOCK), PINNED_BLOCK_HASH);
     }
 
     function test_pinnedCompoundRewardsAreInactiveAndNotAdvertised() external withFork {
         assertEq(IComet(COMET).baseTrackingSupplySpeed(), 0, "pinned supply reward speed changed");
-        assertGt(IComet(COMET).totalSupply(), IComet(COMET).baseMinForRewards());
+        IComet.TotalsBasic memory totals = IComet(COMET).totalsBasic();
+        assertEq(totals.totalSupplyBase, 7_569_448_560_192, "pinned principal supply changed");
+        assertGt(totals.totalSupplyBase, IComet(COMET).baseMinForRewards());
         assertEq(IERC20(COMP).balanceOf(COMET_REWARDS), 0, "pinned reward funding changed");
         assertEq(adapter.rewardTokens().length, 0, "inactive COMP must not be advertised");
 

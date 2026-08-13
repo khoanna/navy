@@ -122,27 +122,39 @@ contract CompoundAdapter is IStrategyAdapter {
     }
 
     /// @notice Unique digest of current protocol configuration
-    /// @dev Implements IStrategyAdapter.configurationDigest()
+    /// @dev The proxy's EIP-1967 implementation slot cannot be read by another contract. Bind the accessible proxy
+    /// bytecode, extension implementation identity/code, and every reward-critical live configuration value instead.
     function configurationDigest() external view returns (bytes32) {
-        return keccak256(
+        ICometRewards.RewardConfig memory current = cometRewards.rewardConfig(address(comet));
+        address extension = comet.extensionDelegate();
+        bytes32 codeIdentity = keccak256(
             abi.encode(
                 address(comet),
-                address(usdc),
+                address(comet).codehash,
+                extension,
+                extension.codehash,
                 address(cometRewards),
-                COMP,
-                rewardRescaleFactor,
-                rewardShouldUpscale,
-                rewardMultiplier,
-                block.chainid
+                address(cometRewards).codehash
             )
         );
+        bytes32 rewardRegime = keccak256(
+            abi.encode(
+                current.token,
+                current.rescaleFactor,
+                current.shouldUpscale,
+                current.multiplier,
+                comet.baseTrackingSupplySpeed(),
+                comet.baseMinForRewards()
+            )
+        );
+        return keccak256(abi.encode(codeIdentity, address(usdc), rewardRegime, block.chainid));
     }
 
     /// @notice List of reward tokens this strategy can claim
     /// @dev Implements IStrategyAdapter.rewardTokens()
     function rewardTokens() external view returns (address[] memory) {
         address[] memory active = new address[](1);
-        if (_hasPendingReward() || _hasFundedStoredReward()) {
+        if (_hasPendingReward() || _hasFundedRewardSource()) {
             active[0] = COMP;
             return active;
         }
@@ -224,15 +236,18 @@ contract CompoundAdapter is IStrategyAdapter {
         return pending;
     }
 
-    function _hasFundedStoredReward() internal view returns (bool) {
+    function _hasFundedRewardSource() internal view returns (bool) {
         if (!_upstreamRewardActive()) return false;
+        uint256 funding = IERC20(COMP).balanceOf(address(cometRewards));
+        if (funding == 0) return false;
         uint256 owed = _storedRewardOwed();
-        return owed != 0 && IERC20(COMP).balanceOf(address(cometRewards)) >= owed;
+        return owed == 0 || funding >= owed;
     }
 
     function _upstreamRewardActive() internal view returns (bool) {
         if (!_rewardConfigurationCurrent()) return false;
-        return comet.baseTrackingSupplySpeed() != 0 && comet.totalSupply() >= comet.baseMinForRewards();
+        IComet.TotalsBasic memory totals = comet.totalsBasic();
+        return comet.baseTrackingSupplySpeed() != 0 && totals.totalSupplyBase >= comet.baseMinForRewards();
     }
 
     function _rewardConfigurationCurrent() internal view returns (bool) {
