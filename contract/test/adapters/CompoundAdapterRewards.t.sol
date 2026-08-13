@@ -92,6 +92,10 @@ contract CompoundAdapterRewardsTest is Test {
         assertGt(uint256(digest), 0, "digest should be non-zero");
     }
 
+    function test_compound_maxDeployableIsUnboundedByProtocolSupplyCap() external view {
+        assertEq(adapter.maxDeployable(), type(uint256).max);
+    }
+
     // ---- maxWithdrawable() ----
     // These require a fork since they call external contracts
 

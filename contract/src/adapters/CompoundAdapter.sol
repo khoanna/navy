@@ -100,6 +100,11 @@ contract CompoundAdapter is IStrategyAdapter {
         return balance < availableInComet ? balance : availableInComet;
     }
 
+    /// @notice Compound III base-asset supply has no protocol supply cap.
+    function maxDeployable() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {

@@ -487,8 +487,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     {
         if (paused) revert DepositPaused();
         if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
-        if (!registeredAdapters[adapter]) revert AdapterNotFound();
-        if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
+        _requireActiveAdapter(adapter);
 
         totalUsdcReceived = _harvestCore(adapter, routeId, minOut);
 
@@ -658,9 +657,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
         if (activePlanNextActionIndex >= activePlanActionCount) {
             _enforceActivePlanRiskLimits(true);
-            uint256 completedReserve = Math.max(activePlanReserve, adminReserve);
-            dynamicReserve = completedReserve;
-            emit DynamicReserveSet(completedReserve);
+            dynamicReserve = activePlanReserve;
+            emit DynamicReserveSet(activePlanReserve);
             usedPlanIds[activePlanId] = true;
             bytes32 completedPlanId = activePlanId;
             _clearActivePlan();
@@ -779,17 +777,16 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
         uint256 currentStrategyAssets = strategyAssets[adapter];
         uint256 nav = totalAssets();
-        uint256 percentCap = Math.mulDiv(nav, adapters[adapter].capBps, 10_000);
-        uint256 cap = Math.min(percentCap, adapters[adapter].absoluteCap);
-
-        if (currentStrategyAssets + amount > cap) revert AdapterCapExceeded();
-        _enforceDependencyGroupCaps(adapter, currentStrategyAssets + amount, nav);
+        _enforceExposureCaps(adapter, currentStrategyAssets + amount, nav);
+        if (amount > IStrategyAdapter(adapter).maxDeployable()) revert AdapterCapExceeded();
 
         IERC20(asset()).safeTransfer(adapter, amount);
         uint256 credited = IStrategyAdapter(adapter).deposit(amount);
         if (credited < minOut) revert AdapterLossExceeded();
 
-        strategyAssets[adapter] += credited;
+        uint256 actualStrategyAssets = currentStrategyAssets + credited;
+        _enforceExposureCaps(adapter, actualStrategyAssets, nav);
+        strategyAssets[adapter] = actualStrategyAssets;
     }
 
     /// @notice Divest funds from an adapter
@@ -826,8 +823,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
             if (paused) revert DepositPaused();
-            // For Harvest action, use the action.amount as the routeId and minOut from action
-            // Note: We skip the adapter validation since plan execution already validates
+            _requireActiveAdapter(action.adapter);
+            // For Harvest action, use the action.amount as the routeId and minOut from action.
             _harvestCore(action.adapter, bytes32(action.amount), action.minOut);
         } else if (action.kind == ActionKind.EmergencyExit) {
             uint256 balance = strategyAssets[action.adapter];
@@ -892,7 +889,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         uint256 idle = IERC20(asset()).balanceOf(address(this));
         if (idle >= assets) return;
 
-        uint256 aggregateLoss;
+        uint256 totalStrategyDebited;
+        uint256 totalReceived;
         uint256 count = _activeAdapters.length;
         for (uint256 i = 0; i < count && idle < assets; i++) {
             address adapter = _activeAdapters[i];
@@ -909,35 +907,52 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             uint256 pull = Math.min(needed, available);
             if (pull == 0) continue;
 
-            uint256 realizedLoss;
-            (idle, realizedLoss) = _pullSynchronousLiquidity(adapter, pull, idle);
-            aggregateLoss += realizedLoss;
-            if (aggregateLoss > Math.mulDiv(assets, maxSynchronousLossBps, 10_000)) {
-                revert SynchronousLossExceeded();
-            }
+            uint256 strategyDebited;
+            uint256 received;
+            (idle, strategyDebited, received) = _pullSynchronousLiquidity(adapter, pull, idle);
+            totalStrategyDebited += strategyDebited;
+            totalReceived += received;
         }
 
         if (idle < assets) revert InsufficientIdle();
+        if (totalStrategyDebited > totalReceived) {
+            uint256 aggregateLoss = totalStrategyDebited - totalReceived;
+            if (aggregateLoss > Math.mulDiv(assets, maxSynchronousLossBps, 10_000)) {
+                revert SynchronousLossExceeded();
+            }
+            recognizedLosses += aggregateLoss;
+        }
     }
 
     function _pullSynchronousLiquidity(address adapter, uint256 pull, uint256 idleBefore)
         internal
-        returns (uint256 idleAfter, uint256 realizedLoss)
+        returns (uint256 idleAfter, uint256 strategyDebited, uint256 received)
     {
         uint256 strategyBefore = strategyAssets[adapter];
         IStrategyAdapter(adapter).withdraw(pull);
         idleAfter = IERC20(asset()).balanceOf(address(this));
-        uint256 received = idleAfter - idleBefore;
+        received = idleAfter - idleBefore;
         _syncStrategyAssetsStrict(adapter);
 
         uint256 strategyAfter = strategyAssets[adapter];
-        uint256 strategyDebited = strategyBefore > strategyAfter ? strategyBefore - strategyAfter : 0;
-        if (strategyDebited <= received) return (idleAfter, 0);
+        strategyDebited = strategyBefore > strategyAfter ? strategyBefore - strategyAfter : 0;
+        if (strategyDebited > received) {
+            uint256 adapterLoss = strategyDebited - received;
+            uint256 adapterAllowedLoss = Math.mulDiv(pull, adapters[adapter].maxLossBps, 10_000);
+            if (adapterLoss > adapterAllowedLoss) revert AdapterLossExceeded();
+        }
+    }
 
-        realizedLoss = strategyDebited - received;
-        uint256 adapterAllowedLoss = Math.mulDiv(pull, adapters[adapter].maxLossBps, 10_000);
-        if (realizedLoss > adapterAllowedLoss) revert AdapterLossExceeded();
-        recognizedLosses += realizedLoss;
+    function _requireActiveAdapter(address adapter) internal view {
+        if (!registeredAdapters[adapter]) revert AdapterNotFound();
+        if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
+    }
+
+    function _enforceExposureCaps(address adapter, uint256 projectedAdapterAssets, uint256 nav) internal view {
+        uint256 percentCap = Math.mulDiv(nav, adapters[adapter].capBps, 10_000);
+        uint256 cap = Math.min(percentCap, adapters[adapter].absoluteCap);
+        if (projectedAdapterAssets > cap) revert AdapterCapExceeded();
+        _enforceDependencyGroupCaps(adapter, projectedAdapterAssets, nav);
     }
 
     function _enforceDependencyGroupCaps(address adapter, uint256 projectedAdapterAssets, uint256 nav) internal view {

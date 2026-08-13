@@ -27,6 +27,9 @@ interface IStrategyAdapter {
     /// @notice Maximum amount withdrawable in same transaction
     function maxWithdrawable() external view returns (uint256);
 
+    /// @notice Maximum additional asset amount deployable under live protocol constraints.
+    function maxDeployable() external view returns (uint256);
+
     /// @notice Unique digest of current protocol configuration
     function configurationDigest() external view returns (bytes32);
 

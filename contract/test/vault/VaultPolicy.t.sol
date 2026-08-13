@@ -58,6 +58,9 @@ contract PolicyAdapter {
     uint256 public withdrawableAssets;
     uint256 public shortfallOnNextWithdraw;
     uint256 public positionLossOnNextWithdraw;
+    uint256 public positionDebitReductionOnNextWithdraw;
+    uint256 public deployableAssets = type(uint256).max;
+    uint256 public creditBonus;
 
     constructor(address vault_, address asset_, bytes32 configurationDigest_) {
         vault = vault_;
@@ -82,21 +85,37 @@ contract PolicyAdapter {
         positionLossOnNextWithdraw = amount;
     }
 
+    function setPositionDebitReductionOnNextWithdraw(uint256 amount) external {
+        positionDebitReductionOnNextWithdraw = amount;
+    }
+
+    function setMaxDeployable(uint256 amount) external {
+        deployableAssets = amount;
+    }
+
+    function setCreditBonus(uint256 amount) external {
+        creditBonus = amount;
+    }
+
     function deposit(uint256 assets) external onlyVault returns (uint256 credited) {
-        reportedAssets += assets;
+        credited = assets + creditBonus;
+        reportedAssets += credited;
         withdrawableAssets += assets;
-        return assets;
     }
 
     function withdraw(uint256 assets) external onlyVault returns (uint256 returnedAssets) {
         uint256 requested = assets < withdrawableAssets ? assets : withdrawableAssets;
         uint256 shortfall = shortfallOnNextWithdraw < requested ? shortfallOnNextWithdraw : requested;
         uint256 positionLoss = positionLossOnNextWithdraw;
+        uint256 debitReduction = positionDebitReductionOnNextWithdraw;
         shortfallOnNextWithdraw = 0;
         positionLossOnNextWithdraw = 0;
+        positionDebitReductionOnNextWithdraw = 0;
 
         returnedAssets = requested - shortfall;
         uint256 debit = requested + positionLoss;
+        if (debitReduction > debit) debitReduction = debit;
+        debit -= debitReduction;
         if (debit > reportedAssets) debit = reportedAssets;
         uint256 realizedLoss = debit > returnedAssets ? debit - returnedAssets : 0;
 
@@ -116,6 +135,10 @@ contract PolicyAdapter {
 
     function maxWithdrawable() external view returns (uint256) {
         return withdrawableAssets;
+    }
+
+    function maxDeployable() external view returns (uint256) {
+        return deployableAssets;
     }
 
     function rewardTokens() external pure returns (address[] memory tokens) {
@@ -214,6 +237,48 @@ contract VaultPolicyTest is Test {
         assertEq(vault.strategyAssets(address(adapterA)), 0);
     }
 
+    function test_adapterPercentageCapRejectsDeploymentBeforeFundsMove() public {
+        _deposit(1_000e6);
+        vault.setAdapterRisk(address(adapterA), 40_00, type(uint256).max, 2_000);
+
+        NavyVaultSRCLA.Action memory action = _action(18, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 401e6);
+        _submit(action, 0);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterCapExceeded.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+        assertEq(usdc.balanceOf(address(adapterA)), 0);
+    }
+
+    function test_externalHeadroomRejectsDeploymentBeforeFundsMove() public {
+        _deposit(1_000e6);
+        adapterA.setMaxDeployable(100e6);
+
+        NavyVaultSRCLA.Action memory action = _action(19, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 101e6);
+        _submit(action, 0);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterCapExceeded.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+        assertEq(usdc.balanceOf(address(adapterA)), 0, "headroom must be checked before transfer");
+        assertEq(usdc.balanceOf(address(vault)), 1_000e6);
+    }
+
+    function test_actualCreditedPositionCannotExceedAdapterCap() public {
+        _deposit(1_000e6);
+        vault.setAdapterRisk(address(adapterA), 10_000, 400e6, 2_000);
+        adapterA.setCreditBonus(1e6);
+
+        NavyVaultSRCLA.Action memory action = _action(20, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 400e6);
+        _submit(action, 0);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterCapExceeded.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+        assertEq(usdc.balanceOf(address(adapterA)), 0, "post-deposit cap failure must roll back transfer");
+        assertEq(vault.strategyAssets(address(adapterA)), 0);
+    }
+
     function test_dependencyGroupBpsCapAggregatesMembers() public {
         _deposit(1_000e6);
         address[] memory members = new address[](2);
@@ -244,6 +309,25 @@ contract VaultPolicyTest is Test {
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.DependencyGroupCapExceeded.selector);
         vault.executeNextActionWithProof(new bytes32[](0), action);
+    }
+
+    function test_actualCreditedPositionCannotExceedDependencyGroupCap() public {
+        _deposit(1_000e6);
+        address[] memory members = new address[](2);
+        members[0] = address(adapterA);
+        members[1] = address(adapterB);
+        vault.setDependencyGroup(keccak256("credit-group"), 10_000, 500e6, members);
+        _submitAndExecute(_action(21, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 300e6), 0);
+        adapterB.setCreditBonus(1e6);
+
+        NavyVaultSRCLA.Action memory action = _action(22, NavyVaultSRCLA.ActionKind.Deploy, address(adapterB), 200e6);
+        _submit(action, 0);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.DependencyGroupCapExceeded.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+        assertEq(usdc.balanceOf(address(adapterB)), 0);
+        assertEq(vault.strategyAssets(address(adapterB)), 0);
     }
 
     function test_dependencyGroupRejectsDuplicateAndUnregisteredMembers() public {
@@ -306,8 +390,12 @@ contract VaultPolicyTest is Test {
 
         _submitAndExecute(_action(6, NavyVaultSRCLA.ActionKind.EmergencyExit, address(adapterA), 0), 100e6);
 
-        assertEq(vault.dynamicReserve(), 400e6);
+        assertEq(vault.dynamicReserve(), 100e6);
         assertEq(vault.requiredIdle(), 400e6);
+
+        vault.setAdminReserve(50e6);
+        assertEq(vault.dynamicReserve(), 100e6, "completed plan must persist its exact reserve");
+        assertEq(vault.requiredIdle(), 100e6, "lower admin floor must reveal completed plan reserve");
     }
 
     function test_expiredPlanDoesNotEraseCompletedDynamicReserve() public {
@@ -351,6 +439,60 @@ contract VaultPolicyTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 100e6);
     }
 
+    function test_pausedVaultPermitsDivestPlanAction() public {
+        _deposit(100e6);
+        _submitAndExecute(_action(23, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 50e6), 0);
+        NavyVaultSRCLA.Action memory action = _action(24, NavyVaultSRCLA.ActionKind.Divest, address(adapterA), 25e6);
+        _submit(action, 0);
+        vault.pause();
+
+        vm.prank(allocator);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+
+        assertEq(vault.strategyAssets(address(adapterA)), 25e6);
+        assertEq(usdc.balanceOf(address(vault)), 75e6);
+    }
+
+    function test_pausedDirectAndPlanHarvestRevert() public {
+        vault.pause();
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.DepositPaused.selector);
+        vault.harvest(address(adapterA), bytes32(uint256(1)), 0);
+
+        NavyVaultSRCLA.Action memory action = _action(25, NavyVaultSRCLA.ActionKind.Harvest, address(adapterA), 0);
+        _submit(action, 0);
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.DepositPaused.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+    }
+
+    function test_planHarvestEnforcesRegisteredAndActiveAdapterLifecycle() public {
+        NavyVaultSRCLA.Action memory unregistered = _action(26, NavyVaultSRCLA.ActionKind.Harvest, address(0xBAD), 0);
+        _submit(unregistered, 0);
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), unregistered);
+        vm.prank(allocator);
+        vault.cancelPlan();
+
+        vault.setAdapterState(address(adapterA), uint8(NavyVaultSRCLA.AdapterState.Disabled));
+        NavyVaultSRCLA.Action memory disabled = _action(27, NavyVaultSRCLA.ActionKind.Harvest, address(adapterA), 0);
+        _submit(disabled, 0);
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), disabled);
+        vm.prank(allocator);
+        vault.cancelPlan();
+
+        vault.setAdapterState(address(adapterA), uint8(NavyVaultSRCLA.AdapterState.Impaired));
+        NavyVaultSRCLA.Action memory impaired = _action(28, NavyVaultSRCLA.ActionKind.Harvest, address(adapterA), 0);
+        _submit(impaired, 0);
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), impaired);
+    }
+
     function test_withdrawAggregatesLossAcrossAdaptersAndPaysExactAssets() public {
         _deposit(200e6);
         _submitAndExecute(_action(10, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 100e6), 0);
@@ -388,6 +530,23 @@ contract VaultPolicyTest is Test {
         assertEq(vault.strategyAssets(address(adapterA)), 100e6);
         assertEq(vault.strategyAssets(address(adapterB)), 100e6);
         assertEq(vault.recognizedLosses(), 0);
+    }
+
+    function test_synchronousAggregateAllowsOneAdapterSurplusToOffsetAnotherLoss() public {
+        _deposit(200e6);
+        _submitAndExecute(_action(29, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 100e6), 0);
+        _submitAndExecute(_action(30, NavyVaultSRCLA.ActionKind.Deploy, address(adapterB), 100e6), 0);
+        adapterA.setWithdrawable(50e6);
+        adapterB.setWithdrawable(50e6);
+        adapterA.setPositionDebitReductionOnNextWithdraw(5e6);
+        adapterB.setPositionLossOnNextWithdraw(5e6);
+        vault.setMaxSynchronousLossBps(0);
+
+        vm.prank(alice);
+        vault.withdraw(100e6, alice, alice);
+
+        assertEq(usdc.balanceOf(alice), 100e6);
+        assertEq(vault.recognizedLosses(), 0, "aggregate debit equals aggregate received");
     }
 
     function test_withdrawRevertsAtomicallyWhenExactLiquidityIsUnavailable() public {

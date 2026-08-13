@@ -120,6 +120,11 @@ contract AaveV3Adapter is IStrategyAdapter {
         return position < cash ? position : cash;
     }
 
+    /// @notice Aave V3 has no reserve-level supply cap exposed for this market.
+    function maxDeployable() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {

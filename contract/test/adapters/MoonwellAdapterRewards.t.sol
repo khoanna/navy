@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {MoonwellAdapter} from "../../src/adapters/MoonwellAdapter.sol";
+import {IMToken, IMComptroller} from "../../src/interfaces/IMToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MoonwellAdapterRewardsTest
@@ -93,6 +94,21 @@ contract MoonwellAdapterRewardsTest is Test {
     function test_moonwell_configurationDigest_changesWithChain() external view {
         bytes32 digest = adapter.configurationDigest();
         assertGt(uint256(digest), 0, "digest should be non-zero");
+    }
+
+    function test_moonwell_maxDeployableUsesLiveSupplyCapHeadroom() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(false));
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.supplyCaps, (M_USDC)), abi.encode(1_000e6));
+        vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalSupply, ()), abi.encode(600e6));
+        vm.mockCall(M_USDC, abi.encodeCall(IMToken.exchangeRateStored, ()), abi.encode(1e18));
+
+        assertEq(adapter.maxDeployable(), 400e6);
+    }
+
+    function test_moonwell_maxDeployableIsZeroWhenMintPaused() external {
+        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(true));
+
+        assertEq(adapter.maxDeployable(), 0);
     }
 
     // ---- maxWithdrawable() ----

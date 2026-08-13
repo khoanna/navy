@@ -181,6 +181,10 @@ contract MockAdapterWithRewards {
         return withdrawableAssets;
     }
 
+    function maxDeployable() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
     function rewardTokens() external view returns (address[] memory) {
         return _rewardTokens;
     }
