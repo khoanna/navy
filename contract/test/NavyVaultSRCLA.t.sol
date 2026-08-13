@@ -376,6 +376,15 @@ contract NavyVaultSRCLACoreTest is Test {
         vault.registerAdapter(address(another), 10_001, 100, "Invalid cap");
     }
 
+    function test_adapterRiskPolicyChangesConfigurationDigest() public {
+        bytes32 beforeDigest = vault.currentConfigurationDigest();
+
+        vm.prank(admin);
+        vault.setAdapterRisk(address(adapter), 4_000, 250e6, 75);
+
+        assertTrue(beforeDigest != vault.currentConfigurationDigest(), "adapter risk must be plan-bound");
+    }
+
     function test_adapterCanBeDisabled() public {
         // Simply verify that we can set the adapter state to disabled without errors
         vm.prank(admin);

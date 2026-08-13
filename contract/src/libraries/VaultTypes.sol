@@ -26,6 +26,13 @@ library VaultTypes {
         uint256 accountingCap;
     }
 
+    struct DependencyGroup {
+        uint16 capBps;
+        uint256 absoluteCap;
+        address[] members;
+        bool exists;
+    }
+
     struct PlanHeader {
         uint256 planId;
         uint64 policyVersion;

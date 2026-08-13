@@ -46,6 +46,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Adapter configuration
     struct AdapterConfig {
         uint16 capBps;
+        uint256 absoluteCap;
         uint16 maxLossBps;
         AdapterState state;
         uint256 lastSyncIdleBase;
@@ -67,6 +68,17 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     uint256 public minIdleBps = 50; // 0.5%
 
     uint256 public constant MAX_ADAPTERS = 16;
+    uint256 public constant MAX_DEPENDENCY_GROUPS = 16;
+    uint256 public constant MAX_DEPENDENCY_GROUP_MEMBERS = 16;
+
+    /// @notice Absolute idle floor controlled by the administrator.
+    uint256 public adminReserve;
+
+    /// @notice Reserve activated by the most recently completed plan.
+    uint256 public dynamicReserve;
+
+    /// @notice Maximum aggregate realized loss for one synchronous exit.
+    uint16 public maxSynchronousLossBps;
 
     /// @notice Reward executor for swapping reward tokens to USDC
     address public rewardExecutor;
@@ -128,6 +140,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Tracked strategy assets per adapter
     mapping(address => uint256) public strategyAssets;
 
+    /// @notice Bounded dependency-group policy records.
+    mapping(bytes32 => VaultTypes.DependencyGroup) private _dependencyGroups;
+    bytes32[] private _dependencyGroupIds;
+
     /// @notice Actions in the active plan (keyed by index)
     mapping(bytes32 => mapping(uint256 => Action)) private _planActions;
 
@@ -142,6 +158,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error AdapterNotEmpty();
     error AdapterCapExceeded();
     error AdapterLossExceeded();
+    error DependencyGroupCapExceeded();
+    error DuplicateDependencyGroupMember();
+    error TooManyDependencyGroups();
+    error TooManyDependencyGroupMembers();
+    error DependencyGroupInvalid();
+    error SynchronousLossExceeded();
     error InsufficientIdle();
     error InvalidPlan();
     error PlanAlreadyActive();
@@ -311,8 +333,13 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (a.asset() != asset()) revert AdapterAssetMismatch();
         if (a.vault() != address(this)) revert AdapterVaultMismatch();
 
-        adapters[adapter] =
-            AdapterConfig({capBps: capBps, maxLossBps: maxLossBps, state: AdapterState.Active, lastSyncIdleBase: 0});
+        adapters[adapter] = AdapterConfig({
+            capBps: capBps,
+            absoluteCap: type(uint256).max,
+            maxLossBps: maxLossBps,
+            state: AdapterState.Active,
+            lastSyncIdleBase: 0
+        });
 
         _activeAdapters.push(adapter);
         strategyAssets[adapter] = 0;
@@ -320,6 +347,81 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         _syncStrategyAssets(adapter);
 
         emit AdapterRegistered(adapter, name, capBps, maxLossBps);
+    }
+
+    /// @notice Configure the percentage, absolute-USDC, and per-adapter loss limits.
+    function setAdapterRisk(address adapter, uint16 capBps, uint256 absoluteCap, uint16 maxLossBps)
+        external
+        onlyRole(ADMIN_ROLE)
+    {
+        if (!registeredAdapters[adapter]) revert AdapterNotFound();
+        if (capBps > 10_000 || maxLossBps > 10_000) revert AdapterConfigInvalid();
+
+        AdapterConfig storage config = adapters[adapter];
+        config.capBps = capBps;
+        config.absoluteCap = absoluteCap;
+        config.maxLossBps = maxLossBps;
+
+        emit AdapterRiskSet(adapter, capBps, absoluteCap, maxLossBps);
+    }
+
+    /// @notice Configure a bounded, ordered dependency group.
+    function setDependencyGroup(bytes32 groupId, uint16 capBps, uint256 absoluteCap, address[] calldata members)
+        external
+        onlyRole(ADMIN_ROLE)
+    {
+        if (groupId == bytes32(0) || capBps > 10_000 || members.length == 0) {
+            revert DependencyGroupInvalid();
+        }
+        if (members.length > MAX_DEPENDENCY_GROUP_MEMBERS) revert TooManyDependencyGroupMembers();
+
+        for (uint256 i = 0; i < members.length; i++) {
+            if (!registeredAdapters[members[i]]) revert AdapterNotFound();
+            for (uint256 j = 0; j < i; j++) {
+                if (members[j] == members[i]) revert DuplicateDependencyGroupMember();
+            }
+        }
+
+        VaultTypes.DependencyGroup storage group = _dependencyGroups[groupId];
+        if (!group.exists) {
+            if (_dependencyGroupIds.length >= MAX_DEPENDENCY_GROUPS) revert TooManyDependencyGroups();
+            group.exists = true;
+            _dependencyGroupIds.push(groupId);
+        }
+
+        group.capBps = capBps;
+        group.absoluteCap = absoluteCap;
+        delete group.members;
+        for (uint256 i = 0; i < members.length; i++) {
+            group.members.push(members[i]);
+        }
+
+        emit DependencyGroupSet(groupId, capBps, absoluteCap, members);
+    }
+
+    function getDependencyGroup(bytes32 groupId)
+        external
+        view
+        returns (uint16 capBps, uint256 absoluteCap, address[] memory members)
+    {
+        VaultTypes.DependencyGroup storage group = _dependencyGroups[groupId];
+        if (!group.exists) revert DependencyGroupInvalid();
+        return (group.capBps, group.absoluteCap, group.members);
+    }
+
+    function getDependencyGroupIds() external view returns (bytes32[] memory) {
+        return _dependencyGroupIds;
+    }
+
+    function setAdminReserve(uint256 reserve) external onlyRole(ADMIN_ROLE) {
+        adminReserve = reserve;
+        emit AdminReserveSet(reserve);
+    }
+
+    function setMaxSynchronousLossBps(uint16 maxLossBps) external onlyRole(ADMIN_ROLE) {
+        if (maxLossBps > 10_000) revert AdapterConfigInvalid();
+        maxSynchronousLossBps = maxLossBps;
+        emit MaxSynchronousLossBpsSet(maxLossBps);
     }
 
     /// @notice Set adapter state
@@ -383,6 +485,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         onlyRole(ALLOCATOR_ROLE)
         returns (uint256 totalUsdcReceived)
     {
+        if (paused) revert DepositPaused();
         if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
         if (!registeredAdapters[adapter]) revert AdapterNotFound();
         if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
@@ -555,6 +658,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
         if (activePlanNextActionIndex >= activePlanActionCount) {
             _enforceActivePlanRiskLimits(true);
+            uint256 completedReserve = Math.max(activePlanReserve, adminReserve);
+            dynamicReserve = completedReserve;
+            emit DynamicReserveSet(completedReserve);
             usedPlanIds[activePlanId] = true;
             bytes32 completedPlanId = activePlanId;
             _clearActivePlan();
@@ -596,7 +702,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Digest of the vault and registered strategy configuration.
     function currentConfigurationDigest() public view returns (bytes32 digest) {
-        digest = keccak256(abi.encode(block.chainid, address(this), asset(), minIdleBps, rewardExecutor));
+        digest = keccak256(
+            abi.encode(
+                block.chainid,
+                address(this),
+                asset(),
+                minIdleBps,
+                rewardExecutor,
+                adminReserve,
+                dynamicReserve,
+                maxSynchronousLossBps
+            )
+        );
         uint256 count = _activeAdapters.length;
         for (uint256 i = 0; i < count; i++) {
             address adapter = _activeAdapters[i];
@@ -606,10 +723,21 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
                     digest,
                     adapter,
                     config.capBps,
+                    config.absoluteCap,
                     config.maxLossBps,
                     config.state,
+                    config.lastSyncIdleBase,
                     IStrategyAdapter(adapter).configurationDigest()
                 )
+            );
+        }
+
+        count = _dependencyGroupIds.length;
+        for (uint256 i = 0; i < count; i++) {
+            bytes32 groupId = _dependencyGroupIds[i];
+            VaultTypes.DependencyGroup storage group = _dependencyGroups[groupId];
+            digest = keccak256(
+                abi.encode(digest, groupId, group.capBps, group.absoluteCap, keccak256(abi.encode(group.members)))
             );
         }
     }
@@ -641,18 +769,21 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Deploy funds to an adapter
     function _deploy(address adapter, uint256 amount, uint256 minOut) internal {
+        if (paused) revert DepositPaused();
         if (adapters[adapter].state != AdapterState.Active) revert AdapterNotActive();
 
         uint256 idle = IERC20(asset()).balanceOf(address(this));
-        uint256 requiredIdle = _requiredIdle();
+        uint256 idleRequirement = _requiredIdle();
 
-        if (idle < amount || idle - amount < requiredIdle) revert InsufficientIdle();
+        if (idle < amount || idle - amount < idleRequirement) revert InsufficientIdle();
 
         uint256 currentStrategyAssets = strategyAssets[adapter];
         uint256 nav = totalAssets();
-        uint256 cap = Math.mulDiv(nav, adapters[adapter].capBps, 10_000);
+        uint256 percentCap = Math.mulDiv(nav, adapters[adapter].capBps, 10_000);
+        uint256 cap = Math.min(percentCap, adapters[adapter].absoluteCap);
 
         if (currentStrategyAssets + amount > cap) revert AdapterCapExceeded();
+        _enforceDependencyGroupCaps(adapter, currentStrategyAssets + amount, nav);
 
         IERC20(asset()).safeTransfer(adapter, amount);
         uint256 credited = IStrategyAdapter(adapter).deposit(amount);
@@ -694,6 +825,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         } else if (action.kind == ActionKind.Divest) {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
+            if (paused) revert DepositPaused();
             // For Harvest action, use the action.amount as the routeId and minOut from action
             // Note: We skip the adapter validation since plan execution already validates
             _harvestCore(action.adapter, bytes32(action.amount), action.minOut);
@@ -748,13 +880,19 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Calculate required idle balance
     function _requiredIdle() internal view returns (uint256) {
-        return Math.mulDiv(totalAssets(), minIdleBps, 10_000);
+        return requiredIdle();
+    }
+
+    function requiredIdle() public view returns (uint256 reserve) {
+        reserve = Math.max(adminReserve, dynamicReserve);
+        reserve = Math.max(reserve, activePlanReserve);
     }
 
     function _ensureIdle(uint256 assets) internal {
         uint256 idle = IERC20(asset()).balanceOf(address(this));
         if (idle >= assets) return;
 
+        uint256 aggregateLoss;
         uint256 count = _activeAdapters.length;
         for (uint256 i = 0; i < count && idle < assets; i++) {
             address adapter = _activeAdapters[i];
@@ -770,11 +908,60 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             uint256 needed = assets - idle;
             uint256 pull = Math.min(needed, available);
             if (pull == 0) continue;
-            _divest(adapter, pull, pull);
-            idle = IERC20(asset()).balanceOf(address(this));
+
+            uint256 realizedLoss;
+            (idle, realizedLoss) = _pullSynchronousLiquidity(adapter, pull, idle);
+            aggregateLoss += realizedLoss;
+            if (aggregateLoss > Math.mulDiv(assets, maxSynchronousLossBps, 10_000)) {
+                revert SynchronousLossExceeded();
+            }
         }
 
         if (idle < assets) revert InsufficientIdle();
+    }
+
+    function _pullSynchronousLiquidity(address adapter, uint256 pull, uint256 idleBefore)
+        internal
+        returns (uint256 idleAfter, uint256 realizedLoss)
+    {
+        uint256 strategyBefore = strategyAssets[adapter];
+        IStrategyAdapter(adapter).withdraw(pull);
+        idleAfter = IERC20(asset()).balanceOf(address(this));
+        uint256 received = idleAfter - idleBefore;
+        _syncStrategyAssetsStrict(adapter);
+
+        uint256 strategyAfter = strategyAssets[adapter];
+        uint256 strategyDebited = strategyBefore > strategyAfter ? strategyBefore - strategyAfter : 0;
+        if (strategyDebited <= received) return (idleAfter, 0);
+
+        realizedLoss = strategyDebited - received;
+        uint256 adapterAllowedLoss = Math.mulDiv(pull, adapters[adapter].maxLossBps, 10_000);
+        if (realizedLoss > adapterAllowedLoss) revert AdapterLossExceeded();
+        recognizedLosses += realizedLoss;
+    }
+
+    function _enforceDependencyGroupCaps(address adapter, uint256 projectedAdapterAssets, uint256 nav) internal view {
+        uint256 groupCount = _dependencyGroupIds.length;
+        for (uint256 i = 0; i < groupCount; i++) {
+            VaultTypes.DependencyGroup storage group = _dependencyGroups[_dependencyGroupIds[i]];
+            uint256 exposure;
+            bool containsAdapter;
+
+            for (uint256 j = 0; j < group.members.length; j++) {
+                address member = group.members[j];
+                if (member == adapter) {
+                    exposure += projectedAdapterAssets;
+                    containsAdapter = true;
+                } else {
+                    exposure += strategyAssets[member];
+                }
+            }
+
+            if (!containsAdapter) continue;
+            uint256 percentCap = Math.mulDiv(nav, group.capBps, 10_000);
+            uint256 cap = Math.min(percentCap, group.absoluteCap);
+            if (exposure > cap) revert DependencyGroupCapExceeded();
+        }
     }
 
     /// @notice Get synchronous liquidity (idle + max withdrawable)
