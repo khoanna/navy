@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
-import {IMToken, IMComptroller, IMInterestRateModel} from "../interfaces/IMToken.sol";
+import {IMToken, IMComptroller, IMInterestRateModel, IMultiRewardDistributor} from "../interfaces/IMToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -19,47 +19,75 @@ contract MoonwellAdapter is IStrategyAdapter {
     uint256 private constant BORROW_RATE_MAX_MANTISSA = 0.0005e16;
 
     address public immutable vault;
+    address public immutable admin;
     IERC20 public immutable usdc;
     IMToken public immutable mUsdc;
     IMComptroller public immutable comptroller;
     IMInterestRateModel public immutable interestRateModel;
+    IMultiRewardDistributor public immutable rewardDistributor;
 
-    /// @dev WELL reward token on Base (native xWELL, not Wormhole)
-    /// @notice From Moonwell token registry: 0xA88594D404727625A9437C3f886C7643872296AE
-    address private constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
+    /// @notice Exact newly claimed reward remainder retained by a bounded claim.
+    /// @dev Unrelated pre-existing balances are deliberately excluded from this ledger.
+    mapping(address token => uint256 amount) public pendingRewards;
 
-    /// @dev List of reward tokens this adapter can claim
-    address[] private _rewardTokens = [WELL];
+    bool private _claimEntered;
 
     error NotVault();
+    error NotAdmin();
     error UnsupportedRewardToken();
     error MintFailed();
     error RedeemFailed();
     error ProtocolPaused();
     error InvalidConfiguration();
     error SupplyCapExceeded();
+    error InvalidRecipient();
+    error RewardClaimMismatch();
+    error ProtectedRecoveryToken();
+    error ProtectedRewardBalance();
+    error ReentrantRewardOperation();
+
+    event UnsupportedRewardRecovered(address indexed token, address indexed recipient, uint256 amount);
+    event RewardQuarantined(address indexed token, uint256 amount);
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
         _;
     }
 
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert NotAdmin();
+        _;
+    }
+
+    modifier nonReentrantRewardOperation() {
+        if (_claimEntered) revert ReentrantRewardOperation();
+        _claimEntered = true;
+        _;
+        _claimEntered = false;
+    }
+
     constructor(address _vault, address _usdc, address _mUsdc, address _comptroller, address _interestRateModel) {
         if (
             _vault == address(0) || _usdc == address(0) || _mUsdc == address(0) || _comptroller == address(0)
-                || _interestRateModel == address(0)
+                || _interestRateModel == address(0) || _mUsdc.code.length == 0 || _comptroller.code.length == 0
+                || _interestRateModel.code.length == 0
         ) revert InvalidConfiguration();
-        if (_mUsdc.code.length != 0) {
-            if (
-                IMToken(_mUsdc).underlying() != _usdc || IMToken(_mUsdc).comptroller() != _comptroller
-                    || IMToken(_mUsdc).interestRateModel() != _interestRateModel
-            ) revert InvalidConfiguration();
-        }
+        if (
+            IMToken(_mUsdc).underlying() != _usdc || IMToken(_mUsdc).comptroller() != _comptroller
+                || IMToken(_mUsdc).interestRateModel() != _interestRateModel
+        ) revert InvalidConfiguration();
+        address resolvedDistributor = IMComptroller(_comptroller).rewardDistributor();
+        if (
+            resolvedDistributor == address(0) || resolvedDistributor.code.length == 0
+                || IMultiRewardDistributor(resolvedDistributor).comptroller() != _comptroller
+        ) revert InvalidConfiguration();
         vault = _vault;
+        admin = msg.sender;
         usdc = IERC20(_usdc);
         mUsdc = IMToken(_mUsdc);
         comptroller = IMComptroller(_comptroller);
         interestRateModel = IMInterestRateModel(_interestRateModel);
+        rewardDistributor = IMultiRewardDistributor(resolvedDistributor);
     }
 
     /// @notice Supply USDC to Moonwell by minting mUSDC
@@ -159,27 +187,206 @@ contract MoonwellAdapter is IStrategyAdapter {
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {
-        return keccak256(abi.encode(address(mUsdc), address(comptroller), address(usdc), block.chainid));
+        address currentDistributor = comptroller.rewardDistributor();
+        bytes32 marketConfigDigest;
+        if (currentDistributor == address(rewardDistributor)) {
+            marketConfigDigest = keccak256(abi.encode(rewardDistributor.getAllMarketConfigs(address(mUsdc))));
+        }
+        return keccak256(
+            abi.encode(
+                address(mUsdc),
+                address(mUsdc).codehash,
+                address(comptroller),
+                address(comptroller).codehash,
+                address(interestRateModel),
+                currentDistributor,
+                address(rewardDistributor),
+                address(rewardDistributor).codehash,
+                marketConfigDigest,
+                address(usdc),
+                block.chainid
+            )
+        );
     }
 
     /// @notice List of reward tokens this strategy can claim
     /// @dev Implements IStrategyAdapter.rewardTokens()
     function rewardTokens() external view returns (address[] memory) {
-        return _rewardTokens;
+        if (!_rewardConfigurationCurrent()) return new address[](0);
+        IMultiRewardDistributor.MarketConfig[] memory configs = rewardDistributor.getAllMarketConfigs(address(mUsdc));
+        address[] memory active = new address[](configs.length);
+        uint256 cursor;
+        for (uint256 i = 0; i < configs.length; ++i) {
+            address token = configs[i].emissionToken;
+            if (_seenToken(active, cursor, token)) continue;
+            (bool discovered, uint256 upstream) = _activeFundedOutstanding(token, configs);
+            if (discovered && (pendingRewards[token] != 0 || upstream != 0)) active[cursor++] = token;
+        }
+        assembly ("memory-safe") {
+            mstore(active, cursor)
+        }
+        return active;
     }
 
     /// @notice Claimable reward amount for a given token
-    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards are integrated.
-    function claimableReward(address token) external pure returns (uint256) {
-        if (token != WELL) revert UnsupportedRewardToken();
-        // Moonwell rewards integration deferred for Phase 2
-        return 0;
+    /// @dev Includes only a measured bounded remainder plus exact active, funded upstream rewards.
+    function claimableReward(address token) external view onlyVault returns (uint256) {
+        uint256 pending = _availablePending(token);
+        IMultiRewardDistributor.MarketConfig[] memory configs = rewardDistributor.getAllMarketConfigs(address(mUsdc));
+        (bool discovered, uint256 upstream) = _activeFundedOutstanding(token, configs);
+        if (!discovered && pending == 0) revert UnsupportedRewardToken();
+        return pending + upstream;
     }
 
-    /// @dev Fail-closed until the exact multi-reward integration is installed.
-    function claimReward(address token, uint256, address) external view onlyVault returns (uint256) {
-        if (token != WELL) revert UnsupportedRewardToken();
-        return 0;
+    /// @notice Claims every configured Moonwell stream and transfers only bounded requested-token rewards.
+    /// @dev Every exact configured-token delta is measured. Non-requested tokens remain quarantined here.
+    function claimReward(address token, uint256 maxAmount, address recipient)
+        external
+        onlyVault
+        nonReentrantRewardOperation
+        returns (uint256 claimed)
+    {
+        if (recipient == address(0)) revert InvalidRecipient();
+
+        uint256 pending = _availablePending(token);
+        if (pending != 0) return _payPending(token, pending, maxAmount, recipient);
+
+        IMultiRewardDistributor.MarketConfig[] memory configs = rewardDistributor.getAllMarketConfigs(address(mUsdc));
+        (bool discovered, uint256 upstream) = _activeFundedOutstanding(token, configs);
+        if (!discovered) revert UnsupportedRewardToken();
+        if (upstream == 0 || maxAmount == 0) return 0;
+
+        (address[] memory tokens, uint256[] memory beforeBalances) = _snapshotConfiguredTokens(configs);
+        address[] memory markets = new address[](1);
+        markets[0] = address(mUsdc);
+        comptroller.claimReward(address(this), markets);
+
+        uint256 requestedDelta;
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            uint256 afterBalance = IERC20(tokens[i]).balanceOf(address(this));
+            if (afterBalance < beforeBalances[i]) revert RewardClaimMismatch();
+            uint256 delta = afterBalance - beforeBalances[i];
+            if (tokens[i] == token) requestedDelta = delta;
+            else if (delta != 0) emit RewardQuarantined(tokens[i], delta);
+        }
+        if (requestedDelta == 0 || requestedDelta > upstream) revert RewardClaimMismatch();
+
+        pendingRewards[token] = requestedDelta;
+        return _payPending(token, requestedDelta, maxAmount, recipient);
+    }
+
+    /// @notice Recovers quarantined or accidentally sent non-principal tokens.
+    /// @dev The deployment caller is the recovery admin. The allocator and vault have no implicit authority.
+    function recoverUnsupportedReward(address token, address recipient, uint256 amount)
+        external
+        onlyAdmin
+        nonReentrantRewardOperation
+    {
+        if (recipient == address(0)) revert InvalidRecipient();
+        if (token == address(usdc) || token == address(mUsdc)) revert ProtectedRecoveryToken();
+
+        uint256 beforeBalance = IERC20(token).balanceOf(address(this));
+        uint256 protected = pendingRewards[token];
+        if (beforeBalance < protected || amount > beforeBalance - protected) revert ProtectedRewardBalance();
+        IERC20(token).safeTransfer(recipient, amount);
+        uint256 afterBalance = IERC20(token).balanceOf(address(this));
+        if (afterBalance > beforeBalance || beforeBalance - afterBalance != amount) revert RewardClaimMismatch();
+        emit UnsupportedRewardRecovered(token, recipient, amount);
+    }
+
+    function _activeFundedOutstanding(address token, IMultiRewardDistributor.MarketConfig[] memory configs)
+        internal
+        view
+        returns (bool discovered, uint256 outstanding)
+    {
+        bool active;
+        for (uint256 i = 0; i < configs.length; ++i) {
+            if (configs[i].emissionToken != token) continue;
+            discovered = true;
+            if (configs[i].supplyEmissionsPerSec != 0 && block.timestamp < configs[i].endTime) active = true;
+        }
+        if (!active || !_rewardConfigurationCurrent() || rewardDistributor.paused() || token.code.length == 0) {
+            return (discovered, 0);
+        }
+
+        IMultiRewardDistributor.RewardInfo[] memory rewards =
+            rewardDistributor.getOutstandingRewardsForUser(address(mUsdc), address(this));
+        for (uint256 i = 0; i < rewards.length; ++i) {
+            if (rewards[i].emissionToken == token) outstanding += rewards[i].supplySide;
+        }
+        if (outstanding == 0) return (discovered, 0);
+        try IERC20(token).balanceOf(address(rewardDistributor)) returns (uint256 funding) {
+            if (funding < outstanding) outstanding = 0;
+        } catch {
+            outstanding = 0;
+        }
+    }
+
+    function _rewardConfigurationCurrent() internal view returns (bool) {
+        try comptroller.rewardDistributor() returns (address currentDistributor) {
+            if (currentDistributor != address(rewardDistributor)) return false;
+        } catch {
+            return false;
+        }
+        try rewardDistributor.comptroller() returns (address configuredComptroller) {
+            return configuredComptroller == address(comptroller);
+        } catch {
+            return false;
+        }
+    }
+
+    function _snapshotConfiguredTokens(IMultiRewardDistributor.MarketConfig[] memory configs)
+        internal
+        view
+        returns (address[] memory tokens, uint256[] memory balances)
+    {
+        tokens = new address[](configs.length);
+        uint256 cursor;
+        for (uint256 i = 0; i < configs.length; ++i) {
+            address configuredToken = configs[i].emissionToken;
+            if (configuredToken == address(0) || _seenToken(tokens, cursor, configuredToken)) continue;
+            tokens[cursor++] = configuredToken;
+        }
+        assembly ("memory-safe") {
+            mstore(tokens, cursor)
+        }
+
+        balances = new uint256[](cursor);
+        for (uint256 i = 0; i < cursor; ++i) {
+            balances[i] = IERC20(tokens[i]).balanceOf(address(this));
+        }
+    }
+
+    function _payPending(address token, uint256 pending, uint256 maxAmount, address recipient)
+        internal
+        returns (uint256 claimed)
+    {
+        claimed = pending < maxAmount ? pending : maxAmount;
+        if (claimed == 0) return 0;
+
+        uint256 adapterBefore = IERC20(token).balanceOf(address(this));
+        uint256 recipientBefore = IERC20(token).balanceOf(recipient);
+        pendingRewards[token] = pending - claimed;
+        IERC20(token).safeTransfer(recipient, claimed);
+        uint256 adapterAfter = IERC20(token).balanceOf(address(this));
+        uint256 recipientAfter = IERC20(token).balanceOf(recipient);
+        if (
+            adapterAfter > adapterBefore || adapterBefore - adapterAfter != claimed || recipientAfter < recipientBefore
+                || recipientAfter - recipientBefore != claimed
+        ) revert RewardClaimMismatch();
+    }
+
+    function _availablePending(address token) internal view returns (uint256 pending) {
+        pending = pendingRewards[token];
+        if (pending == 0) return 0;
+        if (IERC20(token).balanceOf(address(this)) < pending) revert RewardClaimMismatch();
+    }
+
+    function _seenToken(address[] memory tokens, uint256 length, address token) internal pure returns (bool) {
+        for (uint256 i = 0; i < length; ++i) {
+            if (tokens[i] == token) return true;
+        }
+        return false;
     }
 
     function _positionAssets() internal view returns (uint256) {

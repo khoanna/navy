@@ -49,8 +49,37 @@ interface IMComptroller {
     function enterMarkets(address[] memory markets) external returns (uint256[] memory);
     function exitMarket(address market) external returns (uint256);
     function claimReward(uint8 rewardType, address holder, address[] memory realms, bool verbose) external;
+    function claimReward(address holder, address[] memory mTokens) external;
+    function rewardDistributor() external view returns (address);
     function mintGuardianPaused(address market) external view returns (bool);
     function supplyCaps(address market) external view returns (uint256);
+}
+
+/// @dev Exact Moonwell MultiRewardDistributor surface used by the adapter.
+interface IMultiRewardDistributor {
+    struct MarketConfig {
+        address owner;
+        address emissionToken;
+        uint256 endTime;
+        uint224 supplyGlobalIndex;
+        uint32 supplyGlobalTimestamp;
+        uint224 borrowGlobalIndex;
+        uint32 borrowGlobalTimestamp;
+        uint256 supplyEmissionsPerSec;
+        uint256 borrowEmissionsPerSec;
+    }
+
+    struct RewardInfo {
+        address emissionToken;
+        uint256 totalAmount;
+        uint256 supplySide;
+        uint256 borrowSide;
+    }
+
+    function comptroller() external view returns (address);
+    function paused() external view returns (bool);
+    function getAllMarketConfigs(address mToken) external view returns (MarketConfig[] memory);
+    function getOutstandingRewardsForUser(address mToken, address user) external view returns (RewardInfo[] memory);
 }
 
 /// @dev Moonwell Interest Rate Model

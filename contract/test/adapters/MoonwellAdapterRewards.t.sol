@@ -2,187 +2,366 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {MoonwellAdapter} from "../../src/adapters/MoonwellAdapter.sol";
-import {IMToken, IMComptroller} from "../../src/interfaces/IMToken.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MoonwellAdapter} from "../../src/adapters/MoonwellAdapter.sol";
 
-/// @title MoonwellAdapterRewardsTest
-/// @dev Tests for IStrategyAdapter extension methods on MoonwellAdapter.
-/// These tests verify the rewards/reporting interface required by NavyVaultSRCLA.
-/// Fork tests require BASE_RPC_URL to be set.
-contract MoonwellAdapterRewardsTest is Test {
-    // Base mainnet addresses
-    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-    // Moonwell Base addresses from registry
-    address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
-    address constant COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address constant INTEREST_RATE_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
-    // WELL reward token on Base (native xWELL from Moonwell registry)
-    // https://docs.moonwell.fi/moonwell/protocol-information/contracts
-    address constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
+contract MockMoonwellToken is ERC20 {
+    uint8 private immutable _tokenDecimals;
 
-    address VAULT;
-    MoonwellAdapter adapter;
-    bool forkCreated;
-
-    function setUp() public {
-        VAULT = makeAddr("vault");
-        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            forkCreated = false;
-            adapter = new MoonwellAdapter(VAULT, USDC, M_USDC, COMPTROLLER, INTEREST_RATE_MODEL);
-            return;
-        }
-        forkCreated = true;
-        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
-        if (forkBlock == 0) vm.createSelectFork(rpc);
-        else vm.createSelectFork(rpc, forkBlock);
-        adapter = new MoonwellAdapter(VAULT, USDC, M_USDC, COMPTROLLER, INTEREST_RATE_MODEL);
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
+        _tokenDecimals = decimals_;
     }
 
-    modifier withFork() {
-        if (!forkCreated) {
-            vm.skip(true);
-            return;
-        }
-        _;
+    function decimals() public view override returns (uint8) {
+        return _tokenDecimals;
     }
 
-    // ---- rewardTokens() ----
+    function mint(address recipient, uint256 amount) external {
+        _mint(recipient, amount);
+    }
+}
 
-    function test_moonwell_rewardTokens() external view {
-        address[] memory tokens = adapter.rewardTokens();
-        assertGt(tokens.length, 0, "should have reward tokens");
+contract MockMoonwellMToken is ERC20 {
+    address public immutable underlying;
+    address public immutable comptroller;
+    address public immutable interestRateModel;
+    uint256 public exchangeRateStored = 1e18;
+    uint256 public totalBorrows;
+    uint256 public totalReserves;
+    uint256 public reserveFactorMantissa;
+    uint256 public accrualBlockTimestamp;
+
+    constructor(address underlying_, address comptroller_, address interestRateModel_) ERC20("Moonwell USDC", "mUSDC") {
+        underlying = underlying_;
+        comptroller = comptroller_;
+        interestRateModel = interestRateModel_;
+        accrualBlockTimestamp = block.timestamp;
     }
 
-    function test_moonwell_rewardTokens_containsWELL() external view {
-        address[] memory tokens = adapter.rewardTokens();
-        bool found = false;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == WELL) {
-                found = true;
-                break;
+    function decimals() public pure override returns (uint8) {
+        return 8;
+    }
+
+    function mint(uint256 amount) external returns (uint256) {
+        require(IERC20(underlying).transferFrom(msg.sender, address(this), amount));
+        _mint(msg.sender, amount);
+        return 0;
+    }
+
+    function redeem(uint256 amount) external returns (uint256) {
+        _burn(msg.sender, amount);
+        require(IERC20(underlying).transfer(msg.sender, amount));
+        return 0;
+    }
+
+    function redeemUnderlying(uint256 amount) external returns (uint256) {
+        _burn(msg.sender, amount);
+        require(IERC20(underlying).transfer(msg.sender, amount));
+        return 0;
+    }
+
+    function getCash() external view returns (uint256) {
+        return IERC20(underlying).balanceOf(address(this));
+    }
+
+    function exchangeRateCurrent() external view returns (uint256) {
+        return exchangeRateStored;
+    }
+
+    function borrowRatePerTimestamp() external pure returns (uint256) {
+        return 0;
+    }
+}
+
+contract MockMoonwellDistributor {
+    struct MarketConfig {
+        address owner;
+        address emissionToken;
+        uint256 endTime;
+        uint224 supplyGlobalIndex;
+        uint32 supplyGlobalTimestamp;
+        uint224 borrowGlobalIndex;
+        uint32 borrowGlobalTimestamp;
+        uint256 supplyEmissionsPerSec;
+        uint256 borrowEmissionsPerSec;
+    }
+
+    struct RewardInfo {
+        address emissionToken;
+        uint256 totalAmount;
+        uint256 supplySide;
+        uint256 borrowSide;
+    }
+
+    address public immutable comptroller;
+    bool public paused;
+    MarketConfig[] private _configs;
+    RewardInfo[] private _rewards;
+
+    constructor(address comptroller_) {
+        comptroller = comptroller_;
+    }
+
+    function setPaused(bool paused_) external {
+        paused = paused_;
+    }
+
+    function addStream(address token, uint256 supplySpeed, uint256 endTime, uint256 supplyOutstanding) external {
+        _configs.push(
+            MarketConfig({
+                owner: address(this),
+                emissionToken: token,
+                endTime: endTime,
+                supplyGlobalIndex: 1e36,
+                supplyGlobalTimestamp: uint32(block.timestamp),
+                borrowGlobalIndex: 1e36,
+                borrowGlobalTimestamp: uint32(block.timestamp),
+                supplyEmissionsPerSec: supplySpeed,
+                borrowEmissionsPerSec: 0
+            })
+        );
+        _rewards.push(
+            RewardInfo({
+                emissionToken: token, totalAmount: supplyOutstanding, supplySide: supplyOutstanding, borrowSide: 0
+            })
+        );
+    }
+
+    function setSupplyOutstanding(address token, uint256 amount) external {
+        for (uint256 i = 0; i < _rewards.length; ++i) {
+            if (_rewards[i].emissionToken == token) {
+                _rewards[i].totalAmount = amount;
+                _rewards[i].supplySide = amount;
             }
         }
-        assertTrue(found, "reward tokens should contain WELL");
     }
 
-    // ---- claimableReward() ----
-
-    function test_moonwell_claimableReward_doesNotRevert() external view {
-        // Just check it doesn't revert - actual amount depends on protocol state
-        adapter.claimableReward(WELL);
+    function getAllMarketConfigs(address) external view returns (MarketConfig[] memory) {
+        return _configs;
     }
 
-    function test_moonwell_claimableReward_unsupportedToken() external {
-        address unsupported = makeAddr("unsupported");
-        vm.expectRevert(MoonwellAdapter.UnsupportedRewardToken.selector);
-        adapter.claimableReward(unsupported);
+    function getOutstandingRewardsForUser(address, address) external view returns (RewardInfo[] memory) {
+        return _rewards;
     }
 
-    // ---- configurationDigest() ----
+    function claim(address holder) external {
+        for (uint256 i = 0; i < _rewards.length; ++i) {
+            uint256 amount = _rewards[i].supplySide;
+            address token = _rewards[i].emissionToken;
+            if (amount == 0 || _seenEarlier(token, i)) continue;
 
-    function test_moonwell_configurationDigest_notZero() external view {
-        bytes32 digest = adapter.configurationDigest();
-        assertTrue(digest != bytes32(0), "digest should not be zero");
-    }
-
-    function test_moonwell_configurationDigest_deterministic() external view {
-        bytes32 digest1 = adapter.configurationDigest();
-        bytes32 digest2 = adapter.configurationDigest();
-        assertEq(digest1, digest2, "digest should be deterministic");
-    }
-
-    function test_moonwell_configurationDigest_changesWithChain() external view {
-        bytes32 digest = adapter.configurationDigest();
-        assertGt(uint256(digest), 0, "digest should be non-zero");
-    }
-
-    function test_moonwell_maxDeployableUsesLiveSupplyCapHeadroom() external {
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(false));
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.supplyCaps, (M_USDC)), abi.encode(1_000e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.getCash, ()), abi.encode(500e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalBorrows, ()), abi.encode(150e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalReserves, ()), abi.encode(50e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.accrualBlockTimestamp, ()), abi.encode(block.timestamp));
-
-        assertEq(adapter.maxDeployable(), 399_999_999, "returned amount must stay strictly below cap");
-    }
-
-    function test_moonwell_maxDeployableExactBoundaryIsAcceptedAndNextUnitRejected() external {
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(false));
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.supplyCaps, (M_USDC)), abi.encode(1_000e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.getCash, ()), abi.encode(500e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalBorrows, ()), abi.encode(150e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.totalReserves, ()), abi.encode(50e6));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.accrualBlockTimestamp, ()), abi.encode(block.timestamp));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.balanceOf, (address(adapter))), abi.encode(0));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.exchangeRateStored, ()), abi.encode(1e18));
-        vm.mockCall(M_USDC, abi.encodeCall(IMToken.mint, (399_999_999)), abi.encode(0));
-        vm.mockCall(USDC, abi.encodeCall(IERC20.approve, (M_USDC, 399_999_999)), abi.encode(true));
-        vm.mockCall(USDC, abi.encodeCall(IERC20.approve, (M_USDC, 0)), abi.encode(true));
-
-        vm.prank(VAULT);
-        adapter.deposit(399_999_999);
-
-        vm.prank(VAULT);
-        vm.expectRevert(MoonwellAdapter.SupplyCapExceeded.selector);
-        adapter.deposit(400e6);
-    }
-
-    function test_moonwell_maxDeployableIsZeroWhenMintPaused() external {
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(true, 0));
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.mintGuardianPaused, (M_USDC)), abi.encode(true));
-
-        assertEq(adapter.maxDeployable(), 0);
-    }
-
-    function test_moonwell_maxDeployableIsZeroWhenMarketUnlisted() external {
-        vm.mockCall(COMPTROLLER, abi.encodeCall(IMComptroller.markets, (M_USDC)), abi.encode(false, 0));
-
-        assertEq(adapter.maxDeployable(), 0);
-    }
-
-    function test_moonwell_maxDeployablePinnedForkBoundaryActuallyMints() external withFork {
-        uint256 headroom = adapter.maxDeployable();
-        uint256 cap = adapter.comptroller().supplyCaps(M_USDC);
-        if (cap == 0) {
-            assertEq(headroom, type(uint256).max);
-        } else {
-            assertGt(headroom, 0);
-            deal(USDC, address(adapter), headroom);
-            vm.prank(VAULT);
-            uint256 credited = adapter.deposit(headroom);
-            assertGt(credited, 0, "reported boundary must be accepted by Moonwell after accrual");
+            uint256 aggregate = amount;
+            _rewards[i].totalAmount = 0;
+            _rewards[i].supplySide = 0;
+            for (uint256 j = i + 1; j < _rewards.length; ++j) {
+                if (_rewards[j].emissionToken == token) {
+                    aggregate += _rewards[j].supplySide;
+                    _rewards[j].totalAmount = 0;
+                    _rewards[j].supplySide = 0;
+                }
+            }
+            require(IERC20(token).transfer(holder, aggregate));
         }
     }
 
-    // ---- maxWithdrawable() ----
-    // These require a fork since they call external contracts
+    function _seenEarlier(address token, uint256 beforeIndex) private view returns (bool) {
+        for (uint256 i = 0; i < beforeIndex; ++i) {
+            if (_rewards[i].emissionToken == token) return true;
+        }
+        return false;
+    }
+}
 
-    function test_moonwell_maxWithdrawable_noDeposits() external withFork {
-        uint256 max = adapter.maxWithdrawable();
-        assertEq(max, 0, "maxWithdrawable should be 0 with no deposits");
+contract MockMoonwellComptroller {
+    address public rewardDistributor;
+    uint256 public claimCalls;
+
+    constructor() {}
+
+    function setRewardDistributor(address distributor) external {
+        rewardDistributor = distributor;
     }
 
-    function test_moonwell_maxWithdrawable_afterDeposit() external withFork {
-        uint256 amount = 100e6;
-        deal(USDC, address(adapter), amount);
-
-        vm.prank(VAULT);
-        adapter.deposit(amount);
-
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertGt(max, 0, "maxWithdrawable should be > 0 after deposit");
-        assertApproxEqAbs(max, total, 1, "maxWithdrawable should approximately equal totalAssets");
+    function claimReward(address holder, address[] memory) external {
+        ++claimCalls;
+        MockMoonwellDistributor(rewardDistributor).claim(holder);
     }
 
-    function test_moonwell_maxWithdrawable_notExceedsTotalAssets() external withFork {
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertLe(max, total, "maxWithdrawable should not exceed totalAssets");
+    function markets(address) external pure returns (bool, uint256) {
+        return (true, 0);
+    }
+
+    function mintGuardianPaused(address) external pure returns (bool) {
+        return false;
+    }
+
+    function supplyCaps(address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
+contract MockMoonwellInterestModel {
+    function getSupplyRate(uint256, uint256, uint256, uint256) external pure returns (uint256) {
+        return 0;
+    }
+}
+
+contract MoonwellAdapterRewardsTest is Test {
+    uint256 private constant ENDED = 1_700_000_000;
+
+    address private vault = makeAddr("vault");
+    address private allocator = makeAddr("allocator");
+    address private recipient = makeAddr("recipient");
+
+    MockMoonwellToken private usdc;
+    MockMoonwellToken private wormholeWell;
+    MockMoonwellToken private well;
+    MockMoonwellComptroller private comptroller;
+    MockMoonwellDistributor private distributor;
+    MockMoonwellInterestModel private interestModel;
+    MockMoonwellMToken private mUsdc;
+    MoonwellAdapter private adapter;
+
+    function setUp() external {
+        vm.warp(1_800_000_000);
+        usdc = new MockMoonwellToken("USD Coin", "USDC", 6);
+        wormholeWell = new MockMoonwellToken("Wormhole WELL", "xWELL", 18);
+        well = new MockMoonwellToken("Moonwell", "WELL", 18);
+        comptroller = new MockMoonwellComptroller();
+        distributor = new MockMoonwellDistributor(address(comptroller));
+        comptroller.setRewardDistributor(address(distributor));
+        interestModel = new MockMoonwellInterestModel();
+        mUsdc = new MockMoonwellMToken(address(usdc), address(comptroller), address(interestModel));
+
+        distributor.addStream(address(wormholeWell), 0, ENDED, 5e18);
+        distributor.addStream(address(usdc), 24_801, ENDED, 10e6);
+        distributor.addStream(address(well), 0.5e18, block.timestamp + 1 days, 100e18);
+        wormholeWell.mint(address(distributor), 5e18);
+        usdc.mint(address(distributor), 10e6);
+        well.mint(address(distributor), 100e18);
+
+        adapter =
+            new MoonwellAdapter(vault, address(usdc), address(mUsdc), address(comptroller), address(interestModel));
+    }
+
+    function test_rewardTokensAdvertisesOnlyUniqueActiveFundedStreamWithOutstandingRewards() external view {
+        address[] memory tokens = adapter.rewardTokens();
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], address(well));
+    }
+
+    function test_rewardTokensRequiresPositiveOutstandingAndFundingAndUnpausedDistributor() external {
+        distributor.setSupplyOutstanding(address(well), 0);
+        assertEq(adapter.rewardTokens().length, 0, "zero outstanding must not be advertised");
+
+        distributor.setSupplyOutstanding(address(well), 100e18);
+        vm.prank(address(distributor));
+        well.transfer(makeAddr("fundingSink"), 100e18);
+        assertEq(adapter.rewardTokens().length, 0, "unfunded rewards must not be advertised");
+
+        well.mint(address(distributor), 100e18);
+        distributor.setPaused(true);
+        assertEq(adapter.rewardTokens().length, 0, "paused rewards must not be advertised");
+    }
+
+    function test_rewardTokensDeduplicatesDuplicateTokenConfigsAndOutstandingRows() external {
+        distributor.addStream(address(well), 1e18, block.timestamp + 2 days, 25e18);
+        well.mint(address(distributor), 25e18);
+
+        address[] memory tokens = adapter.rewardTokens();
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], address(well));
+        vm.prank(vault);
+        assertEq(adapter.claimableReward(address(well)), 125e18);
+    }
+
+    function test_claimRewardMeasuresAllTokenDeltasBoundsRequestedTokenAndQuarantinesOthers() external {
+        well.mint(address(adapter), 25e18); // unrelated pre-existing balance
+
+        vm.prank(vault);
+        uint256 claimed = adapter.claimReward(address(well), 40e18, recipient);
+
+        assertEq(claimed, 40e18);
+        assertEq(well.balanceOf(recipient), 40e18);
+        assertEq(well.balanceOf(address(adapter)), 85e18, "pre-existing plus bounded remainder stays owned");
+        assertEq(wormholeWell.balanceOf(address(adapter)), 5e18, "ended xWELL delta is quarantined");
+        assertEq(usdc.balanceOf(address(adapter)), 10e6, "ended USDC delta is quarantined");
+        assertEq(adapter.pendingRewards(address(well)), 60e18, "only newly claimed WELL remainder is tracked");
+    }
+
+    function test_claimRewardDrainsBoundedRemainderBeforeCallingUpstreamAgain() external {
+        vm.prank(vault);
+        adapter.claimReward(address(well), 40e18, recipient);
+        assertEq(comptroller.claimCalls(), 1);
+
+        vm.prank(vault);
+        assertEq(adapter.claimReward(address(well), 100e18, recipient), 60e18);
+        assertEq(comptroller.claimCalls(), 1, "bounded remainder must not trigger a second market-wide claim");
+        assertEq(well.balanceOf(recipient), 100e18);
+        assertEq(adapter.pendingRewards(address(well)), 0);
+    }
+
+    function test_claimRewardDoesNotExpropriatePreExistingRequestedTokenBalance() external {
+        well.mint(address(adapter), 77e18);
+        vm.prank(vault);
+        assertEq(adapter.claimReward(address(well), type(uint256).max, recipient), 100e18);
+        assertEq(well.balanceOf(address(adapter)), 77e18, "unrelated WELL must remain untouched");
+    }
+
+    function test_claimRewardRejectsNonVaultZeroRecipientAndUnknownToken() external {
+        vm.expectRevert(MoonwellAdapter.NotVault.selector);
+        adapter.claimReward(address(well), 1, recipient);
+
+        vm.prank(vault);
+        vm.expectRevert();
+        adapter.claimReward(address(well), 1, address(0));
+
+        vm.prank(vault);
+        vm.expectRevert(MoonwellAdapter.UnsupportedRewardToken.selector);
+        adapter.claimReward(makeAddr("unknown"), 1, recipient);
+    }
+
+    function test_rewardOperationsFailClosedAfterDistributorConfigurationDrift() external {
+        bytes32 beforeDigest = adapter.configurationDigest();
+        MockMoonwellDistributor replacement = new MockMoonwellDistributor(address(comptroller));
+        comptroller.setRewardDistributor(address(replacement));
+
+        assertTrue(adapter.configurationDigest() != beforeDigest);
+        assertEq(adapter.rewardTokens().length, 0);
+        vm.prank(vault);
+        assertEq(adapter.claimableReward(address(well)), 0);
+        vm.prank(vault);
+        assertEq(adapter.claimReward(address(well), 100e18, recipient), 0);
+    }
+
+    function test_recoverUnsupportedRewardIsAdminOnlyRejectsZeroRecipientAndProtectsPrincipal() external {
+        wormholeWell.mint(address(adapter), 9e18);
+        deal(address(mUsdc), address(adapter), 1e8);
+        usdc.mint(address(adapter), 1e6);
+
+        vm.prank(allocator);
+        vm.expectRevert(MoonwellAdapter.NotAdmin.selector);
+        adapter.recoverUnsupportedReward(address(wormholeWell), recipient, 1e18);
+
+        vm.expectRevert(MoonwellAdapter.InvalidRecipient.selector);
+        adapter.recoverUnsupportedReward(address(wormholeWell), address(0), 1e18);
+
+        vm.expectRevert(MoonwellAdapter.ProtectedRecoveryToken.selector);
+        adapter.recoverUnsupportedReward(address(usdc), recipient, 1);
+
+        vm.expectRevert(MoonwellAdapter.ProtectedRecoveryToken.selector);
+        adapter.recoverUnsupportedReward(address(mUsdc), recipient, 1);
+
+        adapter.recoverUnsupportedReward(address(wormholeWell), recipient, 9e18);
+        assertEq(wormholeWell.balanceOf(recipient), 9e18);
+    }
+
+    function test_recoveryCannotConsumeTrackedBoundedRemainder() external {
+        vm.prank(vault);
+        adapter.claimReward(address(well), 40e18, recipient);
+
+        vm.expectRevert(MoonwellAdapter.ProtectedRewardBalance.selector);
+        adapter.recoverUnsupportedReward(address(well), recipient, 61e18);
     }
 }

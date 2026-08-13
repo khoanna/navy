@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
-import {IMToken, IMComptroller, IMInterestRateModel} from "../src/interfaces/IMToken.sol";
+import {IMToken, IMComptroller, IMultiRewardDistributor} from "../src/interfaces/IMToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MoonwellAdapterForkTest
@@ -19,6 +19,12 @@ contract MoonwellAdapterForkTest is Test {
     // Per Moonwell registry: https://github.com/moonwell-fi/moonwell-contracts-v2/blob/main/chains/8453.json
     address constant COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
     address constant INTEREST_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
+    address constant REWARD_DISTRIBUTOR = 0xe9005b078701e2A0948D2EaC43010D35870Ad9d2;
+    address constant WORMHOLE_WELL = 0xFF8adeC2221f9f4D8dfbAFa6B9a297d17603493D;
+    address constant WELL = 0xA88594D404727625A9437C3f886C7643872296AE;
+    uint256 constant PINNED_BLOCK = 49_926_094;
+    bytes32 constant PINNED_BLOCK_HASH = 0xb0814321bf0e80894112f59df791bc1e471d6d63d0adfe5ff23f4b8eecaf004c;
+    uint256 constant PINNED_TIMESTAMP = 1_786_641_535;
 
     address VAULT;
     MoonwellAdapter adapter;
@@ -31,8 +37,10 @@ contract MoonwellAdapterForkTest is Test {
             forkCreated = false;
             return;
         }
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", PINNED_BLOCK);
+        require(forkBlock == PINNED_BLOCK, "Moonwell fork must use the audited pinned block");
         forkCreated = true;
-        vm.createSelectFork(rpc);
+        vm.createSelectFork(rpc, forkBlock);
 
         adapter = new MoonwellAdapter(VAULT, USDC, M_USDC, COMPTROLLER, INTEREST_MODEL);
     }
@@ -56,6 +64,71 @@ contract MoonwellAdapterForkTest is Test {
     function test_deployment_verifyUsdcIsCircle() external withFork {
         // Verify Moonwell uses Circle's canonical USDC (per paper Section 2.1)
         assertEq(IMToken(M_USDC).underlying(), USDC, "must use Circle USDC");
+    }
+
+    function test_forkIsTheAuditedPinnedBlockHashAndTimestamp() external withFork {
+        assertEq(block.number, PINNED_BLOCK);
+        assertEq(block.timestamp, PINNED_TIMESTAMP);
+        vm.rollFork(PINNED_BLOCK + 1);
+        assertEq(blockhash(PINNED_BLOCK), PINNED_BLOCK_HASH);
+    }
+
+    function test_rewardDependenciesAreDerivedFromMUsdcAndComptroller() external withFork {
+        assertEq(IMToken(M_USDC).comptroller(), COMPTROLLER);
+        assertEq(IMComptroller(COMPTROLLER).rewardDistributor(), REWARD_DISTRIBUTOR);
+        assertEq(address(adapter.rewardDistributor()), REWARD_DISTRIBUTOR);
+        assertEq(IMultiRewardDistributor(REWARD_DISTRIBUTOR).comptroller(), COMPTROLLER);
+        assertFalse(IMultiRewardDistributor(REWARD_DISTRIBUTOR).paused());
+    }
+
+    function test_pinnedRewardEnumerationHasThreeExactStreamsAndNativeWellIsTimeActive() external withFork {
+        IMultiRewardDistributor.MarketConfig[] memory configs =
+            IMultiRewardDistributor(REWARD_DISTRIBUTOR).getAllMarketConfigs(M_USDC);
+        assertEq(configs.length, 3);
+
+        assertEq(configs[0].emissionToken, WORMHOLE_WELL);
+        assertEq(configs[0].supplyEmissionsPerSec, 0);
+        assertEq(configs[0].endTime, 1_713_564_000);
+
+        assertEq(configs[1].emissionToken, USDC);
+        assertEq(configs[1].supplyEmissionsPerSec, 24_801);
+        assertEq(configs[1].endTime, 1_733_781_600);
+        assertGt(block.timestamp, configs[1].endTime, "stored USDC speed belongs to an ended stream");
+
+        assertEq(configs[2].emissionToken, WELL);
+        assertEq(configs[2].supplyEmissionsPerSec, 505_295_011_690_177_700);
+        assertEq(configs[2].endTime, 1_786_752_000);
+        assertLt(block.timestamp, configs[2].endTime, "native WELL was active only at the pinned timestamp");
+
+        vm.prank(VAULT);
+        assertEq(adapter.claimableReward(WELL), 0, "a fresh adapter has no historical rewards");
+        assertEq(
+            adapter.rewardTokens().length, 0, "positive emissions alone are insufficient without outstanding rewards"
+        );
+    }
+
+    function test_pinnedClaimApiAccruesAndTransfersOnlyExactNativeWellForFreshSupplier() external withFork {
+        uint256 amount = 100e6;
+        deal(USDC, address(adapter), amount);
+        vm.prank(VAULT);
+        adapter.deposit(amount);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(VAULT);
+        uint256 claimable = adapter.claimableReward(WELL);
+        assertGt(claimable, 0, "fresh pinned supplier should accrue native WELL before the observed end");
+
+        address[] memory tokens = adapter.rewardTokens();
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], WELL);
+
+        uint256 vaultWellBefore = IERC20(WELL).balanceOf(VAULT);
+        vm.prank(VAULT);
+        uint256 claimed = adapter.claimReward(WELL, type(uint256).max, VAULT);
+        assertGt(claimed, 0);
+        assertEq(IERC20(WELL).balanceOf(VAULT) - vaultWellBefore, claimed);
+        assertLe(claimed, claimable, "measured claim cannot exceed the pre-claim exact outstanding amount");
+        assertEq(adapter.pendingRewards(WELL), 0);
     }
 
     function test_deployment_mintNotPaused() external withFork {
