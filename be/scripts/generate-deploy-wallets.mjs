@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Wallet } from 'ethers';
 
 const ENV_FILE = 'base-wallets.env';
 const PRIVATE_NOTE = 'README.private.md';
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
+export function defaultOutputDir() {
+  return resolve(scriptDirectory, '../../deploy');
+}
 
 export function generateWalletFiles(outputDir) {
   const directory = resolve(outputDir);
@@ -30,7 +35,7 @@ export function generateWalletFiles(outputDir) {
   const noteBody = [
     '# Private Base deployment operator note',
     '',
-    `- Base admin address: ${admin.address}. This identity owns deployment and administrative contract actions.`,
+    `- Base admin/deployer/guardian address: ${admin.address}. This identity owns deployment and administrative contract actions.`,
     `- Base allocator address: ${allocator.address}. This identity performs only constrained allocator and keeper actions.`,
     '',
     '## Funding',
@@ -56,7 +61,7 @@ export function generateWalletFiles(outputDir) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const { envPath, notePath, adminAddress, allocatorAddress } = generateWalletFiles(process.argv[2] ?? 'deploy');
+    const { envPath, notePath, adminAddress, allocatorAddress } = generateWalletFiles(process.argv[2] ?? defaultOutputDir());
     console.log(`BASE_ADMIN_ADDRESS=${adminAddress}`);
     console.log(`BASE_ALLOCATOR_ADDRESS=${allocatorAddress}`);
     console.log(envPath);

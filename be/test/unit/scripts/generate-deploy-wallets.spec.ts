@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { Wallet } from 'ethers';
@@ -20,8 +20,24 @@ describe('generateWalletFiles', () => {
     ['--input-type=module', '--eval', `import { generateWalletFiles } from ${JSON.stringify(generatorUrl)}; await generateWalletFiles(${JSON.stringify(outputDir)});`],
     { encoding: 'utf8' },
   );
+  const runDefaultOutputDir = () => spawnSync(
+    process.execPath,
+    ['--input-type=module', '--eval', `import { defaultOutputDir } from ${JSON.stringify(generatorUrl)}; process.stdout.write(defaultOutputDir());`],
+    { encoding: 'utf8' },
+  );
 
   afterAll(() => rmSync(outputDir, { recursive: true, force: true }));
+
+  it('resolves the CLI default to the ignored repository-root deploy directory without generating wallets', () => {
+    // This fails if the CLI default is based on the caller's working directory.
+    const result = runDefaultOutputDir();
+    const defaultDir = resolve(process.cwd(), '../deploy');
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(defaultDir);
+    expect(spawnSync('git', ['check-ignore', '-q', defaultDir], { cwd: process.cwd() }).status).toBe(0);
+  });
 
   it('creates distinct, secret-safe deployment wallet files without console output', async () => {
     // This fails if generation uses duplicate/invalid keys, writes permissively,
