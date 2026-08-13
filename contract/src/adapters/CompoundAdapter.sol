@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
-import {IComet} from "../interfaces/IComet.sol";
+import {IComet, ICometRewards} from "../interfaces/IComet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -12,23 +12,32 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract CompoundAdapter is IStrategyAdapter {
     using SafeERC20 for IERC20;
     uint256 private constant SECONDS_PER_YEAR = 365 days;
+    uint256 private constant FACTOR_SCALE = 1e18;
+
+    /// @dev Official Compound III CometRewards deployment on Base.
+    address private constant COMET_REWARDS = 0x123964802e6ABabBE1Bc9547D72Ef1B69B00A6b1;
+
+    /// @dev Exact COMP token configured for Base USDC Comet rewards.
+    address private constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
 
     address public immutable vault;
     IERC20 public immutable usdc;
     IComet public immutable comet;
+    ICometRewards public immutable cometRewards;
+    uint64 public immutable rewardRescaleFactor;
+    bool public immutable rewardShouldUpscale;
+    uint256 public immutable rewardMultiplier;
 
-    /// @dev COMP reward token on Base
-    /// @notice From official compound-finance/comet roots: 0x9e1028F5F1D5eDE59748FFceE5532509976840E0
-    address private constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
-
-    /// @dev List of reward tokens this adapter can claim
-    address[] private _rewardTokens = [COMP];
+    /// @notice Newly claimed COMP retained only because an upstream claim cannot be partially bounded.
+    uint256 public pendingRewards;
 
     error NotVault();
     error UnsupportedRewardToken();
     error DepositFailed();
     error WithdrawFailed();
     error InvalidConfiguration();
+    error InvalidRecipient();
+    error RewardClaimMismatch();
 
     modifier onlyVault() {
         if (msg.sender != vault) revert NotVault();
@@ -37,10 +46,17 @@ contract CompoundAdapter is IStrategyAdapter {
 
     constructor(address _vault, address _usdc, address _comet) {
         if (_vault == address(0) || _usdc == address(0) || _comet == address(0)) revert InvalidConfiguration();
-        if (_comet.code.length != 0 && IComet(_comet).baseToken() != _usdc) revert InvalidConfiguration();
+        if (_comet.code.length == 0 || COMET_REWARDS.code.length == 0) revert InvalidConfiguration();
+        if (IComet(_comet).baseToken() != _usdc) revert InvalidConfiguration();
+        ICometRewards.RewardConfig memory rewardConfig = ICometRewards(COMET_REWARDS).rewardConfig(_comet);
+        if (rewardConfig.token != COMP || rewardConfig.rescaleFactor == 0) revert InvalidConfiguration();
         vault = _vault;
         usdc = IERC20(_usdc);
         comet = IComet(_comet);
+        cometRewards = ICometRewards(COMET_REWARDS);
+        rewardRescaleFactor = rewardConfig.rescaleFactor;
+        rewardShouldUpscale = rewardConfig.shouldUpscale;
+        rewardMultiplier = rewardConfig.multiplier;
     }
 
     /// @notice Supply USDC to Compound III (Comet)
@@ -108,26 +124,129 @@ contract CompoundAdapter is IStrategyAdapter {
     /// @notice Unique digest of current protocol configuration
     /// @dev Implements IStrategyAdapter.configurationDigest()
     function configurationDigest() external view returns (bytes32) {
-        return keccak256(abi.encode(address(comet), address(usdc), block.chainid));
+        return keccak256(
+            abi.encode(
+                address(comet),
+                address(usdc),
+                address(cometRewards),
+                COMP,
+                rewardRescaleFactor,
+                rewardShouldUpscale,
+                rewardMultiplier,
+                block.chainid
+            )
+        );
     }
 
     /// @notice List of reward tokens this strategy can claim
     /// @dev Implements IStrategyAdapter.rewardTokens()
     function rewardTokens() external view returns (address[] memory) {
-        return _rewardTokens;
+        address[] memory active = new address[](1);
+        if (_hasPendingReward() || _hasFundedStoredReward()) {
+            active[0] = COMP;
+            return active;
+        }
+        assembly ("memory-safe") {
+            mstore(active, 0)
+        }
+        return active;
     }
 
-    /// @notice Claimable reward amount for a given token
-    /// @dev Implements IStrategyAdapter.claimableReward(). Returns 0 until rewards are integrated.
-    function claimableReward(address token) external pure returns (uint256) {
-        if (token != COMP) revert UnsupportedRewardToken();
-        // Compound rewards integration deferred for Phase 2
-        return 0;
+    /// @notice Accrues Compound state and reports only exact, fully funded COMP.
+    function claimableReward(address token) external onlyVault returns (uint256) {
+        _requireRewardToken(token);
+        uint256 pending = _availablePending();
+        if (!_upstreamRewardActive()) return pending;
+
+        ICometRewards.RewardOwed memory rewardOwed = cometRewards.getRewardOwed(address(comet), address(this));
+        if (rewardOwed.token != COMP) revert RewardClaimMismatch();
+        if (rewardOwed.owed == 0 || IERC20(COMP).balanceOf(address(cometRewards)) < rewardOwed.owed) return pending;
+        return pending + rewardOwed.owed;
     }
 
-    /// @dev Fail-closed until the exact CometRewards integration is installed.
-    function claimReward(address token, uint256, address) external view onlyVault returns (uint256) {
+    /// @notice Claims Compound rewards to this adapter and pays at most `maxAmount` to `recipient`.
+    /// @dev CometRewards claims all accrued rewards. Any bounded remainder is tracked and can be paid by a later call;
+    /// unrelated COMP already held by the adapter is never included in that accounting.
+    function claimReward(address token, uint256 maxAmount, address recipient)
+        external
+        onlyVault
+        returns (uint256 claimed)
+    {
+        _requireRewardToken(token);
+        if (recipient == address(0)) revert InvalidRecipient();
+        if (maxAmount == 0) return 0;
+
+        if (pendingRewards != 0) return _payPending(maxAmount, recipient);
+        if (!_upstreamRewardActive()) return 0;
+
+        ICometRewards.RewardOwed memory rewardOwed = cometRewards.getRewardOwed(address(comet), address(this));
+        if (rewardOwed.token != COMP) revert RewardClaimMismatch();
+        uint256 owed = rewardOwed.owed;
+        if (owed == 0 || IERC20(COMP).balanceOf(address(cometRewards)) < owed) return 0;
+
+        uint256 beforeBalance = IERC20(COMP).balanceOf(address(this));
+        cometRewards.claim(address(comet), address(this), true);
+        uint256 afterBalance = IERC20(COMP).balanceOf(address(this));
+        if (afterBalance < beforeBalance || afterBalance - beforeBalance != owed) revert RewardClaimMismatch();
+
+        pendingRewards = owed;
+        return _payPending(maxAmount, recipient);
+    }
+
+    function _payPending(uint256 maxAmount, address recipient) internal returns (uint256 claimed) {
+        uint256 pending = _availablePending();
+        claimed = pending < maxAmount ? pending : maxAmount;
+        if (claimed == 0) return 0;
+
+        uint256 adapterBefore = IERC20(COMP).balanceOf(address(this));
+        uint256 recipientBefore = IERC20(COMP).balanceOf(recipient);
+        pendingRewards = pending - claimed;
+        IERC20(COMP).safeTransfer(recipient, claimed);
+        uint256 adapterAfter = IERC20(COMP).balanceOf(address(this));
+        uint256 recipientAfter = IERC20(COMP).balanceOf(recipient);
+        if (
+            adapterAfter > adapterBefore || adapterBefore - adapterAfter != claimed || recipientAfter < recipientBefore
+                || recipientAfter - recipientBefore != claimed
+        ) revert RewardClaimMismatch();
+    }
+
+    function _requireRewardToken(address token) internal pure {
         if (token != COMP) revert UnsupportedRewardToken();
-        return 0;
+    }
+
+    function _hasPendingReward() internal view returns (bool) {
+        return pendingRewards != 0 && IERC20(COMP).balanceOf(address(this)) >= pendingRewards;
+    }
+
+    function _availablePending() internal view returns (uint256) {
+        uint256 pending = pendingRewards;
+        if (IERC20(COMP).balanceOf(address(this)) < pending) revert RewardClaimMismatch();
+        return pending;
+    }
+
+    function _hasFundedStoredReward() internal view returns (bool) {
+        if (!_upstreamRewardActive()) return false;
+        uint256 owed = _storedRewardOwed();
+        return owed != 0 && IERC20(COMP).balanceOf(address(cometRewards)) >= owed;
+    }
+
+    function _upstreamRewardActive() internal view returns (bool) {
+        if (!_rewardConfigurationCurrent()) return false;
+        return comet.baseTrackingSupplySpeed() != 0 && comet.totalSupply() >= comet.baseMinForRewards();
+    }
+
+    function _rewardConfigurationCurrent() internal view returns (bool) {
+        ICometRewards.RewardConfig memory current = cometRewards.rewardConfig(address(comet));
+        return current.token == COMP && current.rescaleFactor == rewardRescaleFactor
+            && current.shouldUpscale == rewardShouldUpscale && current.multiplier == rewardMultiplier;
+    }
+
+    function _storedRewardOwed() internal view returns (uint256) {
+        uint256 accrued = comet.baseTrackingAccrued(address(this));
+        if (rewardShouldUpscale) accrued *= rewardRescaleFactor;
+        else accrued /= rewardRescaleFactor;
+        accrued = accrued * rewardMultiplier / FACTOR_SCALE;
+        uint256 claimed = cometRewards.rewardsClaimed(address(comet), address(this));
+        return accrued > claimed ? accrued - claimed : 0;
     }
 }

@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {CompoundAdapter} from "../src/adapters/CompoundAdapter.sol";
-import {IComet} from "../src/interfaces/IComet.sol";
+import {IComet, ICometRewards} from "../src/interfaces/IComet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title CompoundAdapterForkTest
@@ -14,6 +14,8 @@ contract CompoundAdapterForkTest is Test {
     // Base mainnet addresses (per paper Appendix A)
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
+    address constant COMET_REWARDS = 0x123964802e6ABabBE1Bc9547D72Ef1B69B00A6b1;
+    address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
 
     address VAULT;
     CompoundAdapter adapter;
@@ -22,7 +24,9 @@ contract CompoundAdapterForkTest is Test {
         VAULT = makeAddr("vault");
         string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
-        vm.createSelectFork(rpc);
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
+        if (forkBlock == 0) vm.createSelectFork(rpc);
+        else vm.createSelectFork(rpc, forkBlock);
         adapter = new CompoundAdapter(VAULT, USDC, COMET);
     }
 
@@ -95,6 +99,27 @@ contract CompoundAdapterForkTest is Test {
         vm.prank(alice);
         vm.expectRevert(CompoundAdapter.NotVault.selector);
         adapter.withdraw(100e6);
+    }
+
+    // ---- Exact reward configuration and pinned inactive-state evidence ----
+
+    function test_rewardDependencyMatchesOfficialBaseConfiguration() external withFork {
+        ICometRewards.RewardConfig memory config = ICometRewards(COMET_REWARDS).rewardConfig(COMET);
+        assertEq(address(adapter.cometRewards()), COMET_REWARDS);
+        assertEq(config.token, COMP);
+        assertEq(config.rescaleFactor, 1e12);
+        assertTrue(config.shouldUpscale);
+        assertEq(config.multiplier, 1e18);
+    }
+
+    function test_pinnedCompoundRewardsAreInactiveAndNotAdvertised() external withFork {
+        assertEq(IComet(COMET).baseTrackingSupplySpeed(), 0, "pinned supply reward speed changed");
+        assertGt(IComet(COMET).totalSupply(), IComet(COMET).baseMinForRewards());
+        assertEq(IERC20(COMP).balanceOf(COMET_REWARDS), 0, "pinned reward funding changed");
+        assertEq(adapter.rewardTokens().length, 0, "inactive COMP must not be advertised");
+
+        vm.prank(VAULT);
+        assertEq(adapter.claimableReward(COMP), 0);
     }
 
     // ---- Core Functionality Tests ----

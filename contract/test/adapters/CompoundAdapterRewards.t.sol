@@ -3,140 +3,343 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {CompoundAdapter} from "../../src/adapters/CompoundAdapter.sol";
-import {IComet} from "../../src/interfaces/IComet.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @title CompoundAdapterRewardsTest
-/// @dev Tests for IStrategyAdapter extension methods on CompoundAdapter.
-/// These tests verify the rewards/reporting interface required by NavyVaultSRCLA.
-/// Fork tests require BASE_RPC_URL to be set.
-contract CompoundAdapterRewardsTest is Test {
-    // Base mainnet addresses
-    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-    address constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
-    // COMP token on Base (from compound-finance/comet roots)
-    // https://github.com/compound-finance/comet/blob/f766f515/deployments/base/usdc/roots.json
-    address constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
+contract MockCompoundRewardToken is ERC20 {
+    address public feeSender;
+    uint256 public feeBps;
 
-    address VAULT;
-    CompoundAdapter adapter;
-    bool forkCreated;
+    constructor() ERC20("Compound", "COMP") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function setFee(address sender, uint256 bps) external {
+        feeSender = sender;
+        feeBps = bps;
+    }
+
+    function _update(address from, address to, uint256 amount) internal override {
+        if (from == feeSender && to != address(0) && feeBps != 0) {
+            uint256 fee = amount * feeBps / 10_000;
+            super._update(from, address(0), fee);
+            super._update(from, to, amount - fee);
+            return;
+        }
+        super._update(from, to, amount);
+    }
+}
+
+contract MockCompoundComet {
+    address public immutable baseToken;
+    bool public isSupplyPaused;
+    uint64 public baseTrackingSupplySpeed;
+    uint104 public baseMinForRewards;
+    uint256 public totalSupply;
+    uint256 public accrualIncrement;
+    mapping(address => uint64) public baseTrackingAccrued;
+
+    constructor(address baseToken_) {
+        baseToken = baseToken_;
+    }
+
+    function setRewardState(uint64 speed, uint104 minimum, uint256 marketSupply) external {
+        baseTrackingSupplySpeed = speed;
+        baseMinForRewards = minimum;
+        totalSupply = marketSupply;
+    }
+
+    function setTrackingAccrued(address account, uint64 amount) external {
+        baseTrackingAccrued[account] = amount;
+    }
+
+    function setAccrualIncrement(uint256 amount) external {
+        accrualIncrement = amount;
+    }
+
+    function accrueAccount(address account) external {
+        baseTrackingAccrued[account] += uint64(accrualIncrement);
+        accrualIncrement = 0;
+    }
+
+    function balanceOf(address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function getUtilization() external pure returns (uint256) {
+        return 0;
+    }
+
+    function getSupplyRate(uint256) external pure returns (uint64) {
+        return 0;
+    }
+
+    function supply(address, uint256) external {}
+
+    function withdrawTo(address, address, uint256) external {}
+}
+
+contract MockCompoundCometRewards {
+    struct RewardConfig {
+        address token;
+        uint64 rescaleFactor;
+        bool shouldUpscale;
+        uint256 multiplier;
+    }
+
+    struct RewardOwed {
+        address token;
+        uint256 owed;
+    }
+
+    mapping(address => RewardConfig) internal _configs;
+    mapping(address => mapping(address => uint256)) public rewardsClaimed;
+    uint256 public claimCount;
+    address public lastClaimComet;
+    address public lastClaimSource;
+    bool public lastClaimShouldAccrue;
+
+    function setConfig(address comet, address token, uint64 rescaleFactor, bool shouldUpscale, uint256 multiplier)
+        external
+    {
+        _configs[comet] = RewardConfig(token, rescaleFactor, shouldUpscale, multiplier);
+    }
+
+    function rewardConfig(address comet) external view returns (RewardConfig memory) {
+        return _configs[comet];
+    }
+
+    function getRewardOwed(address comet, address account) external returns (RewardOwed memory) {
+        MockCompoundComet(comet).accrueAccount(account);
+        return RewardOwed(_configs[comet].token, _owed(comet, account));
+    }
+
+    function claim(address comet, address src, bool shouldAccrue) external {
+        claimCount += 1;
+        lastClaimComet = comet;
+        lastClaimSource = src;
+        lastClaimShouldAccrue = shouldAccrue;
+        if (shouldAccrue) MockCompoundComet(comet).accrueAccount(src);
+        uint256 owed = _owed(comet, src);
+        if (owed == 0) return;
+        rewardsClaimed[comet][src] += owed;
+        IERC20(_configs[comet].token).transfer(src, owed);
+    }
+
+    function _owed(address comet, address account) internal view returns (uint256) {
+        RewardConfig memory config = _configs[comet];
+        uint256 accrued = MockCompoundComet(comet).baseTrackingAccrued(account);
+        if (config.shouldUpscale) accrued *= config.rescaleFactor;
+        else accrued /= config.rescaleFactor;
+        accrued = accrued * config.multiplier / 1e18;
+        uint256 claimed = rewardsClaimed[comet][account];
+        return accrued > claimed ? accrued - claimed : 0;
+    }
+}
+
+contract CompoundAdapterRewardsTest is Test {
+    address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    address internal constant COMP = 0x9e1028F5F1D5eDE59748FFceE5532509976840E0;
+    address internal constant COMET_REWARDS = 0x123964802e6ABabBE1Bc9547D72Ef1B69B00A6b1;
+
+    address internal vault;
+    address internal recipient;
+    MockCompoundComet internal comet;
+    MockCompoundCometRewards internal rewards;
+    MockCompoundRewardToken internal comp;
+    CompoundAdapter internal adapter;
 
     function setUp() public {
-        VAULT = makeAddr("vault");
-        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            forkCreated = false;
-            adapter = new CompoundAdapter(VAULT, USDC, COMET);
-            return;
-        }
-        forkCreated = true;
-        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
-        if (forkBlock == 0) vm.createSelectFork(rpc);
-        else vm.createSelectFork(rpc, forkBlock);
-        adapter = new CompoundAdapter(VAULT, USDC, COMET);
+        vault = makeAddr("vault");
+        recipient = makeAddr("recipient");
+        comet = new MockCompoundComet(USDC);
+
+        MockCompoundRewardToken tokenImplementation = new MockCompoundRewardToken();
+        vm.etch(COMP, address(tokenImplementation).code);
+        comp = MockCompoundRewardToken(COMP);
+
+        MockCompoundCometRewards rewardsImplementation = new MockCompoundCometRewards();
+        vm.etch(COMET_REWARDS, address(rewardsImplementation).code);
+        rewards = MockCompoundCometRewards(COMET_REWARDS);
+        rewards.setConfig(address(comet), COMP, 1e12, true, 1e18);
+
+        comet.setRewardState(1, 100e6, 1_000e6);
+        adapter = new CompoundAdapter(vault, USDC, address(comet));
     }
 
-    modifier withFork() {
-        if (!forkCreated) {
-            vm.skip(true);
-            return;
-        }
-        _;
+    function test_constructorBindsOfficialRewardsAndExactConfiguredTokenInDigest() external view {
+        (bool success, bytes memory result) = address(adapter).staticcall(abi.encodeWithSignature("cometRewards()"));
+        assertTrue(success);
+        assertEq(abi.decode(result, (address)), COMET_REWARDS);
+        bytes32 expected = keccak256(
+            abi.encode(address(comet), USDC, COMET_REWARDS, COMP, uint64(1e12), true, uint256(1e18), block.chainid)
+        );
+        assertEq(adapter.configurationDigest(), expected);
     }
 
-    // ---- rewardTokens() ----
+    function test_constructorRejectsRewardTokenMismatch() external {
+        rewards.setConfig(address(comet), makeAddr("wrong-token"), 1, true, 1e18);
 
-    function test_compound_rewardTokens() external view {
+        vm.expectRevert(bytes4(keccak256("InvalidConfiguration()")));
+        new CompoundAdapter(vault, USDC, address(comet));
+    }
+
+    function test_rewardTokensReturnsConfiguredCompOnlyWhenRewardIsActuallyClaimable() external {
+        _setOwedRaw(30e6);
+        comp.mint(COMET_REWARDS, 30e18);
+
         address[] memory tokens = adapter.rewardTokens();
-        assertGt(tokens.length, 0, "should have reward tokens");
+
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], COMP);
     }
 
-    function test_compound_rewardTokens_containsCOMP() external view {
-        address[] memory tokens = adapter.rewardTokens();
-        bool found = false;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == COMP) {
-                found = true;
-                break;
-            }
-        }
-        assertTrue(found, "reward tokens should contain COMP");
+    function test_rewardTokensReturnsEmptyWhenSupplySpeedIsZero() external {
+        _setOwedRaw(30e6);
+        comp.mint(COMET_REWARDS, 30e18);
+        comet.setRewardState(0, 100e6, 1_000e6);
+
+        assertEq(adapter.rewardTokens().length, 0);
     }
 
-    // ---- claimableReward() ----
+    function test_rewardTokensReturnsEmptyWhenMarketSupplyIsBelowRewardsMinimum() external {
+        _setOwedRaw(30e6);
+        comp.mint(COMET_REWARDS, 30e18);
+        comet.setRewardState(1, 100e6, 99e6);
 
-    function test_compound_claimableReward_doesNotRevert() external view {
-        // Just check it doesn't revert - actual amount depends on protocol state
+        assertEq(adapter.rewardTokens().length, 0);
+    }
+
+    function test_rewardTokensReturnsEmptyWhenOwedIsZero() external {
+        comp.mint(COMET_REWARDS, 30e18);
+
+        assertEq(adapter.rewardTokens().length, 0);
+    }
+
+    function test_rewardTokensReturnsEmptyWhenRewardsFundingIsInsufficient() external {
+        _setOwedRaw(30e6);
+        comp.mint(COMET_REWARDS, 30e18 - 1);
+
+        assertEq(adapter.rewardTokens().length, 0);
+    }
+
+    function test_claimableRewardAccruesStateAndReturnsExactFundedOwedAmount() external {
+        comet.setAccrualIncrement(73e6);
+        comp.mint(COMET_REWARDS, 73e18);
+
+        vm.prank(vault);
+        assertEq(adapter.claimableReward(COMP), 73e18);
+        assertEq(comet.baseTrackingAccrued(address(adapter)), 73e6);
+    }
+
+    function test_claimableRewardReportsZeroForInactiveOrUnfundedRewards() external {
+        _setOwedRaw(30e6);
+        comet.setRewardState(0, 100e6, 1_000e6);
+        vm.prank(vault);
+        assertEq(adapter.claimableReward(COMP), 0);
+
+        comet.setRewardState(1, 100e6, 1_000e6);
+        comp.mint(COMET_REWARDS, 30e18 - 1);
+        vm.prank(vault);
+        assertEq(adapter.claimableReward(COMP), 0);
+    }
+
+    function test_claimableRewardRejectsUnsupportedToken() external {
+        vm.prank(vault);
+        vm.expectRevert(CompoundAdapter.UnsupportedRewardToken.selector);
+        adapter.claimableReward(makeAddr("unsupported"));
+    }
+
+    function test_claimableRewardRejectsNonVaultCallerBecauseItAccruesState() external {
+        vm.expectRevert(CompoundAdapter.NotVault.selector);
         adapter.claimableReward(COMP);
     }
 
-    function test_compound_claimableReward_unsupportedToken() external {
-        address unsupported = makeAddr("unsupported");
-        vm.expectRevert(CompoundAdapter.UnsupportedRewardToken.selector);
-        adapter.claimableReward(unsupported);
+    function test_claimRewardRejectsNonVaultCaller() external {
+        _setOwedRaw(50e6);
+        comp.mint(COMET_REWARDS, 50e18);
+
+        vm.expectRevert(CompoundAdapter.NotVault.selector);
+        adapter.claimReward(COMP, 50e18, recipient);
     }
 
-    // ---- configurationDigest() ----
-
-    function test_compound_configurationDigest_notZero() external view {
-        bytes32 digest = adapter.configurationDigest();
-        assertTrue(digest != bytes32(0), "digest should not be zero");
+    function test_claimRewardRejectsZeroRecipient() external {
+        vm.prank(vault);
+        vm.expectRevert(bytes4(keccak256("InvalidRecipient()")));
+        adapter.claimReward(COMP, 50e18, address(0));
     }
 
-    function test_compound_configurationDigest_deterministic() external view {
-        bytes32 digest1 = adapter.configurationDigest();
-        bytes32 digest2 = adapter.configurationDigest();
-        assertEq(digest1, digest2, "digest should be deterministic");
+    function test_claimRewardUsesOfficialClaimAndHonorsMaximumWithoutStrandingRemainder() external {
+        _setOwedRaw(100e6);
+        comp.mint(COMET_REWARDS, 100e18);
+
+        vm.prank(vault);
+        uint256 first = adapter.claimReward(COMP, 40e18, recipient);
+
+        assertEq(first, 40e18);
+        assertEq(comp.balanceOf(recipient), 40e18);
+        assertEq(comp.balanceOf(address(adapter)), 60e18);
+        assertEq(_pendingRewards(), 60e18);
+        assertEq(rewards.claimCount(), 1);
+        assertEq(rewards.lastClaimComet(), address(comet));
+        assertEq(rewards.lastClaimSource(), address(adapter));
+        assertTrue(rewards.lastClaimShouldAccrue());
+
+        vm.prank(vault);
+        uint256 second = adapter.claimReward(COMP, 60e18, recipient);
+
+        assertEq(second, 60e18);
+        assertEq(comp.balanceOf(recipient), 100e18);
+        assertEq(comp.balanceOf(address(adapter)), 0);
+        assertEq(_pendingRewards(), 0);
+        assertEq(rewards.claimCount(), 1, "pending rewards should be paid without another upstream claim");
     }
 
-    function test_compound_configurationDigest_changesWithChain() external view {
-        bytes32 digest = adapter.configurationDigest();
-        assertGt(uint256(digest), 0, "digest should be non-zero");
+    function test_claimRewardMeasuresExactRecipientDeltaAndDoesNotExpropriatePriorBalance() external {
+        comp.mint(address(adapter), 777e18);
+        _setOwedRaw(50e6);
+        comp.mint(COMET_REWARDS, 50e18);
+
+        vm.prank(vault);
+        uint256 claimed = adapter.claimReward(COMP, 50e18, recipient);
+
+        assertEq(claimed, 50e18);
+        assertEq(comp.balanceOf(recipient), 50e18);
+        assertEq(comp.balanceOf(address(adapter)), 777e18);
+        assertEq(_pendingRewards(), 0);
     }
 
-    function test_compound_maxDeployableIsUnboundedOnlyWhileSupplyActive() external {
-        vm.mockCall(COMET, abi.encodeCall(IComet.isSupplyPaused, ()), abi.encode(false));
-        assertEq(adapter.maxDeployable(), type(uint256).max);
+    function test_claimRewardReturnsZeroWhenNoClaimableReward() external {
+        vm.prank(vault);
+        uint256 claimed = adapter.claimReward(COMP, 50e18, recipient);
 
-        vm.mockCall(COMET, abi.encodeCall(IComet.isSupplyPaused, ()), abi.encode(true));
-        assertEq(adapter.maxDeployable(), 0);
+        assertEq(claimed, 0);
+        assertEq(rewards.claimCount(), 0);
     }
 
-    function test_compound_maxDeployablePinnedForkMatchesSupplyPause() external withFork {
-        assertEq(adapter.maxDeployable(), adapter.comet().isSupplyPaused() ? 0 : type(uint256).max);
+    function test_claimRewardRevertsAtomicallyWhenUpstreamTransferDeltaDoesNotMatchOwed() external {
+        _setOwedRaw(50e6);
+        comp.mint(COMET_REWARDS, 50e18);
+        comp.setFee(COMET_REWARDS, 100);
+
+        vm.prank(vault);
+        vm.expectRevert(bytes4(keccak256("RewardClaimMismatch()")));
+        adapter.claimReward(COMP, 50e18, recipient);
+
+        assertEq(comp.balanceOf(COMET_REWARDS), 50e18);
+        assertEq(comp.balanceOf(address(adapter)), 0);
+        assertEq(rewards.rewardsClaimed(address(comet), address(adapter)), 0);
     }
 
-    // ---- maxWithdrawable() ----
-    // These require a fork since they call external contracts
-
-    function test_compound_maxWithdrawable_noDeposits() external withFork {
-        uint256 max = adapter.maxWithdrawable();
-        assertEq(max, 0, "maxWithdrawable should be 0 with no deposits");
+    function _setOwedRaw(uint64 rawAmount) internal {
+        comet.setTrackingAccrued(address(adapter), rawAmount);
     }
 
-    function test_compound_maxWithdrawable_afterDeposit() external withFork {
-        uint256 amount = 100e6;
-        deal(USDC, address(adapter), amount);
-
-        vm.prank(VAULT);
-        adapter.deposit(amount);
-
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertGt(max, 0, "maxWithdrawable should be > 0 after deposit");
-        assertApproxEqAbs(max, total, 1, "maxWithdrawable should approximately equal totalAssets");
-    }
-
-    function test_compound_maxWithdrawable_notExceedsTotalAssets() external withFork {
-        uint256 amount = 100e6;
-        deal(USDC, address(adapter), amount);
-
-        vm.prank(VAULT);
-        adapter.deposit(amount);
-
-        uint256 max = adapter.maxWithdrawable();
-        uint256 total = adapter.totalAssets();
-        assertLe(max, total, "maxWithdrawable should not exceed totalAssets");
+    function _pendingRewards() internal view returns (uint256 pending) {
+        (bool success, bytes memory result) = address(adapter).staticcall(abi.encodeWithSignature("pendingRewards()"));
+        assertTrue(success);
+        pending = abi.decode(result, (uint256));
     }
 }
