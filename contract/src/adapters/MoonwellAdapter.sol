@@ -65,9 +65,7 @@ contract MoonwellAdapter is IStrategyAdapter {
     /// @dev First transfers USDC to this adapter, then mints mTokens
     /// @dev Uses try/catch for protocol pause resilience
     function deposit(uint256 amount) external onlyVault returns (uint256 credited) {
-        uint256 supplyCap = comptroller.supplyCaps(address(mUsdc));
-        uint256 marketSupply = (mUsdc.totalSupply() * mUsdc.exchangeRateStored()) / MANTISSA;
-        if (supplyCap != 0 && marketSupply + amount > supplyCap) revert SupplyCapExceeded();
+        if (amount > maxDeployable()) revert SupplyCapExceeded();
         uint256 beforeAssets = _positionAssets();
         usdc.forceApprove(address(mUsdc), amount);
         try mUsdc.mint(amount) returns (uint256 code) {
@@ -145,12 +143,13 @@ contract MoonwellAdapter is IStrategyAdapter {
     }
 
     /// @notice Live Moonwell mint headroom, including the market pause and supply cap.
-    function maxDeployable() external view returns (uint256) {
+    function maxDeployable() public view returns (uint256) {
         if (comptroller.mintGuardianPaused(address(mUsdc))) return 0;
         uint256 supplyCap = comptroller.supplyCaps(address(mUsdc));
         if (supplyCap == 0) return type(uint256).max;
-        uint256 marketSupply = (mUsdc.totalSupply() * mUsdc.exchangeRateStored()) / MANTISSA;
-        return marketSupply < supplyCap ? supplyCap - marketSupply : 0;
+        uint256 marketSupply = mUsdc.getCash() + mUsdc.totalBorrows() - mUsdc.totalReserves();
+        if (marketSupply >= supplyCap - 1) return 0;
+        return supplyCap - marketSupply - 1;
     }
 
     /// @notice Unique digest of current protocol configuration

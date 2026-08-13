@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {CompoundAdapter} from "../../src/adapters/CompoundAdapter.sol";
+import {IComet} from "../../src/interfaces/IComet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title CompoundAdapterRewardsTest
@@ -30,7 +31,9 @@ contract CompoundAdapterRewardsTest is Test {
             return;
         }
         forkCreated = true;
-        vm.createSelectFork(rpc);
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
+        if (forkBlock == 0) vm.createSelectFork(rpc);
+        else vm.createSelectFork(rpc, forkBlock);
         adapter = new CompoundAdapter(VAULT, USDC, COMET);
     }
 
@@ -92,8 +95,16 @@ contract CompoundAdapterRewardsTest is Test {
         assertGt(uint256(digest), 0, "digest should be non-zero");
     }
 
-    function test_compound_maxDeployableIsUnboundedByProtocolSupplyCap() external view {
+    function test_compound_maxDeployableIsUnboundedOnlyWhileSupplyActive() external {
+        vm.mockCall(COMET, abi.encodeCall(IComet.isSupplyPaused, ()), abi.encode(false));
         assertEq(adapter.maxDeployable(), type(uint256).max);
+
+        vm.mockCall(COMET, abi.encodeCall(IComet.isSupplyPaused, ()), abi.encode(true));
+        assertEq(adapter.maxDeployable(), 0);
+    }
+
+    function test_compound_maxDeployablePinnedForkMatchesSupplyPause() external withFork {
+        assertEq(adapter.maxDeployable(), adapter.comet().isSupplyPaused() ? 0 : type(uint256).max);
     }
 
     // ---- maxWithdrawable() ----

@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AaveV3Adapter} from "../../src/adapters/AaveV3Adapter.sol";
-import {IAaveV3AToken} from "../../src/interfaces/IAaveV3.sol";
+import {IAaveV3Pool, IAaveV3AToken} from "../../src/interfaces/IAaveV3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title AaveV3AdapterRewardsTest
@@ -32,7 +32,9 @@ contract AaveV3AdapterRewardsTest is Test {
             return;
         }
         forkCreated = true;
-        vm.createSelectFork(rpc);
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
+        if (forkBlock == 0) vm.createSelectFork(rpc);
+        else vm.createSelectFork(rpc, forkBlock);
         adapter = new AaveV3Adapter(VAULT, USDC, AAVE_POOL, A_USDC);
     }
 
@@ -95,8 +97,37 @@ contract AaveV3AdapterRewardsTest is Test {
         assertGt(uint256(digest), 0, "digest should be non-zero");
     }
 
-    function test_aave_maxDeployableIsUnboundedByProtocolSupplyCap() external view {
-        assertEq(adapter.maxDeployable(), type(uint256).max);
+    function test_aave_maxDeployableUsesLiveSupplyCapAndTreasuryUsage() external {
+        IAaveV3Pool.ReserveData memory reserveData;
+        reserveData.configuration.data = (uint256(6) << 48) | (uint256(1) << 56) | (uint256(1_000) << 116);
+        reserveData.accruedToTreasury = 10e6;
+        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
+        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveNormalizedIncome, (USDC)), abi.encode(1e27));
+        vm.mockCall(A_USDC, abi.encodeCall(IAaveV3AToken.scaledTotalSupply, ()), abi.encode(600e6));
+
+        assertEq(adapter.maxDeployable(), 390e6);
+    }
+
+    function test_aave_maxDeployableIsZeroWhenInactiveFrozenOrPaused() external {
+        IAaveV3Pool.ReserveData memory reserveData;
+        reserveData.configuration.data = (uint256(6) << 48) | (uint256(1_000) << 116);
+        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
+        assertEq(adapter.maxDeployable(), 0, "inactive");
+
+        reserveData.configuration.data |= uint256(1) << 56 | uint256(1) << 57;
+        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
+        assertEq(adapter.maxDeployable(), 0, "frozen");
+
+        reserveData.configuration.data &= ~(uint256(1) << 57);
+        reserveData.configuration.data |= uint256(1) << 60;
+        vm.mockCall(AAVE_POOL, abi.encodeCall(IAaveV3Pool.getReserveData, (USDC)), abi.encode(reserveData));
+        assertEq(adapter.maxDeployable(), 0, "paused");
+    }
+
+    function test_aave_maxDeployablePinnedForkIsFinite() external withFork {
+        uint256 headroom = adapter.maxDeployable();
+        assertGt(headroom, 0);
+        assertLt(headroom, type(uint256).max);
     }
 
     // ---- maxWithdrawable() ----

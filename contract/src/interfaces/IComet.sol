@@ -9,4 +9,5 @@ interface IComet {
     function getUtilization() external view returns (uint256);
     function getSupplyRate(uint256 utilization) external view returns (uint64);
     function baseToken() external view returns (address);
+    function isSupplyPaused() external view returns (bool);
 }

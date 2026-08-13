@@ -13,6 +13,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract AaveV3Adapter is IStrategyAdapter {
     using SafeERC20 for IERC20;
 
+    uint256 private constant RAY = 1e27;
+    uint256 private constant HALF_RAY = 5e26;
+    uint256 private constant SUPPLY_CAP_MASK = (uint256(1) << 36) - 1;
+
     address public immutable vault;
     IERC20 public immutable usdc;
     IAaveV3Pool public immutable pool;
@@ -120,9 +124,36 @@ contract AaveV3Adapter is IStrategyAdapter {
         return position < cash ? position : cash;
     }
 
-    /// @notice Aave V3 has no reserve-level supply cap exposed for this market.
-    function maxDeployable() external pure returns (uint256) {
-        return type(uint256).max;
+    /// @notice Live Aave supply headroom after reserve state, cap, and accrued treasury usage.
+    function maxDeployable() external view returns (uint256) {
+        IAaveV3Pool.ReserveData memory reserve = pool.getReserveData(address(usdc));
+        uint256 config = reserve.configuration.data;
+        bool active = ((config >> 56) & 1) != 0;
+        bool frozen = ((config >> 57) & 1) != 0;
+        bool paused = ((config >> 60) & 1) != 0;
+        if (!active || frozen || paused) return 0;
+
+        uint256 supplyCap = (config >> 116) & SUPPLY_CAP_MASK;
+        if (supplyCap == 0) return type(uint256).max;
+        uint256 decimals_ = (config >> 48) & 0xff;
+        if (decimals_ > 77) return 0;
+
+        uint256 index = pool.getReserveNormalizedIncome(address(usdc));
+        if (index == 0) return 0;
+        uint256 capBase = supplyCap * (10 ** decimals_);
+        uint256 scaledUsage = aUsdc.scaledTotalSupply() + uint256(reserve.accruedToTreasury);
+        uint256 usage = _rayMul(scaledUsage, index);
+        if (usage >= capBase) return 0;
+
+        uint256 headroom = capBase - usage;
+        uint256 projected = _rayMul(scaledUsage + _rayDiv(headroom, index), index);
+        while (projected > capBase && headroom != 0) {
+            unchecked {
+                --headroom;
+            }
+            projected = _rayMul(scaledUsage + _rayDiv(headroom, index), index);
+        }
+        return headroom;
     }
 
     /// @notice Unique digest of current protocol configuration
@@ -143,5 +174,13 @@ contract AaveV3Adapter is IStrategyAdapter {
         if (token != COMP) revert UnsupportedRewardToken();
         // Aave V3 rewards controller integration deferred for Phase 2
         return 0;
+    }
+
+    function _rayMul(uint256 a, uint256 b) internal pure returns (uint256) {
+        return (a * b + HALF_RAY) / RAY;
+    }
+
+    function _rayDiv(uint256 a, uint256 b) internal pure returns (uint256) {
+        return (a * RAY + b / 2) / b;
     }
 }

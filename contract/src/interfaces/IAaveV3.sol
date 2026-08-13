@@ -12,6 +12,9 @@ interface IAaveV3Pool {
     /// @notice Get the reserve data for an asset
     function getReserveData(address asset) external view returns (ReserveData memory);
 
+    /// @notice Current reserve income index, including accrued interest.
+    function getReserveNormalizedIncome(address asset) external view returns (uint256);
+
     struct ReserveData {
         ReserveConfigurationMap configuration;
         uint128 liquidityIndex;
@@ -41,5 +44,6 @@ interface IAaveV3AToken {
     function scaledBalanceOf(address user) external view returns (uint256);
     function getScaledUserBalanceAndSupply(address user) external view returns (uint256, uint256);
     function totalSupply() external view returns (uint256);
+    function scaledTotalSupply() external view returns (uint256);
     function UNDERLYING_ASSET_ADDRESS() external view returns (address);
 }
