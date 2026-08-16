@@ -1,16 +1,16 @@
 // End-to-end proof of the Navy EVM payment path against a LIVE Sepolia deployment.
 //
-// Exercises exactly what the backend does — build the EIP-2612 Permit (mirrors
-// be/src/evm/payment-authorization.ts), have the payer sign it, and have the relayer submit
-// payInvoice (permit + transferFrom) — against the deployed NavyPayments + the Aave Sepolia
-// USDC, then asserts the 99/1 split and the InvoicePaid event.
+// Exercises exactly what the backend does — build the EIP-3009 ReceiveWithAuthorization
+// using the on-chain authorizationNonce(), have the payer sign it, and have the relayer
+// submit payInvoice — against the deployed NavyPayments + Circle USDC on Sepolia,
+// then asserts the 99/1 split, replay rejection, and that changing configVersion
+// invalidates the old nonce.
 //
 // Run (from be/):  node scripts/evm-e2e.mjs
-// Needs in be/.env: SEPOLIA_RPC_URL, NAVY_PAYMENTS_ADDRESS, NAVY_USDC_ADDRESS (Aave USDC),
+// Needs in be/.env: SEPOLIA_RPC_URL, NAVY_PAYMENTS_ADDRESS, NAVY_USDC_ADDRESS,
 //   NAVY_TREASURY_ADDRESS, NAVY_OWNER_PRIVATE_KEY, NAVY_RELAYER_PRIVATE_KEY,
-//   NAVY_USDC_EIP712_NAME (USDC) / NAVY_USDC_EIP712_VERSION (1)
+//   NAVY_USDC_EIP712_NAME / NAVY_USDC_EIP712_VERSION
 // and in contract/e2e-actors.env: E2E_PAYER_PRIVATE_KEY, E2E_MERCHANT_PAYOUT_ADDRESS.
-// Aave USDC has a public mint() faucet, so this script self-funds the payer.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -97,10 +97,19 @@ async function main() {
 
   console.log('… registering merchant'); await (await payments.connect(owner).registerMerchant(merchantId, merchantPayout)).wait();
 
-  // Build the EIP-3009 ReceiveWithAuthorization (nonce = keccak256(merchantId, invoiceId)) and sign it.
+  // The on-chain authorizationNonce is bound to configVersion, feeBps, treasury, and merchant payout.
+  // Capture the current configVersion before any changes.
+  const configVersionBefore = await payments.configVersion();
+  console.log(`… configVersion=${configVersionBefore}`);
+
+  // Read the authoritative nonce from the contract (mirrors what RelayerService.buildAuthorization does).
+  const nonce = await payments.authorizationNonce(merchantId, invoiceId);
+  log(nonce.length === 66 && nonce.startsWith('0x'), 'authorizationNonce returns a valid bytes32');
+  log(nonce !== invoiceKey(merchantId, invoiceId), 'authorizationNonce differs from the local invoiceKey (as expected when configVersion > 1)');
+
+  // Build the EIP-3009 ReceiveWithAuthorization using the contract nonce and sign it.
   const domain = { name: process.env.NAVY_USDC_EIP712_NAME ?? await usdc.name(), version: process.env.NAVY_USDC_EIP712_VERSION ?? '2', chainId: CHAIN_ID, verifyingContract: usdcAddr };
   const validBefore = Math.floor(Date.now() / 1000) + 3600;
-  const nonce = invoiceKey(merchantId, invoiceId);
   const message = { from: payer.address, to: paymentsAddr, value: AMOUNT.toString(), validAfter: '0', validBefore: validBefore.toString(), nonce };
   const signature = await payer.signTypedData(domain, RWA_TYPES, message);
   const sig = ethers.Signature.from(signature);
@@ -126,8 +135,18 @@ async function main() {
   // Replay must fail (same invoice → invoicePaid guard).
   try {
     await (await payments.connect(relayer).payInvoice(merchantId, invoiceId, AMOUNT, 0, validBefore, payer.address, sig.v, sig.r, sig.s)).wait();
-    log(false, 'replay was rejected');
+    log(false, 'replay of the same invoice was rejected');
   } catch { log(true, 'replay of the same invoice was rejected'); }
+
+  // Config change invalidates the old authorizationNonce (binding includes configVersion).
+  // Change treasury to itself (no-op but bumps configVersion) to prove the binding works.
+  const oldNonce = nonce;
+  console.log('… bumping configVersion via setConfig');
+  await (await payments.connect(owner).setConfig(100, treasury)).wait();
+  const configVersionAfter = await payments.configVersion();
+  log(configVersionAfter > configVersionBefore, `configVersion incremented: ${configVersionBefore} → ${configVersionAfter}`);
+  const newNonce = await payments.authorizationNonce(merchantId, invoiceId);
+  log(newNonce !== oldNonce, 'authorizationNonce changes after configVersion bump');
 
   console.log(process.exitCode ? '\nE2E FAILED' : '\nE2E PASSED ✅');
 }

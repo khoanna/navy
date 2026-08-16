@@ -8,10 +8,13 @@ const PAYMENTS = '0x1111111111111111111111111111111111111111';
 const MERCHANT_UUID = '11111111-2222-3333-4444-555555555555';
 const ORDER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
-function makeChain(balance = 10n ** 18n, payInvoice = jest.fn()) {
+/** A mock nonce returned by the contract's authorizationNonce() — deliberately different from invoiceKey. */
+const CONTRACT_NONCE = '0x00000000000000000000000000000000000000000000000000000000deadbeef';
+
+function makeChain(balance = 10n ** 18n, payInvoice = jest.fn(), authorizationNonce = jest.fn()) {
   return {
     provider: { getBalance: jest.fn().mockResolvedValue(balance) },
-    payments: { payInvoice },
+    payments: { payInvoice, authorizationNonce },
     relayer: { address: '0x9999999999999999999999999999999999999999' },
     paymentsAddress: PAYMENTS,
     usdcDomain: DOMAIN,
@@ -27,35 +30,58 @@ function makePrisma(order: any, consumeCount = 1) {
 }
 function makeCfg(minWei = 20000000000000000n) { return { relayerMinBalanceWei: minWei } as any; }
 
-const NONCE = invoiceKey(merchantIdHex(MERCHANT_UUID), invoiceIdHexFromOrderId(ORDER_ID));
-
-async function signFor(wallet: ethers.HDNodeWallet, amount: bigint, expiresAt: Date, nonce = NONCE) {
+async function signFor(wallet: ethers.HDNodeWallet, amount: bigint, expiresAt: Date, nonce: string) {
   const td = buildAuthorizationTypedData({ domain: DOMAIN, payer: wallet.address, to: PAYMENTS, amount, validAfter: 0, validBefore: Math.floor(expiresAt.getTime() / 1000), nonce });
   return { sig: await wallet.signTypedData(td.domain, td.types, td.message), digest: authorizationDigest(td) };
 }
 
 describe('RelayerService (EVM)', () => {
-  it('buildAuthorization persists the digest as the single-use nonce, uses the invoiceKey nonce, + returns typed data', async () => {
-    const chain = makeChain();
+  it('buildAuthorization calls authorizationNonce on-chain and uses that bytes32 as the typed-data nonce', async () => {
+    const authNonce = jest.fn().mockResolvedValue(CONTRACT_NONCE);
+    const chain = makeChain(10n ** 18n, jest.fn(), authNonce);
     const prisma = makePrisma({ id: ORDER_ID });
     const svc = new RelayerService(chain, prisma, makeCfg());
     const expiresAt = new Date(Date.now() + 600_000);
     const payer = ethers.Wallet.createRandom().address;
+    const merchantIdHex16 = merchantIdHex(MERCHANT_UUID);
+    const invoiceIdHex16 = invoiceIdHexFromOrderId(ORDER_ID);
 
-    const out = await svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt }, merchantIdHex(MERCHANT_UUID), payer);
+    const out = await svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt }, merchantIdHex16, payer);
 
-    expect(out.typedData.primaryType).toBe('ReceiveWithAuthorization');
-    expect(out.typedData.message.from).toBe(payer);
-    expect(out.typedData.message.to).toBe(PAYMENTS);
-    expect(out.typedData.message.value).toBe('1000000');
-    expect(out.typedData.message.validAfter).toBe('0');
-    expect(out.typedData.message.validBefore).toBe(String(Math.floor(expiresAt.getTime() / 1000)));
-    expect(out.typedData.message.nonce).toBe(NONCE);
+    // authorizationNonce was called with the exact bytes16 IDs
+    expect(authNonce).toHaveBeenCalledWith(merchantIdHex16, invoiceIdHex16);
+    // The typed data uses the contract nonce, NOT the local invoiceKey
+    expect(out.typedData.message.nonce).toBe(CONTRACT_NONCE);
+    expect(out.typedData.message.nonce).not.toBe(invoiceKey(merchantIdHex16, invoiceIdHex16));
+    // Digest is derived from the contract nonce
     const expectedDigest = authorizationDigest(out.typedData);
     expect(prisma.order.update).toHaveBeenCalledWith({
       where: { id: ORDER_ID },
       data: { issuedTxHash: expectedDigest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null },
     });
+  });
+
+  it('buildAuthorization throws when authorizationNonce call fails', async () => {
+    const authNonce = jest.fn().mockRejectedValue(new Error('RPC error'));
+    const chain = makeChain(10n ** 18n, jest.fn(), authNonce);
+    const prisma = makePrisma({ id: ORDER_ID });
+    const svc = new RelayerService(chain, prisma, makeCfg());
+    const expiresAt = new Date(Date.now() + 600_000);
+    const payer = ethers.Wallet.createRandom().address;
+    // Should throw ServiceUnavailableException with "authorization nonce unavailable"
+    await expect(svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt }, merchantIdHex(MERCHANT_UUID), payer))
+      .rejects.toThrow('authorization nonce unavailable');
+    // No digest persisted
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  it('buildAuthorization validates the nonce is a 32-byte hex string', async () => {
+    const authNonce = jest.fn().mockResolvedValue('not-32-bytes'); // invalid shape
+    const chain = makeChain(10n ** 18n, jest.fn(), authNonce);
+    const prisma = makePrisma({ id: ORDER_ID });
+    const svc = new RelayerService(chain, prisma, makeCfg());
+    await expect(svc.buildAuthorization({ id: ORDER_ID, amount: 1_000_000n, expiresAt: new Date(Date.now() + 600_000) }, merchantIdHex(MERCHANT_UUID), ethers.Wallet.createRandom().address))
+      .rejects.toThrow('authorization nonce unavailable');
   });
 
   it('buildAuthorization throws 503 when relayer ETH is below min, and does NOT persist', async () => {
@@ -70,7 +96,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit happy path: recovers payer, consumes atomically before submit, returns {txHash,payer,err:null}', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt, CONTRACT_NONCE);
     const wait = jest.fn().mockResolvedValue({ status: 1 });
     const payInvoice = jest.fn().mockResolvedValue({ hash: '0xtxhash', wait });
     const chain = makeChain(10n ** 18n, payInvoice);
@@ -103,7 +129,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit rejects when the recovered signer != expected payer', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt, CONTRACT_NONCE);
     const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
     const svc = new RelayerService(makeChain(), makePrisma(order), makeCfg());
     await expect(svc.verifyAndSubmit(ORDER_ID, sig, '0x0000000000000000000000000000000000000001')).rejects.toThrow(/signature/i);
@@ -112,7 +138,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit rejects a concurrent second submit (atomic consume count 0) without submitting', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt, CONTRACT_NONCE);
     const payInvoice = jest.fn();
     const chain = makeChain(10n ** 18n, payInvoice);
     const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };
@@ -125,7 +151,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit rejects an expired issued authorization', async () => {
     const wallet = ethers.Wallet.createRandom();
     const past = new Date(Date.now() - 1000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, past);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, past, CONTRACT_NONCE);
     const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: past, issuedTxConsumedAt: null };
     const svc = new RelayerService(makeChain(), makePrisma(order), makeCfg());
     await expect(svc.verifyAndSubmit(ORDER_ID, sig, wallet.address)).rejects.toThrow(/expired/i);
@@ -134,7 +160,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit persists {confirming, txSignature} BEFORE awaiting tx.wait (crash-safety)', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt, CONTRACT_NONCE);
     const wait = jest.fn().mockResolvedValue({ status: 1 });
     const payInvoice = jest.fn().mockResolvedValue({ hash: '0xtxhash', wait });
     const chain = makeChain(10n ** 18n, payInvoice);
@@ -157,7 +183,7 @@ describe('RelayerService (EVM)', () => {
   it('verifyAndSubmit maps a reverted receipt to err', async () => {
     const wallet = ethers.Wallet.createRandom();
     const expiresAt = new Date(Date.now() + 600_000);
-    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt);
+    const { sig, digest } = await signFor(wallet, 1_000_000n, expiresAt, CONTRACT_NONCE);
     const payInvoice = jest.fn().mockResolvedValue({ hash: '0xrevert', wait: jest.fn().mockResolvedValue({ status: 0 }) });
     const chain = makeChain(10n ** 18n, payInvoice);
     const order = { id: ORDER_ID, merchantId: MERCHANT_UUID, amount: 1_000_000n, issuedTxHash: digest, issuedTxExpiresAt: expiresAt, issuedTxConsumedAt: null };

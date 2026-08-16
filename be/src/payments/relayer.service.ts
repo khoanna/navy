@@ -6,7 +6,6 @@ import { NavyConfigService } from '../config/config.service';
 import {
   buildAuthorizationTypedData,
   invoiceIdHexFromOrderId,
-  invoiceKey,
   authorizationDigest,
   type AuthorizationTypedData,
 } from '../evm/payment-authorization';
@@ -35,8 +34,21 @@ export class RelayerService {
     if (balance < this.cfg.relayerMinBalanceWei) {
       throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
     }
-    // EIP-3009 nonce is the deterministic on-chain invoice key (bytes32), not a token nonce.
-    const nonce = invoiceKey(merchantIdHex16, invoiceIdHexFromOrderId(order.id));
+    // Fetch the configuration-bound nonce from the contract. This includes the merchant payout,
+    // treasury, feeBps, and version counters so changing any of those invalidates any
+    // outstanding unsigned authorizations. On failure we surface a 503 so the order stays
+    // "awaiting_payment" and can be retried without leaking a durable digest.
+    const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
+    let nonce: string;
+    try {
+      nonce = await this.chain.payments.authorizationNonce(merchantIdHex16, invoiceIdHex16);
+    } catch {
+      throw new ServiceUnavailableException('authorization nonce unavailable');
+    }
+    // Validate bytes32 shape: must be 0x + 64 hex chars
+    if (!/^0x[0-9a-f]{64}$/i.test(nonce)) {
+      throw new ServiceUnavailableException('authorization nonce unavailable');
+    }
     const validBefore = Math.floor(order.expiresAt.getTime() / 1000);
     const typedData = buildAuthorizationTypedData({
       domain: this.chain.usdcDomain,
@@ -89,7 +101,8 @@ export class RelayerService {
     const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
     const validBefore = Math.floor(order.issuedTxExpiresAt!.getTime() / 1000);
     const sig = ethers.Signature.from(signature);
-    // EIP-3009: validAfter=0, validBefore from the issued authorization; the token derives the nonce (invoiceKey) itself.
+    // EIP-3009: validAfter=0, validBefore from the issued authorization; nonce was the
+    // contract's authorizationNonce (bound to the merchant payout/treasury/fee/version at signing time).
     const tx = await this.chain.payments.payInvoice(
       merchantIdHex16, invoiceIdHex16, order.amount, 0, validBefore, signer, sig.v, sig.r, sig.s,
     );

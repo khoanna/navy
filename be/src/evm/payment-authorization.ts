@@ -49,8 +49,10 @@ export function invoiceIdHexFromOrderId(orderId: string): string {
   return uuidToBytes16Hex(orderId);
 }
 
-/** keccak256(abi.encodePacked(bytes16 merchantId, bytes16 invoiceId)) — the on-chain invoice key,
- *  reused as the EIP-3009 authorization nonce (bytes32). */
+/** keccak256(abi.encodePacked(bytes16 merchantId, bytes16 invoiceId)) — the stable on-chain invoice key,
+ *  used as the `invoicePaid` guard and by ChainWatcherService for state lookup.
+ *  NOTE: the EIP-3009 authorization nonce is fetched from `payments.authorizationNonce()`,
+ *  which additionally binds the merchant payout, treasury, feeBps, and version counters. */
 export function invoiceKey(merchantIdHex16: string, invoiceIdHex16: string): string {
   return ethers.keccak256(ethers.concat([merchantIdHex16, invoiceIdHex16]));
 }
