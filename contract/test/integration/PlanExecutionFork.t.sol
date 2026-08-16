@@ -84,7 +84,8 @@ contract PlanExecutionForkTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(aave),
             amount: 90e6,
-            minOut: 89e6
+            minOut: 89e6,
+            dataHash: bytes32(0)
         });
         _submitAndExecute(deployAave);
 
@@ -94,7 +95,8 @@ contract PlanExecutionForkTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(compound),
             amount: 90e6,
-            minOut: 89e6
+            minOut: 89e6,
+            dataHash: bytes32(0)
         });
         _submitAndExecute(deployCompound);
         assertGt(aave.totalAssets(), 0);
@@ -106,7 +108,8 @@ contract PlanExecutionForkTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(aave),
             amount: 45e6,
-            minOut: 44e6
+            minOut: 44e6,
+            dataHash: bytes32(0)
         });
         _submitAndExecute(divestAave);
         assertGe(IERC20(USDC).balanceOf(address(vault)), 65e6);
@@ -119,7 +122,8 @@ contract PlanExecutionForkTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(aave),
             amount: 1e6,
-            minOut: 1e6
+            minOut: 1e6,
+            dataHash: bytes32(0)
         });
         (VaultTypes.PlanHeader memory header, bytes32 leaf) = _plan(action, uint64(block.timestamp + 1));
         vm.prank(allocator);
@@ -137,7 +141,8 @@ contract PlanExecutionForkTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(aave),
             amount: 1e6,
-            minOut: 1e6
+            minOut: 1e6,
+            dataHash: bytes32(0)
         });
         (VaultTypes.PlanHeader memory header, bytes32 leaf) = _plan(action, uint64(block.timestamp + 1 hours));
         vm.prank(makeAddr("not-allocator"));

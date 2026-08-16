@@ -61,6 +61,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         address adapter;
         uint256 amount;
         uint256 minOut;
+        bytes32 dataHash;
     }
 
     // ---- State Variables ----
@@ -189,6 +190,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error PlanRiskLimitExceeded();
     error RewardNotClaimed();
     error InvalidSwapOutput();
+    error ClaimedAmountMismatch();
+    error ClaimExceedsMax();
+    error DeadlinePassed();
+    error InvalidDataHash();
+    error TokenNotAdmitted();
 
     // ---- ExecutionPlan Accessors ----
     // Note: activePlanId, activePlanDecisionHash, activePlanExpiresAt,
@@ -509,6 +515,133 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return totalUsdcReceived;
     }
 
+    /// @notice Atomic harvest: claim exactly one reward token, optionally swap to USDC
+    /// @param adapter The strategy adapter to harvest from
+    /// @param token The specific reward token to claim (must be in adapter's rewardTokens)
+    /// @param maxClaim Maximum amount to claim (capped at claimable)
+    /// @param routeId Route ID for swapping to USDC (if 0, no swap)
+    /// @param minOut Minimum USDC output (slippage protection)
+    /// @param deadline Block timestamp after which this harvest fails
+    /// @return usdcReceived Total USDC added to recognized rewards
+    function harvest(
+        address adapter,
+        address token,
+        uint256 maxClaim,
+        bytes32 routeId,
+        uint256 minOut,
+        uint256 deadline
+    ) external onlyRole(ALLOCATOR_ROLE) returns (uint256 usdcReceived) {
+        if (paused) revert DepositPaused();
+        if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
+        if (deadline < block.timestamp) revert DeadlinePassed();
+        _requireActiveAdapter(adapter);
+
+        usdcReceived = _harvestAtomic(adapter, token, maxClaim, routeId, minOut, deadline);
+
+        emit Harvested(adapter, usdcReceived);
+    }
+
+    /// @notice Internal atomic harvest logic
+    /// @dev Snapshots vault token balance, calls adapter claim, verifies delta equals claimed
+    function _harvestAtomic(
+        address adapter,
+        address token,
+        uint256 maxClaim,
+        bytes32 routeId,
+        uint256 minOut,
+        uint256 deadline
+    ) internal returns (uint256 usdcReceived) {
+        IStrategyAdapter a = IStrategyAdapter(adapter);
+        address usdcAddr = asset();
+
+        // Verify token is an admitted reward token from this adapter
+        bool tokenAdmitted = false;
+        address[] memory tokens = a.rewardTokens();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (tokens[i] == token) {
+                tokenAdmitted = true;
+                break;
+            }
+        }
+        if (!tokenAdmitted) revert TokenNotAdmitted();
+
+        // Snapshot vault balance before claim
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
+        // Call adapter to claim reward to vault
+        uint256 claimed = a.claimReward(token, maxClaim, address(this));
+
+        // Measure actual delta
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 delta = balanceAfter - balanceBefore;
+
+        // Verify measured delta equals returned claim
+        if (delta != claimed) revert ClaimedAmountMismatch();
+
+        // Verify claim doesn't exceed maxClaim
+        if (claimed > maxClaim) revert ClaimExceedsMax();
+
+        // If nothing claimed, we're done
+        if (claimed == 0) return 0;
+
+        // Swap if needed: token != USDC and route provided
+        if (token != usdcAddr && routeId != bytes32(0)) {
+            usdcReceived = _swapRewardToken(token, delta, routeId, minOut, deadline, usdcAddr);
+        }
+
+        // Add received USDC to recognized rewards
+        recognizedRewards += usdcReceived;
+
+        // Refresh reward accounting after state changes
+        if (rewardAccountant != address(0)) {
+            IRewardAccountant(rewardAccountant).refresh(new address[](0));
+        }
+    }
+
+    /// @notice Swap reward token to USDC with exact accounting
+    function _swapRewardToken(
+        address token,
+        uint256 delta,
+        bytes32 routeId,
+        uint256 minOut,
+        uint256 deadline,
+        address usdcAddr
+    ) internal returns (uint256 usdcReceived) {
+        // Get route for this token (prefer configured route)
+        bytes32 effectiveRouteId = rewardTokenRoutes[token];
+        if (effectiveRouteId == bytes32(0)) {
+            effectiveRouteId = routeId;
+        }
+
+        // Approve executor to pull exactly the delta
+        IERC20(token).forceApprove(rewardExecutor, delta);
+
+        // Snapshot balances before swap
+        uint256 tokenBefore = IERC20(token).balanceOf(address(this));
+        uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
+
+        // Execute swap
+        uint256 swapOut = IRewardExecutor(rewardExecutor).swap(effectiveRouteId, delta, minOut, deadline);
+
+        // Reset allowance
+        IERC20(token).forceApprove(rewardExecutor, 0);
+
+        // Verify exact delta was consumed
+        uint256 tokenAfterSwap = IERC20(token).balanceOf(address(this));
+        if (tokenBefore - tokenAfterSwap != delta) {
+            revert InvalidSwapOutput();
+        }
+
+        // Verify USDC output
+        uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
+        if (actualUsdcOut != swapOut) revert InvalidSwapOutput();
+
+        // Verify slippage
+        if (actualUsdcOut < minOut) revert SlippageExceeded();
+
+        return actualUsdcOut;
+    }
+
     /// @notice Internal harvest logic - claims rewards, swaps to USDC, adds to recognized rewards
     function _harvestCore(address adapter, bytes32 routeId, uint256 minOut)
         internal
@@ -541,9 +674,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
                     IERC20(token).forceApprove(rewardExecutor, claimable);
 
                     // Swap via executor - pass minOut per token (slippage check is done by executor)
+                    // Use 1 hour deadline for swap execution
                     uint256 rewardBefore = IERC20(token).balanceOf(address(this));
                     uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
-                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut);
+                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut, block.timestamp + 3600);
                     IERC20(token).forceApprove(rewardExecutor, 0);
                     if (rewardBefore - IERC20(token).balanceOf(address(this)) != claimable) {
                         revert InvalidSwapOutput();
@@ -681,6 +815,84 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         }
     }
 
+    /// @notice Execute a Harvest action within an active plan with the HarvestRequest
+    /// @dev Verifies the request hash matches the committed dataHash
+    /// @param request The harvest request to execute
+    function executeHarvestAction(VaultTypes.HarvestRequest memory request) external onlyRole(ALLOCATOR_ROLE) {
+        if (activePlanId == bytes32(0)) revert PlanNotActive();
+        if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
+
+        uint256 nextIndex = activePlanNextActionIndex;
+        if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
+
+        // Build a partial action to get the dataHash from the plan
+        Action memory expectedAction = _getExpectedAction(nextIndex);
+
+        // For Harvest actions, verify the request matches the committed dataHash
+        if (expectedAction.kind == ActionKind.Harvest) {
+            bytes32 expectedHash = keccak256(abi.encode(request));
+            if (expectedHash != expectedAction.dataHash) revert InvalidDataHash();
+        }
+
+        // Build full action with request
+        Action memory fullAction = Action({
+            planId: expectedAction.planId,
+            index: expectedAction.index,
+            kind: expectedAction.kind,
+            adapter: expectedAction.adapter,
+            amount: expectedAction.amount,
+            minOut: expectedAction.minOut,
+            dataHash: expectedAction.dataHash
+        });
+
+        // Execute the harvest with the request
+        _executeHarvestWithRequest(fullAction, request);
+
+        activePlanTurnover += expectedAction.amount;
+        _enforceActivePlanRiskLimits(false);
+
+        activePlanNextActionIndex = uint64(nextIndex + 1);
+
+        if (activePlanNextActionIndex >= activePlanActionCount) {
+            _enforceActivePlanRiskLimits(true);
+            dynamicReserve = activePlanReserve;
+            emit DynamicReserveSet(activePlanReserve);
+            usedPlanIds[activePlanId] = true;
+            bytes32 completedPlanId = activePlanId;
+            _clearActivePlan();
+            emit PlanCompleted(completedPlanId);
+        } else {
+            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(ActionKind.Harvest)), expectedAction.amount);
+        }
+    }
+
+    /// @notice Get the expected action at a given index (for verification)
+    function _getExpectedAction(uint256 index) internal view returns (Action memory action) {
+        action = _planActions[activePlanId][index];
+    }
+
+    /// @notice Execute harvest with a specific HarvestRequest
+    function _executeHarvestWithRequest(Action memory action, VaultTypes.HarvestRequest memory request) internal {
+        if (paused) revert DepositPaused();
+        _requireActiveAdapter(action.adapter);
+
+        // Verify request matches committed dataHash
+        bytes32 expectedHash = keccak256(abi.encode(request));
+        if (expectedHash != action.dataHash) revert InvalidDataHash();
+
+        // Execute atomic harvest
+        uint256 usdcReceived = _harvestAtomic(
+            request.adapter,
+            request.token,
+            request.maxClaim,
+            request.routeId,
+            request.minOut,
+            request.deadline
+        );
+
+        emit Harvested(action.adapter, usdcReceived);
+    }
+
     /// @notice Cancel the active plan
     /// @dev Marks plan as used to prevent replay after cancellation
     function cancelPlan() external onlyRole(ALLOCATOR_ROLE) {
@@ -768,7 +980,21 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Canonical Merkle leaf for a domain-bound plan action.
     function hashPlanAction(bytes32 domain, Action memory action) public pure returns (bytes32) {
         return keccak256(
-            abi.encode(domain, action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut)
+            abi.encode(domain, action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut, action.dataHash)
+        );
+    }
+
+    /// @notice Hash a HarvestRequest for Merkle action commitment
+    function hashHarvestRequest(VaultTypes.HarvestRequest memory request) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                request.adapter,
+                request.token,
+                request.maxClaim,
+                request.routeId,
+                request.minOut,
+                request.deadline
+            )
         );
     }
 
@@ -842,10 +1068,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         } else if (action.kind == ActionKind.Divest) {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
-            if (paused) revert DepositPaused();
-            _requireActiveAdapter(action.adapter);
-            // For Harvest action, use the action.amount as the routeId and minOut from action.
-            _harvestCore(action.adapter, bytes32(action.amount), action.minOut);
+            // Harvest actions must use executeHarvestAction with a HarvestRequest
+            // This function is called via executeNextActionWithProof for non-Harvest actions
+            // For Harvest, use executeHarvestAction directly
+            revert InvalidPlan();
         } else if (action.kind == ActionKind.EmergencyExit) {
             uint256 balance = strategyAssets[action.adapter];
             if (balance > 0) {

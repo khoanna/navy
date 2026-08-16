@@ -407,7 +407,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
             amount: 0,
-            minOut: 0
+            minOut: 0,
+            dataHash: bytes32(0)
         });
 
         bytes32 planId = keccak256("plan-1");
@@ -428,7 +429,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
             amount: 0,
-            minOut: 0
+            minOut: 0,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -449,7 +451,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
             amount: 0,
-            minOut: 0
+            minOut: 0,
+            dataHash: bytes32(0)
         });
 
         bytes32 planId = keccak256("plan-1");
@@ -471,7 +474,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Harvest,
             adapter: address(adapter),
             amount: 0,
-            minOut: 0
+            minOut: 0,
+            dataHash: bytes32(0)
         });
 
         bytes32 planId = keccak256("plan-1");
@@ -570,7 +574,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 400e6,
-            minOut: 400e6
+            minOut: 400e6,
+            dataHash: bytes32(0)
         });
         _submitSingleAction(action, keccak256("deploy-decision"));
         vm.prank(allocator);
@@ -597,7 +602,8 @@ contract NavyVaultSRCLACoreTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 50e6,
-            minOut: 50e6
+            minOut: 50e6,
+            dataHash: bytes32(0)
         });
         _submitSingleAction(action, keccak256("yield-sync-decision"));
         vm.prank(allocator);

@@ -184,8 +184,15 @@ contract VaultPolicyTest is Test {
         pure
         returns (NavyVaultSRCLA.Action memory)
     {
-        return
-            NavyVaultSRCLA.Action({planId: planId, index: 0, kind: kind, adapter: adapter, amount: amount, minOut: 0});
+        return NavyVaultSRCLA.Action({
+            planId: planId,
+            index: 0,
+            kind: kind,
+            adapter: adapter,
+            amount: amount,
+            minOut: 0,
+            dataHash: bytes32(0)
+        });
     }
 
     function _header(uint256 planId, uint256 reserve) internal view returns (VaultTypes.PlanHeader memory) {

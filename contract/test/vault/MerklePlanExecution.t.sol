@@ -7,7 +7,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
 import {MerkleTree} from "../../src/libraries/MerkleTree.sol";
 import {VaultTypes} from "../../src/libraries/VaultTypes.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title Mock USDC for testing (6 decimals like real USDC)
 contract MockUSDC {
@@ -218,7 +217,8 @@ contract MerklePlanExecutionTest is Test {
                 kind: NavyVaultSRCLA.ActionKind(kind),
                 adapter: address(adapter),
                 amount: 100e6,
-                minOut: 99e6
+                minOut: 99e6,
+                dataHash: bytes32(0)
             });
             leaves[i] = vault.hashPlanAction(vault.planDomain(header), action);
         }
@@ -277,7 +277,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -362,7 +363,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -388,7 +390,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         uint256 adapterAssetsBefore = adapter.reportedAssets();
@@ -424,7 +427,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 200e6, // Wrong amount
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -442,7 +446,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -470,7 +475,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -496,7 +502,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(allocator);
@@ -522,7 +529,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: address(adapter),
             amount: 100e6,
-            minOut: 99e6
+            minOut: 99e6,
+            dataHash: bytes32(0)
         });
 
         vm.prank(nonAllocator);
@@ -544,7 +552,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 500e6,
-            minOut: 499e6
+            minOut: 499e6,
+            dataHash: bytes32(0)
         });
         leaves[0] = vault.hashPlanAction(vault.planDomain(header), deployAction);
         bytes32 root = MerkleTree.computeRoot(leaves);
@@ -560,7 +569,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 500e6,
-            minOut: 499e6
+            minOut: 499e6,
+            dataHash: bytes32(0)
         });
 
         uint256 adapterAssetsBefore = adapter.reportedAssets();
@@ -597,7 +607,8 @@ contract MerklePlanExecutionTest is Test {
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: address(adapter),
             amount: 50e6,
-            minOut: 49e6
+            minOut: 49e6,
+            dataHash: bytes32(0)
         });
 
         bytes32 plainPlanId = keccak256("plain-plan");

@@ -3,7 +3,10 @@ pragma solidity ^0.8.24;
 
 library VaultTypes {
     bytes32 internal constant ACTION_TYPEHASH =
-        keccak256("Action(uint256 planId,uint32 index,uint8 kind,address adapter,uint256 amount,uint256 minOut)");
+        keccak256("Action(uint256 planId,uint32 index,uint8 kind,address adapter,uint256 amount,uint256 minOut,bytes32 dataHash)");
+
+    bytes32 internal constant HARVEST_REQUEST_TYPEHASH =
+        keccak256("HarvestRequest(address adapter,address token,uint256 maxClaim,bytes32 routeId,uint256 minOut,uint256 deadline)");
 
     enum ActionKind {
         Divest,
@@ -56,5 +59,15 @@ library VaultTypes {
         address adapter;
         uint256 amount;
         uint256 minOut;
+        bytes32 dataHash;
+    }
+
+    struct HarvestRequest {
+        address adapter;
+        address token;
+        uint256 maxClaim;
+        bytes32 routeId;
+        uint256 minOut;
+        uint256 deadline;
     }
 }

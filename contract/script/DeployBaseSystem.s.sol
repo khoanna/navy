@@ -23,7 +23,10 @@ contract DeployBaseSystem is Script {
     address internal constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
     address internal constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
     address internal constant MOONWELL_INTEREST_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
-    address internal constant SWAP_ROUTER_02 = 0x2626664c2603336E57B271c5C0b26F421741e481;
+    address internal constant SWAP_ROUTER_02 = 0x2626664C2603336E57b271C5c0b26F42121e30D0;
+    address internal constant FACTORY = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
+    address internal constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
+    uint256 internal constant RECOVERY_GRACE = 3600;
 
     error WrongChain();
     error InvalidGovernance();
@@ -53,7 +56,15 @@ contract DeployBaseSystem is Script {
         aave = new AaveV3Adapter(address(vault), USDC, AAVE_POOL, A_USDC);
         compound = new CompoundAdapter(address(vault), USDC, COMET);
         moonwell = new MoonwellAdapter(address(vault), USDC, M_USDC, MOONWELL_COMPTROLLER, MOONWELL_INTEREST_MODEL);
-        rewards = new RewardExecutor(address(vault), SWAP_ROUTER_02);
+        rewards = new RewardExecutor({
+            _vault: address(vault),
+            _admin: governance,
+            _canonicalUsdc: USDC,
+            _factory: FACTORY,
+            _swapRouter02: SWAP_ROUTER_02,
+            _sequencerFeed: SEQUENCER_FEED,
+            _recoveryGrace: RECOVERY_GRACE
+        });
 
         vault.registerAdapter(address(aave), 4_000, 100, "Aave V3 Base USDC");
         vault.registerAdapter(address(compound), 4_000, 100, "Compound III Base USDC");
