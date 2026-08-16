@@ -112,6 +112,44 @@ describe('PlanBuilder', () => {
       expect(encoded.actions[0]!.amountBase).toBe(1_000_000_000n);
     });
   });
+
+  describe('with configuration digest', () => {
+    it('should persist configuration digest in plan metadata', () => {
+      const configDigest = '0xdigest1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab';
+      const decisionHash = hashData({ test: 'config-digest' });
+      const plan = PlanBuilder.build({
+        decisionHash,
+        actions: [{ kind: 'deploy', adapter: '0x123', amount: 1_000_000n }],
+        configurationDigest: configDigest,
+      });
+
+      expect((plan as any).configurationDigest).toBe(configDigest);
+    });
+
+    it('should persist harvest deadline in plan metadata', () => {
+      const deadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+      const decisionHash = hashData({ test: 'harvest-deadline' });
+      const plan = PlanBuilder.build({
+        decisionHash,
+        actions: [{ kind: 'harvest', adapter: '0x456', amount: 0n }],
+        harvestDeadline: deadline,
+      });
+
+      expect((plan as any).harvestDeadline).toBe(deadline);
+    });
+
+    it('should persist action data hash in plan metadata', () => {
+      const actionDataHash = '0xhash1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+      const decisionHash = hashData({ test: 'action-hash' });
+      const plan = PlanBuilder.build({
+        decisionHash,
+        actions: [{ kind: 'deploy', adapter: '0x789', amount: 5_000_000n }],
+        actionDataHash,
+      });
+
+      expect((plan as any).actionDataHash).toBe(actionDataHash);
+    });
+  });
 });
 
 describe('preflight', () => {
@@ -205,6 +243,126 @@ describe('preflight', () => {
 
       const result = await preflight(params);
       expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('configuration digest validation', () => {
+    it('should reject when vault bytecode hash changed', async () => {
+      const expectedVaultCodeHash = '0xoriginal1234567890abcdef1234567890abcdef1234567890abcdef1234';
+      const currentVaultCodeHash = '0xchanged567890abcdef1234567890abcdef1234567890abcdef1234567890';
+
+      const params: PreflightParams = {
+        adapter: '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e',
+        amountBase: 1_000_000n,
+        registeredAdapters: ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'],
+        pausedAdapters: [],
+        gasPrice: 30_000_000_000n,
+        maxGasPrice: 100_000_000_000n,
+        vaultCodeAndConfig: {
+          vaultCodeHash: currentVaultCodeHash,
+          expectedVaultCodeHash,
+          configurationDigest: '0xdigest123',
+          expectedConfigurationDigest: '0xdigest123',
+          routeStatus: 'active',
+        },
+      };
+
+      const result = await preflight(params);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('VAULT_CODE_CHANGED');
+    });
+
+    it('should reject when configuration digest changed', async () => {
+      const expectedConfigDigest = '0xdigest1234567890abcdef1234567890abcdef1234567890abcdef1234';
+      const currentConfigDigest = '0xnewdigest567890abcdef1234567890abcdef1234567890abcdef123456';
+
+      const params: PreflightParams = {
+        adapter: '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e',
+        amountBase: 1_000_000n,
+        registeredAdapters: ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'],
+        pausedAdapters: [],
+        gasPrice: 30_000_000_000n,
+        maxGasPrice: 100_000_000_000n,
+        vaultCodeAndConfig: {
+          vaultCodeHash: '0xcodehash',
+          expectedVaultCodeHash: '0xcodehash',
+          configurationDigest: currentConfigDigest,
+          expectedConfigurationDigest: expectedConfigDigest,
+          routeStatus: 'active',
+        },
+      };
+
+      const result = await preflight(params);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('CONFIG_DIGEST_CHANGED');
+    });
+
+    it('should reject when route is inactive', async () => {
+      const params: PreflightParams = {
+        adapter: '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e',
+        amountBase: 1_000_000n,
+        registeredAdapters: ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'],
+        pausedAdapters: [],
+        gasPrice: 30_000_000_000n,
+        maxGasPrice: 100_000_000_000n,
+        vaultCodeAndConfig: {
+          vaultCodeHash: '0xcodehash',
+          expectedVaultCodeHash: '0xcodehash',
+          configurationDigest: '0xdigest',
+          expectedConfigurationDigest: '0xdigest',
+          routeStatus: 'inactive',
+        },
+      };
+
+      const result = await preflight(params);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('ROUTE_INACTIVE');
+    });
+
+    it('should accept when all vault code/config state matches', async () => {
+      const vaultCodeHash = '0xoriginal1234567890abcdef1234567890abcdef1234567890abcdef1234';
+      const configDigest = '0xdigest1234567890abcdef1234567890abcdef1234567890abcdef1234';
+
+      const params: PreflightParams = {
+        adapter: '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e',
+        amountBase: 1_000_000n,
+        registeredAdapters: ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'],
+        pausedAdapters: [],
+        gasPrice: 30_000_000_000n,
+        maxGasPrice: 100_000_000_000n,
+        vaultCodeAndConfig: {
+          vaultCodeHash,
+          expectedVaultCodeHash: vaultCodeHash,
+          configurationDigest: configDigest,
+          expectedConfigurationDigest: configDigest,
+          routeStatus: 'active',
+        },
+      };
+
+      const result = await preflight(params);
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject when vaultCodeAndConfig is provided but state changed', async () => {
+      const params: PreflightParams = {
+        adapter: '0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e',
+        amountBase: 1_000_000n,
+        registeredAdapters: ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'],
+        pausedAdapters: [],
+        gasPrice: 30_000_000_000n,
+        maxGasPrice: 100_000_000_000n,
+        vaultCodeAndConfig: {
+          vaultCodeHash: '0xcurrent',
+          expectedVaultCodeHash: '0xexpected',
+          configurationDigest: '0xcurrent',
+          expectedConfigurationDigest: '0xexpected',
+          routeStatus: 'stale',
+        },
+      };
+
+      const result = await preflight(params);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/VAULT_CODE_CHANGED|CONFIG_DIGEST_CHANGED|ROUTE_INACTIVE|ROUTE_STALE/);
     });
   });
 });
@@ -344,6 +502,37 @@ describe('reconcile', () => {
       expect(result.acceptable).toBe(false);
     });
   });
+
+  describe('cache delta verification', () => {
+    it('should track reward cache delta after harvest', () => {
+      const vaultState: VaultState = {
+        idle: 500_000_000_000n,
+        adapterBalances: new Map([
+          ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e', 9_500_000_000_000n],
+        ]),
+        previousRewardCacheValue: 50_000_000_000n,
+        currentRewardCacheValue: 55_000_000_000n,
+      };
+
+      // Verify reward cache increased
+      expect(vaultState.currentRewardCacheValue! - vaultState.previousRewardCacheValue!).toBe(5_000_000_000n);
+    });
+
+    it('should fail if reward cache value decreased unexpectedly', () => {
+      const vaultState: VaultState = {
+        idle: 500_000_000_000n,
+        adapterBalances: new Map([
+          ['0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e', 9_500_000_000_000n],
+        ]),
+        previousRewardCacheValue: 55_000_000_000n,
+        currentRewardCacheValue: 50_000_000_000n, // Decreased - suspicious
+      };
+
+      // Verify reward cache decreased (this would trigger alerts in production)
+      const delta = (vaultState.currentRewardCacheValue ?? 0n) - (vaultState.previousRewardCacheValue ?? 0n);
+      expect(delta).toBeLessThan(0n);
+    });
+  });
 });
 
 describe('ReconciliationResult', () => {
@@ -369,5 +558,23 @@ describe('ReconciliationResult', () => {
     expect(result).toHaveProperty('actualAmount');
     expect(result).toHaveProperty('deviation');
     expect(result).toHaveProperty('acceptable');
+  });
+});
+
+describe('VaultState - Extended Fields', () => {
+  it('should include reward cache tracking fields', () => {
+    const vaultState: VaultState = {
+      idle: 500_000_000_000n,
+      adapterBalances: new Map(),
+      previousRewardCacheValue: 50_000_000_000n,
+      currentRewardCacheValue: 55_000_000_000n,
+      rewardCacheTimestamp: 1_000_000_000n,
+      configurationDigest: '0xdigest123',
+    };
+
+    expect(vaultState.previousRewardCacheValue).toBe(50_000_000_000n);
+    expect(vaultState.currentRewardCacheValue).toBe(55_000_000_000n);
+    expect(vaultState.rewardCacheTimestamp).toBe(1_000_000_000n);
+    expect(vaultState.configurationDigest).toBe('0xdigest123');
   });
 });

@@ -3,8 +3,8 @@ import {
   ConstrainedOptimizer,
   OptimizationConstraints,
   AdapterForecast,
-} from './constrained-optimizer';
-import { DependencyGroups, DependencyGroup } from './dependency-groups';
+} from './constrained-optimizer.js';
+import { DependencyGroups, DependencyGroup } from './dependency-groups.js';
 
 const AAVE_ADDR = '0x0000000000000000000000000000000000000A11';
 const COMPOUND_ADDR = '0x0000000000000000000000000000000000000C01';

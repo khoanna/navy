@@ -1,8 +1,8 @@
-export { DependencyGroups, DependencyGroup } from './dependency-groups';
+export { DependencyGroups, DependencyGroup } from './dependency-groups.js';
 export {
   ConstrainedOptimizer,
   OptimizationConstraints,
   AdapterForecast,
   OptimizationResult,
   ViolationType,
-} from './constrained-optimizer';
+} from './constrained-optimizer.js';

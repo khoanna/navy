@@ -3,7 +3,7 @@ import {
   RewardValuationService,
   RewardValuationConfig,
   MockPriceFeed,
-} from './reward-valuation';
+} from './reward-valuation.js';
 
 const COMP_TOKEN = '0x0000000000000000000000000000000000000C01';
 const WELL_TOKEN = '0x0000000000000000000000000000000000000W01';

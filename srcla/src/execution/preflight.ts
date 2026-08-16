@@ -1,6 +1,22 @@
 import { ethers } from 'ethers';
 
 /**
+ * Vault code and configuration state for preflight validation
+ */
+export interface VaultCodeAndConfig {
+  /** Current vault bytecode hash */
+  vaultCodeHash: string;
+  /** Expected vault bytecode hash (from plan or last known good) */
+  expectedVaultCodeHash: string;
+  /** Current configuration digest */
+  configurationDigest: string;
+  /** Expected configuration digest (from plan) */
+  expectedConfigurationDigest: string;
+  /** Current route status */
+  routeStatus: 'active' | 'inactive' | 'stale';
+}
+
+/**
  * Preflight check parameters
  */
 export interface PreflightParams {
@@ -18,6 +34,8 @@ export interface PreflightParams {
   maxGasPrice: bigint;
   /** If true, allow zero amount for harvest operations */
   isHarvest?: boolean;
+  /** Vault code and configuration state for validation */
+  vaultCodeAndConfig?: VaultCodeAndConfig;
 }
 
 /**
@@ -45,6 +63,11 @@ export const PreflightError = {
   ADAPTER_PAUSED: 'ADAPTER_PAUSED',
   GAS_PRICE_TOO_HIGH: 'GAS_PRICE_TOO_HIGH',
   INVALID_ADDRESS: 'INVALID_ADDRESS',
+  VAULT_CODE_CHANGED: 'VAULT_CODE_CHANGED',
+  CONFIG_DIGEST_CHANGED: 'CONFIG_DIGEST_CHANGED',
+  ROUTE_INACTIVE: 'ROUTE_INACTIVE',
+  ROUTE_STALE: 'ROUTE_STALE',
+  REWARD_STATE_CHANGED: 'REWARD_STATE_CHANGED',
 } as const;
 
 /**
@@ -77,6 +100,9 @@ function normalizeAddress(address: string): string {
  * - Amount is positive (or harvest operation)
  * - Adapter is not paused
  * - Gas price is acceptable
+ * - Vault code unchanged (if vaultCodeAndConfig provided)
+ * - Configuration digest unchanged (if vaultCodeAndConfig provided)
+ * - Route status is active (if vaultCodeAndConfig provided)
  *
  * @param params Preflight parameters
  * @returns Preflight result indicating if action can proceed
@@ -138,6 +164,14 @@ export async function preflight(params: PreflightParams): Promise<PreflightResul
     };
   }
 
+  // Validate vault code and configuration state
+  if (params.vaultCodeAndConfig) {
+    const configValidation = validateVaultState(params.vaultCodeAndConfig);
+    if (!configValidation.valid) {
+      return configValidation;
+    }
+  }
+
   // All checks passed
   return {
     valid: true,
@@ -147,6 +181,44 @@ export async function preflight(params: PreflightParams): Promise<PreflightResul
       ),
     },
   };
+}
+
+/**
+ * Validate vault code and configuration state
+ */
+function validateVaultState(state: VaultCodeAndConfig): PreflightResult {
+  // Check vault bytecode hash
+  if (state.vaultCodeHash !== state.expectedVaultCodeHash) {
+    return {
+      valid: false,
+      reason: `${PreflightError.VAULT_CODE_CHANGED}: vault code has changed since plan creation`,
+    };
+  }
+
+  // Check configuration digest
+  if (state.configurationDigest !== state.expectedConfigurationDigest) {
+    return {
+      valid: false,
+      reason: `${PreflightError.CONFIG_DIGEST_CHANGED}: configuration has changed since plan creation`,
+    };
+  }
+
+  // Check route status
+  if (state.routeStatus === 'inactive') {
+    return {
+      valid: false,
+      reason: `${PreflightError.ROUTE_INACTIVE}: reward route is not active`,
+    };
+  }
+
+  if (state.routeStatus === 'stale') {
+    return {
+      valid: false,
+      reason: `${PreflightError.ROUTE_STALE}: reward route data is stale`,
+    };
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -161,6 +233,7 @@ export function createPreflightParams(params: {
   gasPrice?: bigint;
   maxGasPrice?: bigint;
   isHarvest?: boolean;
+  vaultCodeAndConfig?: VaultCodeAndConfig;
 }): PreflightParams {
   const result: PreflightParams = {
     adapter: params.adapter,
@@ -172,6 +245,9 @@ export function createPreflightParams(params: {
   };
   if (params.isHarvest !== undefined) {
     result.isHarvest = params.isHarvest;
+  }
+  if (params.vaultCodeAndConfig !== undefined) {
+    result.vaultCodeAndConfig = params.vaultCodeAndConfig;
   }
   return result;
 }

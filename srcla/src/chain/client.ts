@@ -61,6 +61,20 @@ export class ChainClient {
   }
 
   /**
+   * Get bytecode hash at address (for code change detection)
+   */
+  async getCodeHash(address: string): Promise<string> {
+    const code = await this.provider.getCode(address);
+    if (!code || code === '0x') {
+      return '0x' + '0'.repeat(64);
+    }
+    // Use ethers to compute hash
+    const { createHash } = await import('crypto');
+    const hash = createHash('sha256').update(code).digest('hex');
+    return '0x' + hash;
+  }
+
+  /**
    * Make a raw call to a contract
    */
   async call(to: string, data: string, blockTag: BlockTag = 'latest'): Promise<string> {

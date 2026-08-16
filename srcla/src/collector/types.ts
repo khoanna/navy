@@ -6,6 +6,10 @@ export interface CollectorConfig {
     moonwell: string;
   };
   usdcAddress: string;
+  /** RewardAccountant contract address for reward state */
+  rewardAccountantAddress?: string;
+  /** RewardExecutor contract address for route status */
+  rewardExecutorAddress?: string;
 }
 
 export interface CollectedSnapshot {
@@ -22,6 +26,45 @@ export interface VaultSnapshot {
   idleBase: bigint;
   minIdleBps: bigint;
   paused: boolean;
+
+  // Extended fields for production vault policy alignment
+  /** Absolute caps from vault configuration */
+  absoluteCaps?: {
+    totalCap: bigint;
+    perUserCap: bigint;
+    minDeposit: bigint;
+  } | undefined;
+  /** Dependency group exposure and caps */
+  groups?: Array<{
+    id: string;
+    exposure: bigint;
+    cap: bigint;
+  }> | undefined;
+  /** Reserve breakdown: admin (immutable floor) + dynamic (policy-calculated) */
+  reserve?: {
+    admin: bigint;
+    dynamic: bigint;
+  } | undefined;
+  /** Reward cache timestamp (Unix seconds) */
+  rewardCacheTimestamp?: bigint;
+  /** Cached reward value in base units */
+  rewardCacheValue?: bigint;
+  /** Whether rewards are ready to be harvested */
+  rewardReady?: boolean;
+  /** Keccak256 hash of reward policy configuration */
+  rewardPolicyDigest?: string;
+  /** Keccak256 hash of approved route configuration */
+  routeDigest?: string;
+  /** Current route status from RewardExecutor */
+  routeStatus?: 'active' | 'inactive' | 'stale';
+  /** Current sequencer round number (Unix timestamp or sequential) */
+  sequencerRound?: bigint;
+  /** Per-feed round data with staleness flags */
+  feedRounds?: Array<{
+    feed: string;
+    round: bigint;
+    staleness: boolean;
+  }> | undefined;
 }
 
 export interface StrategySnapshot {

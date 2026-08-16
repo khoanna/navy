@@ -4,7 +4,7 @@ import {
   HarvestGateConfig,
   HarvestGateCosts,
   HarvestGateReason,
-} from './harvest-gate';
+} from './harvest-gate.js';
 
 const AAVE_ADAPTER = '0x0000000000000000000000000000000000000A11';
 const COMPOUND_ADAPTER = '0x0000000000000000000000000000000000000C01';

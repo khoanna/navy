@@ -36,6 +36,14 @@ export interface ExecutionPlan {
   expiresAt: Date;
   /** Ordered list of actions to execute */
   actions: PlanAction[];
+  /** On-chain configuration digest at plan creation time */
+  configurationDigest?: string;
+  /** Hash of action data for verification */
+  actionDataHash?: string;
+  /** Deadline for harvest execution */
+  harvestDeadline?: Date;
+  /** Dynamic reserve at plan creation */
+  dynamicReserve?: bigint;
 }
 
 /**
@@ -51,6 +59,8 @@ export interface EncodedPlan {
     amountBase: bigint;
     merkleRoot: string;
   }>;
+  /** Configuration digest for on-chain verification */
+  configurationDigest?: string;
 }
 
 /**
@@ -63,6 +73,10 @@ export class PlanBuilder {
    * @param params.decisionHash Hash of the decision inputs
    * @param params.actions Actions to include in the plan
    * @param params.expiryMinutes Plan expiry in minutes (default: 30)
+   * @param params.configurationDigest On-chain configuration digest
+   * @param params.actionDataHash Hash of action data
+   * @param params.harvestDeadline Deadline for harvest execution
+   * @param params.dynamicReserve Dynamic reserve at plan creation
    */
   static build(params: {
     planId?: string;
@@ -73,6 +87,10 @@ export class PlanBuilder {
       amount: bigint;
     }>;
     expiryMinutes?: number;
+    configurationDigest?: string;
+    actionDataHash?: string;
+    harvestDeadline?: Date;
+    dynamicReserve?: bigint;
   }): ExecutionPlan {
     // Generate deterministic planId from decision hash + timestamp
     const timestamp = Date.now();
@@ -94,12 +112,40 @@ export class PlanBuilder {
       Date.now() + (params.expiryMinutes ?? 30) * 60 * 1000
     );
 
-    return {
+    const plan: ExecutionPlan = {
       planId: `0x${planId}`,
       decisionHash: params.decisionHash,
       expiresAt,
       actions,
     };
+
+    // Add production fields if provided
+    if (params.configurationDigest) {
+      plan.configurationDigest = params.configurationDigest;
+    }
+    if (params.actionDataHash) {
+      plan.actionDataHash = params.actionDataHash;
+    }
+    if (params.harvestDeadline) {
+      plan.harvestDeadline = params.harvestDeadline;
+    }
+    if (params.dynamicReserve !== undefined) {
+      plan.dynamicReserve = params.dynamicReserve;
+    }
+
+    return plan;
+  }
+
+  /**
+   * Compute hash of action data for verification
+   */
+  static computeActionDataHash(actions: PlanAction[]): string {
+    const actionData = actions.map((a) => ({
+      kind: a.kind,
+      adapter: a.adapter.toLowerCase(),
+      amount: a.amountBase.toString(),
+    }));
+    return createHash('sha256').update(JSON.stringify(actionData)).digest('hex');
   }
 
   /**
@@ -108,7 +154,7 @@ export class PlanBuilder {
    * @returns Encoded plan with Unix timestamps and numeric action kinds
    */
   static encode(plan: ExecutionPlan): EncodedPlan {
-    return {
+    const encoded: EncodedPlan = {
       planId: plan.planId,
       decisionHash: plan.decisionHash,
       expiresAt: BigInt(Math.floor(plan.expiresAt.getTime() / 1000)),
@@ -119,6 +165,12 @@ export class PlanBuilder {
         merkleRoot: a.merkleRoot,
       })),
     };
+
+    if (plan.configurationDigest) {
+      encoded.configurationDigest = plan.configurationDigest;
+    }
+
+    return encoded;
   }
 
   /**
@@ -153,5 +205,19 @@ export class PlanBuilder {
    */
   static isExpired(plan: ExecutionPlan): boolean {
     return plan.expiresAt.getTime() < Date.now();
+  }
+
+  /**
+   * Validate configuration digest matches expected
+   * @param plan Plan to validate
+   * @param expectedDigest Expected configuration digest
+   * @returns true if digest matches or is not set
+   */
+  static validateConfigurationDigest(plan: ExecutionPlan, expectedDigest: string): boolean {
+    if (!plan.configurationDigest) {
+      // No digest in plan - skip validation
+      return true;
+    }
+    return plan.configurationDigest === expectedDigest;
   }
 }

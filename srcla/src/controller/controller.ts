@@ -148,6 +148,23 @@ export class Controller {
         };
       }
 
+      // Step 2b: Production vault policy check
+      const vaultPolicy = this.admission.evaluateVault(snapshot.vault);
+      if (!vaultPolicy.admitted) {
+        return {
+          timestamp,
+          snapshotHash,
+          admission,
+          forecast: null,
+          decision: null,
+          plan: null,
+          execution: null,
+          skipped: false,
+          reason: 'VAULT_POLICY_FAILED',
+          error: vaultPolicy.errors.join('; '),
+        };
+      }
+
       // Step 3: Forecast for each strategy
       const forecasts: ForecastResult[] = [];
       for (const strategy of snapshot.strategies) {

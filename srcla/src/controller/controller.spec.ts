@@ -17,6 +17,33 @@ interface MockSnapshot {
     idleBase: bigint;
     minIdleBps: bigint;
     paused: boolean;
+    // Extended fields from production vault
+    absoluteCaps?: {
+      totalCap: bigint;
+      perUserCap: bigint;
+      minDeposit: bigint;
+    };
+    groups?: Array<{
+      id: string;
+      exposure: bigint;
+      cap: bigint;
+    }>;
+    reserve?: {
+      admin: bigint;
+      dynamic: bigint;
+    };
+    rewardCacheTimestamp?: bigint;
+    rewardCacheValue?: bigint;
+    rewardReady?: boolean;
+    rewardPolicyDigest?: string;
+    routeDigest?: string;
+    routeStatus?: 'active' | 'inactive' | 'stale';
+    sequencerRound?: bigint;
+    feedRounds?: Array<{
+      feed: string;
+      round: bigint;
+      staleness: boolean;
+    }>;
   };
   strategies: Array<{
     address: string;
@@ -52,6 +79,29 @@ function createMockSnapshot(): MockSnapshot {
       idleBase: 500_000_000_000n,
       minIdleBps: 100n,
       paused: false,
+      absoluteCaps: {
+        totalCap: 100_000_000_000_000n,
+        perUserCap: 1_000_000_000_000n,
+        minDeposit: 10_000_000n,
+      },
+      groups: [
+        { id: 'compound-group', exposure: 5_000_000_000_000n, cap: 10_000_000_000_000n },
+        { id: 'aave-group', exposure: 4_500_000_000_000n, cap: 8_000_000_000_000n },
+      ],
+      reserve: {
+        admin: 100_000_000_000n,
+        dynamic: 400_000_000_000n,
+      },
+      rewardCacheTimestamp: 1_000_000_000n,
+      rewardCacheValue: 50_000_000_000n,
+      rewardReady: true,
+      rewardPolicyDigest: '0xdigest1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+      routeDigest: '0xroute4567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12',
+      routeStatus: 'active',
+      sequencerRound: 1_000_000n,
+      feedRounds: [
+        { feed: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', round: 999_999n, staleness: false },
+      ],
     },
     strategies: [
       {
@@ -92,7 +142,7 @@ function createMockServices(mockSnapshot: MockSnapshot): MockServices & { mocks:
   const collector: SnapshotCollector = {
     collect: async () => {
       mocks.collectCalls++;
-      return mockSnapshot;
+      return mockSnapshot as any;
     },
   } as unknown as SnapshotCollector;
 
@@ -102,6 +152,14 @@ function createMockServices(mockSnapshot: MockSnapshot): MockServices & { mocks:
       return {
         admitted: true,
         reasons: ['RESERVE_SUFFICIENT'],
+        errors: [],
+      };
+    },
+    evaluateVault: () => {
+      mocks.evaluateCalls++;
+      return {
+        admitted: true,
+        reasons: ['VAULT_POLICY_OK'],
         errors: [],
       };
     },
@@ -216,8 +274,8 @@ describe('Controller', () => {
       // Verify snapshot was collected
       expect(mockServices.mocks.collectCalls).toBe(1);
 
-      // Verify admission was evaluated
-      expect(mockServices.mocks.evaluateCalls).toBe(1);
+      // Verify admission was evaluated (2: evaluate + evaluateVault)
+      expect(mockServices.mocks.evaluateCalls).toBe(2);
 
       // Verify decision was made
       expect(mockServices.mocks.decideCalls).toBe(1);
@@ -241,6 +299,11 @@ describe('Controller', () => {
           admitted: false,
           reasons: ['MARKET_PAUSED'],
           errors: [],
+        }),
+        evaluateVault: () => ({
+          admitted: false,
+          reasons: ['VAULT_POLICY_FAILED'],
+          errors: ['REWARD_NOT_READY'],
         }),
       } as unknown as AdmissionEngine;
 
@@ -418,6 +481,145 @@ describe('Controller', () => {
       expect(result.plan?.actions[0]).toHaveProperty('adapter', '0xAaveStrategyAddress');
       expect(result.plan?.actions[0]).toHaveProperty('amountBase', 100_000_000_000n);
     });
+  });
+});
+
+describe('Controller - Production Vault Policy Enforcement', () => {
+  let config: ControllerConfig;
+
+  beforeEach(() => {
+    config = {
+      horizonSeconds: 86400,
+      executionEnabled: false,
+      policyVersion: 'test-v1',
+    };
+  });
+
+  it('should reject when vault policy admission fails (reward not ready)', async () => {
+    // Create snapshot with reward not ready
+    const snapshotWithRewardNotReady: MockSnapshot = {
+      ...createMockSnapshot(),
+      vault: {
+        ...createMockSnapshot().vault,
+        rewardReady: false,
+      },
+    };
+
+    const mockServicesRewardNotReady = createMockServices(snapshotWithRewardNotReady);
+
+    // Override admission to reject vault policy
+    const admissionRejectingVaultPolicy: AdmissionEngine = {
+      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
+      evaluateVault: () => ({
+        admitted: false,
+        reasons: ['VAULT_POLICY_FAILED'],
+        errors: ['REWARD_NOT_READY'],
+      }),
+    } as unknown as AdmissionEngine;
+
+    const controller = new Controller({
+      collector: mockServicesRewardNotReady.collector,
+      admission: admissionRejectingVaultPolicy,
+      forecast: mockServicesRewardNotReady.forecast,
+      reserve: mockServicesRewardNotReady.reserve,
+      decision: mockServicesRewardNotReady.decision,
+      executor: mockServicesRewardNotReady.executor,
+      prisma: mockServicesRewardNotReady.prisma,
+      config,
+    });
+
+    const result = await controller.runCycle();
+
+    expect(result.reason).toBe('VAULT_POLICY_FAILED');
+    expect(result.decision).toBeNull();
+    expect(result.admission?.admitted).toBe(true); // Basic admission passed
+  });
+
+  it('should reject when route status is stale', async () => {
+    // Create snapshot with stale route
+    const snapshotWithStaleRoute: MockSnapshot = {
+      ...createMockSnapshot(),
+      vault: {
+        ...createMockSnapshot().vault,
+        routeStatus: 'stale',
+      },
+    };
+
+    const mockServicesStaleRoute = createMockServices(snapshotWithStaleRoute);
+
+    // Override admission to reject stale route
+    const admissionRejectingStaleRoute: AdmissionEngine = {
+      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
+      evaluateVault: () => ({
+        admitted: false,
+        reasons: ['VAULT_POLICY_FAILED'],
+        errors: ['ROUTE_STALE'],
+      }),
+    } as unknown as AdmissionEngine;
+
+    const controller = new Controller({
+      collector: mockServicesStaleRoute.collector,
+      admission: admissionRejectingStaleRoute,
+      forecast: mockServicesStaleRoute.forecast,
+      reserve: mockServicesStaleRoute.reserve,
+      decision: mockServicesStaleRoute.decision,
+      executor: mockServicesStaleRoute.executor,
+      prisma: mockServicesStaleRoute.prisma,
+      config,
+    });
+
+    const result = await controller.runCycle();
+
+    expect(result.reason).toBe('VAULT_POLICY_FAILED');
+    expect(result.decision).toBeNull();
+    expect(result.admission?.admitted).toBe(true); // Basic admission passed
+  });
+
+  it('should admit when all vault policy checks pass', async () => {
+    // All production fields are valid
+    const snapshotWithAllValid = createMockSnapshot();
+
+    const mockServicesAllValid = createMockServices(snapshotWithAllValid);
+
+    // Admission passes all checks
+    const admissionPassingAll: AdmissionEngine = {
+      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
+      evaluateVault: () => ({
+        admitted: true,
+        reasons: ['VAULT_POLICY_OK', 'REWARD_READY', 'ROUTE_ACTIVE', 'CAPS_OK'],
+        errors: [],
+      }),
+    } as unknown as AdmissionEngine;
+
+    const controller = new Controller({
+      collector: mockServicesAllValid.collector,
+      admission: admissionPassingAll,
+      forecast: mockServicesAllValid.forecast,
+      reserve: mockServicesAllValid.reserve,
+      decision: mockServicesAllValid.decision,
+      executor: mockServicesAllValid.executor,
+      prisma: mockServicesAllValid.prisma,
+      config,
+    });
+
+    const result = await controller.runCycle();
+
+    expect(result.admission?.admitted).toBe(true);
+    expect(result.decision).not.toBeNull();
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('should include production vault fields in snapshot', async () => {
+    const snapshot = createMockSnapshot();
+
+    expect(snapshot.vault.absoluteCaps).toBeDefined();
+    expect(snapshot.vault.absoluteCaps?.totalCap).toBe(100_000_000_000_000n);
+    expect(snapshot.vault.groups).toHaveLength(2);
+    expect(snapshot.vault.reserve).toBeDefined();
+    expect(snapshot.vault.rewardCacheTimestamp).toBeDefined();
+    expect(snapshot.vault.rewardReady).toBe(true);
+    expect(snapshot.vault.routeStatus).toBe('active');
+    expect(snapshot.vault.sequencerRound).toBeDefined();
   });
 });
 

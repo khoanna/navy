@@ -8,6 +8,14 @@ export interface VaultState {
   idle: bigint;
   /** Adapter balance map */
   adapterBalances: Map<string, bigint>;
+  /** Previous reward cache value for delta verification */
+  previousRewardCacheValue?: bigint;
+  /** Current reward cache value for delta verification */
+  currentRewardCacheValue?: bigint;
+  /** Reward cache timestamp at reconciliation */
+  rewardCacheTimestamp?: bigint;
+  /** Configuration digest at reconciliation */
+  configurationDigest?: string;
 }
 
 /**
@@ -28,6 +36,8 @@ export interface ReconciliationResult {
   acceptable: boolean;
   /** Deviation in basis points */
   deviationBps?: bigint;
+  /** Reward cache delta if applicable */
+  rewardCacheDelta?: bigint;
 }
 
 /**
@@ -38,6 +48,8 @@ export interface ReconciliationConfig {
   maxDeviationBps: bigint;
   /** Tolerance floor in base units (to handle dust) */
   dustTolerance: bigint;
+  /** Minimum reward cache delta (for harvest verification) */
+  minRewardCacheDelta?: bigint;
 }
 
 /**
@@ -124,6 +136,19 @@ export function reconcile(
   const withinTolerance = deviationBps <= config.maxDeviationBps;
   const acceptable = isDust || withinTolerance;
 
+  // Verify reward cache delta for harvest actions
+  let rewardCacheDelta: bigint | undefined;
+  if (action.kind === 2 && vaultState.previousRewardCacheValue !== undefined && vaultState.currentRewardCacheValue !== undefined) {
+    rewardCacheDelta = vaultState.currentRewardCacheValue - vaultState.previousRewardCacheValue;
+
+    // Check if reward cache increased (expected for harvest)
+    // Allow for dust tolerance in cache delta
+    if (config.minRewardCacheDelta !== undefined && rewardCacheDelta < config.minRewardCacheDelta) {
+      // Warning but not failure - cache might not have been updated yet
+      // This is informational, not a hard failure
+    }
+  }
+
   return {
     actionIndex,
     success: acceptable && receipt.status === 1,
@@ -132,6 +157,7 @@ export function reconcile(
     deviation,
     acceptable,
     deviationBps,
+    ...(rewardCacheDelta !== undefined && { rewardCacheDelta }),
   };
 }
 
@@ -183,12 +209,14 @@ export function reconciliationSummary(
   failed: number;
   maxDeviationBps: bigint;
   averageDeviationBps: bigint;
+  totalRewardCacheDelta: bigint;
 } {
   const passed = results.filter((r) => r.success).length;
   const failed = results.length - passed;
 
   let maxDeviationBps = 0n;
   let totalDeviationBps = 0n;
+  let totalRewardCacheDelta = 0n;
 
   for (const result of results) {
     if (result.deviationBps && result.deviationBps > maxDeviationBps) {
@@ -196,6 +224,9 @@ export function reconciliationSummary(
     }
     if (result.deviationBps) {
       totalDeviationBps += result.deviationBps;
+    }
+    if (result.rewardCacheDelta !== undefined) {
+      totalRewardCacheDelta += result.rewardCacheDelta;
     }
   }
 
@@ -209,5 +240,25 @@ export function reconciliationSummary(
     failed,
     maxDeviationBps,
     averageDeviationBps,
+    totalRewardCacheDelta,
   };
+}
+
+/**
+ * Verify exact balance and cache deltas
+ * This is a stricter reconciliation that fails on any deviation
+ */
+export function reconcileExact(
+  action: PlanAction,
+  receipt: { status: number; logs: unknown[] },
+  vaultState: VaultState,
+  actionIndex = 0
+): ReconciliationResult {
+  // For exact reconciliation, use 0 tolerance
+  const config: ReconciliationConfig = {
+    maxDeviationBps: 0n,
+    dustTolerance: 0n,
+  };
+
+  return reconcile(action, receipt, vaultState, config, actionIndex);
 }

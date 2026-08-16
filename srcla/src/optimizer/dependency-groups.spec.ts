@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import {
   DependencyGroups,
   DependencyGroup,
-} from './dependency-groups';
+} from './dependency-groups.js';
 
 const AAVE_ADDR = '0x0000000000000000000000000000000000000A11';
 const COMPOUND_ADDR = '0x0000000000000000000000000000000000000C01';
