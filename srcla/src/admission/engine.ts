@@ -101,20 +101,21 @@ export class AdmissionEngine {
 
     // 5. Check feed staleness
     if (vaultSnapshot.feedRounds !== undefined && this.policy.maxFeedStalenessSeconds !== undefined) {
+      const now = BigInt(Math.floor(Date.now() / 1000));
       for (const feed of vaultSnapshot.feedRounds) {
+        // Check explicit staleness flag
         if (feed.staleness) {
           errors.push(`FEED_STALE: feed=${feed.feed}`);
           admitted = false;
-          break; // One stale feed is enough to reject
+          // Continue checking all feeds to collect all stale feed errors
         }
 
         // Check round freshness if round is timestamp-based
-        const now = BigInt(Math.floor(Date.now() / 1000));
         const feedStaleness = now - feed.round;
         if (feedStaleness > this.policy.maxFeedStalenessSeconds) {
           errors.push(`FEED_STALE: feed=${feed.feed}, staleness=${feedStaleness}s`);
           admitted = false;
-          break;
+          // Continue checking all feeds to collect all stale feed errors
         }
       }
     }
@@ -137,12 +138,15 @@ export class AdmissionEngine {
         }
       }
 
-      // Per-user cap check (simplified - would need per-user data)
+      // Per-user cap check - advisory-only at vault level
+      // The per-user cap is enforced by the vault contract on each deposit/mint,
+      // so at the vault level we can only issue a warning if it seems too high.
+      // This check compares the configured per-user cap against the policy maximum
+      // to detect misconfigurations, not to enforce the cap itself.
       if (vaultSnapshot.absoluteCaps.perUserCap > 0n && this.policy.maxPerUserCapBps !== undefined) {
-        // This is a vault-level check; per-user would be handled differently
         const perUserCapBps = (vaultSnapshot.absoluteCaps.perUserCap * 10000n) / vaultSnapshot.absoluteCaps.totalCap;
         if (perUserCapBps > this.policy.maxPerUserCapBps) {
-          // Only warn, not reject - per-user cap is advisory at vault level
+          // Only warn - the vault enforces per-user caps on-chain
           reasons.push(`PER_USER_CAP_HIGH: ${perUserCapBps}bps > ${this.policy.maxPerUserCapBps}bps`);
         }
       }

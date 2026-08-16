@@ -10,6 +10,17 @@ export interface CollectorConfig {
   rewardAccountantAddress?: string;
   /** RewardExecutor contract address for route status */
   rewardExecutorAddress?: string;
+  /**
+   * Known dependency group IDs for the vault.
+   * The vault's getDependencyGroup(bytes32 groupId) returns (capBps, absoluteCap, members[]).
+   * Configure this list based on the deployed vault's group configuration.
+   */
+  dependencyGroupIds?: string[];
+  /**
+   * Known reward token addresses to check for staleness.
+   * The collector will check tokenCache for each address via RewardAccountant.
+   */
+  rewardTokenAddresses?: string[];
 }
 
 export interface CollectedSnapshot {

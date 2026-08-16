@@ -245,8 +245,20 @@ export function reconciliationSummary(
 }
 
 /**
- * Verify exact balance and cache deltas
- * This is a stricter reconciliation that fails on any deviation
+ * Verify exact balance and cache deltas with zero tolerance.
+ *
+ * This is a stricter reconciliation that fails on any deviation from the expected amount.
+ * Unlike the standard `reconcile` function which allows configurable deviation tolerance
+ * (via maxDeviationBps and dustTolerance), `reconcileExact` requires the actual amount
+ * to exactly match the expected amount.
+ *
+ * Use this when:
+ * - You need strict verification of fund movements (e.g., emergency withdrawals)
+ * - The expected amount is known precisely and deviations indicate a problem
+ * - You want to detect even tiny discrepancies that would pass the standard tolerance
+ *
+ * Note: Even with zero tolerance, the transaction must still succeed (status === 1)
+ * for the reconciliation to pass.
  */
 export function reconcileExact(
   action: PlanAction,

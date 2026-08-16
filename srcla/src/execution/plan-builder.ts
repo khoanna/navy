@@ -61,6 +61,12 @@ export interface EncodedPlan {
   }>;
   /** Configuration digest for on-chain verification */
   configurationDigest?: string;
+  /** Hash of action data for verification */
+  actionDataHash?: string;
+  /** Deadline for harvest execution */
+  harvestDeadline?: bigint;
+  /** Dynamic reserve at plan creation */
+  dynamicReserve?: bigint;
 }
 
 /**
@@ -168,6 +174,15 @@ export class PlanBuilder {
 
     if (plan.configurationDigest) {
       encoded.configurationDigest = plan.configurationDigest;
+    }
+    if (plan.actionDataHash) {
+      encoded.actionDataHash = plan.actionDataHash;
+    }
+    if (plan.harvestDeadline) {
+      encoded.harvestDeadline = BigInt(Math.floor(plan.harvestDeadline.getTime() / 1000));
+    }
+    if (plan.dynamicReserve !== undefined) {
+      encoded.dynamicReserve = plan.dynamicReserve;
     }
 
     return encoded;
