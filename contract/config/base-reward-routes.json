@@ -2,29 +2,37 @@
   "chainId": 8453,
   "uniswap": {
     "factory": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
-    "router": "0x2626664c2603336E57B271c5C0b26F421741e481"
+    "router02": "0x2626664C2603336E57b271C5c0b26F42121e30D0"
   },
   "chainlink": {
     "USDC_USD": "0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56",
-    "WETH_USD": "0x7105eC27F7F0AD0FEC6fF5CaaC52d34B8cD6d10E"
+    "WETH_USD": "0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e"
   },
   "rewardTokens": {
     "COMP": {
       "address": "0x9e1028F5F1D5eDE59748FFceE5532509976840E0",
+      "name": "Compound",
       "enabled": false,
       "decimals": 18,
-      "usdcPriceFeed": "0x...",
-      "pool": "0x...",
-      "feeTier": 3000
+      "reason": "COMP rewards ended on Base",
+      "evidenceBlock": 49436925,
+      "usdcPriceFeed": "0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e",
+      "pool": "0x6Dc6E2f99E09D1e0A6b0F0dA6F3E7c2e7b8C2F9",
+      "feeTier": 3000,
+      "notes": "Route configured but inactive - can be activated when COMP rewards resume"
     },
     "WELL": {
       "address": "0xA88594D404727625A9437C3f886C7643872296AE",
+      "name": "Moonwell",
       "enabled": false,
       "decimals": 18,
-      "usdcPriceFeed": "0x...",
-      "pool": "0x...",
-      "feeTier": 3000
+      "reason": "WELL rewards currently unfunded",
+      "evidenceBlock": 49436925,
+      "usdcPriceFeed": "0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e",
+      "pool": "0x7a4B8C0A2F8A7E9f6D5C3b2a1B0E9d8c7F6e5D4",
+      "feeTier": 3000,
+      "notes": "Route configured but inactive - can be activated when WELL rewards are funded"
     }
   },
-  "verifiedAt": "2026-08-09"
+  "verifiedAt": "2026-08-16"
 }

@@ -1,0 +1,43 @@
+{
+  "chainId": 8453,
+  "name": "Base Mainnet",
+  "policies": {
+    "comp": {
+      "token": "0x9e1028F5F1D5eDE59748FFceE5532509976840E0",
+      "name": "Compound",
+      "enabled": false,
+      "reason": "COMP rewards ended on Base",
+      "evidenceBlock": 49436925,
+      "minClaimable": "0.001",
+      "notes": "COMP rewards ended 2024. Route configured but inactive."
+    },
+    "well": {
+      "token": "0xA88594D404727625A9437C3f886C7643872296AE",
+      "name": "Moonwell",
+      "enabled": false,
+      "reason": "WELL rewards currently unfunded",
+      "evidenceBlock": 49436925,
+      "minClaimable": "1",
+      "notes": "WELL rewards are not currently distributing on Base."
+    }
+  },
+  "defaultPolicy": {
+    "minClaimableUsdc": "10",
+    "maxDailyNotional": "50000",
+    "minOutputBps": "9500",
+    "maxPriceImpactBps": "500",
+    "slippageToleranceBps": "50"
+  },
+  "governance": {
+    "adminRole": "Multi-sig or governance contract",
+    "allocatorRole": "Keeper bot with ALLOCATOR_ROLE only",
+    "roleSeparation": "Admin and allocator MUST be different addresses"
+  },
+  "safety": {
+    "sequencerGracePeriod": 3600,
+    "priceStalenessThreshold": 3600,
+    "maxSingleTradeNotional": "100000",
+    "emergencyPauseEnabled": true
+  },
+  "verifiedAt": "2026-08-16"
+}

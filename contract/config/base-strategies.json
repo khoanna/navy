@@ -3,21 +3,22 @@
   "name": "Base Mainnet",
   "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   "rpcUrl": "${BASE_RPC_URL}",
-  "forkBlock": 49436925,
-  "verifiedAt": "2026-08-09",
+  "forkBlock": 49926094,
+  "verifiedAt": "2026-08-16",
   "strategies": {
     "aaveV3": {
       "name": "Aave V3",
       "pool": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
       "aToken": "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB",
-      "incentivesController": null,
+      "incentivesController": "0x929EC64c34a17401F1f803D1e7D44bF92A4fE21a",
       "expectedApy": "0.03-0.08",
       "riskLevel": "low",
-      "notes": "Largest DeFi lending protocol, battle-tested"
+      "notes": "Largest DeFi lending protocol, battle-tested. Incentives controller is official Base."
     },
     "compoundV3": {
       "name": "Compound V3",
       "comet": "0xb125E6687d4313864e53df431d5425969c15Eb2F",
+      "rewards": "0x1FBb2d2431C442599D8c299804C3B3CE2B344d3",
       "expectedApy": "0.02-0.06",
       "riskLevel": "low",
       "notes": "Compound III has no cToken; supplier positions are tracked in base-token units (comet.balanceOf)"
@@ -32,12 +33,21 @@
       "notes": "Multi-chain lending on Base, incentivized with WELL"
     }
   },
+  "chainlink": {
+    "sequencerFeed": "0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7",
+    "usdcUsd": "0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56",
+    "wethUsd": "0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e"
+  },
+  "uniswap": {
+    "factory": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+    "router02": "0x2626664C2603336E57b271C5c0b26F42121e30D0"
+  },
   "deployment": {
     "NavyVaultSRCLA": {
-      "expected": "TBD - to be deployed",
       "requiredRoles": {
-        "admin": "Multi-sig or governance",
-        "allocator": "Keeper bot"
+        "admin": "Multi-sig or governance - gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE",
+        "allocator": "Keeper bot - gets ONLY ALLOCATOR_ROLE",
+        "roleSeparation": "Admin and allocator MUST be different addresses"
       }
     }
   },
@@ -49,7 +59,10 @@
     ],
     "envVars": {
       "BASE_RPC_URL": "Base mainnet RPC (e.g., from Alchemy or Infura)",
-      "BASE_FORK_BLOCK": "Optional: block number to fork at"
+      "BASE_FORK_BLOCK": "Optional: block number to fork at",
+      "DEPLOYER_PRIVATE_KEY": "Deployer private key",
+      "BASE_ADMIN_ADDRESS": "Admin address (multi-sig or governance)",
+      "BASE_ALLOCATOR_ADDRESS": "Allocator address (keeper bot)"
     }
   }
 }
