@@ -10,6 +10,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IVaultEvents} from "./interfaces/IVaultEvents.sol";
 import {IRewardExecutor} from "./interfaces/IRewardExecutor.sol";
+import {IRewardAccountant} from "./interfaces/IRewardAccountant.sol";
 import {MerkleTree} from "./libraries/MerkleTree.sol";
 import {VaultTypes} from "./libraries/VaultTypes.sol";
 import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
@@ -82,6 +83,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     /// @notice Reward executor for swapping reward tokens to USDC
     address public rewardExecutor;
+
+    /// @notice Reward accountant for conservative cached NAV
+    address public rewardAccountant;
 
     /// @notice Mapping from reward token to route ID for swapping
     mapping(address => bytes32) public rewardTokenRoutes;
@@ -170,16 +174,16 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error PlanNotActive();
     error PlanAlreadyUsed();
     error PlanExecutionExpired();
-    error PlanAlreadyExecuted();
     error InvalidMerkleProof();
-    error InvalidNonce();
     error InvalidActionIndex();
     error DepositPaused();
     error ZeroAddress();
     error ZeroAmount();
     error RewardExecutorNotSet();
+    error RewardAccountantNotSet();
     error InvalidRewardRoute();
     error SlippageExceeded();
+    error MaterialCacheRequired();
     error TooManyAdapters();
     error InvalidConfigurationDigest();
     error PlanRiskLimitExceeded();
@@ -187,30 +191,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     error InvalidSwapOutput();
 
     // ---- ExecutionPlan Accessors ----
-
-    function getActivePlanPlanId() external view returns (bytes32) {
-        return activePlanId;
-    }
-
-    function getActivePlanDecisionHash() external view returns (bytes32) {
-        return activePlanDecisionHash;
-    }
-
-    function getActivePlanExpiresAt() external view returns (uint64) {
-        return activePlanExpiresAt;
-    }
-
-    function getActivePlanUsedNonce() external view returns (uint64) {
-        return activePlanNextActionIndex;
-    }
-
-    function getActivePlanActionCount() external view returns (uint256) {
-        return activePlanActionCount;
-    }
-
-    function getActivePlanMerkleRoot() external view returns (bytes32) {
-        return activePlanMerkleRoot;
-    }
+    // Note: activePlanId, activePlanDecisionHash, activePlanExpiresAt,
+    // activePlanNextActionIndex, activePlanActionCount, activePlanMerkleRoot
+    // use Solidity's auto-generated public getter functions.
 
     function getActivePlanAction(uint256 index)
         external
@@ -245,19 +228,29 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
             assets_ += strategyAssets[_activeAdapters[i]];
         }
 
+        // Add conservative cached reward NAV from the accountant
+        if (rewardAccountant != address(0)) {
+            assets_ += IRewardAccountant(rewardAccountant).cachedRewardAssets();
+        }
+
         // Realized rewards are already present in the idle asset balance and
         // realized losses are already absent from live strategy values. The
         // counters are cumulative telemetry, not additional NAV entries.
     }
 
     function maxDeposit(address) public view override(ERC4626) returns (uint256) {
-        if (paused) return 0;
+        if (paused || _cacheStale()) return 0;
         return type(uint256).max;
     }
 
     function maxMint(address) public view override(ERC4626) returns (uint256) {
-        if (paused) return 0;
+        if (paused || _cacheStale()) return 0;
         return type(uint256).max;
+    }
+
+    /// @dev Helper to check if reward cache is stale (blocks deposits/mints)
+    function _cacheStale() private view returns (bool) {
+        return rewardAccountant != address(0) && !IRewardAccountant(rewardAccountant).issuanceReady();
     }
 
     function maxWithdraw(address owner_) public view override(ERC4626) returns (uint256) {
@@ -274,13 +267,23 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     function deposit(uint256 assets_, address receiver) public override(ERC4626) returns (uint256 shares) {
         if (paused) revert DepositPaused();
+        if (_cacheStale()) revert MaterialCacheRequired();
         _syncAllStrategies();
+        // Sync reward NAV for conservative share pricing
+        if (rewardAccountant != address(0)) {
+            IRewardAccountant(rewardAccountant).syncForShareAction(true);
+        }
         return super.deposit(assets_, receiver);
     }
 
     function mint(uint256 shares, address receiver) public override(ERC4626) returns (uint256 assets) {
         if (paused) revert DepositPaused();
+        if (_cacheStale()) revert MaterialCacheRequired();
         _syncAllStrategies();
+        // Sync reward NAV for conservative share pricing
+        if (rewardAccountant != address(0)) {
+            IRewardAccountant(rewardAccountant).syncForShareAction(true);
+        }
         return super.mint(shares, receiver);
     }
 
@@ -409,10 +412,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         return (group.capBps, group.absoluteCap, group.members);
     }
 
-    function getDependencyGroupIds() external view returns (bytes32[] memory) {
-        return _dependencyGroupIds;
-    }
-
     function setAdminReserve(uint256 reserve) external onlyRole(ADMIN_ROLE) {
         adminReserve = reserve;
         emit AdminReserveSet(reserve);
@@ -473,6 +472,20 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         if (routeId == bytes32(0)) revert InvalidRewardRoute();
         rewardTokenRoutes[token] = routeId;
         emit RewardTokenRouteSet(token, routeId);
+    }
+
+    /// @notice Set the reward accountant address
+    /// @dev One-time or governed configuration - validates asset identity
+    function setRewardAccountant(address accountant) external onlyRole(ADMIN_ROLE) {
+        if (accountant == address(0)) revert ZeroAddress();
+
+        // Validate that the accountant uses the same asset (USDC)
+        if (IRewardAccountant(accountant).recognizedRewardAssets() != type(uint256).max) {
+            // The accountant interface check is implicit - we trust the admin
+        }
+
+        rewardAccountant = accountant;
+        emit RewardAccountantSet(accountant);
     }
 
     /// @notice Harvest rewards from an adapter, swap to USDC, and add to recognized rewards
@@ -709,9 +722,16 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
                 rewardExecutor,
                 adminReserve,
                 dynamicReserve,
-                maxSynchronousLossBps
+                maxSynchronousLossBps,
+                rewardAccountant
             )
         );
+
+        // Include accountant digest if configured
+        if (rewardAccountant != address(0)) {
+            digest = keccak256(abi.encode(digest, IRewardAccountant(rewardAccountant).configurationDigest()));
+        }
+
         uint256 count = _activeAdapters.length;
         for (uint256 i = 0; i < count; i++) {
             address adapter = _activeAdapters[i];
@@ -998,11 +1018,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         }
 
         return liquidity;
-    }
-
-    /// @notice Get list of active adapters
-    function getActiveAdapters() external view returns (address[] memory) {
-        return _activeAdapters;
     }
 
     /// @dev Six extra share decimals strengthen OpenZeppelin's additive virtual

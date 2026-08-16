@@ -588,7 +588,7 @@ contract VaultHarvestTest is Test {
         vault.executeNextActionWithProof(new bytes32[](0), action);
 
         // Plan should complete
-        assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be completed");
+        assertEq(vault.activePlanId(), bytes32(0), "plan should be completed");
 
         // Verify recognized rewards increased (27e6 USDC from swaps)
         assertGt(vault.recognizedRewards(), recognizedBefore, "rewards should be recognized");

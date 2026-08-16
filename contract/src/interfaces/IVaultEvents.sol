@@ -34,6 +34,8 @@ interface IVaultEvents {
 
     event RewardTokenRouteSet(address indexed token, bytes32 indexed routeId);
 
+    event RewardAccountantSet(address indexed accountant);
+
     event Harvested(address indexed adapter, uint256 usdcReceived);
 
     event Pause();

@@ -416,9 +416,9 @@ contract NavyVaultSRCLACoreTest is Test {
         vm.prank(allocator);
         _submitSingleAction(action, decisionHash);
 
-        assertEq(vault.getActivePlanPlanId(), planId, "planId should be set");
-        assertEq(vault.getActivePlanDecisionHash(), decisionHash, "decisionHash should be set");
-        assertEq(vault.getActivePlanUsedNonce(), 0, "usedNonce should start at 0");
+        assertEq(vault.activePlanId(), planId, "planId should be set");
+        assertEq(vault.activePlanDecisionHash(), decisionHash, "decisionHash should be set");
+        assertEq(vault.activePlanNextActionIndex(), 0, "usedNonce should start at 0");
     }
 
     function test_executePlan_rejectsActivePlan() public {
@@ -461,7 +461,7 @@ contract NavyVaultSRCLACoreTest is Test {
         _executeSingleAction(action);
 
         // Plan should be completed (single action)
-        assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be completed and cleared");
+        assertEq(vault.activePlanId(), bytes32(0), "plan should be completed and cleared");
     }
 
     function test_cancelPlan_clearsActivePlan() public {
@@ -482,7 +482,7 @@ contract NavyVaultSRCLACoreTest is Test {
         vm.prank(allocator);
         vault.cancelPlan();
 
-        assertEq(vault.getActivePlanPlanId(), bytes32(0), "plan should be cleared");
+        assertEq(vault.activePlanId(), bytes32(0), "plan should be cleared");
     }
 
     // ---- Synchronous Liquidity Tests ----

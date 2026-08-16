@@ -244,7 +244,6 @@ contract MerklePlanExecutionTest is Test {
 
         assertEq(vault.activePlanMerkleRoot(), root, "merkle root should be stored");
         assertEq(vault.activePlanId(), bytes32(planIdVal), "planId should be stored");
-        assertEq(vault.getActivePlanMerkleRoot(), root, "getter should return merkle root");
     }
 
     function test_submitPlan_emitsPlanSubmittedEvent() public {
