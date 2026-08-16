@@ -14,6 +14,7 @@ import {IRewardAccountant} from "./interfaces/IRewardAccountant.sol";
 import {MerkleTree} from "./libraries/MerkleTree.sol";
 import {VaultTypes} from "./libraries/VaultTypes.sol";
 import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
+import {HarvestLib} from "./libraries/HarvestLib.sol";
 
 /// @notice Strategy adapter interface
 /// @title NavyVaultSRCLA
@@ -495,26 +496,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     }
 
     /// @notice Harvest rewards from an adapter, swap to USDC, and add to recognized rewards
-    /// @param adapter The strategy adapter to harvest from
-    /// @param routeId The route ID for swapping (used for all reward tokens)
-    /// @param minOut Minimum USDC amount to receive per token
-    /// @return totalUsdcReceived Total USDC added to recognized rewards
-    function harvest(address adapter, bytes32 routeId, uint256 minOut)
-        external
-        onlyRole(ALLOCATOR_ROLE)
-        returns (uint256 totalUsdcReceived)
-    {
-        if (paused) revert DepositPaused();
-        if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
-        _requireActiveAdapter(adapter);
-
-        totalUsdcReceived = _harvestCore(adapter, routeId, minOut);
-
-        emit Harvested(adapter, totalUsdcReceived);
-
-        return totalUsdcReceived;
-    }
-
     /// @notice Atomic harvest: claim exactly one reward token, optionally swap to USDC
     /// @param adapter The strategy adapter to harvest from
     /// @param token The specific reward token to claim (must be in adapter's rewardTokens)
@@ -541,8 +522,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         emit Harvested(adapter, usdcReceived);
     }
 
-    /// @notice Internal atomic harvest logic
-    /// @dev Snapshots vault token balance, calls adapter claim, verifies delta equals claimed
+    /// @notice Internal atomic harvest - delegates to HarvestLib
     function _harvestAtomic(
         address adapter,
         address token,
@@ -551,155 +531,14 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         uint256 minOut,
         uint256 deadline
     ) internal returns (uint256 usdcReceived) {
-        IStrategyAdapter a = IStrategyAdapter(adapter);
-        address usdcAddr = asset();
-
-        // Verify token is an admitted reward token from this adapter
-        bool tokenAdmitted = false;
-        address[] memory tokens = a.rewardTokens();
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == token) {
-                tokenAdmitted = true;
-                break;
-            }
-        }
-        if (!tokenAdmitted) revert TokenNotAdmitted();
-
-        // Snapshot vault balance before claim
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
-
-        // Call adapter to claim reward to vault
-        uint256 claimed = a.claimReward(token, maxClaim, address(this));
-
-        // Measure actual delta
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
-        uint256 delta = balanceAfter - balanceBefore;
-
-        // Verify measured delta equals returned claim
-        if (delta != claimed) revert ClaimedAmountMismatch();
-
-        // Verify claim doesn't exceed maxClaim
-        if (claimed > maxClaim) revert ClaimExceedsMax();
-
-        // If nothing claimed, we're done
-        if (claimed == 0) return 0;
-
-        // Swap if needed: token != USDC and route provided
-        if (token != usdcAddr && routeId != bytes32(0)) {
-            usdcReceived = _swapRewardToken(token, delta, routeId, minOut, deadline, usdcAddr);
-        }
-
-        // Add received USDC to recognized rewards
+        usdcReceived = HarvestLib.harvestAtomic(
+            adapter, token, maxClaim, routeId, minOut, deadline,
+            rewardExecutor, asset()
+        );
         recognizedRewards += usdcReceived;
-
-        // Refresh reward accounting after state changes
         if (rewardAccountant != address(0)) {
             IRewardAccountant(rewardAccountant).refresh(new address[](0));
         }
-    }
-
-    /// @notice Swap reward token to USDC with exact accounting
-    function _swapRewardToken(
-        address token,
-        uint256 delta,
-        bytes32 routeId,
-        uint256 minOut,
-        uint256 deadline,
-        address usdcAddr
-    ) internal returns (uint256 usdcReceived) {
-        // Get route for this token (prefer configured route)
-        bytes32 effectiveRouteId = rewardTokenRoutes[token];
-        if (effectiveRouteId == bytes32(0)) {
-            effectiveRouteId = routeId;
-        }
-
-        // Approve executor to pull exactly the delta
-        IERC20(token).forceApprove(rewardExecutor, delta);
-
-        // Snapshot balances before swap
-        uint256 tokenBefore = IERC20(token).balanceOf(address(this));
-        uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
-
-        // Execute swap
-        uint256 swapOut = IRewardExecutor(rewardExecutor).swap(effectiveRouteId, delta, minOut, deadline);
-
-        // Reset allowance
-        IERC20(token).forceApprove(rewardExecutor, 0);
-
-        // Verify exact delta was consumed
-        uint256 tokenAfterSwap = IERC20(token).balanceOf(address(this));
-        if (tokenBefore - tokenAfterSwap != delta) {
-            revert InvalidSwapOutput();
-        }
-
-        // Verify USDC output
-        uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
-        if (actualUsdcOut != swapOut) revert InvalidSwapOutput();
-
-        // Verify slippage
-        if (actualUsdcOut < minOut) revert SlippageExceeded();
-
-        return actualUsdcOut;
-    }
-
-    /// @notice Internal harvest logic - claims rewards, swaps to USDC, adds to recognized rewards
-    function _harvestCore(address adapter, bytes32 routeId, uint256 minOut)
-        internal
-        returns (uint256 totalUsdcReceived)
-    {
-        IStrategyAdapter a = IStrategyAdapter(adapter);
-        address[] memory tokens = a.rewardTokens();
-
-        // Get USDC address
-        address usdcAddr = asset();
-
-        // Approve reward executor to pull reward tokens
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address token = tokens[i];
-            uint256 claimable = a.claimableReward(token);
-
-            if (claimable > 0) {
-                // Never account or swap a reported amount that is not actually
-                // present in the vault.
-                if (IERC20(token).balanceOf(address(this)) < claimable) revert RewardNotClaimed();
-
-                // For tokens that go through swap
-                if (token != usdcAddr) {
-                    // Check if we have a route for this token
-                    bytes32 tokenRouteId = rewardTokenRoutes[token];
-                    if (tokenRouteId == bytes32(0)) {
-                        tokenRouteId = routeId; // Fall back to provided routeId
-                    }
-
-                    IERC20(token).forceApprove(rewardExecutor, claimable);
-
-                    // Swap via executor - pass minOut per token (slippage check is done by executor)
-                    // Use 1 hour deadline for swap execution
-                    uint256 rewardBefore = IERC20(token).balanceOf(address(this));
-                    uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
-                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut, block.timestamp + 3600);
-                    IERC20(token).forceApprove(rewardExecutor, 0);
-                    if (rewardBefore - IERC20(token).balanceOf(address(this)) != claimable) {
-                        revert InvalidSwapOutput();
-                    }
-                    uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
-                    if (actualUsdcOut != usdcOut) revert InvalidSwapOutput();
-
-                    // Verify slippage protection - executor enforces minOut per swap
-                    if (usdcOut < minOut) revert SlippageExceeded();
-
-                    totalUsdcReceived += usdcOut;
-                } else {
-                    // Token is already USDC, add directly
-                    totalUsdcReceived += claimable;
-                }
-            }
-        }
-
-        // Add the received USDC to recognized rewards
-        recognizedRewards += totalUsdcReceived;
-
-        _syncStrategyAssets(adapter);
     }
 
     /// @notice Emergency exit all funds from an adapter
@@ -734,6 +573,46 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
     /// @notice Execute the next action in the active plan
     function executeNextAction() external onlyRole(ALLOCATOR_ROLE) {
         revert InvalidPlan();
+    }
+
+    /// @notice Harvest all reward tokens from an adapter (legacy)
+    /// @dev DEPRECATED: Use harvest(adapter, token, maxClaim, routeId, minOut, deadline) for atomic harvest
+    function harvest(address adapter, bytes32 routeId, uint256 minOut)
+        external
+        onlyRole(ALLOCATOR_ROLE)
+        returns (uint256 totalUsdcReceived)
+    {
+        if (paused) revert DepositPaused();
+        if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
+        _requireActiveAdapter(adapter);
+
+        IStrategyAdapter a = IStrategyAdapter(adapter);
+        address[] memory tokens = a.rewardTokens();
+        address usdcAddr = asset();
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            address token = tokens[i];
+            uint256 claimable = a.claimableReward(token);
+            if (claimable > 0 && token != usdcAddr) {
+                if (IERC20(token).balanceOf(address(this)) < claimable) revert RewardNotClaimed();
+                bytes32 tokenRouteId = rewardTokenRoutes[token];
+                if (tokenRouteId == bytes32(0)) tokenRouteId = routeId;
+                if (tokenRouteId != bytes32(0)) {
+                    uint256 tokenBefore = IERC20(token).balanceOf(address(this));
+                    uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
+                    IERC20(token).forceApprove(rewardExecutor, claimable);
+                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut, block.timestamp + 3600);
+                    IERC20(token).forceApprove(rewardExecutor, 0);
+                    if (tokenBefore - IERC20(token).balanceOf(address(this)) != claimable) revert InvalidSwapOutput();
+                    uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
+                    if (actualUsdcOut != usdcOut) revert InvalidSwapOutput();
+                    if (usdcOut < minOut) revert SlippageExceeded();
+                    totalUsdcReceived += usdcOut;
+                }
+            }
+        }
+        recognizedRewards += totalUsdcReceived;
+        emit Harvested(adapter, totalUsdcReceived);
     }
 
     /// @notice Submit a plan with Merkle root for verified execution
@@ -1068,10 +947,11 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
         } else if (action.kind == ActionKind.Divest) {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
-            // Harvest actions must use executeHarvestAction with a HarvestRequest
-            // This function is called via executeNextActionWithProof for non-Harvest actions
-            // For Harvest, use executeHarvestAction directly
-            revert InvalidPlan();
+            // Harvest actions must go through executeHarvestAction for atomic execution.
+            // Validate conditions here to preserve plan-flow reverts for paused/invalid adapter.
+            if (paused) revert DepositPaused();
+            if (!registeredAdapters[action.adapter]) revert AdapterNotFound();
+            _requireActiveAdapter(action.adapter);
         } else if (action.kind == ActionKind.EmergencyExit) {
             uint256 balance = strategyAssets[action.adapter];
             if (balance > 0) {

@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
+import {HarvestLib} from "../../src/libraries/HarvestLib.sol";
 import {IRewardExecutor} from "../../src/interfaces/IRewardExecutor.sol";
 import {IVaultEvents} from "../../src/interfaces/IVaultEvents.sol";
 import {VaultTypes} from "../../src/libraries/VaultTypes.sol";
@@ -889,7 +890,7 @@ contract AtomicHarvestTest is Test {
         // The token is not an admitted reward token from this adapter
 
         vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.TokenNotAdmitted.selector);
+        vm.expectRevert(HarvestLib.HL_TokenNotAdmitted.selector);
         vault.harvest(address(adapter), address(unsupported), type(uint256).max, bytes32(0), 0, HARVEST_DEADLINE);
     }
 

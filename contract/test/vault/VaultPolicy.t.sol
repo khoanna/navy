@@ -463,9 +463,10 @@ contract VaultPolicyTest is Test {
     function test_pausedDirectAndPlanHarvestRevert() public {
         vault.pause();
 
+        // New harvest signature with token parameter
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.DepositPaused.selector);
-        vault.harvest(address(adapterA), bytes32(uint256(1)), 0);
+        vault.harvest(address(adapterA), address(0), type(uint256).max, bytes32(0), 0, block.timestamp + 3600);
 
         NavyVaultSRCLA.Action memory action = _action(25, NavyVaultSRCLA.ActionKind.Harvest, address(adapterA), 0);
         _submit(action, 0);
