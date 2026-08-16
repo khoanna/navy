@@ -214,6 +214,22 @@ contract NavyPaymentsTest is Test {
         assertTrue(navy.invoicePaid(navy.invoiceKey(MID, invoiceId)));
     }
 
+    function test_feeRoundsUp_c10_001At100Bps_equals101() public {
+        // 10,001 * 100 / 10,000 = 100.01, should round up to 101
+        _setup_merchant_relayer_funds();
+        bytes16 invoiceId = bytes16(hex"deadbeefdeadbeefdeadbeefdeadbeef");
+        uint256 amount = 10_001;
+        uint256 validBefore = block.timestamp + 3600;
+        (uint8 v, bytes32 r, bytes32 s) = _signAuth(MID, invoiceId, amount, 0, validBefore);
+
+        vm.prank(relayer);
+        navy.payInvoice(MID, invoiceId, amount, 0, validBefore, _payer(), v, r, s);
+
+        assertEq(usdc.balanceOf(treasury), 101); // rounded up
+        assertEq(usdc.balanceOf(merchantPayout), 9_900); // 10001 - 101
+        assertEq(usdc.balanceOf(merchantPayout) + usdc.balanceOf(treasury), amount);
+    }
+
     function test_payInvoice_zeroFeeWhenFeeBpsZero() public {
         vm.prank(owner);
         navy.setConfig(0, treasury);

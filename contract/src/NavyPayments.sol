@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {IEIP3009} from "./interfaces/IEIP3009.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title NavyPayments — EIP-3009 gasless invoice payments with an enforced fee split.
 /// @dev The payment token is Circle Sepolia USDC, which reverts on failed ERC-20 transfers,
@@ -141,7 +142,7 @@ contract NavyPayments {
         bytes32 nonce = authorizationNonce(merchantId, invoiceId);
         usdc.receiveWithAuthorization(payer, address(this), amount, validAfter, validBefore, nonce, v, r, s);
 
-        uint256 fee = (amount * feeBps) / 10000; // floors
+        uint256 fee = feeBps > 0 ? Math.mulDiv(amount, feeBps, 10_000, Math.Rounding.Ceil) : 0;
         IERC20(address(usdc)).safeTransfer(m.payout, amount - fee);
         if (fee > 0) {
             IERC20(address(usdc)).safeTransfer(treasury, fee);
