@@ -262,3 +262,39 @@ model RebalanceEvent {
   @@index([createdAt])
   @@index([status])
 }
+
+// Vault cohort-level accounting for tracking per-cohort profit/loss
+model VaultCohort {
+  id               String   @id @default(cuid())
+  cohortAddress    String   @unique // EVM address representing the cohort
+  name             String?
+  totalDeposits    BigInt   @default(0)
+  totalWithdrawals BigInt   @default(0)
+  totalHarvests    BigInt   @default(0) // Cumulative profit harvested
+  netPosition      BigInt   @default(0) // netPosition = deposits - withdrawals + harvests
+  lastUpdated      DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  transactions     VaultTransaction[]
+
+  @@index([cohortAddress])
+}
+
+model VaultTransaction {
+  id           String      @id @default(cuid())
+  cohortId     String
+  cohort       VaultCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  txHash       String      @unique
+  type         String      // 'deposit' | 'withdraw' | 'harvest' | 'reallocation'
+  amount       BigInt
+  shares       BigInt?
+  sender       String      // EVM address
+  adapter      String?     // For reallocation/harvest events
+  blockNumber  BigInt
+  timestamp    DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+
+  @@index([cohortId, createdAt])
+  @@index([txHash])
+  @@index([type])
+}
