@@ -47,14 +47,32 @@ export interface CostGateConfig {
 /**
  * Detailed breakdown of movement costs.
  * All values in USDC with 6 decimal places.
+ * Per SRCLA design Section 9.1 - Complete cost formula:
+ * Cmove = CL2 + CL1data + Cexit + Centry + Cclaim + Capprove/reset + Cswap + Cimpact + Cslippage/MEV + Cfailure + Cbuffer
  */
 export interface CostBreakdown {
-  /** Gas cost in USDC (gasLimit * gasPrice * ethPrice / 1e18) */
-  gasCost: bigint;
-  /** Slippage cost in USDC (amount * slippageBps / 10000) */
+  /** L2 gas cost in USDC (gasLimit * gasPrice * ethPrice / 1e18) */
+  l2GasCost: bigint;
+  /** L1 data availability cost for rollups (in wei, caller converts) */
+  l1DataCost: bigint;
+  /** Exit cost from source protocol */
+  exitCost: bigint;
+  /** Entry cost to target protocol */
+  entryCost: bigint;
+  /** Claim cost for reward harvesting */
+  claimCost: bigint;
+  /** Approve/reset cost */
+  approveResetCost: bigint;
+  /** Swap cost for token conversion */
+  swapCost: bigint;
+  /** Price impact cost */
+  impactCost: bigint;
+  /** Slippage/MEV cost in USDC (amount * (slippageBps + mevBps) / 10000) */
   slippageCost: bigint;
-  /** MEV impact in USDC (amount * mevImpactBps / 10000) */
-  mevImpact: bigint;
+  /** Expected failure cost (historical failure rate adjusted loss) */
+  failureCost: bigint;
+  /** Buffer opportunity cost (foregone yield from idle funds) */
+  bufferCost: bigint;
   /** Total movement cost in USDC */
   totalCost: bigint;
 }
@@ -187,6 +205,43 @@ export interface CostGateStats {
   avgNetGain: bigint;
   /** Average cost when passed */
   avgCost: bigint;
+}
+
+/**
+ * Parameters for L1 data cost calculation.
+ * L1 calldata costs on rollups (Base) are significant.
+ */
+export interface L1DataCostParams {
+  /** L1 gas price in wei */
+  l1GasPrice: bigint;
+  /** Number of calldata bytes to publish on L1 */
+  l1CalldataBytes: number;
+}
+
+/**
+ * Parameters for failure cost calculation.
+ * Accounts for expected loss from rebalance failures.
+ */
+export interface FailureCostParams {
+  /** Historical failure rate (0-1, e.g., 0.05 = 5%) */
+  historicalFailureRate: number;
+  /** Estimated loss in USDC if failure occurs */
+  estimatedLossOnFailure: bigint;
+  /** Volatility factor (0-1) for tail risk adjustment */
+  volatilityFactor: number;
+}
+
+/**
+ * Parameters for buffer opportunity cost calculation.
+ * Represents foregone yield from idle funds.
+ */
+export interface BufferOpportunityParams {
+  /** Amount of idle funds */
+  idleAmount: bigint;
+  /** Best available yield rate per second (WAD format) */
+  bestAvailableRate: bigint;
+  /** Time funds will be idle in seconds */
+  timeSeconds: number;
 }
 
 /**

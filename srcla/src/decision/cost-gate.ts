@@ -26,7 +26,15 @@ import {
   CostGateStats,
   MovementCosts,
   DEFAULT_COST_GATE_CONFIG,
+  L1DataCostParams,
+  FailureCostParams,
+  BufferOpportunityParams,
 } from './cost-gate-types.js';
+
+// L1 data cost factor: non-zero byte vs zero byte cost ratio on Ethereum
+// Ethereum L1 gas: zero byte = 4 gas, non-zero byte = 16 gas
+// Factor = 16 / 4 = 4, but we use 16 as the multiplier for full calldata cost
+const L1_DATA_COST_FACTOR = 16n;
 
 import { SECONDS_PER_YEAR } from '../protocols/math.js';
 
@@ -170,7 +178,85 @@ export class CostGate {
   }
 
   /**
+   * Calculate L1 data cost for rollup transactions
+   *
+   * L1 calldata cost = l1GasPrice * l1CalldataBytes * L1_DATA_COST_FACTOR
+   *
+   * The L1_DATA_COST_FACTOR accounts for Ethereum's per-byte gas cost
+   * (16 gas per non-zero byte, 4 gas per zero byte; using 16 as average).
+   *
+   * @param params - L1 data cost parameters
+   * @returns L1 data cost in wei (to be converted to USDC by caller if needed)
+   */
+  calculateL1DataCost(params: L1DataCostParams): bigint {
+    const { l1GasPrice, l1CalldataBytes } = params;
+    return l1GasPrice * BigInt(l1CalldataBytes) * L1_DATA_COST_FACTOR;
+  }
+
+  /**
+   * Calculate expected failure cost from rebalance failures
+   *
+   * Failure cost = historicalFailureRate * estimatedLossOnFailure * (1 + volatilityFactor)
+   *
+   * This represents the expected value of potential loss from failed movements,
+   * adjusted for tail risk through the volatility factor.
+   *
+   * @param params - Failure cost parameters
+   * @returns Expected failure cost in USDC (6 decimals)
+   */
+  calculateFailureCost(params: FailureCostParams): bigint {
+    const { historicalFailureRate, estimatedLossOnFailure, volatilityFactor } = params;
+
+    // Multiply estimated loss by failure rate
+    const expectedLoss = (estimatedLossOnFailure * BigInt(Math.round(historicalFailureRate * 10000))) / 10000n;
+
+    // Apply volatility factor: (1 + volatilityFactor)
+    const volatilityMultiplier = 10000n + BigInt(Math.round(volatilityFactor * 10000));
+    const adjustedLoss = (expectedLoss * volatilityMultiplier) / 10000n;
+
+    return adjustedLoss;
+  }
+
+  /**
+   * Calculate opportunity cost from idle buffer funds
+   *
+   * Buffer opportunity cost = idleAmount * bestAvailableRate * timeSeconds / year
+   *
+   * This represents foregone yield from keeping funds idle instead of
+   * deploying them to the best available opportunity.
+   *
+   * Uses WAD arithmetic for rate calculations.
+   * - Amount is in 6 decimals (USDC)
+   * - Rate is in WAD (18 decimals), e.g., 50000000000000000n = 0.05 = 5%
+   *
+   * @param params - Buffer opportunity parameters
+   * @returns Foregone yield in USDC (6 decimals)
+   */
+  calculateBufferOpportunityCost(params: BufferOpportunityParams): bigint {
+    const { idleAmount, bestAvailableRate, timeSeconds } = params;
+
+    if (idleAmount === 0n || bestAvailableRate === 0n || timeSeconds === 0) {
+      return 0n;
+    }
+
+    // Convert WAD rate to basis points: rate * 10000
+    // e.g., 0.05 (5%) * 10000 = 500 bps
+    const rateBps = (bestAvailableRate * 10000n) / 1_000_000_000_000_000_000n;
+
+    // opportunityCost = idleAmount * rateBps * timeSeconds / year / 10000
+    // - idleAmount: 6 decimals
+    // - rateBps: integer basis points
+    // - Result: 6 decimals
+    const opportunityCost = (idleAmount * rateBps * BigInt(timeSeconds)) / (SECONDS_PER_YEAR * 10000n);
+
+    return opportunityCost;
+  }
+
+  /**
    * Calculate complete movement cost breakdown
+   *
+   * Aggregates all 11 cost components per SRCLA Section 9.1:
+   * Cmove = CL2 + CL1data + Cexit + Centry + Cclaim + Capprove/reset + Cswap + Cimpact + Cslippage/MEV + Cfailure + Cbuffer
    */
   calculateCostBreakdown(params: {
     amount: bigint;
@@ -178,29 +264,79 @@ export class CostGate {
     slippageBps?: number;
     mevImpactBps?: number;
     movementType?: MovementType;
+    l1DataCost?: bigint;
+    exitCost?: bigint;
+    entryCost?: bigint;
+    claimCost?: bigint;
+    approveResetCost?: bigint;
+    swapCost?: bigint;
+    impactCost?: bigint;
+    failureCost?: bigint;
+    bufferCost?: bigint;
   }): CostBreakdown {
-    const { amount, gasLimit, slippageBps, mevImpactBps, movementType } = params;
+    const {
+      amount,
+      gasLimit,
+      slippageBps,
+      mevImpactBps,
+      movementType,
+      l1DataCost = 0n,
+      exitCost = 0n,
+      entryCost = 0n,
+      claimCost = 0n,
+      approveResetCost = 0n,
+      swapCost = 0n,
+      impactCost = 0n,
+      failureCost = 0n,
+      bufferCost = 0n,
+    } = params;
 
-    const gasCost = this.calculateGasCost(gasLimit);
+    const l2GasCost = this.calculateGasCost(gasLimit);
     const slippageCost = this.calculateSlippageCost(amount, slippageBps);
     const mevImpact = this.calculateMevCost(amount, mevImpactBps);
 
     // Additional costs based on movement type
-    let additionalCost = 0n;
+    let additionalGasCost = 0n;
+    let claimAdjustment = 0n;
     if (movementType === MovementType.HARVEST) {
       // Extra gas for claiming rewards
-      additionalCost = this.calculateGasCost(200_000n);
+      additionalGasCost = this.calculateGasCost(200_000n);
+      claimAdjustment = claimCost;
     } else if (movementType === MovementType.EMERGENCY) {
       // Emergency exits may have higher gas
-      additionalCost = this.calculateGasCost(300_000n);
+      additionalGasCost = this.calculateGasCost(300_000n);
     }
 
-    const totalCost = gasCost + slippageCost + mevImpact + additionalCost;
+    // Total L2 gas including movement-specific adjustments
+    const totalL2GasCost = l2GasCost + additionalGasCost;
+
+    // Calculate total: sum all 11 cost components
+    const totalCost =
+      totalL2GasCost +
+      l1DataCost +
+      exitCost +
+      entryCost +
+      claimAdjustment +
+      approveResetCost +
+      swapCost +
+      impactCost +
+      slippageCost +
+      mevImpact +
+      failureCost +
+      bufferCost;
 
     return {
-      gasCost,
-      slippageCost,
-      mevImpact,
+      l2GasCost: totalL2GasCost,
+      l1DataCost,
+      exitCost,
+      entryCost,
+      claimCost: claimAdjustment,
+      approveResetCost,
+      swapCost,
+      impactCost,
+      slippageCost: slippageCost + mevImpact,
+      failureCost,
+      bufferCost,
       totalCost,
     };
   }
@@ -234,19 +370,16 @@ export class CostGate {
     }
 
     // expectedGain = amount * rateAdvantage * horizonSeconds / yearSeconds
-    // We need to scale amount to WAD-like precision for the calculation
-    // Amount is in 6 decimals, rate is in WAD (18 decimals)
+    // Amount is in 6 decimals, rateAdvantage is in WAD (18 decimals)
     // Result needs to be in 6 decimals
 
-    // Convert amount to WAD scale: amount * 1e12
-    const amountwad = amount * 1_000_000_000_000n;
+    // Convert rateAdvantage to basis points: rateAdvantage * 10000 / 10^18
+    // This gives us a dimensionless multiplier
+    const rateBps = (rateAdvantage * 10000n) / 1_000_000_000_000_000_000n;
 
-    // expectedGainwad = amountwad * rateAdvantage * horizonSeconds / yearSeconds
-    const expectedGainwad =
-      (amountwad * rateAdvantage * horizonSeconds) / SECONDS_PER_YEAR;
-
-    // Convert back from WAD: divide by 1e12
-    const expectedGain = expectedGainwad / 1_000_000_000_000n;
+    // expectedGain = amount * rateBps * horizonSeconds / yearSeconds / 10000
+    const expectedGain =
+      (amount * rateBps * horizonSeconds) / (SECONDS_PER_YEAR * 10000n);
 
     return expectedGain;
   }
