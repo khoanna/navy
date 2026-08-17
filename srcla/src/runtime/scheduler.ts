@@ -83,6 +83,18 @@ export class Scheduler {
       const snapshot = await this.collector.collect();
 
       if (snapshot) {
+        // Insert chain block record
+        await this.prisma.chainBlock.upsert({
+          where: { blockHash: snapshot.blockHash },
+          create: {
+            chainId: 8453, // Base chainId
+            blockNumber: BigInt(snapshot.blockNumber),
+            blockHash: snapshot.blockHash,
+            timestamp: snapshot.timestamp,
+          },
+          update: {}, // No update needed
+        });
+
         // Store each strategy as a market snapshot
         for (const strategy of snapshot.strategies) {
           await this.prisma.marketSnapshot.upsert({

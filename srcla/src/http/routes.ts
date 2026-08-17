@@ -146,6 +146,31 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
     };
   });
 
+  // GET /v1/allocation - Current allocation from latest decision
+  server.get('/v1/allocation', async () => {
+    const decision = await prisma.decision.findFirst({
+      orderBy: { timestamp: 'desc' },
+    });
+
+    if (!decision) {
+      return {
+        data: { totalAssets: '0', allocations: [] }
+      };
+    }
+
+    const allocation = decision.allocation as {
+      totalAssets?: string;
+      allocations?: Array<{adapter: string; name: string; assets: string; percentage: number}>;
+    } | null;
+
+    return {
+      data: {
+        totalAssets: allocation?.totalAssets ?? '0',
+        allocations: allocation?.allocations ?? [],
+      }
+    };
+  });
+
   // GET /v1/evaluations - Evaluation runs
   server.get('/v1/evaluations', async (request) => {
     const { status, limit = '10' } = request.query as { status?: string; limit?: string };
