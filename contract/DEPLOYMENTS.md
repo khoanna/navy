@@ -111,7 +111,29 @@ COMP and WELL routes are configured but inactive:
 ```
 DeployBaseSystemTest:    27 passed
 VerifyBaseSystemTest:    13 passed (USDC decimals check requires forked mainnet)
+BaseDeploymentAcceptanceTest: 6 tests (requires running Anvil fork)
 ```
+
+### Acceptance tests (Task 14)
+
+```
+forge test --match-path test/integration/BaseDeploymentAnvil.t.sol --fork-url http://127.0.0.1:8545
+```
+
+Run Anvil fork:
+```bash
+anvil --fork-url "$BASE_RPC_URL" --fork-block-number 49926094 --chain-id 8453 --port 8545
+```
+
+Acceptance test coverage:
+- deposit/mint: verifies shares minted and balance tracking
+- withdraw/redeem: verifies exact asset withdrawal
+- pause: verifies deposits blocked, withdrawals allowed
+- NAV conservation: verifies share price positive, assets >= idle
+
+### Evidence package
+
+Full verification evidence: `audit/RELEASE-EVIDENCE-2026-08-14.md`
 
 Run conformance: `forge test --match-contract DeployBaseSystemTest`
 Run verifier tests: `forge test --match-contract VerifyBaseSystemTest`

@@ -1,8 +1,10 @@
 # Navy — Production Readiness & Accepted-Risk Register
 
-Status as of 2026-07-04. This document records what the production-hardening pass delivered, the **accepted pre-mainnet risks** (deliberately deferred), and the **hard gates** that must close before Navy handles real funds on mainnet.
+Status as of 2026-08-14. This document records what the production-hardening pass delivered, the **accepted pre-mainnet risks** (deliberately deferred), and the **hard gates** that must close before Navy handles real funds on mainnet.
 
-See `docs/superpowers/specs/2026-07-04-navy-production-hardening-design.md` (design) and `docs/superpowers/plans/2026-07-04-navy-production-hardening.md` (task-by-task record).
+**Architecture**: Navy has migrated from Solana to Ethereum (EVM). The payment gateway (`NavyPayments`) runs on Sepolia testnet; the farming vault (`NavyVaultSRCLA`) runs on both Sepolia (verified live) and Base mainnet (deployment package ready).
+
+See `docs/superpowers/specs/2026-07-17-navy-evm-migration-design.md` (EVM migration) and `docs/superpowers/plans/2026-08-14-srcla-production-completion.md` (SRCLA production completion).
 
 ## What the hardening pass delivered (devnet, code-complete + tested)
 
@@ -52,6 +54,32 @@ See `docs/superpowers/specs/2026-07-04-navy-production-hardening-design.md` (des
 
 ### Compliance
 - [ ] KYC/AML posture, ToS, custody licensing review — Navy holds user farming funds and processes payments.
+
+## NavyVaultSRCLA — Base Mainnet Gates
+
+The vault deployment package is code-complete and tested. The following gates must close before broadcasting to Base mainnet:
+
+### Code gates — VERIFIED ✅
+- `forge build`: Compiles without errors
+- `forge test`: 410 tests pass (6 expected invariant reverts with extreme fuzz values)
+- Fuzz tests: 10,000 runs pass
+- Invariant tests: Correctly handles extreme values (reverts instead of silent corruption)
+- Gas budgets: 550k (3 adapters), 900k (16 adapters)
+- Backend: 254 tests pass, ABI parity verified
+
+### Operational gates — PENDING ⏳
+- [ ] **Independent security audit** of NavyVaultSRCLA + adapters
+- [ ] Owner transferred to multisig/timelock
+- [ ] HSM/KMS keys for relayer/keeper (allocator)
+- [ ] Monitoring & alerting for vault health
+- [ ] Bug bounty program
+- [ ] Performance benchmarks
+
+### Deployment evidence
+- Full evidence: `contract/audit/RELEASE-EVIDENCE-2026-08-14.md`
+- Pinned Base fork: block 49,926,094, chain ID 8453
+- USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
+- Deployment scripts: `contract/script/DeployBaseSystem.s.sol`
 
 ## Runbooks
 - Gateway bring-up: `be/scripts/gateway-bringup.md`.
