@@ -156,6 +156,10 @@ export interface SimulatedRate {
   utilizationAfter: bigint;
   /** Maximum deposit amount without exceeding maxUtilization (USDC base units) */
   effectiveCapacity: bigint;
+  /** Available capacity after this deposit (USDC base units, floor at 0) */
+  capacityRemaining: bigint;
+  /** Rate reduction from capacity constraints (WAD, positive value, 0 if below optimal) */
+  ratePenalty: bigint;
 }
 
 /**

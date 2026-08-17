@@ -170,6 +170,20 @@ export class AaveV3Simulator implements ISimulator {
       aaveConfig.maxUtilization
     );
 
+    // Calculate rate before deposit
+    const rateBefore = this.calculateRateFromUtilization(utilizationBefore, aaveConfig);
+
+    // Calculate capacity remaining after deposit (floor at 0)
+    const capacityRemaining = effectiveCapacity > depositAmount
+      ? effectiveCapacity - depositAmount
+      : 0n;
+
+    // Calculate rate penalty: applied when utilization exceeds optimal utilization
+    // ratePenalty = rateBefore - rateAfter if above optimal, else 0
+    const ratePenalty = utilizationAfter > aaveConfig.optimalUtilization && rateBefore > postDepositRate
+      ? rateBefore - postDepositRate
+      : 0n;
+
     return {
       marketId,
       preDepositRate,
@@ -177,6 +191,8 @@ export class AaveV3Simulator implements ISimulator {
       utilizationBefore,
       utilizationAfter,
       effectiveCapacity,
+      capacityRemaining,
+      ratePenalty,
     };
   }
 

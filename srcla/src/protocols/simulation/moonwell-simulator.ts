@@ -215,6 +215,25 @@ export class MoonwellSimulator implements ISimulator {
       (95n * RAY) / 100n // 95% max utilization for Moonwell
     );
 
+    // For Moonwell, optimal utilization is the same as max (95%)
+    // Rate penalty is calculated based on the rate reduction when going above
+    // the base utilization threshold (use 80% as reasonable optimal for penalty)
+    const optimalUtilization = (80n * RAY) / 100n;
+
+    // Calculate rate before deposit
+    const rateBefore = this.calculateRateFromUtilization(utilizationBefore, moonwellConfig);
+
+    // Calculate capacity remaining after deposit (floor at 0)
+    const capacityRemaining = effectiveCapacity > depositAmount
+      ? effectiveCapacity - depositAmount
+      : 0n;
+
+    // Calculate rate penalty: applied when utilization exceeds optimal utilization
+    // ratePenalty = rateBefore - rateAfter if above optimal, else 0
+    const ratePenalty = utilizationAfter > optimalUtilization && rateBefore > postDepositRate
+      ? rateBefore - postDepositRate
+      : 0n;
+
     return {
       marketId,
       preDepositRate,
@@ -222,6 +241,8 @@ export class MoonwellSimulator implements ISimulator {
       utilizationBefore,
       utilizationAfter,
       effectiveCapacity,
+      capacityRemaining,
+      ratePenalty,
     };
   }
 

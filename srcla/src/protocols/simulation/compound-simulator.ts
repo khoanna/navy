@@ -224,6 +224,24 @@ export class CompoundV3Simulator implements ISimulator {
       (99n * RAY) / 100n
     );
 
+    // Calculate rate before deposit
+    const rateBefore = this.calculateRateFromUtilization(utilizationBefore, compoundConfig);
+
+    // For Compound, "optimal" is effectively the high-utilization threshold
+    // We use 80% as a reasonable optimal point for rate penalty calculation
+    const optimalUtilization = (80n * RAY) / 100n;
+
+    // Calculate capacity remaining after deposit (floor at 0)
+    const capacityRemaining = effectiveCapacity > depositAmount
+      ? effectiveCapacity - depositAmount
+      : 0n;
+
+    // Calculate rate penalty: applied when utilization exceeds optimal utilization
+    // ratePenalty = rateBefore - rateAfter if above optimal, else 0
+    const ratePenalty = utilizationAfter > optimalUtilization && rateBefore > postDepositRate
+      ? rateBefore - postDepositRate
+      : 0n;
+
     return {
       marketId,
       preDepositRate,
@@ -231,6 +249,8 @@ export class CompoundV3Simulator implements ISimulator {
       utilizationBefore,
       utilizationAfter,
       effectiveCapacity,
+      capacityRemaining,
+      ratePenalty,
     };
   }
 
