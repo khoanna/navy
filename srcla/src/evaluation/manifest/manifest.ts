@@ -302,6 +302,22 @@ export const DEFAULT_SUCCESS_CRITERIA: SuccessCriteria = {
 // ============================================================================
 
 /**
+ * Content hashes for reproducibility per §11
+ *
+ * Captures the state of all inputs that affect evaluation results:
+ * - codeCommit: Git commit of the evaluation code
+ * - datasetHash: Hash of the evaluation dataset
+ * - configHash: Hash of the evaluation configuration
+ * - resultsHash: Hash of evaluation results (added post-run)
+ */
+export interface ArtifactHashes {
+  codeCommit: string;
+  datasetHash: string;
+  configHash: string;
+  resultsHash?: string;
+}
+
+/**
  * Complete evaluation manifest per §11
  *
  * This is the main artifact that captures all configuration for a reproducible
@@ -314,6 +330,9 @@ export interface EvaluationManifest {
   createdAt: Date;
   /** SHA-256 hash of manifest content (excluding this field) */
   contentHash: string;
+
+  /** Content hashes for reproducibility (per §11) */
+  artifactHashes: ArtifactHashes;
 
   /** Dataset configuration */
   dataset: {
@@ -380,7 +399,7 @@ export interface ManifestCreationConfig {
  * Create a new evaluation manifest
  *
  * @param config - Configuration for the manifest
- * @returns A complete, signed evaluation manifest
+ * @returns A complete, signed evaluation manifest with artifact hashes for reproducibility
  *
  * @example
  * ```typescript
@@ -392,6 +411,7 @@ export interface ManifestCreationConfig {
  *   markets: [compoundMarket],
  * });
  * console.log(manifest.contentHash);
+ * console.log(manifest.artifactHashes);
  * ```
  */
 export function createEvaluationManifest(config: ManifestCreationConfig): EvaluationManifest {
@@ -399,10 +419,62 @@ export function createEvaluationManifest(config: ManifestCreationConfig): Evalua
   const createdAt = new Date();
   const codeCommit = process.env.GIT_COMMIT_HASH ?? 'unknown';
 
+  // Compute dataset hash from date range
+  const datasetHash = createHash('sha256')
+    .update(config.dataset.startDate.toISOString())
+    .update(config.dataset.endDate.toISOString())
+    .digest('hex');
+
+  // Build config for hashing (convert BigInt to strings for JSON serialization)
+  const tiersConfig = config.tiers ? { amounts: config.tiers.amounts ?? DEFAULT_TIERS.amounts, labels: config.tiers.labels ?? DEFAULT_TIERS.labels } : DEFAULT_TIERS;
+  const configContent = {
+    markets: (config.markets ?? DEFAULT_MARKETS).map((m) => ({
+      marketId: m.marketId,
+      protocol: m.protocol,
+      adapterAddress: m.adapterAddress,
+      deploymentDate: m.deploymentDate?.toISOString(),
+      regimeDigest: m.regimeDigest,
+    })),
+    calibration: config.calibration,
+    tiers: {
+      amounts: tiersConfig.amounts.map((a) => a.toString()),
+      labels: tiersConfig.labels,
+    },
+    // Convert costModel BigInt values to strings for JSON serialization
+    costModel: config.costModel
+      ? {
+          fixedGasCost: config.costModel.fixedGasCost?.toString(),
+          gasPriceMultiplierBps: config.costModel.gasPriceMultiplierBps?.toString(),
+          l1FeePerByte: config.costModel.l1FeePerByte?.toString(),
+          slippageToleranceBps: config.costModel.slippageToleranceBps?.toString(),
+          minActionAmount: config.costModel.minActionAmount?.toString(),
+        }
+      : undefined,
+    successCriteria: config.successCriteria,
+  };
+  // Use replacer to safely serialize BigInt values
+  const configHash = createHash('sha256')
+    .update(JSON.stringify(configContent, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    ))
+    .digest('hex');
+
+  // Compute calibration boundary once to ensure consistency
+  const boundaryDate = config.calibration?.calibrationEndDate ?? config.calibration?.heldOutStartDate
+    ?? new Date(config.dataset.startDate.getTime() + (config.dataset.endDate.getTime() - config.dataset.startDate.getTime()) * 0.7);
+
   const manifest: EvaluationManifest = {
     id,
     createdAt,
     contentHash: '', // Computed below
+
+    // Artifact hashes for reproducibility (per §11)
+    artifactHashes: {
+      codeCommit,
+      datasetHash,
+      configHash,
+      // resultsHash is set post-run via setResultsHash
+    },
 
     dataset: {
       startDate: config.dataset.startDate,
@@ -416,12 +488,9 @@ export function createEvaluationManifest(config: ManifestCreationConfig): Evalua
     calibration: {
       ...DEFAULT_CALIBRATION,
       ...config.calibration,
-      calibrationEndDate: config.calibration?.calibrationEndDate ?? new Date(
-        config.dataset.startDate.getTime() + (config.dataset.endDate.getTime() - config.dataset.startDate.getTime()) * 0.7
-      ),
-      heldOutStartDate: config.calibration?.heldOutStartDate ?? new Date(
-        config.dataset.startDate.getTime() + (config.dataset.endDate.getTime() - config.dataset.startDate.getTime()) * 0.7
-      ),
+      // Use the same computed boundary for both dates
+      calibrationEndDate: config.calibration?.calibrationEndDate ?? boundaryDate,
+      heldOutStartDate: config.calibration?.heldOutStartDate ?? boundaryDate,
     },
 
     policies: {
@@ -469,7 +538,12 @@ export function createEvaluationManifest(config: ManifestCreationConfig): Evalua
  */
 export function computeManifestHash(manifest: EvaluationManifest): string {
   const content = extractManifestContent(manifest);
-  return createHash('sha256').update(JSON.stringify(content)).digest('hex');
+  // Use replacer to safely serialize BigInt values
+  return createHash('sha256')
+    .update(JSON.stringify(content, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    ))
+    .digest('hex');
 }
 
 /**
@@ -479,6 +553,15 @@ function extractManifestContent(manifest: EvaluationManifest): Record<string, un
   return {
     id: manifest.id,
     createdAt: manifest.createdAt.toISOString(),
+    artifactHashes: {
+      codeCommit: manifest.artifactHashes.codeCommit,
+      datasetHash: manifest.artifactHashes.datasetHash,
+      configHash: manifest.artifactHashes.configHash,
+      // Include resultsHash in hash when set (for post-run reproducibility)
+      ...(manifest.artifactHashes.resultsHash !== undefined && {
+        resultsHash: manifest.artifactHashes.resultsHash,
+      }),
+    },
     dataset: {
       startDate: manifest.dataset.startDate.toISOString(),
       endDate: manifest.dataset.endDate.toISOString(),
@@ -549,11 +632,16 @@ function extractManifestContent(manifest: EvaluationManifest): Record<string, un
  */
 export function freezeEvaluationManifest(manifest: EvaluationManifest): string {
   const content = extractManifestContent(manifest);
+  // Use replacer to safely serialize BigInt values
   return JSON.stringify({
     ...content,
     contentHash: manifest.contentHash,
     createdAt: manifest.createdAt.toISOString(),
-  }, null, 2);
+    // Include resultsHash if set
+    ...(manifest.artifactHashes.resultsHash !== undefined && {
+      artifactHashes: manifest.artifactHashes,
+    }),
+  }, (_key, value) => typeof value === 'bigint' ? value.toString() : value, 2);
 }
 
 /**
@@ -561,11 +649,23 @@ export function freezeEvaluationManifest(manifest: EvaluationManifest): string {
  */
 export function thawEvaluationManifest(json: string): EvaluationManifest {
   const parsed = JSON.parse(json) as Record<string, unknown>;
+  const artifactHashesParsed = parsed.artifactHashes as Record<string, unknown> | undefined;
+  const executionParsed = parsed.execution as Record<string, unknown> | undefined;
+
+  // Artifact hashes (per §11) - handle backward compatibility
+  const resultsHashValue = artifactHashesParsed?.resultsHash as string | undefined;
+  const artifactHashes: ArtifactHashes = {
+    codeCommit: (artifactHashesParsed?.codeCommit ?? executionParsed?.codeCommit ?? 'unknown') as string,
+    datasetHash: (artifactHashesParsed?.datasetHash ?? 'unknown') as string,
+    configHash: (artifactHashesParsed?.configHash ?? 'unknown') as string,
+    ...(resultsHashValue !== undefined && { resultsHash: resultsHashValue }),
+  };
 
   const manifest: EvaluationManifest = {
     id: parsed.id as string,
     createdAt: new Date(parsed.createdAt as string),
     contentHash: parsed.contentHash as string,
+    artifactHashes,
 
     dataset: {
       startDate: new Date((parsed.dataset as Record<string, unknown>).startDate as string),
@@ -760,4 +860,70 @@ export function findTier(manifest: EvaluationManifest, label: string): bigint | 
  */
 export function getDeployableBaselines(manifest: EvaluationManifest): BaselineConfig[] {
   return manifest.policies.baselines.filter((b) => b.deployable);
+}
+
+// ============================================================================
+// Results Hash (Set Post-Run)
+// ============================================================================
+
+/**
+ * Set the results hash after evaluation completes
+ *
+ * This should be called after all evaluation results are finalized
+ * to complete the artifact hash chain for full reproducibility.
+ */
+export function setResultsHash(
+  manifest: EvaluationManifest,
+  resultsHash: string
+): EvaluationManifest {
+  return {
+    ...manifest,
+    artifactHashes: {
+      ...manifest.artifactHashes,
+      resultsHash,
+    },
+    // Recompute content hash to include results
+    contentHash: computeManifestHash({
+      ...manifest,
+      artifactHashes: {
+        ...manifest.artifactHashes,
+        resultsHash,
+      },
+    }),
+  };
+}
+
+/**
+ * Get code commit hash
+ */
+export function getCodeCommitHash(manifest: EvaluationManifest): string {
+  return manifest.artifactHashes.codeCommit;
+}
+
+/**
+ * Get dataset hash
+ */
+export function getDatasetHash(manifest: EvaluationManifest): string {
+  return manifest.artifactHashes.datasetHash;
+}
+
+/**
+ * Get config hash
+ */
+export function getConfigHash(manifest: EvaluationManifest): string {
+  return manifest.artifactHashes.configHash;
+}
+
+/**
+ * Get results hash (may be undefined if not yet set)
+ */
+export function getResultsHash(manifest: EvaluationManifest): string | undefined {
+  return manifest.artifactHashes.resultsHash;
+}
+
+/**
+ * Export all artifact hashes for external verification
+ */
+export function exportArtifactHashes(manifest: EvaluationManifest): ArtifactHashes {
+  return { ...manifest.artifactHashes };
 }
