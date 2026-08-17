@@ -8,6 +8,23 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Withdrawal Events
+// ─────────────────────────────────────────────────────────────
+
+model WithdrawalEvent {
+  id          String   @id @default(cuid())
+  blockHash   String
+  timestamp   DateTime
+  sender      String
+  assets      String   // BigInt as string
+  shares      String   // BigInt as string
+  regimeId    String?
+
+  @@index([sender, timestamp])
+  @@index([timestamp])
+}
+
+// ─────────────────────────────────────────────────────────────
 // Chain State
 // ─────────────────────────────────────────────────────────────
 
