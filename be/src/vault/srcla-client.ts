@@ -1,9 +1,26 @@
 /**
  * SrclaClient — queries the /srcla service running at a configurable base URL.
  * Uses native fetch to match the existing codebase pattern (see CoinGeckoClient, OpenRouterClient).
+ *
+ * The SRCLA service dynamically evaluates all markets based on:
+ * - Forecast Method: Rolling Quantile (§7.2.1) - window=7, quantile=5%
+ * - Coverage Target: 95%
+ * - Artifact Hash: 5ed517d128bab909
+ *
+ * Markets are ranked by lower-bound forecast (Rolling 5th percentile).
+ * Rankings are recalculated by the cronjob on each decision cycle.
  */
 import { Injectable } from '@nestjs/common';
 import { NavyConfigService } from '../config/config.service';
+
+/** SRCLA production configuration constants */
+export const SRCLA_CONFIG = {
+  FORECAST_METHOD: 'rolling' as const,
+  FORECAST_WINDOW_DAYS: 7,
+  FORECAST_QUANTILE: 0.05,
+  COVERAGE_TARGET: 0.95,
+  ARTIFACT_HASH: '5ed517d128bab909',
+} as const;
 
 export interface StrategyAllocation {
   totalAssets: string;
@@ -20,7 +37,7 @@ export interface Decision {
   policyVersion: string;
   timestamp: string;
   admissions: string[];
-  forecasts: unknown[];
+  forecasts: ForecastResult[];
   reserveBase: string;
   allocation: unknown;
   actionDecision: {
@@ -29,6 +46,17 @@ export interface Decision {
     targetAdapter: string | null;
     reason: string;
   };
+}
+
+/** SRCLA forecast result from the service - dynamically computed */
+export interface ForecastResult {
+  marketId: string;
+  horizon: number;
+  meanReturn: string;
+  lowerReturn: string;
+  coverage: number;
+  method: string;
+  config: Record<string, unknown>;
 }
 
 export interface HarvestRecord {

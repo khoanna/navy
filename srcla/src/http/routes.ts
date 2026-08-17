@@ -166,4 +166,236 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
       meta: { count: runs.length },
     };
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // Regime Routes (§6.2)
+  // ─────────────────────────────────────────────────────────────
+
+  // GET /v1/regimes - Current regime states for all markets
+  server.get('/v1/regimes', async () => {
+    const regimes = await prisma.contractRegime.findMany({
+      orderBy: { marketId: 'asc' },
+    });
+
+    return {
+      data: regimes.map((r) => ({
+        marketId: r.marketId,
+        digest: r.digest,
+        activatedAt: r.activatedAt.toISOString(),
+      })),
+      meta: { count: regimes.length },
+    };
+  });
+
+  // GET /v1/regimes/:marketId - Regime history for a market
+  server.get('/v1/regimes/:marketId', async (request, reply) => {
+    const { marketId } = request.params as { marketId: string };
+
+    const regimes = await prisma.contractRegime.findMany({
+      where: { marketId },
+      orderBy: { activatedAt: 'desc' },
+      take: 100,
+    });
+
+    if (regimes.length === 0) {
+      return reply.status(404).send({
+        error: { code: 'NOT_FOUND', message: 'No regime history for market' },
+      });
+    }
+
+    return {
+      data: regimes.map((r) => ({
+        marketId: r.marketId,
+        digest: r.digest,
+        activatedAt: r.activatedAt.toISOString(),
+      })),
+      meta: { count: regimes.length },
+    };
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Simulation Routes (§6.3-§6.5)
+  // ─────────────────────────────────────────────────────────────
+
+  // GET /v1/simulations/:marketId - Simulation history
+  server.get('/v1/simulations/:marketId', async (request) => {
+    const { marketId } = request.params as { marketId: string };
+    const { limit = '50' } = request.query as { limit?: string };
+
+    const snapshots = await prisma.marketSnapshot.findMany({
+      where: { marketId },
+      orderBy: { timestamp: 'desc' },
+      take: Math.min(parseInt(limit, 10), 100),
+    });
+
+    // Simulation data is embedded in snapshots
+    return {
+      data: snapshots.map((s) => ({
+        marketId: s.marketId,
+        blockHash: s.blockHash,
+        timestamp: s.timestamp.toISOString(),
+        supplyRateE18: s.supplyRateE18,
+        utilizationE18: s.utilizationE18,
+        totalAssetsBase: s.totalAssetsBase,
+        configDigest: s.configDigest,
+      })),
+      meta: { count: snapshots.length },
+    };
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Evaluation Manifest Routes (§11)
+  // ─────────────────────────────────────────────────────────────
+
+  // GET /v1/manifests - List evaluation manifests
+  server.get('/v1/manifests', async () => {
+    const runs = await prisma.evaluationRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 50,
+    });
+
+    return {
+      data: runs.map((r) => ({
+        id: r.id,
+        manifestHash: r.manifestHash,
+        status: r.status,
+        startedAt: r.startedAt.toISOString(),
+        completedAt: r.completedAt?.toISOString() ?? null,
+      })),
+      meta: { count: runs.length },
+    };
+  });
+
+  // GET /v1/manifests/:id - Get manifest by ID
+  server.get('/v1/manifests/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const run = await prisma.evaluationRun.findUnique({
+      where: { id },
+    });
+
+    if (!run) {
+      return reply.status(404).send({
+        error: { code: 'NOT_FOUND', message: 'Manifest not found' },
+      });
+    }
+
+    return {
+      data: {
+        id: run.id,
+        manifestHash: run.manifestHash,
+        status: run.status,
+        results: run.results,
+        startedAt: run.startedAt.toISOString(),
+        completedAt: run.completedAt?.toISOString() ?? null,
+      },
+      meta: { timestamp: new Date().toISOString() },
+    };
+  });
+
+  // GET /v1/manifests/:id/verification - Get enumeration verification
+  server.get('/v1/manifests/:id/verification', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const run = await prisma.evaluationRun.findUnique({
+      where: { id },
+    });
+
+    if (!run) {
+      return reply.status(404).send({
+        error: { code: 'NOT_FOUND', message: 'Manifest not found' },
+      });
+    }
+
+    // Results contain enumeration verification data
+    const results = run.results as Record<string, unknown> | null;
+    const enumeration = results?.enumeration as Record<string, unknown> | null;
+
+    return {
+      data: {
+        manifestId: id,
+        enumeration,
+        passed: enumeration ? (enumeration.passed as boolean) : null,
+      },
+      meta: { timestamp: new Date().toISOString() },
+    };
+  });
+
+  // POST /v1/manifests - Create a new manifest
+  server.post('/v1/manifests', async (request, reply) => {
+    const body = request.body as {
+      datasetStart: string;
+      datasetEnd: string;
+      calibrationEnd: string;
+      heldOutStart: string;
+      markets: Array<{ marketId: string; protocol: string; adapterAddress: string }>;
+    };
+
+    // Validate required fields
+    if (!body.datasetStart || !body.datasetEnd || !body.calibrationEnd || !body.heldOutStart) {
+      return reply.status(400).send({
+        error: { code: 'INVALID_INPUT', message: 'Missing required date fields' },
+      });
+    }
+
+    // Create manifest hash from content
+    const contentHash = require('crypto')
+      .createHash('sha256')
+      .update(JSON.stringify(body))
+      .digest('hex');
+
+    const run = await prisma.evaluationRun.create({
+      data: {
+        manifestHash: contentHash,
+        status: 'running',
+        results: body,
+      },
+    });
+
+    return reply.status(201).send({
+      data: {
+        id: run.id,
+        manifestHash: run.manifestHash,
+        status: run.status,
+        startedAt: run.startedAt.toISOString(),
+      },
+      meta: { timestamp: new Date().toISOString() },
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Enumeration Routes (§8.2)
+  // ─────────────────────────────────────────────────────────────
+
+  // GET /v1/enumeration/:cycleId - Get enumeration result for a cycle
+  server.get('/v1/enumeration/:cycleId', async (request, reply) => {
+    const { cycleId } = request.params as { cycleId: string };
+
+    // Look up decision by hash or ID
+    const decision = await prisma.decision.findFirst({
+      where: {
+        OR: [{ decisionHash: cycleId }, { id: cycleId }],
+      },
+    });
+
+    if (!decision) {
+      return reply.status(404).send({
+        error: { code: 'NOT_FOUND', message: 'Decision not found' },
+      });
+    }
+
+    // Allocation data contains enumeration result
+    const allocation = decision.allocation as Record<string, unknown> | null;
+    const enumeration = allocation?.enumeration as Record<string, unknown> | null;
+
+    return {
+      data: {
+        decisionHash: decision.decisionHash,
+        timestamp: decision.timestamp.toISOString(),
+        enumeration: enumeration ?? null,
+        passed: enumeration ? (enumeration.passed as boolean) : null,
+      },
+      meta: { timestamp: new Date().toISOString() },
+    };
+  });
 }

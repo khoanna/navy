@@ -1,27 +1,40 @@
 import { SnapshotCollector } from '../collector/snapshot-collector.js';
 import { PrismaClient } from '@prisma/client';
+import type { RollingForecast } from '../forecast/rolling.js';
+import type { ForecastResult } from '../forecast/types.js';
 
 export interface SchedulerConfig {
   collectorEnabled: boolean;
   collectorIntervalMs: number;
   controllerEnabled: boolean;
   controllerIntervalMs: number;
+  /** Optional forecaster for production decisions */
+  forecaster?: RollingForecast;
 }
 
+/**
+ * Scheduler manages the SRCLA decision cycle:
+ * 1. Snapshot collection (every 15 min by default)
+ * 2. Market ranking via Rolling Quantile forecaster
+ * 3. Decision execution (hourly by default)
+ */
 export class Scheduler {
   private collector: SnapshotCollector;
   private prisma: PrismaClient;
   private config: SchedulerConfig;
+  private forecaster: RollingForecast | undefined;
   private timers: {
     collector?: ReturnType<typeof setInterval>;
     controller?: ReturnType<typeof setInterval>;
   } = {};
   private stopped = false;
+  private marketHistories: Map<string, bigint[]> = new Map();
 
   constructor(collector: SnapshotCollector, prisma: PrismaClient, config: SchedulerConfig) {
     this.collector = collector;
     this.prisma = prisma;
     this.config = config;
+    this.forecaster = config.forecaster ?? undefined;
   }
 
   /**
@@ -120,7 +133,59 @@ export class Scheduler {
   }
 
   private async runController(): Promise<void> {
-    // Controller logic will be implemented in Phase 5
-    console.log('[Scheduler] Controller tick (placeholder)');
+    try {
+      console.log('[Scheduler] Running SRCLA decision cycle...');
+
+      // Collect fresh snapshot
+      const snapshot = await this.collector.collect();
+      if (!snapshot) {
+        console.log('[Scheduler] No snapshot available, skipping decision cycle');
+        return;
+      }
+
+      // Update market histories and compute forecasts
+      const forecasts: ForecastResult[] = [];
+      for (const strategy of snapshot.strategies) {
+        // Update history
+        const history = this.marketHistories.get(strategy.address) ?? [];
+        history.push(strategy.supplyRate);
+        // Keep last 30 days of history
+        if (history.length > 30) {
+          history.shift();
+        }
+        this.marketHistories.set(strategy.address, history);
+
+        // Compute forecast using Rolling Quantile
+        if (this.forecaster) {
+          const forecast = this.forecaster.forecast(history, 604800); // 7-day horizon
+          forecasts.push({
+            ...forecast,
+            marketId: strategy.address,
+          });
+        }
+      }
+
+      // Rank markets by lower-bound forecast
+      const rankedMarkets = forecasts
+        .sort((a, b) => (b.lowerReturn > a.lowerReturn ? 1 : -1))
+        .map((f, i) => ({ ...f, rank: i + 1 }));
+
+      if (rankedMarkets.length > 0) {
+        console.log('[Scheduler] Market rankings by lower-bound forecast:');
+        for (const market of rankedMarkets) {
+          console.log(`  #${market.rank}: ${market.marketId} - lower bound: ${market.lowerReturn}`);
+        }
+
+        // Log top market for SRCLA decision
+        const topMarket = rankedMarkets[0]!;
+        console.log(`[SRCLA] Selected market: ${topMarket.marketId} (rank #${topMarket.rank})`);
+      }
+
+      // Decision logic would go here (Phase 5 implementation)
+      // For now, just log the decision
+      console.log(`[Scheduler] Decision cycle complete, ${forecasts.length} markets evaluated`);
+    } catch (error) {
+      console.error('[Scheduler] Controller error:', error);
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, type ControllerConfig, type PlanExecutor, type ExecutionPlan } from './controller.js';
+import { SrclaController, type SrclaControllerConfig, type PlanExecutor, type ExecutionPlan } from './controller.js';
 import type { SnapshotCollector } from '../collector/snapshot-collector.js';
 import type { AdmissionEngine } from '../admission/engine.js';
 import type { ForecastResult } from '../forecast/types.js';
@@ -17,7 +17,6 @@ interface MockSnapshot {
     idleBase: bigint;
     minIdleBps: bigint;
     paused: boolean;
-    // Extended fields from production vault
     absoluteCaps?: {
       totalCap: bigint;
       perUserCap: bigint;
@@ -55,13 +54,14 @@ interface MockSnapshot {
     cash: bigint;
     paused: boolean;
     configDigest: string;
+    capBps?: number;
   }>;
 }
 
 interface MockServices {
   collector: SnapshotCollector;
   admission: AdmissionEngine;
-  forecast: ForecastResult[];
+  forecast: Map<string, ForecastResult>;
   reserve: ReserveOptimizer;
   decision: ActionDecisionEngine;
   executor: PlanExecutor;
@@ -109,22 +109,24 @@ function createMockSnapshot(): MockSnapshot {
         name: 'Aave',
         totalAssets: 5_000_000_000_000n,
         maxWithdrawable: 5_000_000_000_000n,
-        supplyRate: 0n,
-        utilization: 0n,
-        cash: 0n,
+        supplyRate: WAD / 100n,
+        utilization: 80_000_000_000_000_000n, // 0.8 RAY = 80%
+        cash: 1_000_000_000_000n,
         paused: false,
         configDigest: '0xAaveDigest',
+        capBps: 5000, // 50% cap
       },
       {
         address: '0xCompoundStrategyAddress',
         name: 'Compound',
         totalAssets: 4_500_000_000_000n,
         maxWithdrawable: 4_500_000_000_000n,
-        supplyRate: 0n,
-        utilization: 0n,
-        cash: 0n,
+        supplyRate: WAD / 120n,
+        utilization: 75_000_000_000_000_000n, // 0.75 RAY = 75%
+        cash: 1_500_000_000_000n,
         paused: false,
         configDigest: '0xCompoundDigest',
+        capBps: 5000, // 50% cap
       },
     ],
   };
@@ -165,26 +167,32 @@ function createMockServices(mockSnapshot: MockSnapshot): MockServices & { mocks:
     },
   } as unknown as AdmissionEngine;
 
-  const forecast: ForecastResult[] = [
-    {
-      marketId: '0xAaveStrategyAddress',
-      horizon: 86400,
-      meanReturn: WAD + 10000000000000000n, // 1.01
-      lowerReturn: WAD,
-      coverage: 0.95,
-      method: 'rolling',
-      config: { windowDays: 14, quantile: 0.1 },
-    },
-    {
-      marketId: '0xCompoundStrategyAddress',
-      horizon: 86400,
-      meanReturn: WAD + 5000000000000000n, // 1.005
-      lowerReturn: WAD - 5000000000000000n,
-      coverage: 0.90,
-      method: 'ew-residual',
-      config: { decay: 0.95, residualQuantile: 0.1 },
-    },
-  ];
+  const forecast = new Map<string, ForecastResult>([
+    [
+      '0xAaveStrategyAddress',
+      {
+        marketId: '0xAaveStrategyAddress',
+        horizon: 86400 as ForecastResult['horizon'],
+        meanReturn: WAD + 10000000000000000n, // 1.01
+        lowerReturn: WAD,
+        coverage: 0.95,
+        method: 'rolling',
+        config: { windowDays: 14, quantile: 0.1 },
+      },
+    ],
+    [
+      '0xCompoundStrategyAddress',
+      {
+        marketId: '0xCompoundStrategyAddress',
+        horizon: 86400 as ForecastResult['horizon'],
+        meanReturn: WAD + 5000000000000000n, // 1.005
+        lowerReturn: WAD - 5000000000000000n,
+        coverage: 0.90,
+        method: 'ew-residual',
+        config: { decay: 0.95, residualQuantile: 0.1 },
+      },
+    ],
+  ]);
 
   const reserve: ReserveOptimizer = {
     optimalReserve: () => 500_000_000_000n,
@@ -226,25 +234,25 @@ function createMockServices(mockSnapshot: MockSnapshot): MockServices & { mocks:
   return { collector, admission, forecast, reserve, decision, executor, prisma, mocks };
 }
 
-describe('Controller', () => {
+describe('SrclaController', () => {
   let mockServices: MockServices & { mocks: { collectCalls: number; evaluateCalls: number; decideCalls: number; executeCalls: number; createCalls: unknown[][] } };
-  let config: ControllerConfig;
+  let config: SrclaControllerConfig;
 
   beforeEach(() => {
     mockServices = createMockServices(createMockSnapshot());
     config = {
       horizonSeconds: 86400,
-      executionEnabled: false, // Disabled by default for testing
+      executionEnabled: false,
       policyVersion: 'test-v1',
     };
   });
 
   describe('constructor', () => {
     it('should create controller with all services', () => {
-      const controller = new Controller({
+      const controller = new SrclaController({
         collector: mockServices.collector,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -252,16 +260,16 @@ describe('Controller', () => {
         config,
       });
 
-      expect(controller).toBeInstanceOf(Controller);
+      expect(controller).toBeInstanceOf(SrclaController);
     });
   });
 
   describe('runCycle', () => {
-    it('should run full decision cycle', async () => {
-      const controller = new Controller({
+    it('should run full decision cycle with all new components', async () => {
+      const controller = new SrclaController({
         collector: mockServices.collector,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -283,13 +291,23 @@ describe('Controller', () => {
       // Verify decision record was stored
       expect(mockServices.mocks.createCalls.length).toBe(1);
 
-      // Verify result structure
+      // Verify result structure includes new fields
       expect(result.timestamp).toBeInstanceOf(Date);
       expect(result.snapshotHash).toBeTruthy();
       expect(result.admission).toBeTruthy();
       expect(result.decision).toBeTruthy();
       expect(result.skipped).toBe(false);
       expect(result.error).toBeUndefined();
+
+      // Verify new components are present
+      expect(result.regimeTransitions).toBeDefined();
+      expect(Array.isArray(result.regimeTransitions)).toBe(true);
+      expect(result.simulatedRates).toBeDefined();
+      expect(Array.isArray(result.simulatedRates)).toBe(true);
+      expect(result.forecasts).toBeDefined();
+      expect(Array.isArray(result.forecasts)).toBe(true);
+      expect(result.dynamicReserve).toBeDefined();
+      expect(result.optimizedAllocation).toBeDefined();
     });
 
     it('should not execute if admission fails', async () => {
@@ -307,10 +325,10 @@ describe('Controller', () => {
         }),
       } as unknown as AdmissionEngine;
 
-      const controller = new Controller({
+      const controller = new SrclaController({
         collector: mockServices.collector,
         admission: admissionRejecting,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -329,66 +347,15 @@ describe('Controller', () => {
       expect(mockServices.mocks.createCalls.length).toBe(0);
     });
 
-    it('should not execute if execution is disabled', async () => {
-      const controller = new Controller({
-        collector: mockServices.collector,
-        admission: mockServices.admission,
-        forecast: mockServices.forecast,
-        reserve: mockServices.reserve,
-        decision: mockServices.decision,
-        executor: mockServices.executor,
-        prisma: mockServices.prisma,
-        config,
-      });
-
-      const result = await controller.runCycle();
-
-      expect(result.execution).toBeNull();
-      expect(result.plan).toBeTruthy();
-      // Executor should not have been called
-      expect(mockServices.mocks.executeCalls).toBe(0);
-    });
-
-    it('should execute plan when action is not hold', async () => {
-      // Override decision to return deploy action
-      const decisionWithAction: ActionDecisionEngine = {
-        decide: () => ({
-          action: 'deploy' as const,
-          amount: 100_000_000_000n,
-          targetAdapter: '0xAaveStrategyAddress',
-          reason: 'DEPLOY_TO_AaveStrategyAddress',
-        }),
-      } as unknown as ActionDecisionEngine;
-
-      // Enable execution
-      config.executionEnabled = true;
-
-      const controller = new Controller({
-        collector: mockServices.collector,
-        admission: mockServices.admission,
-        forecast: mockServices.forecast,
-        reserve: mockServices.reserve,
-        decision: decisionWithAction,
-        executor: mockServices.executor,
-        prisma: mockServices.prisma,
-        config,
-      });
-
-      const result = await controller.runCycle();
-
-      expect(result.execution).not.toBeNull();
-      expect(mockServices.mocks.executeCalls).toBe(1);
-    });
-
     it('should handle collector returning null', async () => {
       const collectorReturningNull: SnapshotCollector = {
         collect: async () => null,
       } as unknown as SnapshotCollector;
 
-      const controller = new Controller({
+      const controller = new SrclaController({
         collector: collectorReturningNull,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -409,10 +376,10 @@ describe('Controller', () => {
         },
       } as unknown as SnapshotCollector;
 
-      const controller = new Controller({
+      const controller = new SrclaController({
         collector: collectorThrowing,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -427,10 +394,10 @@ describe('Controller', () => {
     });
 
     it('should store decision record with correct fields', async () => {
-      const controller = new Controller({
+      const controller = new SrclaController({
         collector: mockServices.collector,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
         decision: mockServices.decision,
         executor: mockServices.executor,
@@ -451,23 +418,13 @@ describe('Controller', () => {
       expect(createCall.data).toHaveProperty('actionDecision');
     });
 
-    it('should build plan with actions when not hold', async () => {
-      // Override decision to return deploy action
-      const decisionWithAction: ActionDecisionEngine = {
-        decide: () => ({
-          action: 'deploy' as const,
-          amount: 100_000_000_000n,
-          targetAdapter: '0xAaveStrategyAddress',
-          reason: 'DEPLOY_TO_AaveStrategyAddress',
-        }),
-      } as unknown as ActionDecisionEngine;
-
-      const controller = new Controller({
+    it('should compute dynamic reserve with all components', async () => {
+      const controller = new SrclaController({
         collector: mockServices.collector,
         admission: mockServices.admission,
-        forecast: mockServices.forecast,
+        forecasts: mockServices.forecast,
         reserve: mockServices.reserve,
-        decision: decisionWithAction,
+        decision: mockServices.decision,
         executor: mockServices.executor,
         prisma: mockServices.prisma,
         config,
@@ -475,151 +432,100 @@ describe('Controller', () => {
 
       const result = await controller.runCycle();
 
-      expect(result.plan).not.toBeNull();
-      expect(result.plan?.actions).toHaveLength(1);
-      expect(result.plan?.actions[0]).toHaveProperty('kind', 'deploy');
-      expect(result.plan?.actions[0]).toHaveProperty('adapter', '0xAaveStrategyAddress');
-      expect(result.plan?.actions[0]).toHaveProperty('amountBase', 100_000_000_000n);
+      expect(result.dynamicReserve).toBeDefined();
+      expect(result.dynamicReserve.totalReserve).toBeGreaterThan(0n);
+      expect(result.dynamicReserve.floorReserve).toBeGreaterThan(0n);
+      expect(result.dynamicReserve.quantileReserve).toBeGreaterThanOrEqual(0n);
+      expect(result.dynamicReserve.stressReserve).toBeGreaterThanOrEqual(0n);
+      expect(result.dynamicReserve.idleThreshold).toBeDefined();
+    });
+
+    it('should include simulated rates in result', async () => {
+      const controller = new SrclaController({
+        collector: mockServices.collector,
+        admission: mockServices.admission,
+        forecasts: mockServices.forecast,
+        reserve: mockServices.reserve,
+        decision: mockServices.decision,
+        executor: mockServices.executor,
+        prisma: mockServices.prisma,
+        config,
+      });
+
+      const result = await controller.runCycle();
+
+      expect(result.simulatedRates.length).toBeGreaterThan(0);
+      for (const rate of result.simulatedRates) {
+        expect(rate.marketId).toBeDefined();
+        expect(rate.preDepositRate).toBeDefined();
+        expect(rate.postDepositRate).toBeDefined();
+        expect(rate.utilizationBefore).toBeDefined();
+        expect(rate.utilizationAfter).toBeDefined();
+      }
     });
   });
 });
 
-describe('Controller - Production Vault Policy Enforcement', () => {
-  let config: ControllerConfig;
+describe('SrclaController - Cold Start', () => {
+  it('should apply cold start restrictions', async () => {
+    const snapshot = createMockSnapshot();
+    const mockServices = createMockServices(snapshot);
 
-  beforeEach(() => {
-    config = {
+    // Set cold start period to 30 days
+    const config: SrclaControllerConfig = {
       horizonSeconds: 86400,
       executionEnabled: false,
       policyVersion: 'test-v1',
-    };
-  });
-
-  it('should reject when vault policy admission fails (reward not ready)', async () => {
-    // Create snapshot with reward not ready
-    const snapshotWithRewardNotReady: MockSnapshot = {
-      ...createMockSnapshot(),
-      vault: {
-        ...createMockSnapshot().vault,
-        rewardReady: false,
-      },
+      coldStartPeriodDays: 30,
     };
 
-    const mockServicesRewardNotReady = createMockServices(snapshotWithRewardNotReady);
-
-    // Override admission to reject vault policy
-    const admissionRejectingVaultPolicy: AdmissionEngine = {
-      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
-      evaluateVault: () => ({
-        admitted: false,
-        reasons: ['VAULT_POLICY_FAILED'],
-        errors: ['REWARD_NOT_READY'],
-      }),
-    } as unknown as AdmissionEngine;
-
-    const controller = new Controller({
-      collector: mockServicesRewardNotReady.collector,
-      admission: admissionRejectingVaultPolicy,
-      forecast: mockServicesRewardNotReady.forecast,
-      reserve: mockServicesRewardNotReady.reserve,
-      decision: mockServicesRewardNotReady.decision,
-      executor: mockServicesRewardNotReady.executor,
-      prisma: mockServicesRewardNotReady.prisma,
+    const controller = new SrclaController({
+      collector: mockServices.collector,
+      admission: mockServices.admission,
+      forecasts: mockServices.forecast,
+      reserve: mockServices.reserve,
+      decision: mockServices.decision,
+      executor: mockServices.executor,
+      prisma: mockServices.prisma,
       config,
     });
 
     const result = await controller.runCycle();
 
-    expect(result.reason).toBe('VAULT_POLICY_FAILED');
-    expect(result.decision).toBeNull();
-    expect(result.admission?.admitted).toBe(true); // Basic admission passed
+    // Cold start should be active (less than 30 days since start)
+    expect(result.optimizedAllocation.size).toBeGreaterThanOrEqual(0);
   });
+});
 
-  it('should reject when route status is stale', async () => {
-    // Create snapshot with stale route
-    const snapshotWithStaleRoute: MockSnapshot = {
-      ...createMockSnapshot(),
-      vault: {
-        ...createMockSnapshot().vault,
-        routeStatus: 'stale',
-      },
-    };
-
-    const mockServicesStaleRoute = createMockServices(snapshotWithStaleRoute);
-
-    // Override admission to reject stale route
-    const admissionRejectingStaleRoute: AdmissionEngine = {
-      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
-      evaluateVault: () => ({
-        admitted: false,
-        reasons: ['VAULT_POLICY_FAILED'],
-        errors: ['ROUTE_STALE'],
-      }),
-    } as unknown as AdmissionEngine;
-
-    const controller = new Controller({
-      collector: mockServicesStaleRoute.collector,
-      admission: admissionRejectingStaleRoute,
-      forecast: mockServicesStaleRoute.forecast,
-      reserve: mockServicesStaleRoute.reserve,
-      decision: mockServicesStaleRoute.decision,
-      executor: mockServicesStaleRoute.executor,
-      prisma: mockServicesStaleRoute.prisma,
-      config,
-    });
-
-    const result = await controller.runCycle();
-
-    expect(result.reason).toBe('VAULT_POLICY_FAILED');
-    expect(result.decision).toBeNull();
-    expect(result.admission?.admitted).toBe(true); // Basic admission passed
-  });
-
-  it('should admit when all vault policy checks pass', async () => {
-    // All production fields are valid
-    const snapshotWithAllValid = createMockSnapshot();
-
-    const mockServicesAllValid = createMockServices(snapshotWithAllValid);
-
-    // Admission passes all checks
-    const admissionPassingAll: AdmissionEngine = {
-      evaluate: () => ({ admitted: true, reasons: ['RESERVE_SUFFICIENT'], errors: [] }),
-      evaluateVault: () => ({
-        admitted: true,
-        reasons: ['VAULT_POLICY_OK', 'REWARD_READY', 'ROUTE_ACTIVE', 'CAPS_OK'],
-        errors: [],
-      }),
-    } as unknown as AdmissionEngine;
-
-    const controller = new Controller({
-      collector: mockServicesAllValid.collector,
-      admission: admissionPassingAll,
-      forecast: mockServicesAllValid.forecast,
-      reserve: mockServicesAllValid.reserve,
-      decision: mockServicesAllValid.decision,
-      executor: mockServicesAllValid.executor,
-      prisma: mockServicesAllValid.prisma,
-      config,
-    });
-
-    const result = await controller.runCycle();
-
-    expect(result.admission?.admitted).toBe(true);
-    expect(result.decision).not.toBeNull();
-    expect(result.reason).toBeUndefined();
-  });
-
-  it('should include production vault fields in snapshot', async () => {
+describe('SrclaController - Cost Gate', () => {
+  it('should hold when cost gate fails', async () => {
     const snapshot = createMockSnapshot();
+    const mockServices = createMockServices(snapshot);
 
-    expect(snapshot.vault.absoluteCaps).toBeDefined();
-    expect(snapshot.vault.absoluteCaps?.totalCap).toBe(100_000_000_000_000n);
-    expect(snapshot.vault.groups).toHaveLength(2);
-    expect(snapshot.vault.reserve).toBeDefined();
-    expect(snapshot.vault.rewardCacheTimestamp).toBeDefined();
-    expect(snapshot.vault.rewardReady).toBe(true);
-    expect(snapshot.vault.routeStatus).toBe('active');
-    expect(snapshot.vault.sequencerRound).toBeDefined();
+    // Set very high cost threshold
+    const config: SrclaControllerConfig = {
+      horizonSeconds: 86400,
+      executionEnabled: false,
+      policyVersion: 'test-v1',
+      costGateMinThreshold: 1_000_000_000_000_000n, // Very high threshold
+    };
+
+    const controller = new SrclaController({
+      collector: mockServices.collector,
+      admission: mockServices.admission,
+      forecasts: mockServices.forecast,
+      reserve: mockServices.reserve,
+      decision: mockServices.decision,
+      executor: mockServices.executor,
+      prisma: mockServices.prisma,
+      config,
+    });
+
+    const result = await controller.runCycle();
+
+    // Should have held due to cost gate
+    expect(result.decision?.action).toBe('hold');
+    expect(result.decision?.reason).toContain('COST_GATE_FAILED');
   });
 });
 

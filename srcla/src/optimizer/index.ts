@@ -6,3 +6,14 @@ export {
   OptimizationResult,
   ViolationType,
 } from './constrained-optimizer.js';
+export {
+  ExhaustiveVerifier,
+  isGreedyOptimal,
+  formatEnumerationResult,
+  quickVerify,
+} from './exhaustive-verify.js';
+export type {
+  EnumerableAllocation,
+  EnumerationResult,
+  ExhaustiveVerifyInput,
+} from './exhaustive-verify.js';

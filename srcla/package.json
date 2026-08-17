@@ -14,7 +14,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "collect": "tsx scripts/collect-once.ts"
+    "collect": "tsx scripts/collect-once.ts",
+    "evaluation:run": "tsx scripts/run-evaluation.ts",
+    "evaluation:synthetic": "tsx scripts/run-evaluation.ts --synthetic",
+    "anvil:test": "tsx scripts/anvil-fork-test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
