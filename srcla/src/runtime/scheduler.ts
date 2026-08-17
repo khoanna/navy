@@ -1,52 +1,109 @@
 import { SnapshotCollector } from '../collector/snapshot-collector.js';
+import { WithdrawalTracker } from '../collector/withdrawal-tracker.js';
 import { PrismaClient } from '@prisma/client';
 import type { RollingForecast } from '../forecast/rolling.js';
 import type { ForecastResult } from '../forecast/types.js';
+import {
+  isCalibrationNeeded,
+  runWalkForwardCalibration,
+  getSelectedMethod,
+  createForecaster,
+  type CalibrationConfig,
+} from '../forecast/calibration.js';
 
 export interface SchedulerConfig {
   collectorEnabled: boolean;
   collectorIntervalMs: number;
   controllerEnabled: boolean;
   controllerIntervalMs: number;
-  /** Optional forecaster for production decisions */
+  /** Calibration interval in milliseconds (default: weekly) */
+  calibrationIntervalMs: number;
+  /** Calibration window in days (training data) */
+  calibrationWindowDays: number;
+  /** Held-out window in days (evaluation data) */
+  heldOutWindowDays: number;
+  /** Forecast horizon in seconds (default: 7 days) */
+  forecastHorizonSeconds: number;
+  /** Artifact hash for calibration traceability */
+  artifactHash: string;
+  /** Optional forecaster for production decisions (deprecated: use selected method from DB) */
   forecaster?: RollingForecast;
 }
 
 /**
  * Scheduler manages the SRCLA decision cycle:
  * 1. Snapshot collection (every 15 min by default)
- * 2. Market ranking via Rolling Quantile forecaster
- * 3. Decision execution (hourly by default)
+ * 2. Walk-forward calibration (weekly by default)
+ * 3. Market ranking via selected forecaster
+ * 4. Decision execution (hourly by default)
  */
 export class Scheduler {
   private collector: SnapshotCollector;
+  private withdrawalTracker: WithdrawalTracker;
   private prisma: PrismaClient;
   private config: SchedulerConfig;
   private forecaster: RollingForecast | undefined;
   private timers: {
     collector?: ReturnType<typeof setInterval>;
     controller?: ReturnType<typeof setInterval>;
+    calibration?: ReturnType<typeof setInterval>;
   } = {};
   private stopped = false;
   private marketHistories: Map<string, bigint[]> = new Map();
+  private selectedMethod: string = 'rolling';
+  private selectedConfig: Record<string, unknown> = { windowDays: 30, quantile: 0.10 };
 
-  constructor(collector: SnapshotCollector, prisma: PrismaClient, config: SchedulerConfig) {
+  constructor(
+    collector: SnapshotCollector,
+    prisma: PrismaClient,
+    config: SchedulerConfig,
+    vaultAddress: string
+  ) {
     this.collector = collector;
     this.prisma = prisma;
     this.config = config;
     this.forecaster = config.forecaster ?? undefined;
+    this.withdrawalTracker = new WithdrawalTracker(collector['client'], vaultAddress, prisma);
   }
 
   /**
    * Start the scheduler
    */
-  start(): void {
+  async start(): Promise<void> {
+    // Load selected method from DB at startup
+    await this.loadSelectedMethod();
+
     if (this.config.collectorEnabled) {
       this.startCollector();
     }
 
     if (this.config.controllerEnabled) {
       this.startController();
+    }
+
+    // Start calibration timer
+    this.startCalibration();
+  }
+
+  /**
+   * Load the currently selected forecast method from the database.
+   */
+  private async loadSelectedMethod(): Promise<void> {
+    try {
+      const selected = await getSelectedMethod(this.prisma);
+      this.selectedMethod = selected.method;
+      this.selectedConfig = selected.config;
+
+      // Initialize forecaster from selected method
+      const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
+      this.forecaster = forecasterInstance;
+
+      console.log(`[Scheduler] Loaded selected method: ${this.selectedMethod}`);
+    } catch (error) {
+      console.warn('[Scheduler] Could not load selected method, using defaults:', error);
+      // Fallback: use rolling with default config
+      const { RollingForecast } = await import('../forecast/rolling.js');
+      this.forecaster = new RollingForecast({ windowDays: 30, quantile: 0.10 });
     }
   }
 
@@ -62,6 +119,69 @@ export class Scheduler {
 
     if (this.timers.controller) {
       clearInterval(this.timers.controller);
+    }
+
+    if (this.timers.calibration) {
+      clearInterval(this.timers.calibration);
+    }
+  }
+
+  /**
+   * Start the calibration timer.
+   * Calibration runs on the configured interval (default: weekly).
+   */
+  private startCalibration(): void {
+    // Run initial calibration check
+    this.runCalibration();
+
+    // Schedule periodic calibration
+    this.timers.calibration = setInterval(() => {
+      if (!this.stopped) {
+        this.runCalibration();
+      }
+    }, this.config.calibrationIntervalMs);
+  }
+
+  /**
+   * Run calibration if needed.
+   * Checks if the last calibration is older than the calibration interval.
+   */
+  private async runCalibration(): Promise<void> {
+    try {
+      // Check if calibration is needed
+      const needed = await isCalibrationNeeded(
+        this.prisma,
+        this.config.calibrationIntervalMs
+      );
+
+      if (!needed) {
+        console.log('[Scheduler] Calibration not needed yet');
+        return;
+      }
+
+      console.log('[Scheduler] Running walk-forward calibration...');
+
+      const calibrationConfig: CalibrationConfig = {
+        calibrationWindowDays: this.config.calibrationWindowDays,
+        heldOutWindowDays: this.config.heldOutWindowDays,
+        horizonSeconds: this.config.forecastHorizonSeconds,
+        artifactHash: this.config.artifactHash,
+      };
+
+      const result = await runWalkForwardCalibration(this.prisma, calibrationConfig);
+
+      // Update the selected method and forecaster
+      this.selectedMethod = result.selectedMethod;
+      const calibrations = await getSelectedMethod(this.prisma);
+      this.selectedConfig = calibrations.config;
+
+      // Re-initialize forecaster with new config
+      const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
+      this.forecaster = forecasterInstance;
+
+      console.log(`[Scheduler] Calibration complete. Selected method: ${this.selectedMethod}`);
+    } catch (error) {
+      console.error('[Scheduler] Calibration error:', error);
     }
   }
 
@@ -126,6 +246,19 @@ export class Scheduler {
         }
 
         console.log(`[Scheduler] Collected snapshot at block ${snapshot.blockNumber}`);
+
+        // Collect withdrawal events since last processed block
+        const lastBlock = await this.withdrawalTracker.getLastProcessedBlock();
+        if (lastBlock > 0) {
+          const withdrawalEvents = await this.withdrawalTracker.collectSince(lastBlock);
+          if (withdrawalEvents.length > 0) {
+            console.log(`[Scheduler] Collected ${withdrawalEvents.length} withdrawal events`);
+          }
+        } else {
+          // First run: collect from block 0 (genesis) with a reasonable limit
+          // In production, set a reasonable start block based on vault deployment
+          console.log('[Scheduler] No previous withdrawal data, skipping retroactive collection');
+        }
       }
     } catch (error) {
       console.error('[Scheduler] Collector error:', error);
@@ -167,12 +300,14 @@ export class Scheduler {
         }
         this.marketHistories.set(strategy.address, history);
 
-        // Compute forecast using Rolling Quantile
+        // Compute forecast using the selected method
         if (this.forecaster) {
-          const forecast = this.forecaster.forecast(history, 604800); // 7-day horizon
+          const forecast = this.forecaster.forecast(history, this.config.forecastHorizonSeconds);
           forecasts.push({
             ...forecast,
             marketId: strategy.address,
+            method: this.selectedMethod,
+            config: this.selectedConfig,
           });
         }
       }
