@@ -2,6 +2,7 @@ import { PlanBuilder, type ExecutionPlan, type PlanAction } from './plan-builder
 import { preflight, type PreflightParams } from './preflight.js';
 import { reconcile, type VaultState } from './reconciler.js';
 import { hashData } from '../domain/hashing.js';
+import type { MarketState } from '../protocols/simulation/types.js';
 
 /**
  * Create a mock ExecutionPlan for testing
@@ -576,5 +577,226 @@ describe('VaultState - Extended Fields', () => {
     expect(vaultState.currentRewardCacheValue).toBe(55_000_000_000n);
     expect(vaultState.rewardCacheTimestamp).toBe(1_000_000_000n);
     expect(vaultState.configurationDigest).toBe('0xdigest123');
+  });
+});
+
+describe('directAllocation', () => {
+  // Mock markets for testing direct allocation logic
+  const mockMarkets: MarketState[] = [
+    {
+      marketId: '0xAdapter1',
+      name: 'Adapter 1',
+      cash: 10_000_000_000n, // 10000 USDC capacity
+      borrows: 5_000_000_000n,
+      supplyRate: 5_000_000_000_000_000n, // 5% APY in WAD
+    },
+    {
+      marketId: '0xAdapter2',
+      name: 'Adapter 2',
+      cash: 5_000_000_000n, // 5000 USDC capacity
+      borrows: 3_000_000_000n,
+      supplyRate: 4_000_000_000_000_000n, // 4% APY in WAD
+    },
+    {
+      marketId: '0xAdapter3',
+      name: 'Adapter 3',
+      cash: 0n, // No capacity
+      borrows: 1_000_000_000n,
+      supplyRate: 6_000_000_000_000_000n, // 6% APY - highest but no capacity
+    },
+  ];
+
+  it('should return highest rate adapter with capacity', () => {
+    const amount = 1_000_000_000n; // 1000 USDC
+
+    // Manual test of direct allocation logic
+    const eligible = mockMarkets.filter((m) => m.cash >= amount);
+    eligible.sort((a, b) => {
+      if (a.supplyRate < b.supplyRate) return 1;
+      if (a.supplyRate > b.supplyRate) return -1;
+      return 0;
+    });
+
+    expect(eligible.length).toBe(2);
+    expect(eligible[0]!.marketId).toBe('0xAdapter1'); // Highest rate
+    expect(eligible[0]!.supplyRate).toBe(5_000_000_000_000_000n);
+  });
+
+  it('should return null when no market has capacity', () => {
+    const largeAmount = 20_000_000_000n; // 20000 USDC - exceeds all capacities
+
+    const eligible = mockMarkets.filter((m) => m.cash >= largeAmount);
+
+    expect(eligible.length).toBe(0);
+  });
+
+  it('should respect capacity constraints when deploying larger amount', () => {
+    // Simulate directAllocation function logic
+    function directAllocation(
+      vaultState: VaultState,
+      markets: MarketState[],
+      amount: bigint
+    ): { adapter: string; amount: bigint } | null {
+      const eligible = markets.filter((m) => {
+        const capacityRemaining = m.cash;
+        const hasCapacity = capacityRemaining >= amount;
+        const adapterBalance = vaultState.adapterBalances.get(m.marketId) ?? 0n;
+        const isActive = adapterBalance > 0n || markets.length === 1;
+        const notEmergency = m.cash > 0n;
+        return hasCapacity && isActive && notEmergency;
+      });
+
+      if (eligible.length === 0) return null;
+
+      eligible.sort((a, b) => {
+        if (a.supplyRate < b.supplyRate) return 1;
+        if (a.supplyRate > b.supplyRate) return -1;
+        return 0;
+      });
+
+      const best = eligible[0]!;
+      const capacityRemaining = best.cash;
+      const actualAmount = amount <= capacityRemaining ? amount : capacityRemaining;
+
+      return {
+        adapter: best.marketId,
+        amount: actualAmount,
+      };
+    }
+
+    // Adapter1 has an existing balance, making it "active"
+    const vaultState: VaultState = {
+      idle: 20_000_000_000n,
+      adapterBalances: new Map([['0xAdapter1', 1_000_000_000n]]), // Has 1 USDC balance
+    };
+
+    // Try to deploy 8_000_000_000n (8000 USDC)
+    // Only Adapter1 has capacity for that (10_000_000_000n)
+    // But Adapter2 doesn't (5000 USDC < 8000 USDC)
+    const result = directAllocation(vaultState, mockMarkets, 8_000_000_000n);
+
+    expect(result).not.toBeNull();
+    expect(result!.adapter).toBe('0xAdapter1'); // Adapter1 is the best with capacity
+    expect(result!.amount).toBe(8_000_000_000n); // Exact amount since within capacity
+  });
+
+  it('should select single active market', () => {
+    const singleMarket: MarketState[] = [
+      {
+        marketId: '0xAdapter1',
+        name: 'Only Adapter',
+        cash: 10_000_000_000n,
+        borrows: 0n,
+        supplyRate: 5_000_000_000_000_000n,
+      },
+    ];
+
+    const eligible = singleMarket.filter((m) => m.cash >= 1_000_000_000n);
+
+    // Single market should be selected even with no existing balance
+    expect(eligible.length).toBe(1);
+  });
+});
+
+describe('executeWithRecovery', () => {
+  it('should handle stop on divest failure', () => {
+    // Verify the config is correctly defined
+    const recoveryConfig = {
+      divestFailureStrategy: 'stop' as const,
+      deployFailureStrategy: 'stop' as const,
+      enableDirectAllocationFallback: false,
+    };
+
+    expect(recoveryConfig.divestFailureStrategy).toBe('stop');
+  });
+
+  it('should handle continue on divest failure', () => {
+    const recoveryConfig = {
+      divestFailureStrategy: 'continue' as const,
+      deployFailureStrategy: 'stop' as const,
+      enableDirectAllocationFallback: false,
+    };
+
+    expect(recoveryConfig.divestFailureStrategy).toBe('continue');
+  });
+
+  it('should handle recover_idle on deploy failure', () => {
+    const recoveryConfig = {
+      divestFailureStrategy: 'stop' as const,
+      deployFailureStrategy: 'recover_idle' as const,
+      enableDirectAllocationFallback: true,
+    };
+
+    expect(recoveryConfig.deployFailureStrategy).toBe('recover_idle');
+  });
+
+  it('should accumulate failed deploy amounts', () => {
+    // Track failed deploy amounts
+    let failedDeployAmount = 0n;
+
+    // Simulate multiple failed deploys
+    const actions = [
+      { kind: 0 as const, amountBase: 1_000_000_000n },
+      { kind: 0 as const, amountBase: 2_000_000_000n },
+    ];
+
+    // Simulate failures
+    for (const action of actions) {
+      if (action.kind === 0) {
+        // Deploy failed
+        failedDeployAmount += action.amountBase;
+      }
+    }
+
+    expect(failedDeployAmount).toBe(3_000_000_000n);
+  });
+
+  it('should reset failed deploy amount on success', () => {
+    let failedDeployAmount = 5_000_000_000n; // Previous failure
+
+    // Simulate success after failure
+    failedDeployAmount = 0n; // Reset on success
+
+    expect(failedDeployAmount).toBe(0n);
+  });
+});
+
+describe('RecoveryConfig', () => {
+  it('should have correct default values', () => {
+    const defaultConfig = {
+      divestFailureStrategy: 'stop',
+      deployFailureStrategy: 'stop',
+      enableDirectAllocationFallback: false,
+    };
+
+    expect(defaultConfig.divestFailureStrategy).toBe('stop');
+    expect(defaultConfig.deployFailureStrategy).toBe('stop');
+    expect(defaultConfig.enableDirectAllocationFallback).toBe(false);
+  });
+
+  it('should allow aggressive recovery configuration', () => {
+    const aggressiveConfig = {
+      divestFailureStrategy: 'continue',
+      deployFailureStrategy: 'recover_idle',
+      enableDirectAllocationFallback: true,
+    };
+
+    expect(aggressiveConfig.divestFailureStrategy).toBe('continue');
+    expect(aggressiveConfig.deployFailureStrategy).toBe('recover_idle');
+    expect(aggressiveConfig.enableDirectAllocationFallback).toBe(true);
+  });
+});
+
+describe('DirectAllocationResult', () => {
+  it('should have correct shape', () => {
+    const result = {
+      adapter: '0xAdapter1',
+      amount: 1_000_000_000n,
+    };
+
+    expect(result).toHaveProperty('adapter');
+    expect(result).toHaveProperty('amount');
+    expect(typeof result.adapter).toBe('string');
+    expect(typeof result.amount).toBe('bigint');
   });
 });

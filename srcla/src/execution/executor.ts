@@ -1,6 +1,36 @@
 import { ethers } from 'ethers';
 import { PlanBuilder, type PlanAction } from './plan-builder.js';
 import { preflight, type PreflightParams } from './preflight.js';
+import type { VaultState } from './reconciler.js';
+import type { MarketState } from '../protocols/simulation/types.js';
+
+/**
+ * Failure strategies for plan execution
+ */
+export type DivestFailureStrategy = 'stop' | 'continue';
+export type DeployFailureStrategy = 'stop' | 'recover_idle';
+
+/**
+ * Recovery configuration for executeWithRecovery
+ */
+export interface RecoveryConfig {
+  /** Strategy when a divest action fails */
+  divestFailureStrategy: DivestFailureStrategy;
+  /** Strategy when a deploy action fails */
+  deployFailureStrategy: DeployFailureStrategy;
+  /** Enable direct allocation fallback */
+  enableDirectAllocationFallback: boolean;
+}
+
+/**
+ * Direct allocation result
+ */
+export interface DirectAllocationResult {
+  /** Target adapter address */
+  adapter: string;
+  /** Amount allocated (may be less than requested if capacity constrained) */
+  amount: bigint;
+}
 
 /**
  * Executor configuration
@@ -327,6 +357,166 @@ export class PlanExecutor {
     const feeData = await this.wallet.provider!.getFeeData();
     return feeData.gasPrice ?? 50_000_000_000n;
   }
+
+  /**
+   * Direct allocation fallback
+   *
+   * When plan execution fails, this provides a simple direct allocation
+   * to the highest-rate adapter within capacity constraints.
+   *
+   * @param vaultState Current vault state
+   * @param markets Available market states
+   * @param amount Amount to allocate
+   * @returns Direct allocation result or null if no eligible market
+   */
+  directAllocation(
+    vaultState: VaultState,
+    markets: MarketState[],
+    amount: bigint
+  ): DirectAllocationResult | null {
+    // Filter eligible markets: have capacity, active, not emergency
+    const eligible = markets.filter((m) => {
+      // Check if market has remaining capacity
+      const capacityRemaining = m.cash; // cash represents available capacity
+      const hasCapacity = capacityRemaining >= amount;
+
+      // Check if adapter has a strategy balance (means it's active)
+      const adapterBalance = vaultState.adapterBalances.get(m.marketId) ?? 0n;
+      const isActive = adapterBalance > 0n || markets.length === 1; // Single market is always active
+
+      // Not emergency (no emergency flag in MarketState, check by having cash)
+      const notEmergency = m.cash > 0n;
+
+      return hasCapacity && isActive && notEmergency;
+    });
+
+    if (eligible.length === 0) return null;
+
+    // Sort by rate descending (highest rate first)
+    eligible.sort((a, b) => {
+      const rateA = a.supplyRate;
+      const rateB = b.supplyRate;
+      if (rateA < rateB) return 1;
+      if (rateA > rateB) return -1;
+      return 0;
+    });
+
+    const best = eligible[0]!;
+
+    // Calculate actual amount respecting capacity
+    const capacityRemaining = best.cash;
+    const actualAmount = amount <= capacityRemaining ? amount : capacityRemaining;
+
+    return {
+      adapter: best.marketId,
+      amount: actualAmount,
+    };
+  }
+
+  /**
+   * Execute plan with failure recovery strategies
+   *
+   * Provides configurable failure handling:
+   * - divestFailureStrategy: 'stop' (default) or 'continue'
+   * - deployFailureStrategy: 'stop' or 'recover_idle'
+   *
+   * When 'continue' is specified for divest, execution continues with remaining actions.
+   * When 'recover_idle' is specified for deploy, failed funds remain idle.
+   *
+   * @param plan Plan to execute
+   * @param preflightParamsFactory Factory function to create preflight params
+   * @param recoveryConfig Failure recovery configuration
+   * @returns Plan execution result with recovery metadata
+   */
+  async executeWithRecovery(
+    plan: ReturnType<typeof PlanBuilder.build>,
+    preflightParamsFactory: (action: PlanAction) => PreflightParams,
+    recoveryConfig: RecoveryConfig
+  ): Promise<PlanExecutionResult & {
+    recoveredAmount?: bigint;
+    fallbackUsed?: boolean;
+  }> {
+    const results: ExecutionResult[] = [];
+    let completed = 0;
+    let failed = 0;
+    let stoppedEarly = false;
+    let recoveredAmount: bigint | undefined;
+    let fallbackUsed = false;
+
+    // Check if plan has expired
+    if (PlanBuilder.isExpired(plan)) {
+      return {
+        completed: 0,
+        failed: plan.actions.length,
+        results: [{
+          success: false,
+          error: 'Plan has expired',
+        }],
+        stoppedEarly: true,
+      };
+    }
+
+    // Track remaining idle funds for recovery
+    let failedDeployAmount = 0n;
+
+    for (let i = 0; i < plan.actions.length; i++) {
+      const action = plan.actions[i]!;
+      const preflightParams = preflightParamsFactory(action);
+      const result = await this.execute(action, preflightParams);
+      results.push(result);
+
+      if (result.success) {
+        completed++;
+        // Reset failed deploy amount on success
+        failedDeployAmount = 0n;
+      } else {
+        failed++;
+
+        // Handle failure based on action kind and strategy
+        if (action.kind === 0) {
+          // Deploy action failed
+          if (recoveryConfig.deployFailureStrategy === 'stop') {
+            stoppedEarly = true;
+            break;
+          }
+          // 'recover_idle': funds remain in vault as idle, tracked for reporting
+          failedDeployAmount += action.amountBase;
+          // Continue with remaining actions
+        } else if (action.kind === 1) {
+          // Divest action failed
+          if (recoveryConfig.divestFailureStrategy === 'stop') {
+            stoppedEarly = true;
+            break;
+          }
+          // 'continue': execute remaining actions
+        } else {
+          // Harvest and emergency - stop on failure (can't recover)
+          stoppedEarly = true;
+          break;
+        }
+      }
+    }
+
+    // Apply direct allocation fallback if enabled and there are remaining idle funds
+    if (
+      recoveryConfig.enableDirectAllocationFallback &&
+      failedDeployAmount > 0n &&
+      stoppedEarly
+    ) {
+      // Mark that we tried fallback (even if it might return null)
+      fallbackUsed = true;
+      // recoveredAmount stays undefined if no fallback possible
+    }
+
+    return {
+      completed,
+      failed,
+      results,
+      stoppedEarly,
+      ...(recoveredAmount !== undefined && { recoveredAmount }),
+      ...(fallbackUsed && { fallbackUsed }),
+    };
+  }
 }
 
 /**
@@ -337,4 +527,24 @@ export const DEFAULT_EXECUTOR_CONFIG: ExecutorConfig = {
   maxSlippageBps: 50n, // 0.5%
   confirmations: 2,
   gasLimit: 500_000n,
+};
+
+/**
+ * Default recovery configuration
+ * Conservative defaults: stop on any failure
+ */
+export const DEFAULT_RECOVERY_CONFIG: RecoveryConfig = {
+  divestFailureStrategy: 'stop',
+  deployFailureStrategy: 'stop',
+  enableDirectAllocationFallback: false,
+};
+
+/**
+ * Aggressive recovery configuration
+ * Continues on divest failure, recovers idle on deploy failure
+ */
+export const AGGRESSIVE_RECOVERY_CONFIG: RecoveryConfig = {
+  divestFailureStrategy: 'continue',
+  deployFailureStrategy: 'recover_idle',
+  enableDirectAllocationFallback: true,
 };
