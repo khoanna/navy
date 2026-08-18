@@ -1,96 +1,76 @@
 /**
- * Evaluation manifest types and factory
+ * Evaluation Manifest Types for Reproducibility
+ *
+ * Per SRCLA design §12: Evaluation Manifest System
+ *
+ * These types define the manifest structure that captures all configuration
+ * for a reproducible evaluation run.
  */
-import { BASELINES, ABLATIONS } from './constants.js';
-
-export interface ManifestConfig {
-  evaluationId: string;
-  startDate: Date;
-  endDate: Date;
-  forecastMethod: {
-    method: 'rolling' | 'ew-residual' | 'arx';
-    config: Record<string, unknown>;
-  };
-  horizons: number[]; // Seconds
-  tiers: bigint[]; // USDC amounts
-  regimes?: string[];
-  coverageTarget: number; // 0.95
-  significanceLevel: number; // 0.05
-}
-
-export type ManifestWithBaselines = ManifestConfig & {
-  baselines: typeof BASELINES;
-  ablations: typeof ABLATIONS;
-};
 
 /**
- * Create a manifest with baselines and ablations filled in
+ * Evaluation manifest - captures all configuration for reproducible evaluation
  */
-export function createManifest(config: ManifestConfig): ManifestWithBaselines {
-  return {
-    ...config,
-    baselines: BASELINES,
-    ablations: ABLATIONS,
-  };
-}
+export interface EvaluationManifest {
+  /** Unique identifier for this evaluation */
+  id: string;
+  /** Manifest version */
+  version: string;
+  /** When the manifest was created */
+  createdAt: string;
 
-/**
- * Validate a manifest config
- */
-export function validateManifest(config: ManifestConfig): void {
-  if (!config.evaluationId) throw new Error('evaluationId is required');
-  if (config.startDate >= config.endDate) throw new Error('startDate must be before endDate');
-  if (config.horizons.length === 0) throw new Error('At least one horizon is required');
-  if (config.horizons.some((h) => h <= 0)) throw new Error('All horizons must be positive');
-  if (config.tiers.length === 0) throw new Error('At least one tier is required');
-  if (config.coverageTarget <= 0 || config.coverageTarget > 1) {
-    throw new Error('coverageTarget must be between 0 and 1');
-  }
-  if (config.significanceLevel <= 0 || config.significanceLevel > 1) {
-    throw new Error('significanceLevel must be between 0 and 1');
-  }
-}
-
-/**
- * Freeze a manifest to JSON for reproducible evaluation
- */
-export function freezeManifest(manifest: ManifestConfig): string {
-  return JSON.stringify({
-    ...manifest,
-    startDate: manifest.startDate.toISOString(),
-    endDate: manifest.endDate.toISOString(),
-    tiers: manifest.tiers.map((t) => t.toString()),
-    frozenAt: new Date().toISOString(),
-  });
-}
-
-/**
- * Thaw a frozen manifest from JSON
- */
-export function thawManifest(json: string): ManifestConfig {
-  const parsed = JSON.parse(json) as {
-    evaluationId: string;
+  /** Dataset configuration */
+  dataset: {
     startDate: string;
     endDate: string;
-    forecastMethod: { method: 'rolling' | 'ew-residual' | 'arx'; config: Record<string, unknown> };
-    horizons: number[];
-    tiers: string[];
-    regimes: string[] | undefined;
-    coverageTarget: number;
-    significanceLevel: number;
+    snapshotCadenceMinutes: number;
+    marketIds: string[];
   };
-  const result: ManifestConfig = {
-    evaluationId: parsed.evaluationId,
-    startDate: new Date(parsed.startDate),
-    endDate: new Date(parsed.endDate),
-    forecastMethod: parsed.forecastMethod,
-    horizons: parsed.horizons,
-    tiers: parsed.tiers.map((t) => BigInt(t)),
-    coverageTarget: parsed.coverageTarget,
-    significanceLevel: parsed.significanceLevel,
+
+  /** Calibration windows with held-out periods */
+  calibration: {
+    windows: Array<{
+      startDate: string;
+      endDate: string;
+      heldOutStart: string;
+      heldOutEnd: string;
+    }>;
   };
-  if (parsed.regimes) {
-    result.regimes = parsed.regimes;
-  }
-  return result;
+
+  /** Vault tiers evaluated */
+  vaultTiers: string[];
+
+  /** Policies evaluated */
+  policies: {
+    baselines: ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
+    ablations: ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
+    srcla: boolean;
+  };
+
+  /** Market configurations */
+  markets: Record<string, {
+    adapters: string[];
+    coldStartDays: number;
+    minObservations: number;
+  }>;
+
+  /** Cost parameters at time of evaluation */
+  costs: {
+    l2GasPrice: string;
+    l1GasPrice: string;
+    ethPrice: string;
+    slippageBps: number;
+    mevBps: number;
+  };
+
+  /** Content hashes for reproducibility */
+  contentHashes: {
+    manifest: string;
+    dataset: string;
+    codeCommit: string;
+  };
 }
+
+/**
+ * Content hash type (SHA-256 hex string)
+ */
+export type ContentHash = string;

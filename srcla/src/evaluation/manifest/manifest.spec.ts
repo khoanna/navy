@@ -1,365 +1,446 @@
-import { createManifest, validateManifest, freezeManifest, thawManifest } from './types.js';
-import {
-  createEvaluationManifest,
-  freezeEvaluationManifest,
-  thawEvaluationManifest,
-  validateManifest as validateFullManifest,
-  setResultsHash,
-  getCodeCommitHash,
-  getDatasetHash,
-  getConfigHash,
-  getResultsHash,
-  exportArtifactHashes,
-} from './manifest.js';
+/**
+ * Manifest System Tests
+ *
+ * Tests for the evaluation manifest system per SRCLA design §12.
+ */
+import { generateManifest, computeContentHash, computeDatasetHash, signManifest } from './generator.js';
+import { verifyManifest, verifyContentHash, verifyDatasetHash } from './verifier.js';
 
-describe('EvaluationManifest', () => {
+describe('Manifest System', () => {
   const validConfig = {
-    evaluationId: 'eval-001',
-    startDate: new Date('2025-01-01'),
-    endDate: new Date('2025-12-31'),
-    forecastMethod: { method: 'rolling' as const, config: { windowDays: 30 } },
-    horizons: [86400],
-    tiers: [10_000_000_000n],
-    coverageTarget: 0.95,
-    significanceLevel: 0.05,
+    version: '1.0.0',
+    dataset: {
+      startDate: new Date('2026-01-01'),
+      endDate: new Date('2026-08-01'),
+      snapshotCadenceMinutes: 15,
+      marketIds: ['aave', 'compound'],
+    },
+    calibrationWindows: [
+      {
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-02-01'),
+        heldOutStart: new Date('2026-02-01'),
+        heldOutEnd: new Date('2026-02-08'),
+      },
+      {
+        startDate: new Date('2026-02-08'),
+        endDate: new Date('2026-03-01'),
+        heldOutStart: new Date('2026-03-01'),
+        heldOutEnd: new Date('2026-03-08'),
+      },
+    ],
+    vaultTiers: ['10000', '100000'],
+    markets: {
+      aave: { adapters: ['0x24d4173e6b9734a52c20190a9c5681ef350D8fE2'], coldStartDays: 7, minObservations: 30 },
+      compound: { adapters: ['0x24d4173e6b9734a52c20190a9c5681ef350D8fE2'], coldStartDays: 0, minObservations: 14 },
+    },
+    costs: {
+      l2GasPrice: 30_000_000_000n,
+      l1GasPrice: 1_000_000_000n,
+      ethPrice: 3_500_000_000_000n,
+      slippageBps: 5,
+      mevBps: 5,
+    },
+    baselines: ['b0', 'b1', 'b2', 'b3', 'b4', 'b5'],
+    ablations: ['h1', 'h2', 'h3', 'h4', 'h5'],
+    srclaEnabled: true,
+    codeCommit: 'abc123',
   };
 
-  describe('createManifest (legacy types.js)', () => {
-    it('should create manifest with all baselines', () => {
-      const manifest = createManifest(validConfig);
-      expect(manifest.baselines).toContain('b0');
-      expect(manifest.baselines).toContain('b5');
-      expect(manifest.baselines).toHaveLength(6);
+  describe('generateManifest', () => {
+    it('should generate manifest with all required fields', () => {
+      const manifest = generateManifest(validConfig);
+
+      expect(manifest.id).toBeDefined();
+      expect(manifest.id).toMatch(/^manifest-/);
+      expect(manifest.version).toBe('1.0.0');
+      expect(manifest.createdAt).toBeDefined();
     });
 
-    it('should create manifest with all ablations', () => {
-      const manifest = createManifest(validConfig);
-      expect(manifest.ablations).toContain('h1');
-      expect(manifest.ablations).toContain('h5');
-      expect(manifest.ablations).toHaveLength(5);
-    });
-  });
+    it('should include dataset configuration', () => {
+      const manifest = generateManifest(validConfig);
 
-  describe('validateManifest (legacy types.js)', () => {
-    it('should accept valid manifest', () => {
-      expect(() => validateManifest(validConfig)).not.toThrow();
+      expect(manifest.dataset.startDate).toBe('2026-01-01T00:00:00.000Z');
+      expect(manifest.dataset.endDate).toBe('2026-08-01T00:00:00.000Z');
+      expect(manifest.dataset.snapshotCadenceMinutes).toBe(15);
+      expect(manifest.dataset.marketIds).toEqual(['aave', 'compound']);
     });
 
-    it('should reject empty evaluationId', () => {
-      const bad = { ...validConfig, evaluationId: '' };
-      expect(() => validateManifest(bad)).toThrow('evaluationId');
+    it('should include calibration windows', () => {
+      const manifest = generateManifest(validConfig);
+
+      expect(manifest.calibration.windows).toHaveLength(2);
+      expect(manifest.calibration.windows[0]!.startDate).toBe('2026-01-01T00:00:00.000Z');
+      expect(manifest.calibration.windows[0]!.heldOutEnd).toBe('2026-02-08T00:00:00.000Z');
     });
 
-    it('should reject startDate >= endDate', () => {
-      const bad = { ...validConfig, startDate: new Date('2026-01-01'), endDate: new Date('2025-01-01') };
-      expect(() => validateManifest(bad)).toThrow('startDate');
+    it('should include vault tiers', () => {
+      const manifest = generateManifest(validConfig);
+
+      expect(manifest.vaultTiers).toEqual(['10000', '100000']);
     });
 
-    it('should reject zero horizon', () => {
-      const bad = { ...validConfig, horizons: [0] };
-      expect(() => validateManifest(bad)).toThrow('horizons');
+    it('should include policies with baselines and ablations', () => {
+      const manifest = generateManifest(validConfig);
+
+      expect(manifest.policies.baselines).toEqual(['b0', 'b1', 'b2', 'b3', 'b4', 'b5']);
+      expect(manifest.policies.ablations).toEqual(['h1', 'h2', 'h3', 'h4', 'h5']);
+      expect(manifest.policies.srcla).toBe(true);
     });
 
-    it('should reject empty tiers', () => {
-      const bad = { ...validConfig, tiers: [] };
-      expect(() => validateManifest(bad)).toThrow(/tier/i);
-    });
-  });
+    it('should include market configurations', () => {
+      const manifest = generateManifest(validConfig);
 
-  describe('freeze/thaw (legacy types.js)', () => {
-    it('should round-trip through freeze/thaw', () => {
-      const manifest = createManifest(validConfig);
-      const frozen = freezeManifest(manifest);
-      const thawed = thawManifest(frozen);
-
-      expect(thawed.evaluationId).toBe(manifest.evaluationId);
-      expect(thawed.tiers[0]).toBe(manifest.tiers[0]);
-      expect(thawed.coverageTarget).toBe(manifest.coverageTarget);
+      expect(manifest.markets.aave).toBeDefined();
+      expect(manifest.markets.aave!.adapters).toContain('0x24d4173e6b9734a52c20190a9c5681ef350D8fE2');
+      expect(manifest.markets.aave!.coldStartDays).toBe(7);
     });
 
-    it('should include frozenAt timestamp', () => {
-      const manifest = createManifest(validConfig);
-      const frozen = JSON.parse(freezeManifest(manifest)) as { frozenAt?: string };
-      expect(frozen.frozenAt).toBeDefined();
-    });
-  });
+    it('should include cost parameters', () => {
+      const manifest = generateManifest(validConfig);
 
-  // ===========================================================================
-  // §11 Artifact Hash Tests
-  // ===========================================================================
-
-  describe('createEvaluationManifest (full §11 manifest)', () => {
-    it('should create manifest with artifact hashes', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(manifest.artifactHashes).toBeDefined();
-      expect(manifest.artifactHashes.codeCommit).toBeTruthy();
-      expect(manifest.artifactHashes.datasetHash).toBeTruthy();
-      expect(manifest.artifactHashes.configHash).toBeTruthy();
+      expect(manifest.costs.l2GasPrice).toBe('30000000000');
+      expect(manifest.costs.l1GasPrice).toBe('1000000000');
+      expect(manifest.costs.ethPrice).toBe('3500000000000');
+      expect(manifest.costs.slippageBps).toBe(5);
+      expect(manifest.costs.mevBps).toBe(5);
     });
 
-    it('should generate different dataset hashes for different date ranges', () => {
-      const manifest1 = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-06-30'),
-        },
-      });
+    it('should include code commit from config', () => {
+      const manifest = generateManifest(validConfig);
 
-      const manifest2 = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(manifest1.artifactHashes.datasetHash).not.toBe(manifest2.artifactHashes.datasetHash);
+      expect(manifest.contentHashes.codeCommit).toBe('abc123');
     });
 
-    it('should generate different config hashes for different configurations', () => {
-      const manifest1 = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-        costModel: { minActionAmount: 1_000_000n },
-      });
+    it('should use unknown as default code commit', () => {
+      const configWithoutCommit = { ...validConfig };
+      delete (configWithoutCommit as { codeCommit?: string }).codeCommit;
 
-      const manifest2 = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-        costModel: { minActionAmount: 10_000_000n },
-      });
+      const manifest = generateManifest(configWithoutCommit);
 
-      expect(manifest1.artifactHashes.configHash).not.toBe(manifest2.artifactHashes.configHash);
-    });
-
-    it('should include codeCommit from environment', () => {
-      const originalCommit = process.env.GIT_COMMIT_HASH;
-      process.env.GIT_COMMIT_HASH = 'abc123def456';
-
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(manifest.artifactHashes.codeCommit).toBe('abc123def456');
-      expect(manifest.execution.codeCommit).toBe('abc123def456');
-
-      if (originalCommit !== undefined) {
-        process.env.GIT_COMMIT_HASH = originalCommit;
-      }
-    });
-
-    it('should set resultsHash to undefined initially', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(manifest.artifactHashes.resultsHash).toBeUndefined();
-    });
-
-    it('should compute content hash', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(manifest.contentHash).toBeTruthy();
-      expect(manifest.contentHash).toHaveLength(64); // SHA-256 hex
+      expect(manifest.contentHashes.codeCommit).toBe('unknown');
     });
   });
 
-  describe('freezeEvaluationManifest / thawEvaluationManifest', () => {
-    it('should round-trip with artifact hashes', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+  describe('computeContentHash', () => {
+    it('should compute SHA-256 hash', () => {
+      const manifest = generateManifest(validConfig);
+      const hash = computeContentHash(manifest);
 
-      const frozen = freezeEvaluationManifest(manifest);
-      const thawed = thawEvaluationManifest(frozen);
-
-      expect(thawed.artifactHashes.codeCommit).toBe(manifest.artifactHashes.codeCommit);
-      expect(thawed.artifactHashes.datasetHash).toBe(manifest.artifactHashes.datasetHash);
-      expect(thawed.artifactHashes.configHash).toBe(manifest.artifactHashes.configHash);
+      expect(hash).toBeDefined();
+      expect(hash).toHaveLength(64); // SHA-256 hex
+      expect(hash).toMatch(/^[a-f0-9]+$/);
     });
 
-    it('should preserve resultsHash through freeze/thaw', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+    it('should produce same hash for same manifest', () => {
+      const manifest = generateManifest(validConfig);
+      const hash1 = computeContentHash(manifest);
+      const hash2 = computeContentHash(manifest);
 
-      const withResults = setResultsHash(manifest, 'results-hash-abc123');
-      const frozen = freezeEvaluationManifest(withResults);
-      const thawed = thawEvaluationManifest(frozen);
-
-      expect(thawed.artifactHashes.resultsHash).toBe('results-hash-abc123');
+      expect(hash1).toBe(hash2);
     });
 
-    it('should detect tampered content', () => {
-      const manifest = createEvaluationManifest({
+    it('should produce different hash for different content', () => {
+      const manifest1 = generateManifest(validConfig);
+
+      const config2 = {
+        ...validConfig,
         dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
+          ...validConfig.dataset,
+          startDate: new Date('2026-02-01'),
         },
-      });
+      };
+      const manifest2 = generateManifest(config2);
 
-      const frozen = freezeEvaluationManifest(manifest);
-      const parsed = JSON.parse(frozen);
-      parsed.dataset.endDate = '2026-12-31T00:00:00.000Z'; // Tamper with data
-      const tampered = JSON.stringify(parsed);
+      const hash1 = computeContentHash(manifest1);
+      const hash2 = computeContentHash(manifest2);
 
-      expect(() => thawEvaluationManifest(tampered)).toThrow('Manifest hash mismatch');
+      expect(hash1).not.toBe(hash2);
     });
   });
 
-  describe('setResultsHash', () => {
-    it('should set results hash and recompute content hash', () => {
-      const manifest = createEvaluationManifest({
+  describe('computeDatasetHash', () => {
+    it('should compute hash from dataset fields', () => {
+      const manifest = generateManifest(validConfig);
+      const hash = computeDatasetHash(manifest);
+
+      expect(hash).toBeDefined();
+      expect(hash).toHaveLength(64);
+    });
+
+    it('should produce same hash for same dataset', () => {
+      const manifest1 = generateManifest(validConfig);
+      const manifest2 = generateManifest(validConfig);
+
+      expect(computeDatasetHash(manifest1)).toBe(computeDatasetHash(manifest2));
+    });
+
+    it('should produce different hash for different date ranges', () => {
+      const manifest1 = generateManifest(validConfig);
+
+      const config2 = {
+        ...validConfig,
         dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
+          ...validConfig.dataset,
+          endDate: new Date('2026-07-01'),
         },
-      });
+      };
+      const manifest2 = generateManifest(config2);
 
-      const originalContentHash = manifest.contentHash;
-      const withResults = setResultsHash(manifest, 'results-hash-xyz789');
-
-      expect(withResults.artifactHashes.resultsHash).toBe('results-hash-xyz789');
-      expect(withResults.contentHash).not.toBe(originalContentHash);
+      expect(computeDatasetHash(manifest1)).not.toBe(computeDatasetHash(manifest2));
     });
   });
 
-  describe('Artifact hash accessor functions', () => {
-    it('getCodeCommitHash should return code commit', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+  describe('signManifest', () => {
+    it('should fill in content hashes', () => {
+      const unsigned = generateManifest(validConfig);
+      expect(unsigned.contentHashes.manifest).toBe('');
+      expect(unsigned.contentHashes.dataset).toBe('');
 
-      expect(getCodeCommitHash(manifest)).toBe(manifest.artifactHashes.codeCommit);
+      const signed = signManifest(unsigned);
+
+      expect(signed.contentHashes.manifest).toBeDefined();
+      expect(signed.contentHashes.dataset).toBeDefined();
+      expect(signed.contentHashes.manifest).toHaveLength(64);
+      expect(signed.contentHashes.dataset).toHaveLength(64);
     });
 
-    it('getDatasetHash should return dataset hash', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+    it('should preserve code commit', () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
 
-      expect(getDatasetHash(manifest)).toBe(manifest.artifactHashes.datasetHash);
-    });
-
-    it('getConfigHash should return config hash', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(getConfigHash(manifest)).toBe(manifest.artifactHashes.configHash);
-    });
-
-    it('getResultsHash should return undefined before results are set', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      expect(getResultsHash(manifest)).toBeUndefined();
-    });
-
-    it('getResultsHash should return results hash after setting', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      const withResults = setResultsHash(manifest, 'final-results-hash');
-      expect(getResultsHash(withResults)).toBe('final-results-hash');
-    });
-
-    it('exportArtifactHashes should return copy of hashes', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
-
-      const exported = exportArtifactHashes(manifest);
-      expect(exported).toEqual(manifest.artifactHashes);
-      expect(exported).not.toBe(manifest.artifactHashes); // Should be a copy
+      expect(signed.contentHashes.codeCommit).toBe('abc123');
     });
   });
 
-  describe('validateFullManifest', () => {
-    it('should validate manifest with all required fields', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+  describe('verifyManifest', () => {
+    it('should verify valid manifest', async () => {
+      // Use single window config to avoid validation complexity
+      const singleWindowConfig = {
+        ...validConfig,
+        calibrationWindows: [
+          {
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-02-01'),
+            heldOutStart: new Date('2026-02-01'),
+            heldOutEnd: new Date('2026-02-08'),
+          },
+        ],
+      };
+      const unsigned = generateManifest(singleWindowConfig);
+      const signed = signManifest(unsigned);
+      const result = await verifyManifest(signed);
 
-      const result = validateFullManifest(manifest);
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
 
-    it('should validate artifact hashes are present', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+    it('should detect missing manifest id', async () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+      signed.id = '';
 
-      const result = validateFullManifest(manifest);
-      expect(result.valid).toBe(true);
+      const result = await verifyManifest(signed);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Missing manifest id');
     });
 
-    it('should fail validation when content hash is wrong', () => {
-      const manifest = createEvaluationManifest({
-        dataset: {
-          startDate: new Date('2025-01-01'),
-          endDate: new Date('2025-12-31'),
-        },
-      });
+    it('should detect missing version', async () => {
+      const unsigned = generateManifest({ ...validConfig, version: '' });
+      const signed = signManifest(unsigned);
 
-      const tampered = { ...manifest, contentHash: 'wrong-hash' };
-      const result = validateFullManifest(tampered);
+      const result = await verifyManifest(signed);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Missing version');
+    });
+
+    it('should detect invalid date format', async () => {
+      const unsigned = generateManifest({
+        ...validConfig,
+        calibrationWindows: [
+          {
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-02-01'),
+            heldOutStart: new Date('2026-02-01'),
+            heldOutEnd: new Date('2026-02-08'),
+          },
+        ],
+      });
+      unsigned.dataset.startDate = 'invalid-date';
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Invalid date format in dataset');
+    });
+
+    it('should detect startDate >= endDate', async () => {
+      const config = {
+        ...validConfig,
+        dataset: {
+          ...validConfig.dataset,
+          startDate: new Date('2026-08-01'),
+          endDate: new Date('2026-01-01'),
+        },
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Dataset startDate must be before endDate');
+    });
+
+    it('should detect overlapping calibration windows', async () => {
+      const config = {
+        ...validConfig,
+        calibrationWindows: [
+          {
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-02-01'),
+            heldOutStart: new Date('2026-02-01'),
+            heldOutEnd: new Date('2026-02-08'),
+          },
+          {
+            startDate: new Date('2026-02-05'), // Overlaps with previous held-out
+            endDate: new Date('2026-03-01'),
+            heldOutStart: new Date('2026-03-01'),
+            heldOutEnd: new Date('2026-03-08'),
+          },
+        ],
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('overlap'))).toBe(true);
+    });
+
+    it('should detect invalid held-out window', async () => {
+      const config = {
+        ...validConfig,
+        calibrationWindows: [
+          {
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-02-01'),
+            heldOutStart: new Date('2026-02-08'),
+            heldOutEnd: new Date('2026-02-01'), // Invalid: end before start
+          },
+        ],
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Held-out window'))).toBe(true);
+    });
+
+    it('should detect tampered content hash', async () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+      signed.contentHashes.manifest = 'tampered-hash';
+
+      const result = await verifyManifest(signed);
 
       expect(result.valid).toBe(false);
       expect(result.errors.some(e => e.includes('hash mismatch'))).toBe(true);
+    });
+
+    it('should warn about empty baselines', async () => {
+      const config = {
+        ...validConfig,
+        baselines: [],
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.warnings).toContain('No baselines specified');
+    });
+
+    it('should warn about empty ablations', async () => {
+      const config = {
+        ...validConfig,
+        ablations: [],
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.warnings).toContain('No ablations specified');
+    });
+
+    it('should warn about unusually high gas price', async () => {
+      const config = {
+        ...validConfig,
+        costs: {
+          ...validConfig.costs,
+          l2GasPrice: 2_000_000_000_000_000_000n, // 2000 gwei
+        },
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.warnings).toContain('L2 gas price seems unusually high');
+    });
+
+    it('should detect held-out before calibration end', async () => {
+      const config = {
+        ...validConfig,
+        calibrationWindows: [
+          {
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-02-01'),
+            heldOutStart: new Date('2026-01-15'), // Before calibration end
+            heldOutEnd: new Date('2026-02-08'),
+          },
+        ],
+      };
+      const unsigned = generateManifest(config);
+
+      const result = await verifyManifest(unsigned);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Held-out start must be >='))).toBe(true);
+    });
+  });
+
+  describe('verifyContentHash', () => {
+    it('should return true for valid hash', () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+
+      expect(verifyContentHash(signed)).toBe(true);
+    });
+
+    it('should return false for tampered hash', () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+      signed.contentHashes.manifest = 'wrong-hash';
+
+      expect(verifyContentHash(signed)).toBe(false);
+    });
+  });
+
+  describe('verifyDatasetHash', () => {
+    it('should return true for valid hash', () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+
+      expect(verifyDatasetHash(signed)).toBe(true);
+    });
+
+    it('should return false for tampered hash', () => {
+      const unsigned = generateManifest(validConfig);
+      const signed = signManifest(unsigned);
+      signed.contentHashes.dataset = 'wrong-hash';
+
+      expect(verifyDatasetHash(signed)).toBe(false);
     });
   });
 });
