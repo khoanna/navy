@@ -4,43 +4,7 @@
  * Generates evaluation manifests from configuration for reproducibility.
  */
 import { createHash } from 'crypto';
-import type { EvaluationManifest } from './types.js';
-
-/**
- * Configuration for manifest generation
- */
-export interface ManifestConfig {
-  version: string;
-  dataset: {
-    startDate: Date;
-    endDate: Date;
-    snapshotCadenceMinutes: number;
-    marketIds: string[];
-  };
-  calibrationWindows: Array<{
-    startDate: Date;
-    endDate: Date;
-    heldOutStart: Date;
-    heldOutEnd: Date;
-  }>;
-  vaultTiers: string[];
-  markets: Record<string, {
-    adapters: string[];
-    coldStartDays: number;
-    minObservations: number;
-  }>;
-  costs: {
-    l2GasPrice: bigint;
-    l1GasPrice: bigint;
-    ethPrice: bigint;
-    slippageBps: number;
-    mevBps: number;
-  };
-  baselines: string[];
-  ablations: string[];
-  srclaEnabled: boolean;
-  codeCommit?: string;
-}
+import type { EvaluationManifest, ManifestConfig } from './types.js';
 
 /**
  * Generate a manifest ID
@@ -103,11 +67,7 @@ export function generateManifest(config: ManifestConfig): EvaluationManifest {
 
     vaultTiers: config.vaultTiers,
 
-    policies: {
-      baselines: config.baselines as EvaluationManifest['policies']['baselines'],
-      ablations: config.ablations as EvaluationManifest['policies']['ablations'],
-      srcla: config.srclaEnabled,
-    },
+    policies: config.policies,
 
     markets: config.markets,
 

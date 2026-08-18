@@ -41,8 +41,8 @@ export interface EvaluationManifest {
 
   /** Policies evaluated */
   policies: {
-    baselines: ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
-    ablations: ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
+    baselines: readonly ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
+    ablations: readonly ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
     srcla: boolean;
   };
 
@@ -74,3 +74,42 @@ export interface EvaluationManifest {
  * Content hash type (SHA-256 hex string)
  */
 export type ContentHash = string;
+
+/**
+ * Configuration for manifest generation
+ */
+export interface ManifestConfig {
+  evaluationId?: string;
+  version: string;
+  dataset: {
+    startDate: Date;
+    endDate: Date;
+    snapshotCadenceMinutes: number;
+    marketIds: string[];
+  };
+  calibrationWindows: Array<{
+    startDate: Date;
+    endDate: Date;
+    heldOutStart: Date;
+    heldOutEnd: Date;
+  }>;
+  vaultTiers: string[];
+  markets: Record<string, {
+    adapters: string[];
+    coldStartDays: number;
+    minObservations: number;
+  }>;
+  policies: {
+    baselines: readonly ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
+    ablations: readonly ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
+    srcla: boolean;
+  };
+  costs: {
+    l2GasPrice: string;
+    l1GasPrice: string;
+    ethPrice: string;
+    slippageBps: number;
+    mevBps: number;
+  };
+  codeCommit?: string;
+}

@@ -5,9 +5,9 @@
  * Aave V3 uses a piecewise interest rate model with an optimal utilization
  * point that minimizes rate volatility for both suppliers and borrowers.
  *
- * Rate Model (per §6.3):
- *   - Below optimal: rate = variableRateSlope * (u/optimalUtilization)^2
- *   - Above optimal: rate = optimalRate + variableRateSlope * (1 + (u - optimal)/(1 - optimal))^2
+ * Rate Model (per §6.3 - exact mirror of DefaultReserveInterestRateStrategy):
+ *   Below optimal: rate = baseRate + variableRateSlope1 * (util / optimalUtilization)^2
+ *   Above optimal: rate = baseRate + variableRateSlope1 + variableRateSlope2 * excessRatio^2
  *
  * Utilization Formula:
  *   utilization = borrows / (cash + borrows - depositAmount)
@@ -31,6 +31,8 @@ import {
  * Simulates how the supply interest rate changes when new capital is deposited
  * into an Aave V3 market. The simulator uses the protocol's mathematical model
  * to calculate post-deposit rates based on the new utilization ratio.
+ *
+ * This is an exact mirror of DefaultReserveInterestRateStrategy from Aave V3.
  *
  * @example
  * ```typescript
@@ -59,46 +61,45 @@ export class AaveV3Simulator implements ISimulator {
   /**
    * Calculate Aave V3 supply rate from utilization.
    *
-   * Uses Aave's piecewise rate model:
-   *   - Below optimal: rate = optimalRate * (utilization/optimalUtilization)^2
-   *   - Above optimal: rate = optimalRate + variableRateSlope * excessRatio^2
+   * Exact formula per §6.3 (mirrors DefaultReserveInterestRateStrategy):
+   *   Below optimal: rate = baseRate + variableRateSlope1 * (util / optimalUtilization)^2
+   *   Above optimal: rate = baseRate + variableRateSlope1 + variableRateSlope2 * excessRatio^2
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Aave V3 configuration parameters
    * @returns Annualized supply rate (WAD)
    */
   calculateRateFromUtilization(util: bigint, config: AaveSimulatorConfig): bigint {
-    const { optimalRate, variableRateSlope, optimalUtilization, maxUtilization } = config;
+    const { baseRate, variableRateSlope1, variableRateSlope2, optimalUtilization, maxUtilization } = config;
 
     // If at or above max utilization, rate is undefined/capped
     if (util >= maxUtilization) {
-      // Return a high rate as a safety measure
-      return optimalRate + variableRateSlope;
+      // At max, return the rate at max (baseRate + slope1 + slope2)
+      return baseRate + variableRateSlope1 + variableRateSlope2;
     }
 
     // Piecewise rate calculation
     if (util <= optimalUtilization) {
-      // Below optimal: quadratic increase from 0 to optimalRate
-      // rate = optimalRate * (util / optimalUtilization)^2
-      if (optimalUtilization === 0n) return 0n;
-      const utilSquared = (util * util) / optimalUtilization;
-      return (optimalRate * utilSquared) / optimalUtilization;
+      // Below optimal: rate = baseRate + slope1 * (util / optimalUtilization)^2
+      if (optimalUtilization === 0n) return baseRate;
+      const utilRatio = (util * RAY) / optimalUtilization;
+      const utilRatioSquared = (utilRatio * utilRatio) / RAY;
+      return baseRate + (variableRateSlope1 * utilRatioSquared) / RAY;
     } else {
-      // Above optimal: linear increase with variableRateSlope
-      // rate = optimalRate + variableRateSlope * ((util - optimal) / (1 - optimal))^2
+      // Above optimal: rate = baseRate + slope1 + slope2 * excessRatio^2
       const excessUtil = util - optimalUtilization;
       const excessCapacity = RAY - optimalUtilization;
 
       if (excessCapacity === 0n) {
         // Edge case: optimal is 100%
-        return optimalRate + variableRateSlope;
+        return baseRate + variableRateSlope1 + variableRateSlope2;
       }
 
-      // Calculate excess ratio squared
+      // Calculate excessRatio^2 = ((util - optimal) / (1 - optimal))^2
       const excessRatio = (excessUtil * RAY) / excessCapacity;
       const excessRatioSquared = (excessRatio * excessRatio) / RAY;
 
-      return optimalRate + (variableRateSlope * excessRatioSquared) / RAY;
+      return baseRate + variableRateSlope1 + (variableRateSlope2 * excessRatioSquared) / RAY;
     }
   }
 

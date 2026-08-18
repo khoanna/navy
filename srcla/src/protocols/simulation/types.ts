@@ -19,28 +19,31 @@ import { WAD, RAY } from '../math.js';
  * Configuration for Aave V3 interest rate simulation.
  *
  * Aave V3 uses a piecewise interest rate model with an optimal utilization
- * point. Below optimal utilization, rates increase quadratically. Above
- * optimal, rates grow linearly at a steeper slope.
+ * point. Below optimal utilization, rates increase quadratically from baseRate.
+ * Above optimal, rates grow at a steeper slope.
  *
- * Rate formula:
- *   - If u <= optimalUtilization: rate = slope * (u/optimal)^2
- *   - If u > optimalUtilization: rate = slope + (u - optimal) * excessSlope
+ * Rate formula (per §6.3 - exact DefaultReserveInterestRateStrategy):
+ *   - If u <= optimalUtilization: rate = baseRate + slope1 * (u/optimal)^2
+ *   - If u > optimalUtilization: rate = baseRate + slope1 + slope2 * excessRatio^2
  *
  * @example
  * ```typescript
  * const config: AaveSimulatorConfig = {
- *   optimalRate: 5n * WAD / 100n,        // 5% APY at optimal utilization
- *   variableRateSlope: 35n * WAD / 100n,  // 35% slope above optimal
- *   optimalUtilization: 8n * RAY / 10n,    // 80% optimal utilization
- *   maxUtilization: 95n * RAY / 100n,     // 95% max to avoid insolvency
+ *   baseRate: 0n,                          // 0% base rate
+ *   variableRateSlope1: 4n * WAD / 100n,   // 4% slope below optimal
+ *   variableRateSlope2: 60n * WAD / 100n,  // 60% slope above optimal
+ *   optimalUtilization: 8n * RAY / 10n,   // 80% optimal utilization
+ *   maxUtilization: 95n * RAY / 100n,      // 95% max to avoid insolvency
  * };
  * ```
  */
 export interface AaveSimulatorConfig {
-  /** Interest rate at optimal utilization (WAD, e.g., 5e16 = 5%) */
-  optimalRate: bigint;
-  /** Slope of rate increase above optimal utilization (WAD) */
-  variableRateSlope: bigint;
+  /** Base interest rate at 0% utilization (WAD, e.g., 0 = 0%) */
+  baseRate: bigint;
+  /** First slope for rate increase below optimal utilization (WAD) */
+  variableRateSlope1: bigint;
+  /** Second slope for rate increase above optimal utilization (WAD) */
+  variableRateSlope2: bigint;
   /** Optimal utilization point (RAY, e.g., 8e17 = 80%) */
   optimalUtilization: bigint;
   /** Maximum safe utilization (RAY, e.g., 95e16 = 95%) */
@@ -235,13 +238,14 @@ export type SimulatorConfig =
 
 /**
  * Default Aave V3 simulation configuration.
- * Based on typical Base Aave V3 deployment parameters.
+ * Based on typical Base Aave V3 deployment parameters (DefaultReserveInterestRateStrategy).
  */
 export const DEFAULT_AAVE_CONFIG: AaveSimulatorConfig = {
-  optimalRate: 5n * WAD / 100n,        // 5% at optimal
-  variableRateSlope: 35n * WAD / 100n,  // 35% slope above optimal
-  optimalUtilization: 8n * RAY / 10n,   // 80% optimal
-  maxUtilization: 95n * RAY / 100n,    // 95% max
+  baseRate: 0n,                           // 0% base rate
+  variableRateSlope1: 4n * WAD / 100n,    // 4% slope below optimal
+  variableRateSlope2: 60n * WAD / 100n,   // 60% slope above optimal
+  optimalUtilization: 8n * RAY / 10n,     // 80% optimal
+  maxUtilization: 95n * RAY / 100n,       // 95% max
 };
 
 /**

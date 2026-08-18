@@ -217,16 +217,14 @@ export class EvaluationRunner {
   ): PolicyResult {
     const replayResult = runReplay({
       dataset,
-      manifest: {
-        evaluationId: this.manifest.id,
-        startDate: this.manifest.dataset.startDate,
-        endDate: this.manifest.dataset.endDate,
-        forecastMethod: { method: 'rolling' as const, config: {} },
-        horizons: [],
-        tiers: [],
-        coverageTarget: this.manifest.evaluation.successCriteria.minCoverage,
-        significanceLevel: 0.05,
-      },
+      evaluationId: this.manifest.id,
+      startDate: this.manifest.dataset.startDate,
+      endDate: this.manifest.dataset.endDate,
+      forecastMethod: { method: 'rolling' as const, config: {} },
+      horizons: [],
+      tiers: [],
+      coverageTarget: this.manifest.evaluation.successCriteria.minCoverage,
+      significanceLevel: 0.05,
       tier,
       policy: policyFn,
     });

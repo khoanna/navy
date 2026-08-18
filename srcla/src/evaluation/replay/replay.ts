@@ -4,7 +4,6 @@
 import { VaultReplay } from './erc4626.js';
 import { modelExecution } from './execution.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
-import type { ManifestConfig } from '../manifest/types.js';
 import type { VaultState } from './state.js';
 
 export interface BaselineAction {
@@ -38,9 +37,19 @@ export interface ReplayResult {
   totalCosts: bigint;
 }
 
+/**
+ * Configuration for replay execution
+ */
 export interface ReplayConfig {
   dataset: EvaluationDataset;
-  manifest: ManifestConfig;
+  evaluationId: string;
+  startDate: string | Date;
+  endDate: string | Date;
+  forecastMethod?: { method: string; config: Record<string, unknown> };
+  horizons?: string[];
+  tiers?: string[];
+  coverageTarget?: number;
+  significanceLevel?: number;
   tier: bigint;
   policy: PolicyFn;
 }
@@ -49,7 +58,7 @@ export interface ReplayConfig {
  * Run replay for a specific tier and policy
  */
 export function runReplay(config: ReplayConfig): ReplayResult {
-  const { dataset, manifest, tier, policy } = config;
+  const { dataset, evaluationId, tier, policy } = config;
 
   const cohortId = `tier-${tier}`;
   const vault = new VaultReplay(tier);
@@ -110,7 +119,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
   const realizedNetApy = calculateNetApy(snapshots, totalCosts, tier);
 
   return {
-    policyId: manifest.evaluationId,
+    policyId: evaluationId,
     tier,
     cohortId,
     snapshots,

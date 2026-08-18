@@ -35,15 +35,17 @@ describe('Manifest System', () => {
       compound: { adapters: ['0x24d4173e6b9734a52c20190a9c5681ef350D8fE2'], coldStartDays: 0, minObservations: 14 },
     },
     costs: {
-      l2GasPrice: 30_000_000_000n,
-      l1GasPrice: 1_000_000_000n,
-      ethPrice: 3_500_000_000_000n,
+      l2GasPrice: '30000000000',
+      l1GasPrice: '1000000000',
+      ethPrice: '3500000000000',
       slippageBps: 5,
       mevBps: 5,
     },
-    baselines: ['b0', 'b1', 'b2', 'b3', 'b4', 'b5'],
-    ablations: ['h1', 'h2', 'h3', 'h4', 'h5'],
-    srclaEnabled: true,
+    policies: {
+      baselines: ['b0', 'b1', 'b2', 'b3', 'b4', 'b5'] as const,
+      ablations: ['h1', 'h2', 'h3', 'h4', 'h5'] as const,
+      srcla: true,
+    },
     codeCommit: 'abc123',
   };
 
@@ -353,7 +355,10 @@ describe('Manifest System', () => {
     it('should warn about empty baselines', async () => {
       const config = {
         ...validConfig,
-        baselines: [],
+        policies: {
+          ...validConfig.policies,
+          baselines: [],
+        },
       };
       const unsigned = generateManifest(config);
 
@@ -365,7 +370,10 @@ describe('Manifest System', () => {
     it('should warn about empty ablations', async () => {
       const config = {
         ...validConfig,
-        ablations: [],
+        policies: {
+          ...validConfig.policies,
+          ablations: [],
+        },
       };
       const unsigned = generateManifest(config);
 
@@ -379,7 +387,7 @@ describe('Manifest System', () => {
         ...validConfig,
         costs: {
           ...validConfig.costs,
-          l2GasPrice: 2_000_000_000_000_000_000n, // 2000 gwei
+          l2GasPrice: '2000000000000000000', // 2000 gwei
         },
       };
       const unsigned = generateManifest(config);
