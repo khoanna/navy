@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { PrismaClient, PlanAction } from '@prisma/client';
 import { serializeMarket, serializeDecision, serializePlan, serializeHarvest } from './serializers.js';
+import { ProposalEvaluator, RebalanceProposal } from '../evaluation/proposal-evaluator.js';
+import { loadConfig } from '../config.js';
 
 const prisma = new PrismaClient();
 
@@ -422,5 +424,51 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
       },
       meta: { timestamp: new Date().toISOString() },
     };
+  });
+
+  // POST /v1/proposals/review - Evaluate backend rebalance proposal (§4)
+  server.post('/v1/proposals/review', async (request, reply) => {
+    const body = request.body as {
+      proposalId: string;
+      actions: Array<{
+        index: number;
+        kind: 'deploy' | 'divest' | 'harvest' | 'emergency';
+        adapter: string;
+        amount: string;
+        minOut: string;
+      }>;
+      targetReserve: string;
+    };
+
+    if (!body || !body.proposalId || !Array.isArray(body.actions) || body.targetReserve === undefined) {
+      return reply.status(400).send({
+        error: { code: 'INVALID_INPUT', message: 'Invalid proposal review payload' },
+      });
+    }
+
+    try {
+      const config = loadConfig();
+      const evaluator = new ProposalEvaluator(config);
+
+      const proposal: RebalanceProposal = {
+        id: body.proposalId,
+        actions: body.actions.map((a) => ({
+          index: a.index,
+          kind: a.kind,
+          adapter: a.adapter,
+          amount: BigInt(a.amount),
+          minOut: BigInt(a.minOut),
+        })),
+        targetReserve: BigInt(body.targetReserve),
+      };
+
+      const result = await evaluator.reviewProposal(proposal);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Proposal review failed';
+      return reply.status(500).send({
+        error: { code: 'EVALUATION_FAILED', message },
+      });
+    }
   });
 }
