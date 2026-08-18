@@ -298,3 +298,117 @@ model VaultTransaction {
   @@index([txHash])
   @@index([type])
 }
+
+// Decision records from SRCLA service - stores policy decisions
+model Decision {
+  hash          String      @id  // decisionHash from SRCLA
+  policyVersion String
+  timestamp     DateTime
+  admissions    Json        // Array of admitted market IDs
+  forecasts     Json        // Array of forecast results
+  reserveBase   BigInt      @db.BigInt
+  allocation    Json
+  action        Json        // actionDecision from SRCLA
+  createdAt     DateTime    @default(now())
+
+  proposals     Proposal[]
+
+  @@index([timestamp])
+  @@index([policyVersion])
+}
+
+// SRCLA Proposal System - Backend creates proposals, SRCLA keeper signs
+model Proposal {
+  id            String         @id @default(uuid())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  status        ProposalStatus @default(PENDING)
+  actions       Json           // Array of action details
+  targetReserve BigInt         @db.BigInt
+  estimatedCost BigInt         @db.BigInt
+  evaluation    Json?          // SRCLA evaluation result
+  signature     String?        // SRCLA keeper signature (hex)
+  executedAt    DateTime?
+  decisionHash  String?        @unique
+
+  decision      Decision?      @relation(fields: [decisionHash], references: [hash])
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Vault cohort-level accounting with fixed window
+model Cohort {
+  id                Int       @id @default(autoincrement())
+  windowStart       DateTime
+  windowEnd         DateTime
+  startSharePrice   BigInt    @db.BigInt
+  endSharePrice     BigInt?   @db.BigInt
+  totalDeposits     BigInt    @db.BigInt @default(0)
+  totalWithdrawals  BigInt    @db.BigInt @default(0)
+  closed            Boolean   @default(false)
+
+  deposits      Deposit[]
+  withdrawals   Withdrawal[]
+
+  @@index([windowStart])
+  @@index([closed])
+}
+
+model Deposit {
+  id            String   @id @default(uuid())
+  cohortId      Int
+  userAddress   String   @db.VarChar(42)
+  amount        BigInt   @db.BigInt
+  shares        BigInt   @db.BigInt
+  sharePrice    BigInt   @db.BigInt  // Price at deposit time
+  timestamp     DateTime @default(now())
+
+  cohort        Cohort   @relation(fields: [cohortId], references: [id])
+
+  @@index([cohortId])
+  @@index([userAddress])
+  @@index([timestamp])
+}
+
+model Withdrawal {
+  id            String   @id @default(uuid())
+  cohortId      Int
+  userAddress   String   @db.VarChar(42)
+  amount        BigInt   @db.BigInt
+  shares        BigInt   @db.BigInt
+  sharePrice    BigInt   @db.BigInt  // Price at withdrawal time
+  profit        BigInt?  @db.BigInt
+  timestamp     DateTime @default(now())
+
+  cohort        Cohort   @relation(fields: [cohortId], references: [id])
+
+  @@index([cohortId])
+  @@index([userAddress])
+  @@index([timestamp])
+}
+
+model ForkEvaluation {
+  id             String   @id @default(uuid())
+  manifestId     String
+  policyId       String
+  tier           BigInt   @db.BigInt
+  startBlock     Int
+  endBlock       Int
+  realizedApy    Float
+  totalCosts     BigInt   @db.BigInt
+  totalTurnover  BigInt   @db.BigInt
+  snapshotsCount Int
+  createdAt      DateTime @default(now())
+
+  @@index([manifestId])
+  @@index([policyId])
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  EXPIRED
+}
