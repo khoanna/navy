@@ -21,7 +21,13 @@ export interface BaselineResult {
   withdrawalSuccessRate: number;
 }
 
-export const BASELINE_INFO: Record<string, { name: string; description: string; deployable: boolean }> = {
+export interface BaselineInfo {
+  name: string;
+  description: string;
+  deployable: boolean;
+}
+
+export const BASELINE_INFO: Record<'b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5', BaselineInfo> = {
   b0: { name: 'Idle', description: 'Hold USDC idle — no deployments', deployable: false },
   b1: { name: 'Highest Rate', description: 'Always deploy to highest displayed rate', deployable: true },
   b2: { name: 'Capacity-Aware', description: 'Deploy with capacity constraints, no uncertainty', deployable: true },
