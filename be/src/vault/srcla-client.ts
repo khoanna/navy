@@ -68,6 +68,39 @@ export interface HarvestRecord {
   amountOutBase: string;
 }
 
+/** Proposal action for SRCLA review */
+export interface ProposalAction {
+  index: number;
+  kind: 'deploy' | 'divest' | 'harvest' | 'emergency';
+  adapter: string;
+  amount: string;
+  minOut: string;
+}
+
+/** Rebalance proposal sent to SRCLA for evaluation */
+export interface ProposalReviewRequest {
+  proposalId: string;
+  actions: ProposalAction[];
+  targetReserve: string;
+}
+
+/** Policy check results from SRCLA evaluation */
+export interface PolicyChecks {
+  admissionPassed: boolean;
+  costGatePassed: boolean;
+  reservePassed: boolean;
+  capsPassed: boolean;
+}
+
+/** Evaluation result returned by SRCLA for a proposal */
+export interface ProposalEvaluation {
+  proposalId: string;
+  valid: boolean;
+  reasons: string[];
+  policyChecks: PolicyChecks;
+  signature?: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   meta: {
@@ -115,6 +148,45 @@ export class SrclaClient {
 
   async getHealth(): Promise<{ status: string; lastSnapshot: string | null }> {
     return this.get('/v1/health');
+  }
+
+  /**
+   * Submit a rebalance proposal to SRCLA for evaluation.
+   * SRCLA checks admission, cost gate, reserve policy, and adapter caps.
+   * If valid, returns a signed evaluation for on-chain execution.
+   *
+   * Implements paper §4: "SRCLA reviews proposals from backend"
+   */
+  async reviewProposal(request: ProposalReviewRequest): Promise<ProposalEvaluation> {
+    const url = new URL('/v1/proposals/review', this.baseUrl);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`SRCLA proposal review ${res.status}: ${await res.text().catch(() => '')}`);
+      }
+
+      return res.json() as Promise<ProposalEvaluation>;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`SRCLA proposal review timeout after ${this.timeout}ms`);
+      }
+      throw error;
+    }
   }
 
   private async get<T>(path: string, params?: Record<string, string>): Promise<T> {
