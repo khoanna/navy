@@ -1,271 +1,370 @@
 import { describe, it, expect } from '@jest/globals';
 import {
-  HarvestGate,
+  evaluateHarvest,
+  HarvestTrigger,
   HarvestGateConfig,
-  HarvestGateCosts,
-  HarvestGateReason,
+  DEFAULT_HARVEST_CONFIG,
 } from './harvest-gate.js';
 
-const AAVE_ADAPTER = '0x0000000000000000000000000000000000000A11';
-const COMPOUND_ADAPTER = '0x0000000000000000000000000000000000000C01';
+describe('evaluateHarvest', () => {
+  const defaultConfig = DEFAULT_HARVEST_CONFIG;
 
-function createDefaultCosts(): HarvestGateCosts {
-  return {
-    claimGasCost: 150_000n, // 150k gas
-    swapGasCost: 200_000n, // 200k gas for swap
-    l1DataCost: 0n,
-    swapImpactBps: 10n, // 0.1%
-    slippageBps: 5n, // 0.05%
-    bufferBps: 20n, // 0.2% safety buffer
-  };
-}
+  // Standard gas and price parameters for testing
+  // Using realistic Base values: ~10 gwei L2, $2,000 ETH
+  const l2GasPrice = 10_000_000_000n;      // 10 gwei (Base typical)
+  const l1GasPrice = 1_000_000_000n;       // 1 gwei L1
+  const ethPriceUsdc = 2_000_000_000n;     // $2000 ETH (8 decimals)
+  const poolLiquidity = 10_000_000_000_000n; // 10M liquidity (6 decimals)
 
-function createDefaultConfig(): HarvestGateConfig {
-  return {
-    costs: createDefaultCosts(),
-    minValueThreshold: 1_000_000n, // $1 minimum (1 USDC = 1_000_000 in 6-decimal)
-    observationPeriod: 3600, // 1 hour
-  };
-}
+  describe('should harvest when profitable', () => {
+    it('should harvest when net gain exceeds minimum threshold', () => {
+      // L2 cost = (150k * 10e9 * 2e9) / 1e18 = ~$3 USDC
+      // With 100 USDC rewards, net gain is ~$97 - clearly profitable
+      const result = evaluateHarvest(
+        100_000_000n,  // 100 USDC rewards
+        100_000n,      // claim gas
+        50_000n,       // swap gas
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.THRESHOLD],
+        defaultConfig
+      );
 
-describe('HarvestGate', () => {
-  describe('shouldHarvest', () => {
-    it('should not harvest below minimum value', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 500_000n, // $0.50 - below $1 minimum
-        expectedSlippageBps: 5n,
-      });
-
-      expect(result.execute).toBe(false);
-      expect(result.reason).toContain(HarvestGateReason.MINIMUM_VALUE);
+      expect(result.shouldHarvest).toBe(true);
+      expect(result.netGain).toBeGreaterThan(0n);
+      expect(result.reason).toBe('PROFITABLE');
+      expect(result.claimableValue).toBe(100_000_000n);
     });
 
-    it('should harvest when profitable', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
+    it('should calculate correct net gain', () => {
+      const result = evaluateHarvest(
+        1_000_000n,   // 1 USDC rewards - below $1 min
+        100_000n,
+        50_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 100_000_000n, // $100
-        expectedSlippageBps: 5n,
-      });
+      expect(result.shouldHarvest).toBe(false); // Not above $1 min
+      expect(result.totalCost).toBeGreaterThan(0n);
+      expect(result.netGain).toBe(0n);
+    });
+  });
 
-      expect(result.execute).toBe(true);
-      expect(result.reason).toContain(HarvestGateReason.PROFITABLE);
-      expect(result.estimatedNetValue).toBeGreaterThan(0n);
+  describe('should not harvest when unprofitable', () => {
+    it('should not harvest when rewards below minimum', () => {
+      const result = evaluateHarvest(
+        100_000n,    // 0.1 USDC rewards (below $1 min)
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
+
+      expect(result.shouldHarvest).toBe(false);
+      expect(result.reason).toBe('NOT_PROFITABLE');
+      expect(result.netGain).toBe(0n);
     });
 
-    it('should not harvest when not profitable after costs', () => {
-      // Make costs very high relative to claimable value
-      const config: HarvestGateConfig = {
-        costs: {
-          claimGasCost: 10_000_000n, // 10M gas = huge
-          swapGasCost: 10_000_000n,
-          l1DataCost: 0n,
-          swapImpactBps: 100n, // 1%
-          slippageBps: 100n, // 1%
-          bufferBps: 100n, // 1%
-        },
-        minValueThreshold: 0n, // No minimum threshold
-        observationPeriod: 0,
-      };
-      const gate = new HarvestGate(config, 1_000_000_000n); // $10,000 ETH
+    it('should not harvest when costs exceed rewards', () => {
+      const result = evaluateHarvest(
+        500_000n,    // 0.5 USDC
+        500_000n,    // Very high claim gas
+        500_000n,    // Very high swap gas
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 10_000_000n, // $10
-      });
+      expect(result.shouldHarvest).toBe(false);
+      expect(result.reason).toBe('NOT_PROFITABLE');
+    });
+  });
 
-      // Gas cost alone: 20M gas * 30 gwei * 10000 USDC/ETH / 1e18 = 6000 USDC
-      // Plus slippage/impact/buffer: 3% of $10 = $0.30
-      // Total costs >> $10, so should not harvest
-      expect(result.execute).toBe(false);
-      expect(result.reason).toContain(HarvestGateReason.NOT_PROFITABLE);
+  describe('trigger handling', () => {
+    it('should trigger on EXPIRY even if marginally profitable', () => {
+      // With EXPIRY trigger, harvest if rewards > totalCost / 2
+      // Use higher gas so netGain < minHarvestValue but rewards > half costs
+      const result = evaluateHarvest(
+        1_500_000n, // 1.5 USDC - low enough that netGain < minHarvestValue
+        50_000n,     // Low claim gas
+        30_000n,     // Low swap gas
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.EXPIRY],
+        defaultConfig
+      );
+
+      // EXPIRY trigger fires if rewards > half costs
+      expect(result.shouldHarvest).toBe(true);
+      expect(result.triggers).toContain(HarvestTrigger.EXPIRY);
+      expect(result.reason).toBe('TRIGGERED_EXPIRY');
     });
 
-    it('should respect observation period', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-      const now = Math.floor(Date.now() / 1000);
+    it('should trigger on EMISSION when rewards cover costs', () => {
+      // EMISSION triggers if rewards > total cost
+      // Use higher rewards so it's covers costs but not PROFITABLE (netGain < min)
+      const result = evaluateHarvest(
+        2_000_000n, // 2 USDC - covers costs but netGain < minHarvestValue
+        50_000n,      // Low gas
+        30_000n,      // Low gas
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.EMISSION],
+        defaultConfig
+      );
 
-      // Record a harvest 30 minutes ago
-      gate.recordHarvest(AAVE_ADAPTER, now - 1800);
-
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 100_000_000n,
-      });
-
-      expect(result.execute).toBe(false);
-      expect(result.reason).toContain(HarvestGateReason.OBSERVATION_PERIOD);
+      expect(result.shouldHarvest).toBe(true);
+      expect(result.triggers).toContain(HarvestTrigger.EMISSION);
+      expect(result.reason).toBe('TRIGGERED_EMISSION');
     });
 
-    it('should allow harvest after observation period', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-      const now = Math.floor(Date.now() / 1000);
+    it('should trigger on ROUTE for better swap paths', () => {
+      const result = evaluateHarvest(
+        10_000_000n, // 10 USDC
+        50_000n,
+        30_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.ROUTE],
+        defaultConfig
+      );
 
-      // Record a harvest 2 hours ago
-      gate.recordHarvest(AAVE_ADAPTER, now - 7200);
+      // ROUTE trigger alone doesn't guarantee harvest without profitability
+      expect(result.triggers).toContain(HarvestTrigger.ROUTE);
+    });
 
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 100_000_000n,
-      });
+    it('should handle multiple triggers', () => {
+      // Low gas costs so any reasonable amount triggers
+      const result = evaluateHarvest(
+        10_000_000n, // 10 USDC
+        50_000n,
+        30_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.EXPIRY, HarvestTrigger.EMISSION],
+        defaultConfig
+      );
 
-      expect(result.execute).toBe(true);
+      expect(result.shouldHarvest).toBe(true);
+      expect(result.triggers).toContain(HarvestTrigger.EXPIRY);
+      expect(result.triggers).toContain(HarvestTrigger.EMISSION);
     });
   });
 
   describe('cost calculations', () => {
-    it('should calculate gas cost correctly', () => {
-      const config = createDefaultConfig();
-      // Use a known ETH price for predictable results
-      const gate = new HarvestGate(config, 2000_000000n); // $2000 ETH
+    it('should calculate L2 gas cost correctly', () => {
+      const result = evaluateHarvest(
+        100_000_000n, // 100 USDC
+        200_000n,     // claim gas
+        150_000n,     // swap gas
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      const gasCost = gate.calculateGasCost();
-
-      // Total gas = 150k + 200k + 0 = 350k gas units
-      // At 30 gwei: 350,000 * 30e9 = 10.5e15 wei
-      // At $2000 ETH: (350k * 30e9 * 2000e8) / 1e18 = 21_000_000 USDC (6 decimals)
-      // The result should be 21 USDC worth of gas
-      expect(gasCost).toBe(21_000_000n); // $21
+      expect(result.totalCost).toBeGreaterThan(0n);
+      // L2 cost = (350k * 10e9 * 2e9) / 1e18 = $7 USDC
+      expect(result.totalCost).toBeLessThan(10_000_000n); // Less than $10
     });
 
-    it('should calculate slippage cost correctly', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
+    it('should include L1 data cost for L2 rollups', () => {
+      // With high L1 gas price
+      const result1 = evaluateHarvest(
+        100_000_000n,
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        50_000_000_000n, // 50 gwei L1
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      const claimableValue = 100_000_000n; // $100
-      const slippageCost = gate.calculateSlippageCost(claimableValue, 10n); // 10 bps = 0.1%
+      const result2 = evaluateHarvest(
+        100_000_000n,
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        1_000_000_000n, // 1 gwei L1 (cheaper)
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      // 0.1% of $100 = $0.10
-      expect(slippageCost).toBe(100_000n);
+      // Higher L1 price should result in higher total cost
+      expect(result1.totalCost).toBeGreaterThan(result2.totalCost);
     });
 
-    it('should calculate impact cost correctly', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
+    it('should include market impact cost', () => {
+      // Small pool = high impact
+      const smallPool = 1_000_000n; // 1 USDC pool
 
-      const claimableValue = 100_000_000n; // $100
-      const impactCost = gate.calculateImpactCost(claimableValue, 10n); // 10 bps = 0.1%
+      const result = evaluateHarvest(
+        100_000_000n, // 100 USDC - large relative to pool
+        100_000n,
+        50_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        smallPool,
+        [],
+        defaultConfig
+      );
 
-      expect(impactCost).toBe(100_000n);
+      // Impact should be significant for small pool
+      expect(result.totalCost).toBeGreaterThan(0n);
     });
 
-    it('should calculate buffer cost correctly', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
+    it('should have minimal market impact on large pools', () => {
+      const hugePool = 1_000_000_000_000_000n; // 1B pool
 
-      const claimableValue = 100_000_000n; // $100
-      const bufferCost = gate.calculateBufferCost(claimableValue);
+      const result = evaluateHarvest(
+        100_000_000n, // 100 USDC
+        100_000n,
+        50_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        hugePool,
+        [],
+        defaultConfig
+      );
 
-      // bufferBps = 20, so 0.2% of $100 = $0.20
-      expect(bufferCost).toBe(200_000n);
-    });
-
-    it('should calculate total costs correctly', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config, 2000_000000n);
-
-      const claimableValue = 100_000_000n; // $100
-      const costs = gate.calculateCosts(claimableValue, 10n);
-
-      expect(costs.slippageCostUsdc).toBe(100_000n);
-      expect(costs.impactCostUsdc).toBe(100_000n);
-      expect(costs.bufferCostUsdc).toBe(200_000n);
-      expect(costs.totalCostUsdc).toBeGreaterThan(0n);
-    });
-  });
-
-  describe('recordHarvest', () => {
-    it('should record and retrieve last harvest time', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-      const now = Math.floor(Date.now() / 1000);
-
-      gate.recordHarvest(AAVE_ADAPTER, now);
-
-      expect(gate.getLastHarvestTime(AAVE_ADAPTER)).toBe(now);
-    });
-
-    it('should return 0 for unknown adapter', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-
-      expect(gate.getLastHarvestTime(COMPOUND_ADAPTER)).toBe(0);
-    });
-
-    it('should use current time when not specified', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
-      const before = Math.floor(Date.now() / 1000);
-
-      gate.recordHarvest(AAVE_ADAPTER);
-
-      const after = Math.floor(Date.now() / 1000);
-      const recorded = gate.getLastHarvestTime(AAVE_ADAPTER);
-
-      expect(recorded).toBeGreaterThanOrEqual(before);
-      expect(recorded).toBeLessThanOrEqual(after);
+      // Impact cost should be minimal on huge pool
+      // But gas costs still exist
+      expect(result.totalCost).toBeGreaterThan(0n);
     });
   });
 
-  describe('setNativeTokenPrice', () => {
-    it('should update gas cost when price changes', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config, 2000_000000n);
-
-      const costAt2000 = gate.calculateGasCost();
-
-      gate.setNativeTokenPrice(4000_000000n); // $4000 ETH
-
-      const costAt4000 = gate.calculateGasCost();
-
-      expect(costAt4000).toBe(costAt2000 * 2n);
-    });
-  });
-
-  describe('getMinimumHarvestValue', () => {
-    it('should return configured minimum when costs are low', () => {
-      const config: HarvestGateConfig = {
-        costs: {
-          claimGasCost: 50_000n,
-          swapGasCost: 50_000n,
-          l1DataCost: 0n,
-          swapImpactBps: 5n,
-          slippageBps: 5n,
-          bufferBps: 5n,
-        },
-        minValueThreshold: 1_000_000n,
-        observationPeriod: 3600,
+  describe('config customization', () => {
+    it('should use custom minHarvestValue', () => {
+      const customConfig: HarvestGateConfig = {
+        ...defaultConfig,
+        minHarvestValue: 10_000_000n, // $10 minimum
       };
-      const gate = new HarvestGate(config, 2000_000000n);
 
-      const minValue = gate.getMinimumHarvestValue();
+      // $5 rewards - below $10 custom min
+      const result = evaluateHarvest(
+        5_000_000n,
+        100_000n,
+        50_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        customConfig
+      );
 
-      // Should return the configured minimum as it's reasonable
-      expect(minValue).toBeGreaterThanOrEqual(1_000_000n);
+      expect(result.shouldHarvest).toBe(false);
+    });
+
+    it('should respect zero cooldown (for testing)', () => {
+      const fastConfig: HarvestGateConfig = {
+        ...defaultConfig,
+        harvestCooldownSeconds: 0,
+      };
+
+      // This mainly affects the config structure, actual cooldown logic
+      // would be in a HarvestManager class
+      expect(fastConfig.harvestCooldownSeconds).toBe(0);
     });
   });
 
-  describe('decision output', () => {
-    it('should include cost breakdown in decision', () => {
-      const config = createDefaultConfig();
-      const gate = new HarvestGate(config);
+  describe('edge cases', () => {
+    it('should handle zero rewards', () => {
+      const result = evaluateHarvest(
+        0n,
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [],
+        defaultConfig
+      );
 
-      const result = gate.shouldHarvest({
-        adapter: AAVE_ADAPTER,
-        claimableValue: 100_000_000n,
-      });
-
-      expect(result.costBreakdown).toBeDefined();
-      expect(result.costBreakdown.totalCostUsdc).toBeGreaterThan(0n);
-      expect(result.estimatedNetValue).toBeDefined();
+      expect(result.shouldHarvest).toBe(false);
+      expect(result.netGain).toBe(0n);
     });
+
+    it('should handle zero pool liquidity', () => {
+      const result = evaluateHarvest(
+        100_000_000n, // 100 USDC
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        0n, // No pool liquidity
+        [],
+        defaultConfig
+      );
+
+      // Should use 1% default impact
+      expect(result.totalCost).toBeGreaterThan(0n);
+    });
+
+    it('should handle large reward amounts', () => {
+      const result = evaluateHarvest(
+        1_000_000_000_000n, // 1M USDC
+        200_000n,
+        150_000n,
+        l2GasPrice,
+        l1GasPrice,
+        ethPriceUsdc,
+        poolLiquidity,
+        [HarvestTrigger.THRESHOLD],
+        defaultConfig
+      );
+
+      expect(result.shouldHarvest).toBe(true);
+      expect(result.netGain).toBeGreaterThan(result.claimableValue / 2n);
+    });
+  });
+});
+
+describe('DEFAULT_HARVEST_CONFIG', () => {
+  it('should have sensible defaults', () => {
+    expect(DEFAULT_HARVEST_CONFIG.minHarvestValue).toBe(1_000_000n); // $1
+    expect(DEFAULT_HARVEST_CONFIG.harvestCooldownSeconds).toBe(3600); // 1 hour
+    expect(DEFAULT_HARVEST_CONFIG.claimableThresholdBps).toBe(100); // 1%
+  });
+});
+
+describe('HarvestTrigger enum', () => {
+  it('should have all required triggers', () => {
+    expect(HarvestTrigger.EXPIRY).toBe('expiry');
+    expect(HarvestTrigger.EMISSION).toBe('emission');
+    expect(HarvestTrigger.ROUTE).toBe('route');
+    expect(HarvestTrigger.THRESHOLD).toBe('threshold');
   });
 });

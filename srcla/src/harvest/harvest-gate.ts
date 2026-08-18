@@ -1,239 +1,165 @@
 /**
- * Harvest Gate - decides when to harvest rewards based on profitability
+ * Harvest Gate - Event-driven harvest decision per SRCLA design §9.3
  *
- * This implements an event-driven harvest gate per SRCLA design Section 3.4:
- * - Calculates harvest costs (gas, slippage, impact)
- * - Compares against potential rewards
- * - Only triggers harvest when profitable above threshold
+ * This module evaluates when to harvest rewards based on:
+ * - Claimable rewards value
+ * - Complete cost of claim + swap (gas, L1 data, market impact)
+ * - Trigger events (expiry, emission, route, threshold)
+ *
+ * Per paper §9.3:
+ * - Observe every 15 minutes
+ * - Harvest when claimable > complete_cost
+ * - Triggers: expiry, emission, route, threshold
  */
-
-export interface HarvestGateCosts {
-  /** Gas cost for claiming rewards (in native gas units, e.g., wei) */
-  claimGasCost: bigint;
-  /** Additional gas cost for swap execution */
-  swapGasCost: bigint;
-  /** L1 data cost (for L2 rollups like Base) */
-  l1DataCost: bigint;
-  /** Expected price impact in basis points (e.g., 10 = 0.1%) */
-  swapImpactBps: bigint;
-  /** Expected slippage in basis points */
-  slippageBps: bigint;
-  /** Safety buffer in basis points */
-  bufferBps: bigint;
-}
 
 export interface HarvestGateConfig {
-  /** Cost model parameters */
-  costs: HarvestGateCosts;
-  /** Minimum value to harvest (in USDC 6 decimals, e.g., 10_000_0000 = $10) */
-  minValueThreshold: bigint;
-  /** Minimum time between harvests per adapter (seconds) */
-  observationPeriod: number;
+  /** Minimum value to harvest (USDC 6 decimals, e.g., 1_000_000 = $1) */
+  minHarvestValue: bigint;
+  /** Cooldown between harvests (seconds) */
+  harvestCooldownSeconds: number;
+  /** Trigger: % of rewards claimable (basis points, e.g., 100 = 1%) */
+  claimableThresholdBps: number;
 }
 
-export interface HarvestDecision {
+export const DEFAULT_HARVEST_CONFIG: HarvestGateConfig = {
+  minHarvestValue: 1_000_000n, // $1 minimum
+  harvestCooldownSeconds: 3600, // 1 hour
+  claimableThresholdBps: 100,   // 1%
+};
+
+export enum HarvestTrigger {
+  EXPIRY = 'expiry',         // Rewards expiring
+  EMISSION = 'emission',      // New emissions started
+  ROUTE = 'route',            // Better swap route available
+  THRESHOLD = 'threshold',    // Value threshold exceeded
+}
+
+export interface HarvestEvaluation {
   /** Whether to execute the harvest */
-  execute: boolean;
+  shouldHarvest: boolean;
   /** Reason for the decision */
   reason: string;
-  /** Estimated net value (positive = profit, negative = loss) */
-  estimatedNetValue: bigint;
-  /** Estimated cost breakdown */
-  costBreakdown: HarvestCosts;
-}
-
-export interface HarvestCosts {
-  gasCostUsdc: bigint;
-  slippageCostUsdc: bigint;
-  impactCostUsdc: bigint;
-  bufferCostUsdc: bigint;
-  totalCostUsdc: bigint;
+  /** Total claimable value (USDC 6 decimals) */
+  claimableValue: bigint;
+  /** Total estimated cost (USDC 6 decimals) */
+  totalCost: bigint;
+  /** Net gain if harvested (USDC 6 decimals) */
+  netGain: bigint;
+  /** Active triggers that fired */
+  triggers: HarvestTrigger[];
 }
 
 /**
- * Error codes for harvest gate decisions
+ * L1 data cost for L2 rollups (Base, Optimism)
+ * CL1data = calldata_bytes * L1_gas_price * ETH_price / 1e18
  */
-export enum HarvestGateReason {
-  MINIMUM_VALUE = 'MINIMUM_VALUE',
-  NOT_PROFITABLE = 'NOT_PROFITABLE',
-  OBSERVATION_PERIOD = 'OBSERVATION_PERIOD',
-  PROFITABLE = 'PROFITABLE',
+function calculateL1DataCost(
+  calldataBytes: number,
+  l1GasPrice: bigint,
+  ethPriceUsdc: bigint
+): bigint {
+  const L1_GAS_PER_BYTE = 16n; // Optimism: 16 gas per non-zero byte
+
+  const l1Gas = BigInt(calldataBytes) * L1_GAS_PER_BYTE;
+  const costInWei = l1Gas * l1GasPrice;
+
+  // Convert wei to USDC
+  // ethPriceUsdc is in USDC per ETH (8 decimals)
+  // 1 ETH = 1e18 wei
+  return (costInWei * ethPriceUsdc) / 1_000_000_000_000_000_000n;
 }
 
 /**
- * Harvest Gate for deciding when to harvest rewards
+ * Market impact cost based on pool liquidity
+ * Uses sqrt approximation: impact_bps ≈ 100 * sqrt(amount / liquidity)
  */
-export class HarvestGate {
-  private config: HarvestGateConfig;
-  private lastHarvestTime: Map<string, number> = new Map();
-  private nativeTokenPrice: bigint; // Price of native token in USDC (8 decimals)
+function calculateMarketImpact(amount: bigint, poolLiquidity: bigint): bigint {
+  if (poolLiquidity === 0n) return amount / 100n; // 1% default if no data
 
-  constructor(config: HarvestGateConfig, nativeTokenPrice: bigint = 3500_000000n) {
-    // nativeTokenPrice default ~$3500 (ETH price)
-    this.config = config;
-    this.nativeTokenPrice = nativeTokenPrice;
+  const ratio = Number(amount) / Number(poolLiquidity);
+  const impactBps = Math.floor(100 * Math.sqrt(Math.max(0, ratio)));
+
+  // Cap at 10% (1000 bps)
+  return (amount * BigInt(Math.min(impactBps, 1000))) / 10000n;
+}
+
+/**
+ * Evaluate if harvest is profitable
+ *
+ * Per paper §9.3:
+ * - Observe every 15 minutes
+ * - Harvest when claimable > complete_cost
+ * - Special triggers can override profitability check
+ *
+ * @param claimableRewards - Total claimable reward value (USDC 6 decimals)
+ * @param claimGas - Gas units for claiming rewards
+ * @param swapGas - Gas units for swap execution
+ * @param l2GasPrice - L2 gas price in wei
+ * @param l1GasPrice - L1 gas price in wei (for L2 rollups)
+ * @param ethPriceUsdc - ETH price in USDC (8 decimals)
+ * @param poolLiquidity - Available pool liquidity for swap
+ * @param triggers - Active harvest triggers
+ * @param config - Harvest gate configuration
+ * @returns HarvestEvaluation with decision and cost breakdown
+ */
+export function evaluateHarvest(
+  claimableRewards: bigint,
+  claimGas: bigint,
+  swapGas: bigint,
+  l2GasPrice: bigint,
+  l1GasPrice: bigint,
+  ethPriceUsdc: bigint,
+  poolLiquidity: bigint,
+  triggers: HarvestTrigger[],
+  config: HarvestGateConfig = DEFAULT_HARVEST_CONFIG
+): HarvestEvaluation {
+  // Calculate L2 gas cost
+  const totalGas = claimGas + swapGas;
+  const l2Cost = (totalGas * l2GasPrice * ethPriceUsdc) / 1_000_000_000_000_000_000n;
+
+  // Calculate L1 data cost (for L2 rollups like Base)
+  const avgTxBytes = 300; // Average transaction size
+  const l1Cost = calculateL1DataCost(avgTxBytes, l1GasPrice, ethPriceUsdc);
+
+  // Calculate market impact cost
+  const impactCost = calculateMarketImpact(claimableRewards, poolLiquidity);
+
+  // Total cost = L2 gas + L1 data + market impact
+  const totalCost = l2Cost + l1Cost + impactCost;
+
+  // Net gain = claimable - total cost (0 if negative)
+  const netGain = claimableRewards > totalCost
+    ? claimableRewards - totalCost
+    : 0n;
+
+  // Determine if harvest should execute
+  // Primary: profitable by more than minimum threshold
+  // Override: special triggers can fire even if marginally profitable
+  const shouldHarvest =
+    (netGain > config.minHarvestValue) ||
+    (triggers.includes(HarvestTrigger.EXPIRY) && claimableRewards > totalCost / 2n) ||
+    (triggers.includes(HarvestTrigger.EMISSION) && claimableRewards > totalCost);
+
+  // Build reason string
+  let reason: string;
+  if (!shouldHarvest) {
+    reason = 'NOT_PROFITABLE';
+  } else if (netGain > config.minHarvestValue) {
+    reason = 'PROFITABLE';
+  } else if (triggers.includes(HarvestTrigger.EXPIRY)) {
+    reason = 'TRIGGERED_EXPIRY';
+  } else if (triggers.includes(HarvestTrigger.EMISSION)) {
+    reason = 'TRIGGERED_EMISSION';
+  } else {
+    reason = 'TRIGGERED';
   }
 
-  /**
-   * Update the native token price (e.g., ETH price)
-   */
-  setNativeTokenPrice(price: bigint): void {
-    this.nativeTokenPrice = price;
-  }
-
-  /**
-   * Get the last harvest time for an adapter
-   */
-  getLastHarvestTime(adapter: string): number {
-    return this.lastHarvestTime.get(adapter) ?? 0;
-  }
-
-  /**
-   * Record a harvest event for an adapter
-   */
-  recordHarvest(adapter: string, timestamp?: number): void {
-    this.lastHarvestTime.set(adapter, timestamp ?? Math.floor(Date.now() / 1000));
-  }
-
-  /**
-   * Calculate the total gas cost in USDC
-   */
-  calculateGasCost(): bigint {
-    const { claimGasCost, swapGasCost, l1DataCost } = this.config.costs;
-    const totalGas = claimGasCost + swapGasCost + l1DataCost;
-
-    // Convert gas to USDC:
-    // totalGas * gasPrice (wei) * ethUsdcPrice (USDC per ETH, 8 decimals) / 1e18
-    // Example: 350_000 gas * 30e9 gwei * 2000e8 USDC/ETH / 1e18 = 21_000_000 USDC
-    const gasPrice = 30_000_000_000n; // 30 gwei in wei
-    // Multiply first, then divide to avoid intermediate zero from integer division
-    // Result is in USDC with 6 decimals
-    const gasCostUsdc = (totalGas * gasPrice * this.nativeTokenPrice) / 1_000_000_000_000_000_000n;
-
-    return gasCostUsdc;
-  }
-
-  /**
-   * Calculate slippage cost in USDC
-   */
-  calculateSlippageCost(claimableValue: bigint, slippageBps: bigint): bigint {
-    return (claimableValue * slippageBps) / 10000n;
-  }
-
-  /**
-   * Calculate impact cost in USDC
-   */
-  calculateImpactCost(claimableValue: bigint, impactBps: bigint): bigint {
-    return (claimableValue * impactBps) / 10000n;
-  }
-
-  /**
-   * Calculate buffer cost in USDC
-   */
-  calculateBufferCost(claimableValue: bigint): bigint {
-    const { bufferBps } = this.config.costs;
-    return (claimableValue * bufferBps) / 10000n;
-  }
-
-  /**
-   * Calculate all harvest costs
-   */
-  calculateCosts(claimableValue: bigint, slippageBps?: bigint): HarvestCosts {
-    const slippage = slippageBps ?? this.config.costs.slippageBps;
-    const { swapImpactBps } = this.config.costs;
-
-    const gasCostUsdc = this.calculateGasCost();
-    const slippageCostUsdc = this.calculateSlippageCost(claimableValue, slippage);
-    const impactCostUsdc = this.calculateImpactCost(claimableValue, swapImpactBps);
-    const bufferCostUsdc = this.calculateBufferCost(claimableValue);
-
-    const totalCostUsdc = gasCostUsdc + slippageCostUsdc + impactCostUsdc + bufferCostUsdc;
-
-    return {
-      gasCostUsdc,
-      slippageCostUsdc,
-      impactCostUsdc,
-      bufferCostUsdc,
-      totalCostUsdc,
-    };
-  }
-
-  /**
-   * Decide whether to harvest
-   */
-  shouldHarvest(params: {
-    adapter: string;
-    claimableValue: bigint;
-    expectedSlippageBps?: bigint;
-  }): HarvestDecision {
-    const { adapter, claimableValue, expectedSlippageBps } = params;
-
-    // Check minimum value threshold
-    if (claimableValue < this.config.minValueThreshold) {
-      return {
-        execute: false,
-        reason: `${HarvestGateReason.MINIMUM_VALUE}: claimable value ${claimableValue} below threshold ${this.config.minValueThreshold}`,
-        estimatedNetValue: 0n,
-        costBreakdown: this.calculateCosts(claimableValue, expectedSlippageBps),
-      };
-    }
-
-    // Check observation period
-    const lastHarvest = this.getLastHarvestTime(adapter);
-    const now = Math.floor(Date.now() / 1000);
-    if (lastHarvest > 0 && now - lastHarvest < this.config.observationPeriod) {
-      const remaining = this.config.observationPeriod - (now - lastHarvest);
-      return {
-        execute: false,
-        reason: `${HarvestGateReason.OBSERVATION_PERIOD}: must wait ${remaining}s before next harvest`,
-        estimatedNetValue: 0n,
-        costBreakdown: this.calculateCosts(claimableValue, expectedSlippageBps),
-      };
-    }
-
-    // Calculate costs and net value
-    const costs = this.calculateCosts(claimableValue, expectedSlippageBps);
-    const estimatedNetValue = claimableValue - costs.totalCostUsdc;
-
-    // Check if profitable
-    if (estimatedNetValue <= 0n) {
-      return {
-        execute: false,
-        reason: `${HarvestGateReason.NOT_PROFITABLE}: net value ${estimatedNetValue} <= 0`,
-        estimatedNetValue,
-        costBreakdown: costs,
-      };
-    }
-
-    return {
-      execute: true,
-      reason: `${HarvestGateReason.PROFITABLE}: net value ${estimatedNetValue} > 0`,
-      estimatedNetValue,
-      costBreakdown: costs,
-    };
-  }
-
-  /**
-   * Get the minimum harvestable value after costs
-   */
-  getMinimumHarvestValue(): bigint {
-    // Minimum value needed to cover costs
-    const costs = this.config.costs;
-    const totalCostRatioBps = costs.slippageBps + costs.swapImpactBps + costs.bufferBps;
-
-    // Minimum value = gas cost / (1 - cost ratio)
-    // This is an approximation - the exact minimum would require solving:
-    // value - (value * ratio + gas) > 0
-    // value > gas / (1 - ratio)
-    const totalCostRatio = totalCostRatioBps / 10000n;
-    const gasCostUsdc = this.calculateGasCost();
-
-    if (totalCostRatio >= 1n) {
-      // Costs exceed 100%, can't profit
-      return this.config.minValueThreshold;
-    }
-
-    const minValue = (gasCostUsdc * 10000n) / (10000n - totalCostRatioBps);
-    return minValue > this.config.minValueThreshold ? minValue : this.config.minValueThreshold;
-  }
+  return {
+    shouldHarvest,
+    reason,
+    claimableValue: claimableRewards,
+    totalCost,
+    netGain,
+    triggers,
+  };
 }
