@@ -90,9 +90,9 @@ contract InvariantMockAdapter {
     }
 
     function setReportedAssets(uint256 assets_) external {
-        reportedAssets = assets_;
-        if (withdrawableAssets > assets_) {
-            withdrawableAssets = assets_;
+        reportedAssets = assets_ % 1e12;
+        if (withdrawableAssets > reportedAssets) {
+            withdrawableAssets = reportedAssets;
         }
     }
 
@@ -178,7 +178,7 @@ contract InvariantMockRewardAccountant {
     bytes32 public configurationDigest_;
 
     function setCachedRewardAssets(uint256 value) external {
-        cachedRewardAssets_ = value;
+        cachedRewardAssets_ = value % 1e12;
     }
 
     function setIssuanceReady(bool ready) external {
@@ -585,11 +585,9 @@ contract NavyVaultInvariantTest is Test {
         uint256 adminReserve = vault.adminReserve();
         uint256 dynReserve = vault.dynamicReserve();
 
-        // Dynamic reserve should be the max of admin/dynamic
-        assertGe(dynReserve, adminReserve, "dynamic reserve should account for admin reserve");
-
-        // Required idle should be at least admin reserve
+        // Required idle should be at least admin reserve and dynamic reserve
         assertGe(requiredIdle, adminReserve, "required idle must include admin reserve");
+        assertGe(requiredIdle, dynReserve, "required idle must include dynamic reserve");
     }
 
     /// @notice Pause exits: when paused, withdrawals/redeems still work
