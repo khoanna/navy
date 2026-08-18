@@ -1,43 +1,75 @@
 /**
- * VaultService — provides vault position queries and unsigned transaction builders.
- * Replaces the old gasless EIP-3009/EIP-2612 relay flow with unsigned calldata
- * that the user's wallet signs locally.
+ * VaultService — Deep module providing vault position queries, ERC-4626 limits,
+ * unsigned calldata builders for local wallet signing, and SRCLA strategy integration.
  */
 import { Injectable } from '@nestjs/common';
-import { FarmingChainService } from '../farming-chain/farming-chain.service';
+import { ethers } from 'ethers';
+import { NavyConfigService } from '../config/config.service';
 import { SrclaClient, StrategyAllocation } from './srcla-client';
+import { TransactionProposal, VaultPositionDto, VaultLimitsDto } from './vault.types';
 
-export interface VaultPositionDto {
-  sharesBase: string;
-  assetsBase: string;
-  maxWithdrawBase: string;
-  maxRedeemBase: string;
-}
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+] as const;
 
-export interface VaultLimitsDto {
-  maxDeposit: string;
-  maxWithdraw: string;
-  maxRedeem: string;
-}
+const VAULT_ABI = [
+  'function balanceOf(address) view returns (uint256)',
+  'function convertToAssets(uint256 shares) view returns (uint256)',
+  'function maxWithdraw(address owner) view returns (uint256)',
+  'function maxRedeem(address owner) view returns (uint256)',
+  'function totalAssets() view returns (uint256)',
+  'function maxDeposit(address) view returns (uint256)',
+  'function previewDeposit(uint256 assets) view returns (uint256)',
+  'function previewRedeem(uint256 shares) view returns (uint256)',
+  'function deposit(uint256 assets, address receiver) returns (uint256)',
+  'function redeem(uint256 shares, address receiver, address owner) returns (uint256)',
+  'function withdraw(uint256 assets, address receiver, address owner) returns (uint256)',
+] as const;
 
 @Injectable()
 export class VaultService {
+  readonly provider: ethers.JsonRpcProvider;
+  readonly chainId: number;
+  readonly usdcAddress: string;
+  readonly vaultAddress: string;
+  readonly usdc: ethers.Contract;
+  readonly vault: ethers.Contract;
+
   constructor(
-    private readonly farmingChain: FarmingChainService,
+    private readonly config: NavyConfigService,
     private readonly srclaClient: SrclaClient,
-  ) {}
+  ) {
+    const rpcUrl = config.farmingBaseRpcUrl;
+    this.chainId = config.farmingBaseChainId;
+    this.usdcAddress = config.farmingBaseUsdcAddress;
+    this.vaultAddress = config.farmingVaultAddress;
+
+    if (!rpcUrl) throw new Error('Missing required env var: FARMING_BASE_RPC_URL');
+    if (!this.usdcAddress) throw new Error('Missing required env var: FARMING_BASE_USDC_ADDRESS');
+    if (!this.vaultAddress) throw new Error('Missing required env var: FARMING_VAULT_ADDRESS');
+
+    this.provider = new ethers.JsonRpcProvider(rpcUrl, this.chainId);
+    this.usdc = new ethers.Contract(this.usdcAddress, ERC20_ABI, this.provider);
+    this.vault = new ethers.Contract(this.vaultAddress, VAULT_ABI, this.provider);
+  }
 
   /**
    * Get user's vault position
    */
   async getPosition(walletAddress: string): Promise<VaultPositionDto> {
-    const position = await this.farmingChain.getPosition(walletAddress);
+    const [sharesBase, maxWithdrawBase, maxRedeemBase] = await Promise.all([
+      this.vault.balanceOf(walletAddress),
+      this.vault.maxWithdraw(walletAddress),
+      this.vault.maxRedeem(walletAddress),
+    ]);
+    const assetsBase = await this.vault.convertToAssets(sharesBase);
 
     return {
-      sharesBase: position.sharesBase.toString(),
-      assetsBase: position.assetsBase.toString(),
-      maxWithdrawBase: position.maxWithdrawBase.toString(),
-      maxRedeemBase: position.maxRedeemBase.toString(),
+      sharesBase: sharesBase.toString(),
+      assetsBase: assetsBase.toString(),
+      maxWithdrawBase: maxWithdrawBase.toString(),
+      maxRedeemBase: maxRedeemBase.toString(),
     };
   }
 
@@ -45,13 +77,24 @@ export class VaultService {
    * Get vault limits for user
    */
   async getLimits(walletAddress: string): Promise<VaultLimitsDto> {
-    const limits = await this.farmingChain.getLimits(walletAddress);
+    const [maxDeposit, maxWithdraw, maxRedeem] = await Promise.all([
+      this.vault.maxDeposit(walletAddress),
+      this.vault.maxWithdraw(walletAddress),
+      this.vault.maxRedeem(walletAddress),
+    ]);
 
     return {
-      maxDeposit: limits.maxDeposit.toString(),
-      maxWithdraw: limits.maxWithdraw.toString(),
-      maxRedeem: limits.maxRedeem.toString(),
+      maxDeposit: maxDeposit.toString(),
+      maxWithdraw: maxWithdraw.toString(),
+      maxRedeem: maxRedeem.toString(),
     };
+  }
+
+  /**
+   * Get USDC allowance granted by a wallet to the vault
+   */
+  async getAllowance(walletAddress: string): Promise<bigint> {
+    return this.usdc.allowance(walletAddress, this.vaultAddress) as Promise<bigint>;
   }
 
   /**
@@ -60,26 +103,32 @@ export class VaultService {
   async buildDepositTransactions(
     walletAddress: string,
     assetsBase: string,
-  ): Promise<ReturnType<FarmingChainService['buildDepositTransaction']>[]> {
+  ): Promise<TransactionProposal[]> {
     const assets = BigInt(assetsBase);
-    const proposals: ReturnType<FarmingChainService['buildDepositTransaction']>[] = [];
+    const proposals: TransactionProposal[] = [];
 
-    // Check allowance
-    const allowance = await this.farmingChain.getAllowance(walletAddress);
+    const allowance = await this.getAllowance(walletAddress);
 
     if (allowance < assets) {
-      // Need approval
+      const approveData = this.usdc.interface.encodeFunctionData('approve', [
+        this.vaultAddress,
+        assets,
+      ]);
       proposals.push({
-        ...this.farmingChain.buildApprovalTransaction(walletAddress, assets),
-        chainId: this.farmingChain.chainId,
+        to: this.usdcAddress,
+        data: approveData,
+        value: '0',
+        chainId: this.chainId,
         description: `Approve vault to spend ${assetsBase} USDC`,
       });
     }
 
-    // Deposit transaction
+    const depositData = this.vault.interface.encodeFunctionData('deposit', [assets, walletAddress]);
     proposals.push({
-      ...this.farmingChain.buildDepositTransaction(walletAddress, assets),
-      chainId: this.farmingChain.chainId,
+      to: this.vaultAddress,
+      data: depositData,
+      value: '0',
+      chainId: this.chainId,
       description: `Deposit ${assetsBase} USDC into vault`,
     });
 
@@ -92,13 +141,20 @@ export class VaultService {
   async buildRedeemTransactions(
     walletAddress: string,
     sharesBase: string,
-  ): Promise<ReturnType<FarmingChainService['buildRedeemTransaction']>[]> {
+  ): Promise<TransactionProposal[]> {
     const shares = BigInt(sharesBase);
+    const redeemData = this.vault.interface.encodeFunctionData('redeem', [
+      shares,
+      walletAddress,
+      walletAddress,
+    ]);
 
     return [
       {
-        ...this.farmingChain.buildRedeemTransaction(walletAddress, shares),
-        chainId: this.farmingChain.chainId,
+        to: this.vaultAddress,
+        data: redeemData,
+        value: '0',
+        chainId: this.chainId,
         description: `Redeem ${sharesBase} shares from vault`,
       },
     ];
@@ -110,13 +166,20 @@ export class VaultService {
   async buildWithdrawTransactions(
     walletAddress: string,
     assetsBase: string,
-  ): Promise<ReturnType<FarmingChainService['buildWithdrawTransaction']>[]> {
+  ): Promise<TransactionProposal[]> {
     const assets = BigInt(assetsBase);
+    const withdrawData = this.vault.interface.encodeFunctionData('withdraw', [
+      assets,
+      walletAddress,
+      walletAddress,
+    ]);
 
     return [
       {
-        ...this.farmingChain.buildWithdrawTransaction(walletAddress, assets),
-        chainId: this.farmingChain.chainId,
+        to: this.vaultAddress,
+        data: withdrawData,
+        value: '0',
+        chainId: this.chainId,
         description: `Withdraw ${assetsBase} USDC from vault`,
       },
     ];

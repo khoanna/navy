@@ -1,5 +1,5 @@
 import { Body, Controller, Post, UnauthorizedException } from '@nestjs/common';
-import { PrivyService } from '../wallet/privy.service';
+import { PrivyService } from '../auth/privy.service';
 import { UserService } from './user.service';
 import { NavyTokenService } from '../auth/navy-token.service';
 import { AuditService } from '../audit/audit.service';

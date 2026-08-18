@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { SrclaClient } from './srcla-client';
-import { NavyConfigService } from '../config/config.service';
+import { SrclaClient } from '../../../src/vault/srcla-client';
+import { NavyConfigService } from '../../../src/config/config.service';
 
 describe('SrclaClient', () => {
   let client: SrclaClient;

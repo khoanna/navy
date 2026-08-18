@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { UserController } from './user.controller';
 import { UserAccountController } from './user-account.controller';
 import { UserService } from './user.service';
-import { PrivyService } from '../wallet/privy.service';
+import { PrivyService } from '../auth/privy.service';
 
 @Module({
   controllers: [UserController, UserAccountController],

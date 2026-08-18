@@ -2,7 +2,7 @@ import {
   ALLOWED_IMAGE_MIMES,
   MAX_IMAGE_BYTES,
   validateProductImage,
-} from './product-image.validation';
+} from '../../../src/products/product-image.validation';
 
 describe('validateProductImage', () => {
   it('accepts a small jpeg', () => {

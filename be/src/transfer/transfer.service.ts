@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
+import { recoverAndVerifySigner } from '../evm/eip3009-relay.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
 import { UserService } from '../user/user.service';
@@ -82,10 +83,7 @@ export class TransferService {
     if (t.consumedAt) throw new BadRequestException('Transfer already submitted');
     if (t.validBefore < new Date()) throw new BadRequestException('Transfer authorization expired');
 
-    let signer: string;
-    try { signer = ethers.recoverAddress(t.digest, signature); }
-    catch { throw new BadRequestException('Invalid signature'); }
-    if (signer.toLowerCase() !== expectedPayer.toLowerCase()) throw new BadRequestException('Signature does not match the authenticated user');
+    const { signer, sig } = recoverAndVerifySigner(t.digest, signature, expectedPayer);
 
     const consumed = await this.prisma.transfer.updateMany({
       where: { id: transferId, consumedAt: null }, data: { consumedAt: new Date() },
@@ -93,7 +91,6 @@ export class TransferService {
     if (consumed.count !== 1) throw new BadRequestException('Transfer already submitted');
 
     const validBefore = Math.floor(t.validBefore.getTime() / 1000);
-    const sig = ethers.Signature.from(signature);
     const tx = await this.chain.usdc.transferWithAuthorization(
       t.fromAddress, t.toAddress, t.amount, 0, validBefore, t.nonce, sig.v, sig.r, sig.s,
     );

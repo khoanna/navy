@@ -10,7 +10,6 @@ import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
 import { AdminModule } from './admin/admin.module';
 import { MerchantModule } from './merchant/merchant.module';
-import { WalletModule } from './wallet/wallet.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminMerchantsModule } from './admin-merchants/admin-merchants.module';
 import { HealthModule } from './health/health.module';
@@ -19,16 +18,15 @@ import { TransferModule } from './transfer/transfer.module';
 import { AgentModule } from './agent/agent.module';
 import { MarketModule } from './market/market.module';
 import { VaultModule } from './vault/vault.module';
-import { FarmingChainModule } from './farming-chain/farming-chain.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     NavyConfigModule, PrismaModule, CryptoModule, AuditModule, AuthModule,
-    UserModule, AdminModule, MerchantModule, WalletModule, PaymentsModule,
+    UserModule, AdminModule, MerchantModule, PaymentsModule,
     AdminMerchantsModule, HealthModule, ProductsModule,
-    TransferModule, AgentModule, MarketModule, VaultModule, FarmingChainModule,
+    TransferModule, AgentModule, MarketModule, VaultModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

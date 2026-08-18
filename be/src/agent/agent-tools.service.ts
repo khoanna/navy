@@ -8,7 +8,7 @@ import { PriceService } from '../market/price.service';
 import { spendingSeries } from './analytics';
 import { userSpecifiedAmount, CLARIFY } from './amount-guard';
 import type { ToolHandlers, ToolResult } from './types';
-import type { TransactionProposal } from '../farming-chain/farming-chain.types';
+import type { TransactionProposal } from '../vault/vault.types';
 
 @Injectable()
 export class AgentToolsService {

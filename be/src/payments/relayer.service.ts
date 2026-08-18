@@ -9,6 +9,7 @@ import {
   authorizationDigest,
   type AuthorizationTypedData,
 } from '../evm/payment-authorization';
+import { assertRelayerBalance, recoverAndVerifySigner } from '../evm/eip3009-relay.util';
 
 export interface AuthorizationResult {
   typedData: AuthorizationTypedData;
@@ -30,10 +31,7 @@ export class RelayerService {
     payer: string,
   ): Promise<AuthorizationResult> {
     // Guardrail: the relayer pays gas for every payInvoice. If it's low on ETH, fail fast (503).
-    const balance = await this.chain.provider.getBalance(this.chain.relayer.address);
-    if (balance < this.cfg.relayerMinBalanceWei) {
-      throw new ServiceUnavailableException('Payment relayer is temporarily unavailable');
-    }
+    await assertRelayerBalance(this.chain.provider, this.chain.relayer.address, this.cfg.relayerMinBalanceWei);
     // Fetch the configuration-bound nonce from the contract. This includes the merchant payout,
     // treasury, feeBps, and version counters so changing any of those invalidates any
     // outstanding unsigned authorizations. On failure we surface a 503 so the order stays
@@ -79,16 +77,9 @@ export class RelayerService {
     if (order.issuedTxExpiresAt && order.issuedTxExpiresAt < new Date()) {
       throw new BadRequestException('Issued authorization expired');
     }
-    // The persisted digest is exactly what the wallet signed; recover the signer via raw ecrecover.
-    let signer: string;
-    try {
-      signer = ethers.recoverAddress(order.issuedTxHash, signature);
-    } catch {
-      throw new BadRequestException('Invalid signature');
-    }
-    if (signer.toLowerCase() !== expectedPayer.toLowerCase()) {
-      throw new BadRequestException('Signature does not match the authenticated payer');
-    }
+
+    const { signer, sig } = recoverAndVerifySigner(order.issuedTxHash, signature, expectedPayer);
+
     // Optimistic single-use consume BEFORE submitting, so a concurrent second submit is rejected here.
     const consumed = await this.prisma.order.updateMany({
       where: { id: orderId, issuedTxConsumedAt: null },
@@ -100,7 +91,6 @@ export class RelayerService {
     const merchantIdHex16 = '0x' + order.merchantId.replace(/-/g, '').toLowerCase();
     const invoiceIdHex16 = invoiceIdHexFromOrderId(order.id);
     const validBefore = Math.floor(order.issuedTxExpiresAt!.getTime() / 1000);
-    const sig = ethers.Signature.from(signature);
     // EIP-3009: validAfter=0, validBefore from the issued authorization; nonce was the
     // contract's authorizationNonce (bound to the merchant payout/treasury/fee/version at signing time).
     const tx = await this.chain.payments.payInvoice(

@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { VaultService } from './vault.service';
-import { TransactionProposal } from '../farming-chain/farming-chain.types';
+import { TransactionProposal } from './vault.types';
 import { JwtGuard } from '../auth/jwt.guard';
 
 interface AuthenticatedRequest extends Request {
