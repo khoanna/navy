@@ -1,5 +1,5 @@
-import { LateDepositorCalculator, DepositRecord } from './late-depositor';
-import { CohortTracker } from './cohort-tracker';
+import { LateDepositorCalculator, DepositRecord } from './late-depositor.js';
+import { CohortTracker } from './cohort-tracker.js';
 
 const WAD = 1_000_000_000_000_000_000n;
 

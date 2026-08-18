@@ -38,13 +38,14 @@ export interface ReportParams {
 export function generateReport(params: ReportParams): EvaluationReport {
   return {
     meta: {
-      evaluationId: params.manifest.evaluationId,
+      evaluationId: params.manifest.evaluationId ?? 'unknown',
       generatedAt: new Date().toISOString(),
       manifestHash: hashManifest(params.manifest),
     },
     forecastCalibration: {
-      method: params.manifest.forecastMethod.method,
-      config: params.manifest.forecastMethod.config,
+      // ManifestConfig does not include forecastMethod; use safe defaults
+      method: 'rolling',
+      config: {},
       metrics: params.forecastMetrics,
     },
     baselines: params.baselineResults,

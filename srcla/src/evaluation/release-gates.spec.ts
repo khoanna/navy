@@ -7,7 +7,8 @@ import {
   evaluatePolicyGate,
   EvaluationResults,
   PolicyComparison,
-} from './release-gates';
+  GateCheck,
+} from './release-gates.js';
 
 describe('Release Gates', () => {
   describe('Forecast Gate', () => {
@@ -21,7 +22,7 @@ describe('Release Gates', () => {
 
       const result = evaluateForecastGate(evaluation);
       expect(result.passed).toBe(true);
-      expect(result.checks.every(c => c.passed)).toBe(true);
+      expect(result.checks.every((c: GateCheck) => c.passed)).toBe(true);
       expect(result.blockedReason).toBeUndefined();
     });
 
@@ -98,7 +99,7 @@ describe('Release Gates', () => {
       };
 
       const result = evaluateForecastGate(evaluation);
-      const coverageCheck = result.checks.find(c => c.name === 'Calibration Coverage');
+      const coverageCheck = result.checks.find((c: GateCheck) => c.name === 'Calibration Coverage');
       expect(coverageCheck?.metrics).toBeDefined();
       expect(coverageCheck?.metrics?.coverage).toBe(0.96);
     });
@@ -198,7 +199,7 @@ describe('Release Gates', () => {
       };
 
       const result = evaluatePolicyGate(comparison);
-      const sharpeCheck = result.checks.find(c => c.name === 'Acceptable Sharpe Ratio');
+      const sharpeCheck = result.checks.find((c: GateCheck) => c.name === 'Acceptable Sharpe Ratio');
       expect(sharpeCheck?.metrics).toBeDefined();
       expect(sharpeCheck?.metrics?.sharpe).toBe(0.8);
     });

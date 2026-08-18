@@ -1,5 +1,8 @@
 /**
  * Implements paper §11.4: Pinned Base-fork jobs validate exact adapter math.
+ *
+ * ForkRunner spawns a local Anvil process with a mainnet fork,
+ * takes vault state snapshots, and cleans up when done.
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -43,65 +46,83 @@ export class ForkRunner {
   private anvilProcess: ChildProcess | null = null;
   private provider: JsonRpcProvider | null = null;
   private port = 8545;
-  
+
+  /**
+   * Start Anvil with a forked chain at a specific block.
+   * Polls until the RPC is responsive (up to 30 attempts × 500 ms).
+   * @returns The local RPC URL (e.g. http://localhost:8545)
+   */
   async startFork(config: ForkConfig): Promise<string> {
     const url = `http://localhost:${this.port}`;
     this.anvilProcess = spawn('anvil', [
       '--fork-url', config.rpcUrl,
       '--fork-block-number', config.forkBlock.toString(),
       '--port', this.port.toString(),
-      '--host', '0.0.0.0'
+      '--host', '0.0.0.0',
     ]);
 
-    this.anvilProcess.stdout?.on('data', (data) => {
-      // process.stdout.write(data);
-    });
-    this.anvilProcess.stderr?.on('data', (data) => {
-      // process.stderr.write(data);
-    });
+    // Silently consume stdout/stderr to prevent blocking
+    this.anvilProcess.stdout?.resume();
+    this.anvilProcess.stderr?.resume();
 
     let attempts = 0;
     while (attempts < 30) {
       try {
+        const probe = new JsonRpcProvider(url);
+        await probe.getBlockNumber();
+        probe.destroy();
         this.provider = new JsonRpcProvider(url);
-        await this.provider.getBlockNumber();
         return url;
-      } catch (e) {
+      } catch {
         attempts++;
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
       }
     }
-    throw new Error('Failed to start Anvil fork');
+    throw new Error('Failed to start Anvil fork after 30 attempts');
   }
 
+  /**
+   * Take a snapshot of current vault state on the fork.
+   */
   async takeSnapshot(config: ForkConfig): Promise<ForkSnapshot> {
-    if (!this.provider) throw new Error('Provider not initialized');
-    
+    if (!this.provider) throw new Error('Fork not started — call startFork() first');
+
     const vault = new Contract(config.vaultAddress, VAULT_ABI, this.provider);
-    
+
     const block = await this.provider.getBlock('latest');
-    const blockNumber = block?.number || 0;
-    
-    const totalAssets = await vault.totalAssets();
-    const idleBase = await vault.idle();
-    const sharePrice = await vault.convertToAssets(ethers.parseUnits('1', 18));
-    
+    const blockNumber = block?.number ?? 0;
+
+    // ethers v6 Contract: dynamic function access returns ContractFunction.
+    // Cast to () => Promise<bigint> for type safety.
+    const totalAssets = BigInt(await (vault['totalAssets'] as () => Promise<bigint>)());
+    const idleBase = BigInt(await (vault['idle'] as () => Promise<bigint>)());
+    const sharePrice = BigInt(
+      await (vault['convertToAssets'] as (arg: bigint) => Promise<bigint>)(
+        ethers.parseUnits('1', 18),
+      ),
+    );
+
     const adapterBalances = new Map<string, bigint>();
     for (const addr of config.adapterAddresses) {
-      const balance = await vault.adapterBalances(addr);
+      const balance = BigInt(
+        await (vault['adapterBalances'] as (arg: string) => Promise<bigint>)(addr),
+      );
       adapterBalances.set(addr, balance);
     }
-    
+
     return {
       blockNumber,
       totalAssets,
       idleBase,
       adapterBalances,
       sharePrice,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
 
+  /**
+   * Stop the Anvil process and release the provider.
+   */
   async stopFork(): Promise<void> {
     if (this.provider) {
       this.provider.destroy();
@@ -113,7 +134,11 @@ export class ForkRunner {
     }
   }
 
-  private calculateNetApy(snapshots: ForkSnapshot[], costs: bigint): number {
+  /**
+   * Compute annualised net APY from a sequence of snapshots after cost deduction.
+   * Assumes one snapshot per day for the years calculation.
+   */
+  netApy(snapshots: ForkSnapshot[], costs: bigint): number {
     if (snapshots.length < 2) return 0;
     const start = snapshots[0]!;
     const end = snapshots[snapshots.length - 1]!;
