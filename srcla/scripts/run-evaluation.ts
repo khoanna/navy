@@ -15,7 +15,8 @@
 import { PrismaClient } from '@prisma/client';
 import { readFileSync } from 'fs';
 import { join as pathJoin } from 'path';
-import { thawManifest, type ManifestConfig } from '../src/evaluation/manifest/types.js';
+import { thawEvaluationManifest } from '../src/evaluation/manifest/manifest.js';
+import type { ManifestConfig } from '../src/evaluation/manifest/types.js';
 import { loadDataset, splitDataset, createSyntheticDataset, type EvaluationDataset } from '../src/evaluation/dataset.js';
 import { runReplay } from '../src/evaluation/replay/replay.js';
 import { b0Policy } from '../src/evaluation/baselines/policies.js';
@@ -121,14 +122,14 @@ async function main() {
       endDate: new Date('2026-06-30'),
       forecastMethod: { method: 'rolling', config: { windowDays: 30 } },
       horizons: [86400],
-      tiers: [10_000_000_000n, 100_000_000_000n, 1_000_000_000_000n],
+      tiers: [1_000_000_000_000n, 10_000_000_000_000n, 100_000_000_000_000n],
       coverageTarget: 0.95,
       significanceLevel: 0.05,
     };
   } else {
     try {
       const raw = readFileSync(manifestPath, 'utf-8');
-      manifest = thawManifest(raw);
+      manifest = thawEvaluationManifest(raw) as unknown as ManifestConfig;
       console.log(`Manifest: ${manifest.evaluationId}`);
       console.log(`Period: ${manifest.startDate.toISOString()} → ${manifest.endDate.toISOString()}\n`);
     } catch (err) {
@@ -140,7 +141,7 @@ async function main() {
         endDate: new Date('2026-06-30'),
         forecastMethod: { method: 'rolling', config: { windowDays: 30 } },
         horizons: [86400],
-        tiers: [10_000_000_000n, 100_000_000_000_000n],
+        tiers: [1_000_000_000_000n, 10_000_000_000_000n, 100_000_000_000_000n],
         coverageTarget: 0.95,
         significanceLevel: 0.05,
       };
@@ -549,9 +550,9 @@ function getBaselineName(id: string): string {
 
 function formatTier(tier: bigint): string {
   const usdc = Number(tier) / 1e6;
-  if (usdc >= 1000) return `${(usdc / 1000).toFixed(0)}B`;
-  if (usdc >= 1) return `${usdc.toFixed(0)}M`;
-  return `${(usdc * 1000).toFixed(0)}K`;
+  if (usdc >= 1_000_000) return `${(usdc / 1_000_000).toFixed(0)}M USDC`;
+  if (usdc >= 1_000) return `${(usdc / 1_000).toFixed(0)}K USDC`;
+  return `${usdc.toFixed(0)} USDC`;
 }
 
 function computeAverageApy(results: PolicyResult[], id: string): number {

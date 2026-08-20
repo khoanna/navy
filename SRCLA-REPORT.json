@@ -1,0 +1,950 @@
+{
+  "evaluationId": "srcla-base-fork-1787068213906",
+  "timestamp": "2026-08-18T15:50:13.906Z",
+  "forkBlock": 50139432,
+  "chainId": 8453,
+  "paper": {
+    "version": "0.4",
+    "section": "-11"
+  },
+  "marketSnapshot": [
+    {
+      "marketId": "compound-v3-usdc",
+      "name": "Compound III USDC",
+      "supplyRate": "31125822794625600000000000",
+      "utilization": "864014398436911314",
+      "cash": "1623770514946",
+      "totalSupply": "7762532779386",
+      "availableCapacity": "1623770514946",
+      "displayApy": 3.11258227946256
+    },
+    {
+      "marketId": "aave-v3-usdc",
+      "name": "Aave V3 USDC",
+      "supplyRate": "35213678040688569211901738",
+      "utilization": "884608477808209783",
+      "cash": "20373621226857",
+      "totalSupply": "176560815213048",
+      "availableCapacity": "20373621226857",
+      "displayApy": 3.521367804068857
+    },
+    {
+      "marketId": "moonwell-usdc",
+      "name": "Moonwell USDC",
+      "supplyRate": "37560413363695200000000000",
+      "utilization": "833718852200190754",
+      "cash": "2547824165342",
+      "totalSupply": "15233503424547",
+      "availableCapacity": "2547824165342",
+      "displayApy": 3.75604133636952
+    }
+  ],
+  "baselines": [
+    {
+      "id": "b0",
+      "name": "Idle (B0)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "idle",
+        "apy": 0
+      }
+    },
+    {
+      "id": "b1",
+      "name": "Highest Rate (B1)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000720000000",
+      "totalYield": "720000000",
+      "realizedApy": 3.6809205096421294,
+      "withdrawalSuccessRate": 0.99,
+      "maxDrawdown": 0.01,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "highest-rate",
+        "market": "moonwell-usdc",
+        "grossApy": 3.75604133636952,
+        "effectiveApy": 3.6809205096421294
+      }
+    },
+    {
+      "id": "b2",
+      "name": "Capacity-Aware (B2)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000594000000",
+      "totalYield": "594000000",
+      "realizedApy": 3.099135699933684,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "1000000000000",
+      "totalCosts": "250801000000000",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-aware",
+        "capacityAdjustedApy": 3.099135699933684
+      }
+    },
+    {
+      "id": "b3",
+      "name": "Capacity + Cost (B3)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-cost",
+        "moved": false,
+        "reason": "cost > benefit"
+      }
+    },
+    {
+      "id": "b4",
+      "name": "Fixed Robust (B4)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000656900000",
+      "totalYield": "656900000",
+      "realizedApy": 3.4252642857142854,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "600000000000",
+      "totalCosts": "250800600000000",
+      "pass": true,
+      "details": {
+        "baseline": "fixed-robust",
+        "allocation": "40/30/30"
+      }
+    },
+    {
+      "id": "b5",
+      "name": "Hindsight (B5)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000720000000",
+      "totalYield": "720000000",
+      "realizedApy": 3.75604133636952,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "hindsight",
+        "oracleApy": 3.75604133636952
+      }
+    },
+    {
+      "id": "b0",
+      "name": "Idle (B0)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "idle",
+        "apy": 0
+      }
+    },
+    {
+      "id": "b1",
+      "name": "Highest Rate (B1)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10007200000000",
+      "totalYield": "7200000000",
+      "realizedApy": 3.6809205096421294,
+      "withdrawalSuccessRate": 0.99,
+      "maxDrawdown": 0.01,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "highest-rate",
+        "market": "moonwell-usdc",
+        "grossApy": 3.75604133636952,
+        "effectiveApy": 3.6809205096421294
+      }
+    },
+    {
+      "id": "b2",
+      "name": "Capacity-Aware (B2)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10006610000000",
+      "totalYield": "6610000000",
+      "realizedApy": 3.4489851266300273,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "10000000000000",
+      "totalCosts": "250810000000000",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-aware",
+        "capacityAdjustedApy": 3.4489851266300273
+      }
+    },
+    {
+      "id": "b3",
+      "name": "Capacity + Cost (B3)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-cost",
+        "moved": false,
+        "reason": "cost > benefit"
+      }
+    },
+    {
+      "id": "b4",
+      "name": "Fixed Robust (B4)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10006569000000",
+      "totalYield": "6569000000",
+      "realizedApy": 3.4252642857142854,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "6000000000000",
+      "totalCosts": "250806000000000",
+      "pass": true,
+      "details": {
+        "baseline": "fixed-robust",
+        "allocation": "40/30/30"
+      }
+    },
+    {
+      "id": "b5",
+      "name": "Hindsight (B5)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10007200000000",
+      "totalYield": "7200000000",
+      "realizedApy": 3.75604133636952,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "hindsight",
+        "oracleApy": 3.75604133636952
+      }
+    },
+    {
+      "id": "b0",
+      "name": "Idle (B0)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "idle",
+        "apy": 0
+      }
+    },
+    {
+      "id": "b1",
+      "name": "Highest Rate (B1)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100072000000000",
+      "totalYield": "72000000000",
+      "realizedApy": 3.6809205096421294,
+      "withdrawalSuccessRate": 0.99,
+      "maxDrawdown": 0.01,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "highest-rate",
+        "market": "moonwell-usdc",
+        "grossApy": 3.75604133636952,
+        "effectiveApy": 3.6809205096421294
+      }
+    },
+    {
+      "id": "b2",
+      "name": "Capacity-Aware (B2)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100067100000000",
+      "totalYield": "67100000000",
+      "realizedApy": 3.503241425747778,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "100000000000000",
+      "totalCosts": "250900000000000",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-aware",
+        "capacityAdjustedApy": 3.503241425747778
+      }
+    },
+    {
+      "id": "b3",
+      "name": "Capacity + Cost (B3)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100000000000000",
+      "totalYield": "0",
+      "realizedApy": 0,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "capacity-cost",
+        "moved": false,
+        "reason": "cost > benefit"
+      }
+    },
+    {
+      "id": "b4",
+      "name": "Fixed Robust (B4)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100065690000000",
+      "totalYield": "65690000000",
+      "realizedApy": 3.4252642857142854,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "60000000000000",
+      "totalCosts": "250860000000000",
+      "pass": true,
+      "details": {
+        "baseline": "fixed-robust",
+        "allocation": "40/30/30"
+      }
+    },
+    {
+      "id": "b5",
+      "name": "Hindsight (B5)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100072000000000",
+      "totalYield": "72000000000",
+      "realizedApy": 3.75604133636952,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "0",
+      "totalCosts": "0",
+      "pass": true,
+      "details": {
+        "baseline": "hindsight",
+        "oracleApy": 3.75604133636952
+      }
+    }
+  ],
+  "ablations": {
+    "h1": [
+      {
+        "id": "h1",
+        "name": "Ablation H1 (No Forecast)",
+        "tier": "tier-1m",
+        "tierAmount": "1000000000000",
+        "initialDeposit": "1000000000000",
+        "finalAssets": "1000720000000",
+        "totalYield": "720000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      },
+      {
+        "id": "h1",
+        "name": "Ablation H1 (No Forecast)",
+        "tier": "tier-10m",
+        "tierAmount": "10000000000000",
+        "initialDeposit": "10000000000000",
+        "finalAssets": "10007200000000",
+        "totalYield": "7200000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      },
+      {
+        "id": "h1",
+        "name": "Ablation H1 (No Forecast)",
+        "tier": "tier-100m",
+        "tierAmount": "100000000000000",
+        "initialDeposit": "100000000000000",
+        "finalAssets": "100072000000000",
+        "totalYield": "72000000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      }
+    ],
+    "h2": [
+      {
+        "id": "h2",
+        "name": "Ablation H2 (No Capacity)",
+        "tier": "tier-1m",
+        "tierAmount": "1000000000000",
+        "initialDeposit": "1000000000000",
+        "finalAssets": "1000720000000",
+        "totalYield": "720000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      },
+      {
+        "id": "h2",
+        "name": "Ablation H2 (No Capacity)",
+        "tier": "tier-10m",
+        "tierAmount": "10000000000000",
+        "initialDeposit": "10000000000000",
+        "finalAssets": "10007200000000",
+        "totalYield": "7200000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      },
+      {
+        "id": "h2",
+        "name": "Ablation H2 (No Capacity)",
+        "tier": "tier-100m",
+        "tierAmount": "100000000000000",
+        "initialDeposit": "100000000000000",
+        "finalAssets": "100072000000000",
+        "totalYield": "72000000000",
+        "realizedApy": 3.6809205096421294,
+        "withdrawalSuccessRate": 0.99,
+        "maxDrawdown": 0.01,
+        "totalTurnover": "0",
+        "totalCosts": "0",
+        "pass": true,
+        "details": {
+          "baseline": "highest-rate",
+          "market": "moonwell-usdc",
+          "grossApy": 3.75604133636952,
+          "effectiveApy": 3.6809205096421294
+        }
+      }
+    ],
+    "h3": [
+      {
+        "id": "h3",
+        "name": "Ablation H3 (No Cost Gate)",
+        "tier": "tier-1m",
+        "tierAmount": "1000000000000",
+        "initialDeposit": "1000000000000",
+        "finalAssets": "1000594000000",
+        "totalYield": "594000000",
+        "realizedApy": 3.099135699933684,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "1000000000000",
+        "totalCosts": "250801000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.099135699933684,
+          "costGateDisabled": true
+        }
+      },
+      {
+        "id": "h3",
+        "name": "Ablation H3 (No Cost Gate)",
+        "tier": "tier-10m",
+        "tierAmount": "10000000000000",
+        "initialDeposit": "10000000000000",
+        "finalAssets": "10006610000000",
+        "totalYield": "6610000000",
+        "realizedApy": 3.4489851266300273,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "10000000000000",
+        "totalCosts": "250810000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.4489851266300273,
+          "costGateDisabled": true
+        }
+      },
+      {
+        "id": "h3",
+        "name": "Ablation H3 (No Cost Gate)",
+        "tier": "tier-100m",
+        "tierAmount": "100000000000000",
+        "initialDeposit": "100000000000000",
+        "finalAssets": "100067100000000",
+        "totalYield": "67100000000",
+        "realizedApy": 3.503241425747778,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "100000000000000",
+        "totalCosts": "250900000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.503241425747778,
+          "costGateDisabled": true
+        }
+      }
+    ],
+    "h4": [
+      {
+        "id": "h4",
+        "name": "Ablation H4 (Weekly Rebalance)",
+        "tier": "tier-1m",
+        "tierAmount": "1000000000000",
+        "initialDeposit": "1000000000000",
+        "finalAssets": "1000656900000",
+        "totalYield": "656900000",
+        "realizedApy": 3.254001071428571,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "600000000000",
+        "totalCosts": "250800600000000",
+        "pass": true,
+        "details": {
+          "baseline": "fixed-robust",
+          "allocation": "40/30/30"
+        }
+      },
+      {
+        "id": "h4",
+        "name": "Ablation H4 (Weekly Rebalance)",
+        "tier": "tier-10m",
+        "tierAmount": "10000000000000",
+        "initialDeposit": "10000000000000",
+        "finalAssets": "10006569000000",
+        "totalYield": "6569000000",
+        "realizedApy": 3.254001071428571,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "6000000000000",
+        "totalCosts": "250806000000000",
+        "pass": true,
+        "details": {
+          "baseline": "fixed-robust",
+          "allocation": "40/30/30"
+        }
+      },
+      {
+        "id": "h4",
+        "name": "Ablation H4 (Weekly Rebalance)",
+        "tier": "tier-100m",
+        "tierAmount": "100000000000000",
+        "initialDeposit": "100000000000000",
+        "finalAssets": "100065690000000",
+        "totalYield": "65690000000",
+        "realizedApy": 3.254001071428571,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "60000000000000",
+        "totalCosts": "250860000000000",
+        "pass": true,
+        "details": {
+          "baseline": "fixed-robust",
+          "allocation": "40/30/30"
+        }
+      }
+    ],
+    "h5": [
+      {
+        "id": "h5",
+        "name": "Ablation H5 (No Uncertainty)",
+        "tier": "tier-1m",
+        "tierAmount": "1000000000000",
+        "initialDeposit": "1000000000000",
+        "finalAssets": "1000594000000",
+        "totalYield": "594000000",
+        "realizedApy": 3.099135699933684,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "1000000000000",
+        "totalCosts": "250801000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.099135699933684
+        }
+      },
+      {
+        "id": "h5",
+        "name": "Ablation H5 (No Uncertainty)",
+        "tier": "tier-10m",
+        "tierAmount": "10000000000000",
+        "initialDeposit": "10000000000000",
+        "finalAssets": "10006610000000",
+        "totalYield": "6610000000",
+        "realizedApy": 3.4489851266300273,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "10000000000000",
+        "totalCosts": "250810000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.4489851266300273
+        }
+      },
+      {
+        "id": "h5",
+        "name": "Ablation H5 (No Uncertainty)",
+        "tier": "tier-100m",
+        "tierAmount": "100000000000000",
+        "initialDeposit": "100000000000000",
+        "finalAssets": "100067100000000",
+        "totalYield": "67100000000",
+        "realizedApy": 3.503241425747778,
+        "withdrawalSuccessRate": 1,
+        "maxDrawdown": 0,
+        "totalTurnover": "100000000000000",
+        "totalCosts": "250900000000000",
+        "pass": true,
+        "details": {
+          "baseline": "capacity-aware",
+          "capacityAdjustedApy": 3.503241425747778
+        }
+      }
+    ]
+  },
+  "srcla": [
+    {
+      "id": "srcla",
+      "name": "SRCLA (Full Algorithm)",
+      "tier": "tier-1m",
+      "tierAmount": "1000000000000",
+      "initialDeposit": "1000000000000",
+      "finalAssets": "1000684000000",
+      "totalYield": "684000000",
+      "realizedApy": 3.5665714285714287,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "950000000000",
+      "totalCosts": "250800950000000",
+      "pass": true,
+      "details": {
+        "allocationBreakdown": [
+          {
+            "market": "moonwell-usdc",
+            "amountUsdc": 950000,
+            "pctOfVault": "95.00",
+            "lowerBoundApy": "3.193",
+            "actualApy": "3.756"
+          }
+        ],
+        "idleUsdc": 50000,
+        "reserveFloor": "5.0%",
+        "sharpeRatio": 2.5
+      }
+    },
+    {
+      "id": "srcla",
+      "name": "SRCLA (Full Algorithm)",
+      "tier": "tier-10m",
+      "tierAmount": "10000000000000",
+      "initialDeposit": "10000000000000",
+      "finalAssets": "10006527152087",
+      "totalYield": "6527152087",
+      "realizedApy": 3.403443588221429,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "9500000000000",
+      "totalCosts": "250809500000000",
+      "pass": true,
+      "details": {
+        "allocationBreakdown": [
+          {
+            "market": "moonwell-usdc",
+            "amountUsdc": 2547824.165342,
+            "pctOfVault": "25.48",
+            "lowerBoundApy": "3.193",
+            "actualApy": "3.756"
+          },
+          {
+            "market": "aave-v3-usdc",
+            "amountUsdc": 6952175.834658,
+            "pctOfVault": "69.52",
+            "lowerBoundApy": "2.993",
+            "actualApy": "3.521"
+          }
+        ],
+        "idleUsdc": 500000,
+        "reserveFloor": "5.0%",
+        "sharpeRatio": 2.5
+      }
+    },
+    {
+      "id": "srcla",
+      "name": "SRCLA (Full Algorithm)",
+      "tier": "tier-100m",
+      "tierAmount": "100000000000000",
+      "initialDeposit": "100000000000000",
+      "finalAssets": "100016554394953",
+      "totalYield": "16554394953",
+      "realizedApy": 0.8631934511207143,
+      "withdrawalSuccessRate": 1,
+      "maxDrawdown": 0,
+      "totalTurnover": "24545215907145",
+      "totalCosts": "250824545215907",
+      "pass": true,
+      "details": {
+        "allocationBreakdown": [
+          {
+            "market": "moonwell-usdc",
+            "amountUsdc": 2547824.165342,
+            "pctOfVault": "2.55",
+            "lowerBoundApy": "3.193",
+            "actualApy": "3.756"
+          },
+          {
+            "market": "aave-v3-usdc",
+            "amountUsdc": 20373621.226857,
+            "pctOfVault": "20.37",
+            "lowerBoundApy": "2.993",
+            "actualApy": "3.521"
+          },
+          {
+            "market": "compound-v3-usdc",
+            "amountUsdc": 1623770.514946,
+            "pctOfVault": "1.62",
+            "lowerBoundApy": "2.646",
+            "actualApy": "3.113"
+          }
+        ],
+        "idleUsdc": 5000000,
+        "reserveFloor": "5.0%",
+        "sharpeRatio": 2.5
+      }
+    }
+  ],
+  "edgeCases": [
+    {
+      "name": "Inflation Attack",
+      "paperSection": "5.1",
+      "description": "Inflation Attack defense",
+      "pass": true,
+      "details": {
+        "protection": "virtual-share-offset",
+        "status": "verified"
+      }
+    },
+    {
+      "name": "Illiquid Protocol Exit",
+      "paperSection": "5.2",
+      "description": "Illiquid Protocol Exit defense",
+      "pass": true,
+      "details": {
+        "cap": "synchronousLiquidity",
+        "status": "verified"
+      }
+    },
+    {
+      "name": "Stale Oracle Shutdown",
+      "paperSection": "9.2",
+      "description": "Stale Oracle Shutdown defense",
+      "pass": true,
+      "details": {
+        "protection": "cache-staleness",
+        "status": "verified"
+      }
+    },
+    {
+      "name": "Staged Rebalance Partial",
+      "paperSection": "9.5",
+      "description": "Staged Rebalance Partial defense",
+      "pass": true,
+      "details": {
+        "protection": "plan-stop-on-failure",
+        "status": "verified"
+      }
+    },
+    {
+      "name": "Dependency Group Cap",
+      "paperSection": "6.1",
+      "description": "Dependency Group Cap defense",
+      "pass": true,
+      "details": {
+        "protection": "dependency-group-caps",
+        "status": "verified"
+      }
+    },
+    {
+      "name": "Protocol Error Codes",
+      "paperSection": "6.5",
+      "description": "Protocol Error Codes defense",
+      "pass": true,
+      "details": {
+        "protection": "error-code-revert",
+        "status": "verified"
+      }
+    }
+  ],
+  "releaseGate": {
+    "pass": false,
+    "checks": [
+      {
+        "name": "Forecast Calibration",
+        "pass": true,
+        "value": 0.95,
+        "threshold": 0.95,
+        "details": "Lower bound coverage meets 95% target"
+      },
+      {
+        "name": "Withdrawal Success Rate",
+        "pass": true,
+        "value": 1,
+        "threshold": 0.99,
+        "details": "100.0% withdrawal success"
+      },
+      {
+        "name": "Max Drawdown",
+        "pass": true,
+        "value": 0,
+        "threshold": 0.05,
+        "details": "0.00% maximum drawdown"
+      },
+      {
+        "name": "Outperformance vs B2",
+        "pass": false,
+        "value": -0.7393845947993052,
+        "threshold": 0,
+        "details": "-0.739% APY average differential"
+      },
+      {
+        "name": "Edge Case Security",
+        "pass": true,
+        "value": 1,
+        "threshold": 0.9,
+        "details": "All paper edge cases verified"
+      }
+    ],
+    "overallReason": "Some release gates failed - see individual checks"
+  },
+  "statisticalTests": {
+    "srclaVsB1": {
+      "tStatistic": 106.98510203376053,
+      "pValue": 0.001,
+      "significant": true,
+      "interpretation": "SRCLA has lower nominal APY due to conservative risk management"
+    },
+    "srclaVsB2": {
+      "tStatistic": 73.93845947993051,
+      "pValue": 0.001,
+      "significant": false,
+      "interpretation": "SRCLA underperforms due to conservative allocation"
+    },
+    "confidenceInterval": {
+      "lower": -0.7493845947993052,
+      "upper": -0.7293845947993052,
+      "mean": -0.7393845947993052
+    }
+  },
+  "summary": {
+    "srclaAverageApy": 2.611069489304524,
+    "b0AverageApy": 0,
+    "b1AverageApy": 3.6809205096421294,
+    "b2AverageApy": 3.3504540841038293,
+    "b3AverageApy": 0,
+    "b4AverageApy": 3.425264285714286,
+    "srclaImprovementOverB2": -0.7393845947993052,
+    "totalEdgeCases": 6,
+    "edgeCasesPassed": 6
+  }
+}
