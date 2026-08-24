@@ -11,7 +11,7 @@ export function FundButton({
   variant?: 'primary' | 'secondary' | 'ghost';
 }) {
   // EVM funding hook (was Solana `useFundSolanaWallet`). `chain` defaults to the app's
-  // configured chain (Sepolia); we leave it unset to avoid importing a viem Chain object.
+  // configured chain (Base); we leave it unset to avoid importing a viem Chain object.
   const { fundWallet } = useFundWallet();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -20,8 +20,8 @@ export function FundButton({
     if (!address) return;
     setBusy(true);
     try {
-      // Navy is Sepolia (testnet) only — on-ramps (MoonPay/Coinbase) generally reject
-      // testnets, so this typically surfaces the chain_not_supported branch below.
+      // Navy runs on Base (mainnet or Anvil fork) — on-ramps (MoonPay/Coinbase) operate
+      // on mainnet so funding should work; chain_not_supported surfaces for testnets.
       await fundWallet({ address });
     } catch (e: unknown) {
       // User cancelled the funding flow — no error toast needed

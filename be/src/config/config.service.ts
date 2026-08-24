@@ -40,11 +40,11 @@ export class NavyConfigService {
     const n = parseInt(this.env.NAVY_ADMIN_LOCK_WINDOW_MS ?? '', 10);
     return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
   }
-  // --- EVM (Sepolia) ---
-  get evmRpcUrl(): string { return this.req('SEPOLIA_RPC_URL'); }
+  // --- EVM (Base) ---
+  get evmRpcUrl(): string { return this.env.BASE_RPC_URL ?? this.req('BASE_RPC_URL'); }
   get evmChainId(): number {
-    const n = parseInt(this.env.EVM_CHAIN_ID ?? '11155111', 10);
-    return Number.isFinite(n) ? n : 11155111;
+    const n = parseInt(this.env.EVM_CHAIN_ID ?? '8453', 10);
+    return Number.isFinite(n) ? n : 8453;
   }
   get paymentsAddress(): string { return this.req('NAVY_PAYMENTS_ADDRESS'); }
   get usdcAddress(): string { return this.req('NAVY_USDC_ADDRESS'); }
@@ -62,8 +62,8 @@ export class NavyConfigService {
   get rebalanceGasCostBase(): bigint { return BigInt(this.env.NAVY_REBALANCE_GAS_COST_BASE ?? '100000'); }
   get rebalanceSafetyFactor(): number { return parseInt(this.env.NAVY_REBALANCE_SAFETY_FACTOR ?? '2', 10); }
   get rebalanceHorizonSeconds(): number { return parseInt(this.env.NAVY_REBALANCE_HORIZON_SECONDS ?? '21600', 10); }
-  /** USDC EIP-712 domain name/version. Circle Sepolia USDC (EIP-3009) is name "USDC", version "2"; overridable + verify against chain. */
-  get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USDC'; }
+  /** USDC EIP-712 domain name/version. Circle Base USDC (EIP-3009) uses name "USD Coin", version "2"; overridable + verify against chain. */
+  get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USD Coin'; }
   get usdcEip712Version(): string { return this.env.NAVY_USDC_EIP712_VERSION ?? '2'; }
   /** Min relayer ETH balance (wei) required before submitting a payment. Env is ETH; default 0.02. */
   get relayerMinBalanceWei(): bigint {

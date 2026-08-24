@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import 'dotenv/config';
 
 const DependencyGroupSchema = z.object({
   id: z.string(),
@@ -63,7 +64,6 @@ export const SrclaConfigSchema = z.object({
 export const ConfigSchema = z.object({
   // Chain
   baseRpcUrl: z.string().url(),
-  sepoliaRpcUrl: z.string().url(),
   chainId: z.number().default(8453),
 
   // Contracts
@@ -71,6 +71,7 @@ export const ConfigSchema = z.object({
   aaveStrategyAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   compoundStrategyAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   moonwellStrategyAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  rewardAccountantAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
   rewardExecutorAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   usdcAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
 
@@ -104,13 +105,13 @@ export function loadConfig(): Config {
   if (cachedConfig) return cachedConfig;
 
   const raw = {
-    baseRpcUrl: process.env.BASE_RPC_URL ?? 'https://mainnet.base.org',
-    sepoliaRpcUrl: process.env.SEPOLIA_RPC_URL ?? 'https://rpc.sepolia.org',
+    baseRpcUrl: process.env.BASE_RPC_URL ?? 'http://127.0.0.1:8545',
     chainId: parseInt(process.env.CHAIN_ID ?? '8453', 10),
     vaultAddress: process.env.VAULT_ADDRESS ?? '',
     aaveStrategyAddress: process.env.AAVE_STRATEGY_ADDRESS ?? '',
     compoundStrategyAddress: process.env.COMPOUND_STRATEGY_ADDRESS ?? '',
     moonwellStrategyAddress: process.env.MOONWELL_STRATEGY_ADDRESS ?? '',
+    rewardAccountantAddress: process.env.REWARD_ACCOUNTANT_ADDRESS,
     rewardExecutorAddress: process.env.REWARD_EXECUTOR_ADDRESS ?? '',
     usdcAddress: process.env.USDC_ADDRESS ?? '',
     databaseUrl: process.env.DATABASE_URL ?? '',

@@ -66,7 +66,7 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
     const rpcUrl = config.evmRpcUrl;
     const vaultAddress = config.vaultAddress;
 
-    if (!rpcUrl) throw new Error('Missing SEPOLIA_RPC_URL');
+    if (!rpcUrl) throw new Error('Missing BASE_RPC_URL');
     if (!vaultAddress) throw new Error('Missing NAVY_VAULT_ADDRESS');
 
     this.provider = new ethers.JsonRpcProvider(rpcUrl, config.evmChainId);

@@ -26,6 +26,8 @@ export interface SchedulerConfig {
   forecastHorizonSeconds: number;
   /** Artifact hash for calibration traceability */
   artifactHash: string;
+  /** Chain ID for block records */
+  chainId: number;
   /** Optional forecaster for production decisions (deprecated: use selected method from DB) */
   forecaster?: RollingForecast;
 }
@@ -207,7 +209,7 @@ export class Scheduler {
         await this.prisma.chainBlock.upsert({
           where: { blockHash: snapshot.blockHash },
           create: {
-            chainId: 8453, // Base chainId
+            chainId: this.config.chainId, // Use configured chain ID (8453 for Base/Anvil)
             blockNumber: BigInt(snapshot.blockNumber),
             blockHash: snapshot.blockHash,
             timestamp: snapshot.timestamp,

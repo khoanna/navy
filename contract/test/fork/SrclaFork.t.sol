@@ -16,15 +16,15 @@ import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
  * - State consistency at decision points
  */
 contract SrclaForkTest is Test {
-    // Deployed NavyVaultSRCLA on Sepolia
-    address constant VAULT_ADDRESS = 0x28f8Da914C1fc5acfC5FC1bb8273829d0Fd3daDE;
-    address constant COMPOUND_ADAPTER = 0x24d4173e6b9734a52c20190a9c5681ef350D8fE2;
+    // Deployed NavyVaultSRCLA on Base
+    address constant VAULT_ADDRESS = 0x55E728b08FdB9432520FB3Fd1b9D7777320f8ED3;
+    address constant COMPOUND_ADAPTER = 0xcF3755C6Ab0Af30bBfffB099f50C8775183ee90d;
     
     NavyVaultSRCLA vault;
     bool forkCreated;
     
     function setUp() public {
-        string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
+        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) {
             forkCreated = false;
             return;

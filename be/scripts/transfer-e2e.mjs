@@ -2,14 +2,14 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 
-const RPC = process.env.SEPOLIA_RPC_URL;
+const RPC = process.env.BASE_RPC_URL;
 const USDC = process.env.NAVY_USDC_ADDRESS;
 const relayerPk = process.env.NAVY_RELAYER_PRIVATE_KEY;
 const senderPk = process.env.E2E_SENDER_PK;
 const recipient = process.env.E2E_RECIPIENT_ADDR;
-const name = process.env.NAVY_USDC_EIP712_NAME ?? 'USDC';
+const name = process.env.NAVY_USDC_EIP712_NAME ?? 'USD Coin';
 const version = process.env.NAVY_USDC_EIP712_VERSION ?? '2';
-const chainId = Number(process.env.EVM_CHAIN_ID ?? 11155111);
+const chainId = Number(process.env.EVM_CHAIN_ID ?? 8453);
 
 const abi = [
   'function balanceOf(address) view returns (uint256)',

@@ -69,6 +69,7 @@ async function main(): Promise<void> {
     heldOutWindowDays: HELD_OUT_WINDOW_DAYS,
     forecastHorizonSeconds: FORECAST_HORIZON_SECONDS,
     artifactHash: '5ed517d128bab909',
+    chainId: config.chainId,
   }, config.vaultAddress);
 
   // Build HTTP server

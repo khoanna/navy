@@ -6,21 +6,23 @@ export interface CollectorConfig {
     moonwell: string;
   };
   usdcAddress: string;
+  chainRpcUrl?: string;
+  chainId?: number;
   /** RewardAccountant contract address for reward state */
-  rewardAccountantAddress?: string;
+  rewardAccountantAddress?: string | undefined;
   /** RewardExecutor contract address for route status */
-  rewardExecutorAddress?: string;
+  rewardExecutorAddress?: string | undefined;
   /**
    * Known dependency group IDs for the vault.
    * The vault's getDependencyGroup(bytes32 groupId) returns (capBps, absoluteCap, members[]).
    * Configure this list based on the deployed vault's group configuration.
    */
-  dependencyGroupIds?: string[];
+  dependencyGroupIds?: string[] | undefined;
   /**
    * Known reward token addresses to check for staleness.
    * The collector will check tokenCache for each address via RewardAccountant.
    */
-  rewardTokenAddresses?: string[];
+  rewardTokenAddresses?: string[] | undefined;
 }
 
 export interface CollectedSnapshot {

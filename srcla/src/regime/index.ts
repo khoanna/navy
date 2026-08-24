@@ -19,3 +19,4 @@ export {
 // Classes
 export { RegimeTracker, DEFAULT_REGIME_THRESHOLDS, DEFAULT_REGIME_DETECTOR_CONFIG } from './regime-tracker.js';
 export { ColdStartEnforcer, DEFAULT_COLD_START_CONFIG, type ColdStartConfig, type ColdStartRecord } from './cold-start.js';
+export { RegimeRepository } from './repository.js';

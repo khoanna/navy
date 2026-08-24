@@ -7,10 +7,10 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 
-const RPC = process.env.SEPOLIA_RPC_URL;
+const RPC = process.env.BASE_RPC_URL;
 const senderPk = process.env.E2E_SENDER_PK;
 const recipient = process.env.E2E_RECIPIENT_ADDR;
-const chainId = Number(process.env.EVM_CHAIN_ID ?? 11155111);
+const chainId = Number(process.env.EVM_CHAIN_ID ?? 8453);
 
 if (!senderPk || !recipient) {
   console.error('Set E2E_SENDER_PK (funded) and E2E_RECIPIENT_ADDR, then re-run.');

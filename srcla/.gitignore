@@ -5,3 +5,8 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# Generated/Local files
+MEMORY.md
+evaluation-results.json
+.env

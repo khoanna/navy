@@ -7,7 +7,7 @@
 // invalidates the old nonce.
 //
 // Run (from be/):  node scripts/evm-e2e.mjs
-// Needs in be/.env: SEPOLIA_RPC_URL, NAVY_PAYMENTS_ADDRESS, NAVY_USDC_ADDRESS,
+// Needs in be/.env: BASE_RPC_URL, NAVY_PAYMENTS_ADDRESS, NAVY_USDC_ADDRESS,
 //   NAVY_TREASURY_ADDRESS, NAVY_OWNER_PRIVATE_KEY, NAVY_RELAYER_PRIVATE_KEY,
 //   NAVY_USDC_EIP712_NAME / NAVY_USDC_EIP712_VERSION
 // and in contract/e2e-actors.env: E2E_PAYER_PRIVATE_KEY, E2E_MERCHANT_PAYOUT_ADDRESS.
@@ -33,7 +33,7 @@ loadEnv(join(beRoot, '..', 'contract', 'e2e-actors.env'));
 
 function req(k) { const v = process.env[k]; if (!v) throw new Error(`Missing env ${k}`); return v; }
 
-const CHAIN_ID = parseInt(process.env.EVM_CHAIN_ID ?? '11155111', 10);
+const CHAIN_ID = parseInt(process.env.EVM_CHAIN_ID ?? '8453', 10);
 const AMOUNT = BigInt(process.env.E2E_AMOUNT_BASE ?? '500000'); // default 0.5 USDC (6 decimals)
 
 // helpers mirroring be/src/evm/payment-authorization.ts
@@ -61,7 +61,8 @@ const USDC_ABI = [
 function log(ok, msg) { console.log(`${ok ? '✓' : '✗'} ${msg}`); if (!ok) process.exitCode = 1; }
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(req('SEPOLIA_RPC_URL'), CHAIN_ID);
+  const rpc = process.env.BASE_RPC_URL ?? req('BASE_RPC_URL');
+  const provider = new ethers.JsonRpcProvider(rpc, CHAIN_ID);
   const owner = new ethers.Wallet(req('NAVY_OWNER_PRIVATE_KEY'), provider);
   const relayer = new ethers.Wallet(req('NAVY_RELAYER_PRIVATE_KEY'), provider);
   const payer = new ethers.Wallet(req('E2E_PAYER_PRIVATE_KEY'), provider);

@@ -56,14 +56,14 @@ describe('NavyConfigService EVM getters', () => {
   it('exposes EVM getters with sensible defaults', () => {
     const cfg = new NavyConfigService({
       ...BASE,
-      SEPOLIA_RPC_URL: 'https://sepolia.example',
+      BASE_RPC_URL: 'https://base.example',
       NAVY_PAYMENTS_ADDRESS: '0x1111111111111111111111111111111111111111',
-      NAVY_USDC_ADDRESS: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+      NAVY_USDC_ADDRESS: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       NAVY_TREASURY_ADDRESS: '0x2222222222222222222222222222222222222222',
       NAVY_RELAYER_PRIVATE_KEY: '0x' + '1'.repeat(64),
       NAVY_OWNER_PRIVATE_KEY: '0x' + '2'.repeat(64),
     });
-    expect(cfg.evmChainId).toBe(11155111);
+    expect(cfg.evmChainId).toBe(8453);
     expect(cfg.usdcEip712Name).toBe('USDC');
     expect(cfg.usdcEip712Version).toBe('2');
     expect(cfg.relayerMinBalanceWei).toBe(20000000000000000n); // 0.02 ETH

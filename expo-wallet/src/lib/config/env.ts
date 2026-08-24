@@ -2,11 +2,11 @@ export interface NavyEnv {
   privyAppId: string;
   privyClientId: string;
   navyApiUrl: string;
-  /** Ethereum Sepolia JSON-RPC endpoint (used for balance reads). */
-  sepoliaRpc: string;
-  /** USDC (6-decimal) ERC-20 contract address on Sepolia. */
+  /** Base JSON-RPC endpoint (used for balance reads). */
+  baseRpc: string;
+  /** USDC (6-decimal) ERC-20 contract address on Base. */
   usdcAddress: string;
-  /** EVM chain id (Sepolia = 11155111), kept as a string in config. */
+  /** EVM chain id (Base = 8453), kept as a string in config. */
   chainId: string;
 }
 
@@ -20,7 +20,7 @@ export function readEnv(extra: RawExtra): NavyEnv {
   };
   return {
     privyAppId: req('privyAppId'), privyClientId: req('privyClientId'), navyApiUrl: req('navyApiUrl'),
-    sepoliaRpc: req('sepoliaRpc'), usdcAddress: req('usdcAddress'), chainId: req('chainId'),
+    baseRpc: req('baseRpc'), usdcAddress: req('usdcAddress'), chainId: req('chainId'),
   };
 }
 
@@ -30,7 +30,7 @@ export function getEnv(): NavyEnv {
     privyAppId: process.env.EXPO_PUBLIC_PRIVY_APP_ID,
     privyClientId: process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID,
     navyApiUrl: process.env.EXPO_PUBLIC_NAVY_API_URL,
-    sepoliaRpc: process.env.EXPO_PUBLIC_SEPOLIA_RPC,
+    baseRpc: process.env.EXPO_PUBLIC_BASE_RPC,
     usdcAddress: process.env.EXPO_PUBLIC_USDC_ADDRESS,
     chainId: process.env.EXPO_PUBLIC_CHAIN_ID,
   });

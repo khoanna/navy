@@ -55,7 +55,7 @@ export default function Home() {
       let eth = '0';
       let usdc = '0';
       if (address) {
-        const provider = new JsonRpcProvider(env.sepoliaRpc);
+        const provider = new JsonRpcProvider(env.baseRpc);
         const usdcReader = makeUsdcReader(provider, env.usdcAddress);
         const b = await fetchBalances(provider, address, usdcReader);
         eth = weiToEth(b.ethWei);

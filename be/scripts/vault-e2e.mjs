@@ -6,9 +6,9 @@
 // back to USDC. Standalone (no backend/DB needed).
 //
 // Run (from be/):  NAVY_VAULT_E2E=1 node scripts/vault-e2e.mjs
-// Needs in be/.env: SEPOLIA_RPC_URL, NAVY_VAULT_ADDRESS, NAVY_USDC_ADDRESS (Circle),
+// Needs in be/.env: BASE_RPC_URL, NAVY_VAULT_ADDRESS, NAVY_USDC_ADDRESS (Circle),
 //   NAVY_RELAYER_PRIVATE_KEY, NAVY_KEEPER_PRIVATE_KEY (or NAVY_OWNER_PRIVATE_KEY),
-//   NAVY_VAULT_E2E_PAYER_KEY (a plain EOA holding Sepolia USDC), and optionally
+//   NAVY_VAULT_E2E_PAYER_KEY (a plain EOA holding Base USDC), and optionally
 //   NAVY_USDC_EIP712_NAME/VERSION, NAVY_VAULT_EIP712_NAME/VERSION.
 //
 // GATING: prints a no-op message and exits 0 unless NAVY_VAULT_E2E=1 AND NAVY_VAULT_ADDRESS is set,
@@ -43,7 +43,7 @@ if (!process.env.NAVY_VAULT_ADDRESS) {
 }
 
 const req = (k) => { const v = process.env[k]; if (!v) throw new Error(`Missing env ${k}`); return v; };
-const CHAIN_ID = parseInt(process.env.EVM_CHAIN_ID ?? '11155111', 10);
+const CHAIN_ID = parseInt(process.env.EVM_CHAIN_ID ?? '8453', 10);
 const AMOUNT = BigInt(process.env.VAULT_E2E_AMOUNT_BASE ?? '1000000'); // default 1 USDC (6 decimals)
 
 const VAULT_ABI = JSON.parse(readFileSync(join(beRoot, 'src/evm/navy-vault-abi.json'), 'utf8')); // BARE ARRAY
@@ -74,7 +74,8 @@ const PERMIT_TYPES = {
 function log(ok, msg) { console.log(`${ok ? '✓' : '✗'} ${msg}`); if (!ok) process.exitCode = 1; }
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(req('SEPOLIA_RPC_URL'), CHAIN_ID);
+  const rpc = process.env.BASE_RPC_URL ?? req('BASE_RPC_URL');
+  const provider = new ethers.JsonRpcProvider(rpc, CHAIN_ID);
   const relayer = new ethers.Wallet(req('NAVY_RELAYER_PRIVATE_KEY'), provider);
   const keeper = new ethers.Wallet(process.env.NAVY_KEEPER_PRIVATE_KEY ?? req('NAVY_OWNER_PRIVATE_KEY'), provider);
   const payer = new ethers.Wallet(req('NAVY_VAULT_E2E_PAYER_KEY'), provider); // plain EOA holding USDC

@@ -4,3 +4,4 @@
  * Exports the evaluation runner and related types.
  */
 export * from './runner.js';
+export * from './integration.js';

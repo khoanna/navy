@@ -5,10 +5,10 @@ import {Test} from "forge-std/Test.sol";
 import {NavyPayments} from "../src/NavyPayments.sol";
 import {IEIP3009} from "../src/interfaces/IEIP3009.sol";
 
-/// @dev Exercises the REAL Circle Sepolia USDC EIP-3009 receiveWithAuthorization on a Sepolia fork.
-/// Skips automatically when SEPOLIA_RPC_URL is not set.
+/// @dev Exercises the REAL Circle Base USDC EIP-3009 receiveWithAuthorization on a Base fork.
+/// Skips automatically when BASE_RPC_URL is not set.
 contract NavyPaymentsForkTest is Test {
-    address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
     NavyPayments navy;
     address owner = address(0x0111);
@@ -19,7 +19,7 @@ contract NavyPaymentsForkTest is Test {
     uint256 payerPk = 0xA11CE;
 
     function setUp() public {
-        string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
+        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
 
@@ -54,7 +54,7 @@ contract NavyPaymentsForkTest is Test {
 
     function test_fork_realUsdcReceiveWithAuthorization() public {
         if (address(navy) == address(0)) {
-            emit log("SKIP: set SEPOLIA_RPC_URL to run the fork test");
+            emit log("SKIP: set BASE_RPC_URL to run the fork test");
             vm.skip(true);
             return;
         }

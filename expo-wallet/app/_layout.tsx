@@ -4,6 +4,7 @@ import { PrivyProvider } from '@privy-io/expo';
 import { PrivyElements } from '@privy-io/expo/ui';
 import { Slot } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { base } from '@privy-io/react-native'; // Base chain for Anvil/Base mainnet
 import { getEnv } from '@/lib/config/env';
 import { SessionProvider } from '@/lib/auth/SessionContext';
 import { ToastProvider } from '@/ui/Toast';
@@ -16,12 +17,13 @@ export default function Root() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         {/* @privy-io/expo PrivyProvider config.embedded.ethereum.createOnLogin provisions
-            an EVM (Ethereum/Sepolia) embedded wallet on login for users who don't have one.
+            an EVM (Base) embedded wallet on login for users who don't have one.
             The app uses useEmbeddedEthereumWallet + useMobileSigner (EVM signer);
             useMobileSigner still keeps the fallback provisioning latch as a backstop. */}
         <PrivyProvider
           appId={env.privyAppId}
           clientId={env.privyClientId}
+          supportedChains={[base]}
           config={{ embedded: { ethereum: { createOnLogin: 'users-without-wallets' } } }}
         >
           <SessionProvider>

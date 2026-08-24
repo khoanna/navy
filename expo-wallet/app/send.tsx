@@ -167,7 +167,7 @@ function SendInner({
   // Load balances.
   useEffect(() => {
     let active = true;
-    const provider = new JsonRpcProvider(getEnv().sepoliaRpc);
+    const provider = new JsonRpcProvider(getEnv().baseRpc);
     const usdcReader = makeUsdcReader(provider, getEnv().usdcAddress);
     fetchBalances(provider, myAddress, usdcReader)
       .then((b) => {
