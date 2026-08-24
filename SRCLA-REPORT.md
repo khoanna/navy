@@ -117,7 +117,7 @@ The architecture separates **immutable custody and accounting** from **replaceab
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              Immutable RewardExecutor                             │
+│              Immutable RewardExecutor                            │
 │        Uniswap V3 routes → USDC → NavyVault                     │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -126,7 +126,7 @@ The architecture separates **immutable custody and accounting** from **replaceab
 ├─────────────────┬─────────────────┬───────────────────────────────┤
 │  Finalized       │  Forecast,      │  Cost/Emergency             │
 │  Snapshot        │  Reserve,       │  Decision Engine            │
-│  Collector        │  Optimizer       │  + Executor                │
+│  Collector       │  Optimizer      │  + Executor                 │
 └─────────────────┴─────────────────┴───────────────────────────────┘
 ```
 
@@ -188,13 +188,9 @@ cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "totalSupply()(uint256)"
 
 **Critical finding:** Compound III at 90.38% utilization limits capacity.
 
-**Calculation:**
+$$Available\ Capacity = Total\ Supply \times (1 - Utilization)$$
 
-```
-Available Capacity = Total Supply × (1 - Utilization)
-                  = $9.25B × 9.62%
-                  ≈ $890M
-```
+$$= \$9.25B \times 9.62\% \approx \$890M$$
 
 **For a $100K vault:**
 - Compound allocation limited by per-adapter cap (50% = $50K)
@@ -208,21 +204,15 @@ This validates SRCLA's capacity-aware allocation — deploying 100% to Compound 
 
 ### 4.1 Forecast Target
 
-At origin t, for market i, candidate allocation x, and horizon H, the target is the next realized unannualized net holding-period return:
+At origin $t$, for market $i$, candidate allocation $x$, and horizon $H$, the target is the next realized unannualized net holding-period return:
 
-```
-R(i,t→t+H)(x) = R_base(i,t→t+H)(x) 
-               + R_reward(i,t→t+H)(x) 
-               - C_claim/swap(i,t→t+H)(x) / x
-```
+$$R_{i,t \rightarrow t+H}(x) = R^{\text{base}}_{i,t \rightarrow t+H}(x) + R^{\text{reward}}_{i,t \rightarrow t+H}(x) - \frac{C^{\text{claim/swap}}_{i,t \rightarrow t+H}(x)}{x}$$
 
 The planning input is a **lower prediction bound** for the next outcome:
 
-```
-ℓ(i,t,H)(x) = μ_hat(i,t,H)(x) + q_alpha,t
-```
+$$\ell_{i,t,H}(x) = \hat{\mu}_{i,t,H}(x) + q_{\alpha,t}, \quad q_{\alpha,t} \leq 0$$
 
-Where q_alpha,t ≤ 0 is a calibrated lower quantile of completed horizon residuals.
+Where $q_{\alpha,t} \leq 0$ is a calibrated lower quantile of completed horizon residuals.
 
 ### 4.2 Three Registered Candidate Methods
 
@@ -268,125 +258,135 @@ Per SRCLA Paper §7.2, we evaluate **exactly three deterministic forecast candid
 
 ### 5.1 Dynamic Idle Reserve Formula
 
-Per Paper §8.1, the required idle amount is calculated as the maximum of three components:
+Per Paper §8.1, the required idle amount is:
 
-```
-I_required(x) = max(I_floor, Q_β(W_H), max_s(D_s - E_s(x)))
-```
+$$I_t^{\text{required}}(x) = \max\left(I^{\text{floor}}, Q_\beta(W_H), \max_s\{D_s - E_s(x)\}\right)$$
 
-**Where:**
+**Variable Definitions:**
 
 | Symbol | Meaning |
 |--------|---------|
-| I_floor | Administrator-defined minimum idle floor |
-| Q_β(W_H) | Withdrawal-demand quantile at horizon H |
-| D_s | Withdrawal demand in stress scenario s |
-| E_s(x) | Stressed executable exit of candidate positions x |
+| $I^{\text{floor}}$ | Administrator's non-bypassable idle floor |
+| $Q_\beta(W_H)$ | Registered withdrawal-demand quantile |
+| $D_s$ | Withdrawal demand in stress scenario $s$ |
+| $E_s(x)$ | Stressed executable exit of positions $x$ |
 
 **Stress feasibility constraint:**
 
-```
-w0 × V_t + Σ_i min(x_i, e_i,s) ≥ D_s  for all s
-```
+$$w_0 V_t + \sum_i \min(x_i, e_{i,s}) \geq D_s \quad \forall s$$
 
 ### 5.2 TVL-Dependent Allocation Formula
 
 **Yes, Total Assets (TVL = tier) directly affects allocation:**
 
-```
-min_reserve = totalAssets × minReserveBps / 10000
-max_per_adapter = totalAssets × maxMarketCapBps / 10000
-target_amount = min(effective_capacity, max_per_adapter, remaining_tvl)
-```
+$$min\_reserve = totalAssets \times minReserveBps / 10000$$
+
+$$max\_per\_adapter = totalAssets \times maxMarketCapBps / 10000$$
+
+$$target\_amount = \min(effective\_capacity,\ max\_per\_adapter,\ remaining\_tvl)$$
 
 **Key Variables (ALL depend on TVL):**
 
 | Variable | Formula | Role |
 |----------|---------|------|
-| totalAssets | **The tier value (10K, 100K, 1M, 10M)** | Base for all calculations |
-| min_reserve | TVL × minReserveBps / 10000 | Idle buffer per dynamic reserve |
-| max_per_adapter | TVL × maxMarketCapBps / 10000 | Per-protocol cap |
-| remaining_tvl | TVL - min_reserve | Deployable funds |
+| $V_t$ | **The tier value (10K, 100K, 1M, 10M)** | Base for all calculations |
+| $w_0 V_t$ | $V_t \times minReserveBps / 10000$ | Idle buffer per dynamic reserve |
+| $w_i V_t$ | $V_t \times maxMarketCapBps / 10000$ | Per-protocol cap |
+| $V_t - w_0 V_t$ | $V_t - min\_reserve$ | Deployable funds |
 
 ### 5.3 Constrained Optimization
 
-SRCLA chooses the allocation that maximizes expected return:
+SRCLA chooses:
 
-```
-w* = argmax_w Σ_i w_i × ℓ_i,t,H(w_i × V_t)
-```
+$$w^* = \arg\max_w \sum_i w_i \, \ell_{i,t,H}(w_i V_t)$$
 
-**Subject to constraints:**
+Subject to:
 
-| Constraint | Formula | Description |
-|------------|---------|-------------|
-| Reserve | w0 × V_t ≥ I_required | Must maintain minimum idle |
-| Market Cap | w_i × V_t ≤ min(c_i^pct × V_t, c_i^abs, c_i^external) | Cannot exceed per-adapter limit |
-| Group Cap | Σ_{i∈g} w_i × V_t ≤ c_g^dependency | Shared dependency limit |
+$$w_0 + \sum_i w_i = 1, \quad w_0 \geq 0, \quad w_i \geq 0$$
+
+**Reserve constraint:**
+
+$$w_0 V_t \geq I_t^{\text{required}}(w_1 V_t, \ldots, w_n V_t)$$
+
+**Market cap constraint:**
+
+$$w_i V_t \leq \min\left(c_i^{\text{pct}} V_t,\ c_i^{\text{abs}},\ c_i^{\text{external}}\right)$$
+
+**Dependency group constraint (for every group $g$):**
+
+$$\sum_{i \in g} w_i V_t \leq c_g^{\text{dependency}}$$
 
 ### 5.4 Concrete Allocation Calculations by Tier
 
 #### $100K Vault
 
-```
-Input:
-• totalAssets = 100,000 USDC
-• minReserveBps = 500 (5%)
-• maxMarketCapBps = 5000 (50%)
+**Inputs:**
 
-Calculations:
-• min_reserve = 100,000 × 500 / 10000 = 5,000 USDC
-• deployable = 100,000 - 5,000 = 95,000 USDC
-• max_per_adapter = 100,000 × 5000 / 10000 = 50,000 USDC
-```
+| Parameter | Value |
+|-----------|-------|
+| $V_t$ (totalAssets) | 100,000 USDC |
+| minReserveBps | 500 (5%) |
+| maxMarketCapBps | 5000 (50%) |
+
+**Calculations:**
+
+$$min\_reserve = 100{,}000 \times \frac{500}{10000} = 5{,}000\ USDC$$
+
+$$deployable = 100{,}000 - 5{,}000 = 95{,}000\ USDC$$
+
+$$max\_per\_adapter = 100{,}000 \times \frac{5000}{10000} = 50{,}000\ USDC$$
 
 **Allocation Table:**
 
-| Protocol | Target % | Amount | Calculation |
-|----------|----------|--------|-------------|
-| Compound III | 55% | $50,000 | min($784M_cap, 50K_max, 95K_remaining) |
-| Aave V3 | 28% | $28,000 | min($X_cap, 28K_max, 45K_remaining) |
-| Moonwell | 12% | $12,000 | min($Y_cap, 12K_max, 17K_remaining) |
-| Idle | 5% | $5,000 | min_reserve |
+| Protocol | Target $w_i$ | Amount $w_i V_t$ | Constraint |
+|----------|--------------|------------------|------------|
+| Compound III | 50% | $50,000 | $\min(\$784M_{cap},\ 50K_{max},\ 95K_{deployable})$ |
+| Aave V3 | 28% | $28,000 | $\min(\$_{cap},\ 28K_{max},\ 45K_{remaining})$ |
+| Moonwell | 12% | $12,000 | $\min(\$_{cap},\ 12K_{max},\ 17K_{remaining})$ |
+| Idle ($w_0$) | 5% | $5,000 | $min\_reserve$ |
 | **Total** | **100%** | **$100,000** | ✓ |
 
 #### $10M Vault
 
-```
-Input:
-• totalAssets = 10,000,000 USDC
-• minReserveBps = 1000 (10%)  ← Higher for larger tier
-• maxMarketCapBps = 5000 (50%)
+**Inputs:**
 
-Calculations:
-• min_reserve = 10M × 1000 / 10000 = 1,000,000 USDC
-• deployable = 10M - 1M = 9,000,000 USDC
-• max_per_adapter = 10M × 5000 / 10000 = 5,000,000 USDC
-```
+| Parameter | Value |
+|-----------|-------|
+| $V_t$ (totalAssets) | 10,000,000 USDC |
+| minReserveBps | 1000 (10%) ← Higher for larger tier |
+| maxMarketCapBps | 5000 (50%) |
+
+**Calculations:**
+
+$$min\_reserve = 10{,}000{,}000 \times \frac{1000}{10000} = 1{,}000{,}000\ USDC$$
+
+$$deployable = 10{,}000{,}000 - 1{,}000{,}000 = 9{,}000{,}000\ USDC$$
+
+$$max\_per\_adapter = 10{,}000{,}000 \times \frac{5000}{10000} = 5{,}000{,}000\ USDC$$
 
 **Allocation Table:**
 
-| Protocol | Target % | Amount | Calculation |
-|----------|----------|--------|-------------|
-| Compound III | 45% | $4,500,000 | min($784M_cap, 4.5M_max, 9M_remaining) |
-| Aave V3 | 30% | $3,000,000 | min($X_cap, 3M_max, 4.5M_remaining) |
-| Moonwell | 15% | $1,500,000 | min($Y_cap, 1.5M_max, 1.5M_remaining) |
-| Idle | 10% | $1,000,000 | min_reserve (higher for safety) |
+| Protocol | Target $w_i$ | Amount $w_i V_t$ | Constraint |
+|----------|--------------|------------------|------------|
+| Compound III | 45% | $4,500,000 | $\min(\$784M_{cap},\ 4.5M_{max},\ 9M_{deployable})$ |
+| Aave V3 | 30% | $3,000,000 | $\min(\$_{cap},\ 3M_{max},\ 4.5M_{remaining})$ |
+| Moonwell | 15% | $1,500,000 | $\min(\$_{cap},\ 1.5M_{max},\ 1.5M_{remaining})$ |
+| Idle ($w_0$) | 10% | $1,000,000 | $min\_reserve$ (higher for safety) |
 | **Total** | **100%** | **$10,000,000** | ✓ |
 
 ### 5.5 Tier-Specific Idle Reserve
 
-| Tier | TVL | minReserveBps | Idle Reserve | Formula |
-|------|-----|----------------|-------------|---------|
-| 10K | $10,000 | 500 | $500 | 10K × 500 / 10000 |
-| 100K | $100,000 | 500 | $5,000 | 100K × 500 / 10000 |
-| 1M | $1,000,000 | 500 | $50,000 | 1M × 500 / 10000 |
-| 10M | $10,000,000 | 1000 | $1,000,000 | 10M × 1000 / 10000 |
+| Tier | $V_t$ (TVL) | minReserveBps | $w_0 V_t$ (Idle Reserve) | Formula |
+|------|-------------|----------------|--------------------------|---------|
+| 10K | $10,000 | 500 | $500 | $10{,}000 \times 500 / 10000$ |
+| 100K | $100,000 | 500 | $5,000 | $100{,}000 \times 500 / 10000$ |
+| 1M | $1,000,000 | 500 | $50,000 | $1{,}000{,}000 \times 500 / 10000$ |
+| 10M | $10,000,000 | 1000 | $1,000,000 | $10{,}000{,}000 \times 1000 / 10000$ |
 
 **Why larger tiers require higher idle reserve:**
 
-- Q_β(W_H) (withdrawal quantile) grows with vault size
-- max_s(D_s - E_s(x)) (stress shortfall) scales with TVL
+- $Q_\beta(W_H)$ (withdrawal quantile) grows with vault size
+- $\max_s\{D_s - E_s(x)\}$ (stress shortfall) scales with TVL
 - Larger vaults face more withdrawal pressure in stress scenarios
 
 ---
@@ -397,40 +397,31 @@ Calculations:
 
 Capital moves only when conservative horizon gain exceeds complete movement cost:
 
-```
-G_H > C_move
-```
+$$G_H > C_{\text{move}}$$
 
 **Complete movement cost breakdown:**
 
-```
-C_move = C_L2 + C_L1data + C_exit + C_entry
-       + C_claim + C_approve/reset + C_swap
-       + C_impact + C_slippage/MEV + C_failure + C_buffer
-```
+$$C_{\text{move}} = C_{\text{L2}} + C_{\text{L1data}} + C_{\text{exit}} + C_{\text{entry}} + C_{\text{claim}} + C_{\text{approve/reset}} + C_{\text{swap}} + C_{\text{impact}} + C_{\text{slippage/MEV}} + C_{\text{failure}} + C_{\text{buffer}}$$
 
 | Cost Component | Description |
 |---------------|-------------|
-| C_L2 | Base L2 execution gas |
-| C_L1data | L1 data availability fees |
-| C_exit | Exit gas from protocol |
-| C_entry | Entry gas to protocol |
-| C_claim | Reward claim gas |
-| C_approve/reset | Approval reset costs |
-| C_swap | Uniswap swap costs |
-| C_impact | DEX price impact |
-| C_slippage/MEV | Slippage and MEV costs |
-| C_failure | Failed tx risk |
-| C_buffer | Safety margin |
+| $C_{\text{L2}}$ | Base L2 execution gas |
+| $C_{\text{L1data}}$ | L1 data availability fees |
+| $C_{\text{exit}}$ | Exit gas from protocol |
+| $C_{\text{entry}}$ | Entry gas to protocol |
+| $C_{\text{claim}}$ | Reward claim gas |
+| $C_{\text{approve/reset}}$ | Approval reset costs |
+| $C_{\text{swap}}$ | Uniswap swap costs |
+| $C_{\text{impact}}$ | DEX price impact |
+| $C_{\text{slippage/MEV}}$ | Slippage and MEV costs |
+| $C_{\text{failure}}$ | Failed tx risk |
+| $C_{\text{buffer}}$ | Safety margin |
 
 ### 6.2 Event-Driven Harvest Gate
 
 There is no weekly or fixed-period harvest. The collector observes rewards every 15 minutes without paying gas. Harvest attempts when:
 
-```
-conservative_USDC_output > C_claim + C_approve/reset + C_swap
-                           + C_L1data + C_impact + C_slippage/MEV + C_buffer
-```
+$$\text{conservative USDC output} > C_{\text{claim}} + C_{\text{approve/reset}} + C_{\text{swap}} + C_{\text{L1data}} + C_{\text{impact}} + C_{\text{slippage/MEV}} + C_{\text{buffer}}$$
 
 ### 6.3 Immutable Reward Executor
 
@@ -455,20 +446,18 @@ The allocator chooses only an active route ID and bounded amount. It **cannot** 
 
 Rebalancing is staged, not atomic. A plan commits to:
 
-```
-Plan Structure:
-├── Unique plan and decision hash
-├── Policy version and configuration digest
-├── Finalized snapshot block number and hash
-├── Merkle root of ordered action commitments
-├── Target exposures and dynamic reserve
-├── Minimum final assets and maximum loss
-├── Turnover allowance
-└── Creation and expiry timestamps
-```
+| Component | Description |
+|-----------|-------------|
+| Plan hash | Unique plan and decision hash |
+| Policy version | Version and configuration digest |
+| Snapshot | Finalized block number and hash |
+| Actions | Merkle root of ordered commitments |
+| Targets | Exposures and dynamic reserve |
+| Limits | Min final assets, max loss |
+| Turnover | Allowance |
+| Timestamps | Creation and expiry |
 
 **Vault rechecks before each action:**
-
 - Allocator authority
 - Expiry and replay state
 - Adapter lifecycle
@@ -783,7 +772,7 @@ SRCLA turns "move USDC to the best yield" into an **explicit and bounded process
 | Forecast candidates | Rolling, EW-Residual, Direct ARX |
 | Forecast horizons | 1, 7, 14 days |
 | Lower-bound coverage | 90%, 95%, 99% |
-| Reserve formula | max(admin floor, withdrawal quantile, stress shortfall) |
+| Reserve formula | $\max(I^{\text{floor}},\ Q_\beta(W_H),\ \max_s(D_s - E_s(x)))$ |
 | Rebalance | Staged, expiring, ordered actions |
 | User transactions | Standard ERC-4626 |
 
