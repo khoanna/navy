@@ -1,12 +1,13 @@
 /**
  * Constrained Optimizer - allocates funds across adapters subject to constraints
  *
- * This implements the optimization algorithm per the SRCLA design:
- * - Greedy allocation sorted by expected return
- * - Market cap constraints
+ * This module extends the GreedyAllocator with additional constraint handling:
  * - Dependency group constraints
  * - Reserve constraints
- * - Min action amount filtering
+ * - Absolute exposure limits
+ * - Constraint validation
+ *
+ * For simple greedy allocation without constraints, use GreedyAllocator directly.
  */
 
 import { DependencyGroups } from './dependency-groups.js';

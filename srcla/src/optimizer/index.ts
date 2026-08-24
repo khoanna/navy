@@ -6,6 +6,13 @@ export {
   OptimizationResult,
   ViolationType,
 } from './constrained-optimizer.js';
+export { GreedyAllocator } from './greedy-allocator.js';
+export type {
+  AllocatableMarket,
+  MarketAllocation,
+  AllocationResult,
+  AllocatorOptions,
+} from './greedy-allocator.js';
 export {
   ExhaustiveVerifier,
   isGreedyOptimal,

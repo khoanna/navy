@@ -30,6 +30,7 @@ import type { VaultState } from './replay/state.js';
 import type { TimeOrderedSnapshot } from './dataset.js';
 import type { BaselineAction } from './replay/replay.js';
 import { WAD, RAY } from '../protocols/math.js';
+import { GreedyAllocator } from '../optimizer/greedy-allocator.js';
 
 export interface SRCLAPolicyConfig {
   /** Forecast lower bound coverage target (0.95 = 95%) */
@@ -312,28 +313,32 @@ function computeEffectiveCapacity(
 
 /**
  * Compute target allocation using greedy constrained optimizer
+ *
+ * Uses the unified GreedyAllocator for consistency across the codebase.
  */
 function computeTargetAllocation(
   state: VaultState,
   markets: Array<{ marketId: string; expectedReturn: bigint; effectiveCapacity: bigint }>,
   cfg: SRCLAPolicyConfig,
 ): Map<string, bigint> {
+  const allocator = new GreedyAllocator();
+
+  // Convert markets to GreedyAllocator format
+  const allocatableMarkets = markets.map((m) => ({
+    id: m.marketId,
+    expectedReturn: m.expectedReturn,
+    capacity: m.effectiveCapacity,
+  }));
+
+  const result = allocator.allocate(state.totalAssets, allocatableMarkets, {
+    maxPerAdapter: cfg.maxAdapterAllocation,
+    idleBufferBps: cfg.maxIdleBps,
+  });
+
+  // Build result map
   const allocation = new Map<string, bigint>();
-  let remaining = state.totalAssets - (state.totalAssets * BigInt(cfg.maxIdleBps)) / 10_000n;
-
-  // Sort by expected return
-  const sorted = [...markets].sort((a, b) =>
-    b.expectedReturn > a.expectedReturn ? 1 : -1,
-  );
-
-  for (const market of sorted) {
-    if (remaining <= 0n) break;
-
-    // Max allocation per adapter
-    const maxPerAdapter = (state.totalAssets * BigInt(cfg.maxAdapterAllocation)) / 10_000n;
-    const target = minBigInt(minBigInt(market.effectiveCapacity, maxPerAdapter), remaining);
-    allocation.set(market.marketId, target);
-    remaining -= target;
+  for (const alloc of result.allocations) {
+    allocation.set(alloc.marketId, alloc.amount);
   }
 
   return allocation;

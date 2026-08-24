@@ -1,4 +1,5 @@
-export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+/** UUID v4 regex pattern for validating invoice IDs. */
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /** True if `id` is a canonical UUID (used to guard hand-typed /pay/<x> URLs). */
 export function isUuid(id: string): boolean {

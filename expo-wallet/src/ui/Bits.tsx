@@ -1,11 +1,10 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import {
   View,
   Pressable,
   StyleSheet,
   StyleProp,
   ViewStyle,
-  Animated,
 } from 'react-native';
 import { colors, radius, space } from './theme';
 import { Text } from './Text';

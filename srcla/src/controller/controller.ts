@@ -20,6 +20,7 @@ import { ActionDecisionEngine, type ActionDecision } from '../decision/action-de
 import { SnapshotCollector } from '../collector/snapshot-collector.js';
 import { computeDecisionHash, computeSnapshotHash } from '../domain/hashing.js';
 import { WAD } from '../protocols/math.js';
+import { GreedyAllocator } from '../optimizer/greedy-allocator.js';
 import {
   orderActions,
   executeOrderedActions,
@@ -715,7 +716,7 @@ export class SrclaController {
   }
 
   /**
-   * Optimize allocation
+   * Optimize allocation using unified GreedyAllocator
    */
   private optimizeAllocation(
     snapshot: { vault: { totalAssets: bigint }; strategies: Array<{ address: string; capBps?: number }> },
@@ -723,36 +724,38 @@ export class SrclaController {
     currentAllocation: Map<string, bigint>,
     isColdStart: boolean
   ): Map<string, bigint> {
-    const allocation = new Map<string, bigint>();
     const { totalAssets } = snapshot.vault;
 
-    // Apply cold start reduction
-    const capacityFactor = isColdStart ? 5000n : 10000n; // 50% or 100%
+    // Build market list from forecasts and strategies
+    const markets = forecasts
+      .map((f) => {
+        const strategy = snapshot.strategies.find((s) => s.address === f.marketId);
+        if (!strategy) return null;
 
-    // Sort by forecast lower return (highest first)
-    const sorted = [...forecasts].sort((a, b) =>
-      b.lowerReturn > a.lowerReturn ? 1 : -1
-    );
+        // Calculate capacity from capBps
+        const capBps = strategy.capBps ?? 10000;
+        const capacity = (totalAssets * BigInt(capBps)) / 10000n;
 
-    // Greedy allocation
-    let remaining = totalAssets;
+        return {
+          id: f.marketId,
+          expectedReturn: f.lowerReturn,
+          capacity,
+          currentAllocation: currentAllocation.get(f.marketId) ?? 0n,
+        };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null);
 
-    for (const forecast of sorted) {
-      if (remaining <= 0n) break;
+    // Use unified GreedyAllocator
+    const allocator = new GreedyAllocator();
+    const result = allocator.allocate(totalAssets, markets, {
+      coldStartFactor: isColdStart ? 0.5 : 1.0,
+    });
 
-      const strategy = snapshot.strategies.find((s) => s.address === forecast.marketId);
-      if (!strategy) continue;
-
-      // Cap as percentage of total assets
-      const capBps = strategy.capBps ?? 10000; // Default to 100% cap
-      const maxCap = (totalAssets * BigInt(capBps) * capacityFactor) / 10000n / 10000n;
-      const current = currentAllocation.get(forecast.marketId) ?? 0n;
-      const target = maxCap > current ? maxCap : current;
-      const toAdd = target > current ? target - current : 0n;
-
-      const allocate = toAdd > remaining ? remaining : toAdd;
-      allocation.set(forecast.marketId, current + allocate);
-      remaining -= allocate;
+    // Build result map
+    const allocation = new Map<string, bigint>();
+    for (const alloc of result.allocations) {
+      const current = currentAllocation.get(alloc.marketId) ?? 0n;
+      allocation.set(alloc.marketId, current + alloc.amount);
     }
 
     return allocation;

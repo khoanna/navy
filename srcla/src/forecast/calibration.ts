@@ -1,6 +1,9 @@
 import { PrismaClient, ForecastCalibration } from '@prisma/client';
 import type { CalibrationResult, ForecastCandidate } from './types.js';
 import { WAD } from '../protocols/math.js';
+import { RollingForecast } from './rolling.js';
+import { EWResidualForecast } from './ew-residual.js';
+import { DirectARXForecast } from './direct-arx.js';
 
 // Weekly calibration interval: 7 days * 24 hours * 60 min * 60 sec * 1000 ms
 export const WEEKLY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,7 +50,6 @@ export function calibrateAllMethods(
 
   for (const windowDays of rollingWindows) {
     for (const quantile of rollingQuantiles) {
-      const { RollingForecast } = require('./rolling.js');
       const method = new RollingForecast({ windowDays, quantile });
 
       const predictions: bigint[] = [];
@@ -86,7 +88,6 @@ export function calibrateAllMethods(
 
   for (const decay of decays) {
     for (const residualQuantile of residualQuantiles) {
-      const { EWResidualForecast } = require('./ew-residual.js');
       const method = new EWResidualForecast({ decay, residualQuantile });
 
       const predictions: bigint[] = [];
@@ -123,7 +124,6 @@ export function calibrateAllMethods(
   const lagsOptions = [3, 7, 14];
 
   for (const lags of lagsOptions) {
-    const { DirectARXForecast } = require('./direct-arx.js');
     const method = new DirectARXForecast({ lags, features: ['rate'] });
 
     const predictions: bigint[] = [];
@@ -353,23 +353,19 @@ export async function runWalkForwardCalibration(
 export function createForecaster(
   method: string,
   config: Record<string, unknown>
-): { forecast: (history: bigint[], horizonSeconds: number) => unknown } {
+): unknown {
   switch (method) {
     case 'rolling':
-      const { RollingForecast } = require('./rolling.js');
       return new RollingForecast(config as { windowDays: number; quantile: number });
 
     case 'ew-residual':
-      const { EWResidualForecast } = require('./ew-residual.js');
       return new EWResidualForecast(config as { decay: number; residualQuantile: number });
 
     case 'arx':
-      const { DirectARXForecast } = require('./direct-arx.js');
       return new DirectARXForecast(config as { lags: number; features: string[] });
 
     default:
       console.warn(`[Calibration] Unknown method ${method}, defaulting to rolling`);
-      const { RollingForecast: RF } = require('./rolling.js');
-      return new RF({ windowDays: 30, quantile: 0.10 });
+      return new RollingForecast({ windowDays: 30, quantile: 0.10 });
   }
 }
