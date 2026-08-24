@@ -9,6 +9,7 @@ optimizer = true
 optimizer_runs = 10000
 via_ir = true
 fs_permissions = [{ access = "read", path = "./"}]
+evm_version = "cancun"
 
 # Enable bytecode size limit bypass for Anvil
 [profile.default.fuzz]

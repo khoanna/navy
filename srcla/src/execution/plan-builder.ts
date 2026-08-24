@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { ethers } from 'ethers';
 
 /**
  * Action kinds mapped to numeric codes
@@ -26,6 +27,7 @@ export interface PlanAction {
 
 /**
  * Execution plan with staged actions
+ * Matches NavyVaultSRCLA.PlanHeader exactly
  */
 export interface ExecutionPlan {
   /** Unique plan identifier (SHA-256 hash) */
@@ -44,10 +46,23 @@ export interface ExecutionPlan {
   harvestDeadline?: Date;
   /** Dynamic reserve at plan creation */
   dynamicReserve?: bigint;
+  /** Policy version (must match contract's expected version) */
+  policyVersion?: bigint;
+  /** Creation timestamp */
+  createdAt?: Date;
+  /** Snapshot block number for plan */
+  snapshotBlockNumber?: bigint;
+  /** Minimum final assets after plan execution */
+  minFinalAssets?: bigint;
+  /** Maximum recognized loss during plan execution */
+  maxRecognizedLoss?: bigint;
+  /** Turnover limit for plan execution */
+  turnoverLimit?: bigint;
 }
 
 /**
  * Encoded plan for on-chain submission
+ * Matches VaultTypes.PlanHeader exactly
  */
 export interface EncodedPlan {
   planId: string;
@@ -59,6 +74,10 @@ export interface EncodedPlan {
     amountBase: bigint;
     merkleRoot: string;
   }>;
+  /** Plan header fields for on-chain submission */
+  policyVersion: bigint;
+  createdAt: bigint;
+  snapshotBlockNumber: bigint;
   /** Configuration digest for on-chain verification */
   configurationDigest?: string;
   /** Hash of action data for verification */
@@ -67,6 +86,9 @@ export interface EncodedPlan {
   harvestDeadline?: bigint;
   /** Dynamic reserve at plan creation */
   dynamicReserve?: bigint;
+  minFinalAssets?: bigint;
+  maxRecognizedLoss?: bigint;
+  turnoverLimit?: bigint;
 }
 
 /**
@@ -97,6 +119,11 @@ export class PlanBuilder {
     actionDataHash?: string;
     harvestDeadline?: Date;
     dynamicReserve?: bigint;
+    policyVersion?: bigint;
+    snapshotBlockNumber?: bigint;
+    minFinalAssets?: bigint;
+    maxRecognizedLoss?: bigint;
+    turnoverLimit?: bigint;
   }): ExecutionPlan {
     // Generate deterministic planId from decision hash + timestamp
     const timestamp = Date.now();
@@ -123,6 +150,7 @@ export class PlanBuilder {
       decisionHash: params.decisionHash,
       expiresAt,
       actions,
+      createdAt: new Date(),
     };
 
     // Add production fields if provided
@@ -137,6 +165,21 @@ export class PlanBuilder {
     }
     if (params.dynamicReserve !== undefined) {
       plan.dynamicReserve = params.dynamicReserve;
+    }
+    if (params.policyVersion !== undefined) {
+      plan.policyVersion = params.policyVersion;
+    }
+    if (params.snapshotBlockNumber !== undefined) {
+      plan.snapshotBlockNumber = params.snapshotBlockNumber;
+    }
+    if (params.minFinalAssets !== undefined) {
+      plan.minFinalAssets = params.minFinalAssets;
+    }
+    if (params.maxRecognizedLoss !== undefined) {
+      plan.maxRecognizedLoss = params.maxRecognizedLoss;
+    }
+    if (params.turnoverLimit !== undefined) {
+      plan.turnoverLimit = params.turnoverLimit;
     }
 
     return plan;
@@ -164,12 +207,19 @@ export class PlanBuilder {
       planId: plan.planId,
       decisionHash: plan.decisionHash,
       expiresAt: BigInt(Math.floor(plan.expiresAt.getTime() / 1000)),
+      policyVersion: plan.policyVersion ?? 1n,
+      createdAt: plan.createdAt ? BigInt(Math.floor(plan.createdAt.getTime() / 1000)) : BigInt(Math.floor(Date.now() / 1000)),
+      snapshotBlockNumber: plan.snapshotBlockNumber ?? 0n,
       actions: plan.actions.map((a) => ({
         kind: a.kind,
         adapter: a.adapter,
         amountBase: a.amountBase,
         merkleRoot: a.merkleRoot,
       })),
+      configurationDigest: plan.configurationDigest ?? ethers.ZeroHash,
+      minFinalAssets: plan.minFinalAssets ?? 0n,
+      maxRecognizedLoss: plan.maxRecognizedLoss ?? 0n,
+      turnoverLimit: plan.turnoverLimit ?? 0n,
     };
 
     if (plan.configurationDigest) {

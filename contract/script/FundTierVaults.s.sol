@@ -15,8 +15,8 @@ contract FundTierVaults is Script {
     address constant VAULT_10M = 0x92261C1938B153fB03f37F3DFBd372ba9c65Cc16;
 
     // Whale addresses with USDC on Base
-    address constant WHALE1 = 0xc8628CA4F4580C5b93C8Dd47D41C23B22Ef74d1A;
-    address constant WHALE2 = 0x0c421c1D79fBf9f6D24c08f2f1C2B47B3e8c63A0;
+    address constant WHALE1 = 0xc8628ca4f4580C5b93C8Dd47D41C23B22Ef74d1A;
+    address constant WHALE2 = 0x0c421c1D79fBf9f6D24c08f2f1c2B47B3e8c63A0;
 
     uint256 constant TIER_10K = 10_000e6;
     uint256 constant TIER_100K = 100_000e6;

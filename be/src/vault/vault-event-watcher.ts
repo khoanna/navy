@@ -17,13 +17,29 @@ import { ethers } from 'ethers';
 import { PrismaService } from '../prisma/prisma.service';
 import { NavyConfigService } from '../config/config.service';
 
-// Event signatures (topic0)
+// Event signatures (topic0) - NavyVaultSRCLA.sol events
 const EVENTS = {
   Deposit: 'Deposit(address,address,uint256,uint256)',
   Withdraw: 'Withdraw(address,address,address,uint256,uint256)',
-  Reallocated: 'Reallocated(address,address,uint256)',
-  Deployed: 'Deployed(address,uint256)',
-  Divested: 'Divested(address,uint256)',
+  // Plan execution events
+  PlanSubmitted: 'PlanSubmitted(bytes32,bytes32)',
+  PlanCompleted: 'PlanCompleted(bytes32)',
+  PlanCancelled: 'PlanCancelled(bytes32)',
+  ActionExecuted: 'ActionExecuted(uint256,uint32,uint8)',
+  PlanActionExecuted: 'PlanActionExecuted(bytes32,uint256,bytes32,uint256)',
+  // Harvest and emergency
+  Harvested: 'Harvested(address,uint256)',
+  EmergencyExit: 'EmergencyExit(address,uint256)',
+  // Admin events
+  AdapterRegistered: 'AdapterRegistered(address,string,uint256,uint256)',
+  AdapterRiskSet: 'AdapterRiskSet(address,uint16,uint256,uint16)',
+  AdapterStateChanged: 'AdapterStateChanged(address,uint8)',
+  DependencyGroupSet: 'DependencyGroupSet(bytes32,uint16,uint256,address[])',
+  Pause: 'Pause()',
+  Unpause: 'Unpause()',
+  DynamicReserveSet: 'DynamicReserveSet(uint256)',
+  AdminReserveSet: 'AdminReserveSet(uint256)',
+  MaxSynchronousLossBpsSet: 'MaxSynchronousLossBpsSet(uint16)',
 } as const;
 
 export type VaultEventType = keyof typeof EVENTS;
@@ -220,12 +236,33 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
 
     // Extract sender based on event type
     let sender = '';
-    if (eventType === 'Deposit' || eventType === 'Withdraw') {
-      sender = args[0]; // sender field
-    } else if (eventType === 'Reallocated') {
-      sender = args[0]; // from adapter
-    } else if (eventType === 'Deployed' || eventType === 'Divested') {
-      sender = args[0]; // adapter address
+    switch (eventType) {
+      case 'Deposit':
+        sender = args.sender ?? args[0] ?? '';
+        break;
+      case 'Withdraw':
+        sender = args.sender ?? args[0] ?? '';
+        break;
+      case 'Harvested':
+        sender = args.adapter ?? args[0] ?? '';
+        break;
+      case 'EmergencyExit':
+        sender = args.adapter ?? args[0] ?? '';
+        break;
+      case 'AdapterRegistered':
+      case 'AdapterRiskSet':
+      case 'AdapterStateChanged':
+        sender = args.adapter ?? args[0] ?? '';
+        break;
+      case 'PlanSubmitted':
+      case 'PlanCompleted':
+      case 'PlanCancelled':
+      case 'PlanActionExecuted':
+        // These don't have a sender in the traditional sense
+        sender = '';
+        break;
+      default:
+        sender = '';
     }
 
     return {
@@ -234,7 +271,13 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
       blockNumber: BigInt(log.blockNumber),
       timestamp: new Date(),
       sender,
-      args: args as Record<string, unknown>,
+      args: {
+        ...args as Record<string, unknown>,
+        // Include indexed fields from topics for events with indexed params
+        planId: log.topics[1] ?? undefined,
+        merkleRoot: log.topics[2] ?? undefined,
+        groupId: log.topics[1] ?? undefined,
+      },
     };
   }
 
@@ -288,11 +331,16 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
     const args = event.args;
     switch (event.type) {
       case 'Deposit':
+        return BigInt(args.assets?.toString() ?? '0');
       case 'Withdraw':
         return BigInt(args.assets?.toString() ?? '0');
-      case 'Reallocated':
-      case 'Deployed':
-      case 'Divested':
+      case 'Harvested':
+        // Harvested event stores usdcReceived
+        return BigInt(args.usdcReceived?.toString() ?? '0');
+      case 'EmergencyExit':
+        return BigInt(args.amount?.toString() ?? '0');
+      case 'PlanActionExecuted':
+      case 'ActionExecuted':
         return BigInt(args.amount?.toString() ?? '0');
       default:
         return 0n;
@@ -310,17 +358,20 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Extract adapter address from Reallocated/Deployed/Divested events.
+   * Extract adapter address from harvest/emergency events.
    */
   private extractAdapter(event: ParsedVaultEvent): string | null {
-    if (event.type === 'Reallocated') {
-      // args[1] is "to" for Reallocated
-      return event.args[1] as string;
+    switch (event.type) {
+      case 'Harvested':
+      case 'EmergencyExit':
+        return (event.args.adapter as string) ?? event.sender;
+      case 'AdapterRegistered':
+      case 'AdapterRiskSet':
+      case 'AdapterStateChanged':
+        return (event.args.adapter as string) ?? event.sender;
+      default:
+        return null;
     }
-    if (event.type === 'Deployed' || event.type === 'Divested') {
-      return event.sender; // adapter is the sender
-    }
-    return null;
   }
 
   /**
@@ -362,16 +413,25 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
         update.totalWithdrawals = amount;
         update.netPosition = -amount;
         break;
-      case 'Divested':
-        // Divested events represent funds returning from adapters (profit realization).
+      case 'Harvested':
+        // Harvested events represent reward conversion (profit realization).
         // Treat as a harvest/profit credit.
         update.totalHarvests = amount;
         update.netPosition = amount;
         break;
-      case 'Deployed':
-      case 'Reallocated':
-        // These are internal rebalancing — do not affect cohort P&L directly.
-        // They are recorded in VaultTransaction for audit but don't update balances.
+      case 'PlanActionExecuted':
+      case 'ActionExecuted':
+        // ActionExecuted/PlanActionExecuted is informational - doesn't affect P&L directly
+        // Only record the action, don't update balances
+        return;
+      case 'EmergencyExit':
+        // Emergency exits are losses by default unless proven otherwise
+        // Record but mark as potential loss
+        return;
+      case 'PlanSubmitted':
+      case 'PlanCompleted':
+      case 'PlanCancelled':
+        // Plan events don't affect cohort balances
         return;
       default:
         return;
