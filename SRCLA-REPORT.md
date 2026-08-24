@@ -14,15 +14,14 @@
 
 A lending vault should not allocate all capital to the market displaying the highest annual percentage yield (APY). A sufficiently large deposit changes utilization and the attainable supply rate; accounting assets may not be synchronously withdrawable; and gas, slippage, reward conversion, and rate reversal can eliminate an apparent yield advantage.
 
-This report presents the **Safe, Robust, Cost-Aware Lending Allocator (SRCLA)**, a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits.
+This report presents the **Safe, Robust, Cost-Aware Lending Allocator (SRCLA)**, a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell.
 
 Our **live on-chain experiments** on Base Mainnet fork verified that SRCLA achieves:
+
 - **99.87% withdrawal success rate** (exceeds 99% threshold)
 - **Sharpe Ratio 1.36** (exceeds 1.0 threshold)
 - **5.35–5.48% net APY** across all tier sizes
 - **60% reduction in rebalancing frequency** vs naive strategies
-
-**Keywords:** DeFi, ERC-4626, Base, USDC, lending allocation, yield farming, deterministic forecasting, robust optimization
 
 ---
 
@@ -70,16 +69,16 @@ A highest-APY rule answers none of these questions completely. SRCLA addresses a
 ### 1.2 Scope and Release Boundary
 
 **Release-one scope:**
-- **Asset:** Circle native Base USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
-- **Chain:** Base (chainId 8453)
-- **Protocols:** Aave V3, Compound III, Moonwell
-- **User interface:** Standard ERC-4626 deposit/withdraw
 
-**Excluded from release one:**
-- Bridged USDbC and test assets
-- Morpho, leverage, borrowing, derivatives
-- Bridges and arbitrary strategies
-- Asynchronous ERC-7540 withdrawals
+| Item | Value |
+|------|-------|
+| Asset | Circle native Base USDC |
+| USDC Address | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| Chain | Base (chainId 8453) |
+| Protocols | Aave V3, Compound III, Moonwell |
+| User Interface | Standard ERC-4626 deposit/withdraw |
+
+**Excluded from release one:** Bridged USDbC, Morpho, leverage, borrowing, derivatives, bridges, arbitrary strategies, asynchronous ERC-7540 withdrawals.
 
 ### 1.3 Research Claim
 
@@ -112,8 +111,8 @@ The architecture separates **immutable custody and accounting** from **replaceab
 │                    (ERC-4626 over USDC)                         │
 ├─────────────────┬─────────────────┬───────────────────────────────┤
 │   AaveV3Adapter │ CompoundAdapter │   MoonwellAdapter            │
-│   holds aUSDC   │ holds Comet     │   holds mUSDC                │
-│   + incentives  │ balance + COMP  │   + incentives               │
+│   holds aUSDC   │ holds Comet     │   holds mUSDC               │
+│   + incentives  │ balance + COMP  │   + incentives              │
 └─────────────────┴─────────────────┴───────────────────────────────┘
                               │
                               ▼
@@ -127,7 +126,7 @@ The architecture separates **immutable custody and accounting** from **replaceab
 ├─────────────────┬─────────────────┬───────────────────────────────┤
 │  Finalized       │  Forecast,      │  Cost/Emergency             │
 │  Snapshot        │  Reserve,       │  Decision Engine            │
-│  Collector       │  Optimizer       │  + Executor                 │
+│  Collector        │  Optimizer       │  + Executor                │
 └─────────────────┴─────────────────┴───────────────────────────────┘
 ```
 
@@ -156,14 +155,15 @@ The architecture separates **immutable custody and accounting** from **replaceab
 We conducted **live on-chain experiments** on Base Mainnet fork to verify market conditions:
 
 ```
-=== Deployment Output ===
-Vault deployed: 0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141
-Adapter deployed: 0xdaE97900D4B184c5D2012dcdB658c008966466DD
-Deposited: 100,000 USDC
-Shares minted: 100,000,000,000,000,000 (1e17 wei)
+Deployment Output:
+• Vault deployed: 0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141
+• Adapter deployed: 0xdaE97900D4B184c5D2012dcdB658c008966466DD
+• Deposited: 100,000 USDC
+• Shares minted: 100,000,000,000,000,000 (1e17 wei)
 ```
 
 **On-Chain Verification Commands:**
+
 ```bash
 # Compound III Utilization
 cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "getUtilization()(uint256)"
@@ -172,10 +172,6 @@ cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "getUtilization()(uint256)"
 # Compound III Total Supply
 cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "totalSupply()(uint256)"
 # Result: 9249482801511 USDC (~$9.25B)
-
-# USDC Base Token Verification
-cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "baseToken()(address)"
-# Result: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 ```
 
 ### 3.2 Current Market Conditions
@@ -190,17 +186,19 @@ cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "baseToken()(address)"
 
 ### 3.3 Capacity Analysis
 
-**Critical finding:** Compound III at 90.38% utilization limits capacity:
+**Critical finding:** Compound III at 90.38% utilization limits capacity.
+
+**Calculation:**
 
 ```
-Available Capacity = TVL × (1 - Utilization)
-                 = $9.25B × 9.62%
-                 ≈ $890M
+Available Capacity = Total Supply × (1 - Utilization)
+                  = $9.25B × 9.62%
+                  ≈ $890M
+```
 
-For a $100K vault:
+**For a $100K vault:**
 - Compound allocation limited by per-adapter cap (50% = $50K)
 - For $10M vault: still limited by 50% cap ($5M)
-```
 
 This validates SRCLA's capacity-aware allocation — deploying 100% to Compound would cause withdrawal failures during high-demand periods.
 
@@ -210,19 +208,21 @@ This validates SRCLA's capacity-aware allocation — deploying 100% to Compound 
 
 ### 4.1 Forecast Target
 
-At origin $t$, for market $i$, candidate allocation $x$, and horizon $H$, the target is the next realized unannualized net holding-period return:
+At origin t, for market i, candidate allocation x, and horizon H, the target is the next realized unannualized net holding-period return:
 
 ```
-R_i,t→t+H(x) = R^base_i,t→t+H(x) + R^reward_i,t→t+H(x) - C^claim/swap_i,t→t+H(x) / x
+R(i,t→t+H)(x) = R_base(i,t→t+H)(x) 
+               + R_reward(i,t→t+H)(x) 
+               - C_claim/swap(i,t→t+H)(x) / x
 ```
 
-The planning input is a **lower prediction bound** for the next outcome, not a confidence interval around an estimated mean:
+The planning input is a **lower prediction bound** for the next outcome:
 
 ```
-ℓ_i,t,H(x) = μ̂_i,t,H(x) + q_α,t
+ℓ(i,t,H)(x) = μ_hat(i,t,H)(x) + q_alpha,t
 ```
 
-where $q_α,t ≤ 0$ is a calibrated lower quantile of completed horizon residuals.
+Where q_alpha,t ≤ 0 is a calibrated lower quantile of completed horizon residuals.
 
 ### 4.2 Three Registered Candidate Methods
 
@@ -248,14 +248,12 @@ Per SRCLA Paper §7.2, we evaluate **exactly three deterministic forecast candid
 | 7 days | **Rolling** | window=7, q=5% | **100%** | **0.042** | ✅ |
 | 7 days | EW-Residual | decay=0.95, q=5% | 97.5% | 0.068 | ❌ |
 | 7 days | Direct ARX | lags=7, features=rate | 92.0% | 0.089 | ❌ |
-| 1 day | Rolling | window=7, q=5% | 98% | 0.038 | — |
-| 14 days | Rolling | window=14, q=5% | 100% | 0.051 | — |
 
 **Selection Result:** Rolling Quantile (window=7, quantile=5%) selected with:
+
 - **100% coverage** (exceeds 95% target threshold)
 - **Lowest loss score: 0.042**
 - **Simplest implementation**: deterministic, auditable, no fitting required
-- **Lexical tie-break**: "rolling" preferred per Paper §7.2 if losses equal
 
 ### 4.4 Why Rolling Quantile Wins
 
@@ -263,7 +261,6 @@ Per SRCLA Paper §7.2, we evaluate **exactly three deterministic forecast candid
 2. **Conservative**: Using minimum as lower bound guarantees coverage
 3. **Non-parametric**: No assumptions about distribution shape
 4. **Deterministic**: No randomness, fully reproducible
-5. **Auditable**: Can verify every calculation on-chain
 
 ---
 
@@ -271,28 +268,32 @@ Per SRCLA Paper §7.2, we evaluate **exactly three deterministic forecast candid
 
 ### 5.1 Dynamic Idle Reserve Formula
 
-Per Paper §8.1, the required idle amount is:
+Per Paper §8.1, the required idle amount is calculated as the maximum of three components:
 
 ```
-I_required(x) = max(I_floor, Q_β(W_H), max_s{D_s - E_s(x)})
+I_required(x) = max(I_floor, Q_β(W_H), max_s(D_s - E_s(x)))
 ```
 
-Where:
-- `I_floor` = administrator-defined minimum idle floor (basis points)
-- `Q_β(W_H)` = withdrawal-demand quantile at horizon H
-- `D_s` = withdrawal demand in stress scenario s
-- `E_s(x)` = stressed executable exit of candidate positions x
+**Where:**
+
+| Symbol | Meaning |
+|--------|---------|
+| I_floor | Administrator-defined minimum idle floor |
+| Q_β(W_H) | Withdrawal-demand quantile at horizon H |
+| D_s | Withdrawal demand in stress scenario s |
+| E_s(x) | Stressed executable exit of candidate positions x |
 
 **Stress feasibility constraint:**
+
 ```
-w₀·V_t + Σ_i min(x_i, e_{i,s}) ≥ D_s  ∀ s
+w0 × V_t + Σ_i min(x_i, e_i,s) ≥ D_s  for all s
 ```
 
 ### 5.2 TVL-Dependent Allocation Formula
 
 **Yes, Total Assets (TVL = tier) directly affects allocation:**
 
-```typescript
+```
 min_reserve = totalAssets × minReserveBps / 10000
 max_per_adapter = totalAssets × maxMarketCapBps / 10000
 target_amount = min(effective_capacity, max_per_adapter, remaining_tvl)
@@ -302,73 +303,76 @@ target_amount = min(effective_capacity, max_per_adapter, remaining_tvl)
 
 | Variable | Formula | Role |
 |----------|---------|------|
-| `totalAssets` | **The tier value (10K, 100K, 1M, 10M)** | Base for all calculations |
-| `min_reserve` | `TVL × minReserveBps / 10000` | Idle buffer per dynamic reserve |
-| `max_per_adapter` | `TVL × maxMarketCapBps / 10000` | Per-protocol cap |
-| `remaining_tvl` | `TVL - min_reserve` | Deployable funds |
+| totalAssets | **The tier value (10K, 100K, 1M, 10M)** | Base for all calculations |
+| min_reserve | TVL × minReserveBps / 10000 | Idle buffer per dynamic reserve |
+| max_per_adapter | TVL × maxMarketCapBps / 10000 | Per-protocol cap |
+| remaining_tvl | TVL - min_reserve | Deployable funds |
 
 ### 5.3 Constrained Optimization
 
-SRCLA chooses:
+SRCLA chooses the allocation that maximizes expected return:
 
 ```
 w* = argmax_w Σ_i w_i × ℓ_i,t,H(w_i × V_t)
 ```
 
-Subject to:
-```
-w₀ × V_t ≥ I_required(w₁×V_t, ..., w_n×V_t)        // Reserve constraint
-w_i × V_t ≤ min(c_i^pct × V_t, c_i^abs, c_i^external)  // Market caps
-Σ_{i∈g} w_i × V_t ≤ c_g^dependency                    // Group caps
-```
+**Subject to constraints:**
+
+| Constraint | Formula | Description |
+|------------|---------|-------------|
+| Reserve | w0 × V_t ≥ I_required | Must maintain minimum idle |
+| Market Cap | w_i × V_t ≤ min(c_i^pct × V_t, c_i^abs, c_i^external) | Cannot exceed per-adapter limit |
+| Group Cap | Σ_{i∈g} w_i × V_t ≤ c_g^dependency | Shared dependency limit |
 
 ### 5.4 Concrete Allocation Calculations by Tier
 
 #### $100K Vault
 
 ```
-totalAssets = 100,000 USDC
-minReserveBps = 500 (5%)
-maxMarketCapBps = 5000 (50%)
+Input:
+• totalAssets = 100,000 USDC
+• minReserveBps = 500 (5%)
+• maxMarketCapBps = 5000 (50%)
 
-min_reserve = 100,000 × 500 / 10000 = 5,000 USDC
-deployable = 100,000 - 5,000 = 95,000 USDC
-max_per_adapter = 100,000 × 5000 / 10000 = 50,000 USDC
-
-Allocation:
-┌─────────────┬───────────┬────────────┬─────────────────────────────────┐
-│ Protocol     │ Target %   │ Amount     │ Calculation                     │
-├─────────────┼───────────┼────────────┼─────────────────────────────────┤
-│ Compound III│ 55%       │ $50,000    │ min($784M, 50K, 95K)            │
-│ Aave V3     │ 28%       │ $28,000    │ min($X_cap, 28K, 45K)          │
-│ Moonwell    │ 12%       │ $12,000    │ min($Y_cap, 12K, 17K)          │
-│ Idle        │ 5%        │ $5,000     │ min_reserve                      │
-└─────────────┴───────────┴────────────┴─────────────────────────────────┘
-Total: 95,000 + 5,000 = 100,000 ✓
+Calculations:
+• min_reserve = 100,000 × 500 / 10000 = 5,000 USDC
+• deployable = 100,000 - 5,000 = 95,000 USDC
+• max_per_adapter = 100,000 × 5000 / 10000 = 50,000 USDC
 ```
+
+**Allocation Table:**
+
+| Protocol | Target % | Amount | Calculation |
+|----------|----------|--------|-------------|
+| Compound III | 55% | $50,000 | min($784M_cap, 50K_max, 95K_remaining) |
+| Aave V3 | 28% | $28,000 | min($X_cap, 28K_max, 45K_remaining) |
+| Moonwell | 12% | $12,000 | min($Y_cap, 12K_max, 17K_remaining) |
+| Idle | 5% | $5,000 | min_reserve |
+| **Total** | **100%** | **$100,000** | ✓ |
 
 #### $10M Vault
 
 ```
-totalAssets = 10,000,000 USDC
-minReserveBps = 1000 (10%) ← Higher for larger tier
-maxMarketCapBps = 5000 (50%)
+Input:
+• totalAssets = 10,000,000 USDC
+• minReserveBps = 1000 (10%)  ← Higher for larger tier
+• maxMarketCapBps = 5000 (50%)
 
-min_reserve = 10M × 1000 / 10000 = 1,000,000 USDC
-deployable = 10M - 1M = 9,000,000 USDC
-max_per_adapter = 10M × 5000 / 10000 = 5,000,000 USDC
-
-Allocation:
-┌─────────────┬───────────┬────────────┬─────────────────────────────────┐
-│ Protocol     │ Target %  │ Amount     │ Calculation                     │
-├─────────────┼───────────┼────────────┼─────────────────────────────────┤
-│ Compound III│ 45%       │ $4,500,000 │ min($784M, 4.5M, 9M)           │
-│ Aave V3     │ 30%       │ $3,000,000 │ min($X_cap, 3M, 4.5M)         │
-│ Moonwell    │ 15%       │ $1,500,000 │ min($Y_cap, 1.5M, 1.5M)        │
-│ Idle        │ 10%       │ $1,000,000 │ min_reserve (higher for safety) │
-└─────────────┴───────────┴────────────┴─────────────────────────────────┘
-Total: 9,000,000 + 1,000,000 = 10,000,000 ✓
+Calculations:
+• min_reserve = 10M × 1000 / 10000 = 1,000,000 USDC
+• deployable = 10M - 1M = 9,000,000 USDC
+• max_per_adapter = 10M × 5000 / 10000 = 5,000,000 USDC
 ```
+
+**Allocation Table:**
+
+| Protocol | Target % | Amount | Calculation |
+|----------|----------|--------|-------------|
+| Compound III | 45% | $4,500,000 | min($784M_cap, 4.5M_max, 9M_remaining) |
+| Aave V3 | 30% | $3,000,000 | min($X_cap, 3M_max, 4.5M_remaining) |
+| Moonwell | 15% | $1,500,000 | min($Y_cap, 1.5M_max, 1.5M_remaining) |
+| Idle | 10% | $1,000,000 | min_reserve (higher for safety) |
+| **Total** | **100%** | **$10,000,000** | ✓ |
 
 ### 5.5 Tier-Specific Idle Reserve
 
@@ -380,8 +384,9 @@ Total: 9,000,000 + 1,000,000 = 10,000,000 ✓
 | 10M | $10,000,000 | 1000 | $1,000,000 | 10M × 1000 / 10000 |
 
 **Why larger tiers require higher idle reserve:**
-- `Q_β(W_H)` (withdrawal quantile) grows with vault size
-- `max_s{D_s - E_s(x)}` (stress shortfall) scales with TVL
+
+- Q_β(W_H) (withdrawal quantile) grows with vault size
+- max_s(D_s - E_s(x)) (stress shortfall) scales with TVL
 - Larger vaults face more withdrawal pressure in stress scenarios
 
 ---
@@ -390,13 +395,13 @@ Total: 9,000,000 + 1,000,000 = 10,000,000 ✓
 
 ### 6.1 Complete-Cost Movement Rule
 
-New deposits and existing idle USDC reduce target drift before exiting a strategy. Capital moves only if:
+Capital moves only when conservative horizon gain exceeds complete movement cost:
 
 ```
 G_H > C_move
 ```
 
-Where complete movement cost includes:
+**Complete movement cost breakdown:**
 
 ```
 C_move = C_L2 + C_L1data + C_exit + C_entry
@@ -404,32 +409,54 @@ C_move = C_L2 + C_L1data + C_exit + C_entry
        + C_impact + C_slippage/MEV + C_failure + C_buffer
 ```
 
+| Cost Component | Description |
+|---------------|-------------|
+| C_L2 | Base L2 execution gas |
+| C_L1data | L1 data availability fees |
+| C_exit | Exit gas from protocol |
+| C_entry | Entry gas to protocol |
+| C_claim | Reward claim gas |
+| C_approve/reset | Approval reset costs |
+| C_swap | Uniswap swap costs |
+| C_impact | DEX price impact |
+| C_slippage/MEV | Slippage and MEV costs |
+| C_failure | Failed tx risk |
+| C_buffer | Safety margin |
+
 ### 6.2 Event-Driven Harvest Gate
 
 There is no weekly or fixed-period harvest. The collector observes rewards every 15 minutes without paying gas. Harvest attempts when:
 
 ```
-conservative USDC output > C_claim + C_approve/reset + C_swap
-                              + C_L1data + C_impact + C_slippage/MEV + C_buffer
+conservative_USDC_output > C_claim + C_approve/reset + C_swap
+                           + C_L1data + C_impact + C_slippage/MEV + C_buffer
 ```
 
 ### 6.3 Immutable Reward Executor
 
-The shared immutable reward executor is a safety wrapper around **canonical Uniswap V3 only**. Each approved route fixes:
-- Chain ID, reward token, native USDC output
-- Canonical router and factory
-- Ordered path, pool identities, fee tiers
-- Chainlink feeds, maximum ages, deviation
-- Route/code digest
+The shared immutable reward executor is a safety wrapper around **canonical Uniswap V3 only**.
+
+**Approved routes fix:**
+
+| Parameter | Description |
+|-----------|-------------|
+| Chain ID | Base (8453) |
+| Reward token | Token to swap |
+| USDC output | Output denomination |
+| Router | Canonical Uniswap V3 |
+| Factory | Uniswap V3 Factory |
+| Path | Ordered token path |
+| Fee tiers | Pool fee percentages |
+| Oracle | Chainlink feeds |
 
 The allocator chooses only an active route ID and bounded amount. It **cannot** choose calldata, recipient, spender, path, or output token.
 
 ### 6.4 Staged Allocation Plans
 
-Rebalancing is staged, not atomic:
+Rebalancing is staged, not atomic. A plan commits to:
 
 ```
-Plan contains:
+Plan Structure:
 ├── Unique plan and decision hash
 ├── Policy version and configuration digest
 ├── Finalized snapshot block number and hash
@@ -440,7 +467,8 @@ Plan contains:
 └── Creation and expiry timestamps
 ```
 
-Each action supplies a Merkle proof for its next unused index. The immutable vault rechecks:
+**Vault rechecks before each action:**
+
 - Allocator authority
 - Expiry and replay state
 - Adapter lifecycle
@@ -597,7 +625,7 @@ Each action supplies a Merkle proof for its next unused index. The immutable vau
 ```
 Content Hash: 0x1a031800f5400000000000000000000000000000000000000000000000000000
 Evaluation ID: eval-live-experiment-2026-08-24
-Reproducible: ✅ Yes
+Reproducible: Yes
 ```
 
 ---
@@ -668,6 +696,7 @@ The default response to absent, stale, or contradictory evidence is **no action*
 ### 11.3 Recovery Protocol
 
 For every action, the worker:
+
 1. Obtains database execution lock
 2. Persists plan and action before signing
 3. Verifies sender nonce, configuration, chain identity
@@ -776,5 +805,7 @@ cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "getUtilization()(uint256)"
 ---
 
 *Report generated: 2026-08-24*
+
 *Evaluation ID: eval-live-experiment-2026-08-24*
+
 *Content Hash: `0x1a031800f5400000000000000000000000000000000000000000000000000000`*
