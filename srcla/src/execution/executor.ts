@@ -452,37 +452,52 @@ export class PlanExecutor {
   }> {
     const provider = this.wallet.provider as ethers.JsonRpcProvider;
 
-    const [activePlanId, merkleRoot, nextActionIndex, actionCount, expiresAt] = await Promise.all([
-      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanId') }),
-      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanMerkleRoot') }),
-      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanNextActionIndex') }),
-      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanActionCount') }),
-      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanExpiresAt') }),
-    ]);
+    try {
+      const [activePlanId, merkleRoot, nextActionIndex, actionCount, expiresAt] = await Promise.all([
+        provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanId') }),
+        provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanMerkleRoot') }),
+        provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanNextActionIndex') }),
+        provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanActionCount') }),
+        provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanExpiresAt') }),
+      ]);
 
-    return {
-      activePlanId: ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], activePlanId)[0] as string,
-      merkleRoot: ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], merkleRoot)[0] as string,
-      nextActionIndex: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], nextActionIndex)[0] as bigint,
-      actionCount: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], actionCount)[0] as bigint,
-      expiresAt: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], expiresAt)[0] as bigint,
-    };
+      return {
+        activePlanId: activePlanId === '0x' ? ethers.ZeroHash : ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], activePlanId)[0] as string,
+        merkleRoot: merkleRoot === '0x' ? ethers.ZeroHash : ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], merkleRoot)[0] as string,
+        nextActionIndex: nextActionIndex === '0x' ? 0n : ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], nextActionIndex)[0] as bigint,
+        actionCount: actionCount === '0x' ? 0n : ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], actionCount)[0] as bigint,
+        expiresAt: expiresAt === '0x' ? 0n : ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], expiresAt)[0] as bigint,
+      };
+    } catch {
+      // Return zero state on error
+      return {
+        activePlanId: ethers.ZeroHash,
+        merkleRoot: ethers.ZeroHash,
+        nextActionIndex: 0n,
+        actionCount: 0n,
+        expiresAt: 0n,
+      };
+    }
   }
+
+  // Role hashes (computed from contract constants)
+  private static readonly ADMIN_ROLE_HASH = '0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775';
+  private static readonly ALLOCATOR_ROLE_HASH = '0x7935be9171d225aed0f1e3092f6e45b2c8c1b97c41c25e5077c07d3f3e71a62f';
 
   /**
    * Check if an address has ADMIN_ROLE
    */
   async hasAdminRole(address: string): Promise<boolean> {
     const provider = this.wallet.provider as ethers.JsonRpcProvider;
-    const adminRole = await provider.call({
-      to: this.vaultAddress,
-      data: this.iface.encodeFunctionData('ADMIN_ROLE'),
-    });
-    const hasRoleData = await provider.call({
-      to: this.vaultAddress,
-      data: this.iface.encodeFunctionData('hasRole', [ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], adminRole)[0], address]),
-    });
-    return ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean;
+    try {
+      const hasRoleData = await provider.call({
+        to: this.vaultAddress,
+        data: this.iface.encodeFunctionData('hasRole', [PlanExecutor.ADMIN_ROLE_HASH, address]),
+      });
+      return hasRoleData !== '0x' && (ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean);
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -490,18 +505,15 @@ export class PlanExecutor {
    */
   async hasAllocatorRole(address: string): Promise<boolean> {
     const provider = this.wallet.provider as ethers.JsonRpcProvider;
-    const allocatorRoleData = await provider.call({
-      to: this.vaultAddress,
-      data: this.iface.encodeFunctionData('ALLOCATOR_ROLE'),
-    });
-    const hasRoleData = await provider.call({
-      to: this.vaultAddress,
-      data: this.iface.encodeFunctionData('hasRole', [
-        ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], allocatorRoleData)[0],
-        address,
-      ]),
-    });
-    return ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean;
+    try {
+      const hasRoleData = await provider.call({
+        to: this.vaultAddress,
+        data: this.iface.encodeFunctionData('hasRole', [PlanExecutor.ALLOCATOR_ROLE_HASH, address]),
+      });
+      return hasRoleData !== '0x' && (ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean);
+    } catch {
+      return false;
+    }
   }
 
   /**
