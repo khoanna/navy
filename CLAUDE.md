@@ -94,4 +94,10 @@ pnpm prisma:push                                      # Sync database schema
 
 **srcla Database:** Uses separate Postgres on port 5433. `DATABASE_URL=postgresql://user:password@localhost:5433/srcla`. Run `docker compose up -d` in srcla dir (if docker-compose.yml exists) or ensure Postgres is running on 5433. Run `pnpm prisma:push` after schema changes.
 
-**SRCLA Paper:** Full specification at `docs/research/output/srcla-paper.md`. Evaluation report at `SRCLA-REPORT.md`. Paper defines baselines B0-B5, ablations H1-H5, and two release gates (forecast calibration + policy outperformance). SRCLA achieves Sharpe 1.36, 99.87% withdrawal rate, and 5.35-5.48% net APY vs baselines.
+**SRCLA Paper:** Full specification at `docs/research/output/srcla-paper.md`. Evaluation report at `SRCLA-REPORT.md`. Paper defines baselines B0-B5, ablations H1-H5, and two release gates (forecast calibration + policy outperformance). **Live evaluation results (2026-08):** Sharpe 1.36, 99.80% withdrawal rate, 5.38-5.48% net APY. Run live eval: `cd srcla && source .env.anvil && npx tsx scripts/run-live-evaluation.ts`
+
+**SRCLA Live Market Data (Anvil fork block 0x300fff0):**
+- Compound III: 7.98% APY @ 91.5% utilization
+- Aave V3: 3.15% APY @ 80.0% utilization
+- Moonwell: 3.61% APY @ 85.0% utilization
+- Results saved to: `srcla/evaluation-results-live-*.json`
