@@ -64,7 +64,7 @@ describe('NavyConfigService EVM getters', () => {
       NAVY_OWNER_PRIVATE_KEY: '0x' + '2'.repeat(64),
     });
     expect(cfg.evmChainId).toBe(8453);
-    expect(cfg.usdcEip712Name).toBe('USDC');
+    expect(cfg.usdcEip712Name).toBe('USD Coin'); // Default from Circle USDC on Base
     expect(cfg.usdcEip712Version).toBe('2');
     expect(cfg.relayerMinBalanceWei).toBe(20000000000000000n); // 0.02 ETH
   });

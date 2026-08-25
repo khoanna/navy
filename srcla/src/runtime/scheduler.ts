@@ -10,6 +10,7 @@ import {
   createForecaster,
   type CalibrationConfig,
 } from '../forecast/calibration.js';
+import { KeeperExecutor, createKeeperExecutor } from '../execution/keeper-executor.js';
 
 export interface SchedulerConfig {
   collectorEnabled: boolean;
@@ -30,6 +31,8 @@ export interface SchedulerConfig {
   chainId: number;
   /** Optional forecaster for production decisions (deprecated: use selected method from DB) */
   forecaster?: RollingForecast;
+  /** Enable execution (default: true) */
+  executionEnabled?: boolean;
 }
 
 /**
@@ -38,6 +41,9 @@ export interface SchedulerConfig {
  * 2. Walk-forward calibration (weekly by default)
  * 3. Market ranking via selected forecaster
  * 4. Decision execution (hourly by default)
+ *
+ * This scheduler integrates with the KeeperExecutor to execute
+ * plans on-chain when decisions are made.
  */
 export class Scheduler {
   private collector: SnapshotCollector;
@@ -54,6 +60,7 @@ export class Scheduler {
   private marketHistories: Map<string, bigint[]> = new Map();
   private selectedMethod: string = 'rolling';
   private selectedConfig: Record<string, unknown> = { windowDays: 30, quantile: 0.10 };
+  private keeperExecutor: KeeperExecutor | null = null;
 
   constructor(
     collector: SnapshotCollector,
@@ -75,12 +82,31 @@ export class Scheduler {
     // Load selected method from DB at startup
     await this.loadSelectedMethod();
 
+    // Initialize keeper executor if execution is enabled
+    if (this.config.executionEnabled !== false) {
+      try {
+        this.keeperExecutor = createKeeperExecutor();
+        console.log(`[Scheduler] Keeper executor initialized for ${this.keeperExecutor.getAddress()}`);
+
+        // Check keeper permissions
+        const hasAllocator = await this.keeperExecutor.hasAllocatorRole();
+        if (hasAllocator) {
+          console.log('[Scheduler] Keeper has ALLOCATOR_ROLE');
+        } else {
+          console.warn('[Scheduler] WARNING: Keeper does NOT have ALLOCATOR_ROLE - execution will fail');
+        }
+      } catch (error) {
+        console.error('[Scheduler] Failed to initialize keeper executor:', error);
+        console.warn('[Scheduler] Continuing without execution - decisions will be logged only');
+      }
+    }
+
     if (this.config.collectorEnabled) {
       this.startCollector();
     }
 
     if (this.config.controllerEnabled) {
-      this.startController();
+      await this.startController();
     }
 
     // Start calibration timer
@@ -267,18 +293,32 @@ export class Scheduler {
     }
   }
 
-  private startController(): void {
+  /**
+   * Initialize and start the controller
+   */
+  private async startController(): Promise<void> {
+    // Create the SRCLA controller
+    // Note: In production, you would inject the actual components
+    // Here we create a minimal controller for execution
+    console.log('[Scheduler] Controller initialization skipped - using direct execution mode');
+    console.log('[Scheduler] Decisions will be executed via KeeperExecutor when controller runs');
+
     // Run immediately
-    this.runController();
+    await this.runController();
 
     // Then schedule
     this.timers.controller = setInterval(() => {
       if (!this.stopped) {
-        this.runController();
+        this.runController().catch((error) => {
+          console.error('[Scheduler] Controller run error:', error);
+        });
       }
     }, this.config.controllerIntervalMs);
   }
 
+  /**
+   * Run the SRCLA decision cycle and execute on-chain
+   */
   private async runController(): Promise<void> {
     try {
       console.log('[Scheduler] Running SRCLA decision cycle...');
@@ -330,11 +370,189 @@ export class Scheduler {
         console.log(`[SRCLA] Selected market: ${topMarket.marketId} (rank #${topMarket.rank})`);
       }
 
-      // Decision logic would go here (Phase 5 implementation)
-      // For now, just log the decision
-      console.log(`[Scheduler] Decision cycle complete, ${forecasts.length} markets evaluated`);
+      // Generate action decision based on forecasts
+      // In production, this would use the full SrclaController
+      const decision = await this.generateDecision(snapshot, forecasts);
+
+      if (decision.action !== 'hold' && this.keeperExecutor) {
+        console.log(`[Scheduler] Executing decision: ${decision.action} ${decision.amount} to ${decision.targetAdapter}`);
+
+        // Execute the decision (convert to KeeperActionDecision format)
+        const result = await this.keeperExecutor.executeAction({
+          action: decision.action,
+          adapter: decision.targetAdapter,
+          amount: decision.amount,
+          reason: decision.reason,
+        });
+
+        if (result.success) {
+          console.log(`[Scheduler] Decision executed successfully`);
+          if (result.txHashes.length > 0) {
+            console.log(`[Scheduler] TX: ${result.txHashes.join(', ')}`);
+          }
+        } else {
+          console.error(`[Scheduler] Decision execution failed: ${result.errors.join(', ')}`);
+        }
+
+        // Persist decision to database
+        await this.persistDecision(snapshot, forecasts, decision, result);
+      } else if (decision.action === 'hold') {
+        console.log('[Scheduler] No action needed - holding current allocation');
+      } else {
+        console.log('[Scheduler] Keeper executor not available - decision not executed');
+      }
     } catch (error) {
       console.error('[Scheduler] Controller error:', error);
     }
   }
+
+  /**
+   * Generate a decision based on forecasts and current state
+   * This is a simplified version - in production, use the full SrclaController
+   */
+  private async generateDecision(
+    snapshot: Awaited<ReturnType<SnapshotCollector['collect']>>,
+    forecasts: ForecastResult[]
+  ): Promise<{ action: 'deploy' | 'divest' | 'harvest' | 'hold'; amount: bigint; targetAdapter: string | null; reason: string }> {
+    if (!snapshot) {
+      return {
+        action: 'hold',
+        amount: 0n,
+        targetAdapter: null,
+        reason: 'NO_SNAPSHOT_AVAILABLE',
+      };
+    }
+
+    const { idleBase } = snapshot.vault;
+    const vaultAssets = snapshot.vault.totalAssets;
+    const strategies = snapshot.strategies;
+
+    // Calculate current allocation
+    const currentAllocation = new Map<string, bigint>(
+      strategies.map((s) => [s.address, s.totalAssets])
+    );
+
+    // Find best market
+    const bestMarket = forecasts.length > 0
+      ? forecasts.reduce((best, f) => f.lowerReturn > best.lowerReturn ? f : best, forecasts[0]!)
+      : null;
+
+    // Find worst market
+    const worstMarket = forecasts.length > 0
+      ? forecasts.reduce((worst, f) => f.lowerReturn < worst.lowerReturn ? f : worst, forecasts[0]!)
+      : null;
+
+    // Decision thresholds
+    const DRIFT_THRESHOLD = 100_000_000n; // 100 USDC minimum
+    const MAX_IDLE = vaultAssets * 500n / 10000n; // Max 5% idle
+
+    // Check if rebalancing needed
+    if (!bestMarket || !worstMarket) {
+      return {
+        action: 'hold',
+        amount: 0n,
+        targetAdapter: null,
+        reason: 'NO_MARKETS_AVAILABLE',
+      };
+    }
+
+    // Check if idle is too high
+    if (idleBase > MAX_IDLE) {
+      // Deploy idle to best market
+      return {
+        action: 'deploy',
+        amount: idleBase - MAX_IDLE,
+        targetAdapter: bestMarket.marketId,
+        reason: `IDLE_EXCEEDS_MAX: ${idleBase} > ${MAX_IDLE}`,
+      };
+    }
+
+    // Check for significant drift
+    const bestCurrentAllocation = currentAllocation.get(bestMarket.marketId) ?? 0n;
+    const worstCurrentAllocation = currentAllocation.get(worstMarket.marketId) ?? 0n;
+
+    // Simple logic: if best market has capacity and we're not already heavily allocated
+    const targetAllocation = vaultAssets * 8000n / 10000n; // 80% target
+    if (bestCurrentAllocation < targetAllocation && idleBase >= DRIFT_THRESHOLD) {
+      const remainingCapacity = targetAllocation - bestCurrentAllocation;
+      const deployAmount = idleBase < remainingCapacity ? idleBase : remainingCapacity;
+      if (deployAmount >= DRIFT_THRESHOLD) {
+        return {
+          action: 'deploy',
+          amount: deployAmount,
+          targetAdapter: bestMarket.marketId,
+          reason: `DRIFT_CORRECTION: deploying to ${bestMarket.marketId}`,
+        };
+      }
+    }
+
+    // Check if we should divest from underperforming market
+    if (worstCurrentAllocation > 0n) {
+      const divestedAmount = worstCurrentAllocation * 1000n / 10000n; // Divest 10%
+      if (divestedAmount >= DRIFT_THRESHOLD) {
+        return {
+          action: 'divest',
+          amount: divestedAmount,
+          targetAdapter: worstMarket.marketId,
+          reason: `UNDERPERFORMANCE: divesting from ${worstMarket.marketId}`,
+        };
+      }
+    }
+
+    return {
+      action: 'hold',
+      amount: 0n,
+      targetAdapter: null,
+      reason: 'ALLOCATION_WITHIN_TOLERANCE',
+    };
+  }
+
+  /**
+   * Persist decision and execution result to database
+   */
+  private async persistDecision(
+    snapshot: Awaited<ReturnType<SnapshotCollector['collect']>>,
+    forecasts: ForecastResult[],
+    decision: { action: 'deploy' | 'divest' | 'harvest' | 'hold'; amount: bigint; targetAdapter: string | null; reason: string },
+    _execution: { success: boolean; txHashes: string[]; errors: string[] }
+  ): Promise<void> {
+    try {
+      const decisionHash = `0x${Buffer.from(
+        JSON.stringify({ timestamp: Date.now(), ...decision })
+      ).toString('hex').slice(0, 64).padEnd(64, '0')}`;
+
+      await this.prisma.decision.create({
+        data: {
+          decisionHash,
+          policyVersion: 'v1',
+          snapshotHash: snapshot!.blockHash,
+          blockNumber: BigInt(snapshot!.blockNumber),
+          timestamp: new Date(),
+          admissions: ['MARKET_ADMITTED'] as unknown as object,
+          forecasts: forecasts.map((f) => ({
+            marketId: f.marketId,
+            meanReturn: f.meanReturn.toString(),
+            lowerReturn: f.lowerReturn.toString(),
+            method: f.method,
+          })) as unknown as object,
+          reserveBase: snapshot!.vault.totalAssets.toString(),
+          allocation: Object.fromEntries(
+            snapshot!.strategies.map((s) => [s.address, s.totalAssets.toString()])
+          ) as unknown as object,
+          actionDecision: {
+            action: decision.action,
+            amount: decision.amount.toString(),
+            targetAdapter: decision.targetAdapter,
+            reason: decision.reason,
+          } as unknown as object,
+        },
+      });
+
+      console.log(`[Scheduler] Decision persisted: ${decisionHash}`);
+    } catch (error) {
+      console.error('[Scheduler] Failed to persist decision:', error);
+    }
+  }
 }
+
+// Note: ActionDecision is defined as inline type in generateDecision return type

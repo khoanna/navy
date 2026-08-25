@@ -23,11 +23,14 @@ import { WAD } from '../protocols/math.js';
 import { GreedyAllocator } from '../optimizer/greedy-allocator.js';
 import {
   orderActions,
-  executeOrderedActions,
-  generateMerkleProof,
   type OrderedAction,
   type ActionKind,
 } from '../execution/rebalancer-ordering.js';
+import {
+  generateMerkleProof,
+  orderedActionToMerkleAction,
+  type MerkleAction,
+} from '../execution/merkle-utils.js';
 
 /**
  * Extended controller configuration with all SRCLA components
@@ -430,11 +433,12 @@ export class SrclaController {
         actions.map((a) => ({ kind: a.kind as ActionKind, adapter: a.adapter, amountBase: a.amountBase }))
       );
 
-      // Generate Merkle proofs
-      const actionsWithProofs = orderedActions.map((a) => ({
-        ...a,
-        merkleProof: generateMerkleProof(orderedActions, a.executionIndex),
-      }));
+      // Generate Merkle proofs for all actions
+      const merkleActions: MerkleAction[] = orderedActions.map((a) => orderedActionToMerkleAction(a));
+      const actionsWithProofs = orderedActions.map((a) => {
+        const { proof } = generateMerkleProof(merkleActions, a.executionIndex);
+        return { ...a, merkleProof: proof };
+      });
 
       const plan: ExecutionPlan = {
         decisionHash,
@@ -859,32 +863,31 @@ export class SrclaController {
 
   /**
    * Execute ordered plan with failure handling
+   * Uses the injected executor to execute actions on-chain
    */
   private async executeOrderedPlan(actions: OrderedAction[]): Promise<ExecutionResult> {
     if (!this.executor) {
+      console.log('[Controller] No executor configured, skipping execution');
       return { success: true, txHashes: [], errors: [] };
     }
 
-    const result = await executeOrderedActions(
-      actions,
-      async (action) => {
-        // In production, this would call the executor with the action
-        void action.kind;
-        void action.adapter;
-        void action.amountBase;
-        return {
-          index: action.originalIndex,
-          executionIndex: action.executionIndex,
-          success: true,
-          amountProcessed: action.amountBase,
-        };
-      }
-    );
+    // Convert OrderedAction to PlanAction (map emergency to hold for plan type)
+    const planActions: PlanAction[] = actions.map((a) => ({
+      kind: a.kind === 'emergency' ? 'hold' : a.kind,
+      adapter: a.adapter,
+      amountBase: a.amountBase,
+    }));
+
+    // Execute actions through the executor
+    const result = await this.executor.executePlan({
+      decisionHash: '',
+      actions: planActions,
+    });
 
     return {
-      success: result.completed,
-      txHashes: result.results.filter((r) => r.success).map((r) => r.txHash ?? ''),
-      errors: result.results.filter((r) => !r.success).map((r) => r.error ?? ''),
+      success: result.success,
+      txHashes: result.txHashes,
+      errors: result.errors,
     };
   }
 

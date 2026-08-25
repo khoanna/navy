@@ -10,10 +10,19 @@
  * 2. Harvests execute second (capture rewards during rebalance)
  * 3. Deployments execute last (optimized allocation)
  * 4. Emergency actions execute last (only when market ineligible)
+ *
+ * NOTE: This module uses action ordering only.
+ * For Merkle tree operations, use merkle-utils.ts which correctly
+ * implements keccak256 with proper ABI encoding matching the contract.
  */
 
-import { createHash } from 'crypto';
 import type { PlanAction } from './plan-builder.js';
+import {
+  hashActionLeaf,
+  getMerkleRoot,
+  generateMerkleProof,
+  type MerkleAction,
+} from './merkle-utils.js';
 
 /**
  * Action kind for ordering purposes
@@ -34,8 +43,12 @@ export interface OrderedAction {
   adapter: string;
   /** Amount in base units */
   amountBase: bigint;
-  /** Merkle proof for this action */
+  /** Merkle proof for this action (computed from ordered actions) */
   merkleProof?: string[];
+  /** Minimum output for this action */
+  minOut?: bigint;
+  /** Data hash for verification */
+  dataHash?: string;
 }
 
 /**
@@ -165,91 +178,58 @@ export function orderActions(
 }
 
 /**
- * Generate Merkle proof for an action
+ * Compute Merkle proofs for all ordered actions
+ * This must be called after orderActions() to ensure correct ordering
  *
- * For a Merkle tree of actions, generates a proof that this action
- * is included in the tree. Used for on-chain verification.
+ * @param orderedActions Actions in execution order
+ * @returns Ordered actions with Merkle proofs attached
  */
-export function generateMerkleProof(
-  actions: OrderedAction[],
-  targetIndex: number
-): string[] {
-  if (actions.length === 0) return [];
-  if (actions.length === 1) return [];
-
-  // Build Merkle tree
-  const leaves = actions.map((action) => hashAction(action));
-  const tree = buildMerkleTree(leaves);
-
-  // Generate proof for target index
-  const proof: string[] = [];
-  let currentIndex = targetIndex;
-
-  for (let level = 0; level < tree.length - 1; level++) {
-    const levelNodes = tree[level]!;
-    const isRightNode = currentIndex % 2 === 1;
-
-    if (isRightNode && levelNodes[currentIndex - 1]) {
-      proof.push(levelNodes[currentIndex - 1]!);
-    } else if (!isRightNode && levelNodes[currentIndex + 1]) {
-      proof.push(levelNodes[currentIndex + 1]!);
-    }
-
-    currentIndex = Math.floor(currentIndex / 2);
+export function computeMerkleProofs(
+  orderedActions: OrderedAction[]
+): OrderedAction[] {
+  if (orderedActions.length === 0) {
+    return [];
   }
 
-  return proof;
+  // Convert to MerkleAction format
+  const merkleActions: MerkleAction[] = orderedActions.map((action) => ({
+    index: action.executionIndex,
+    kind: action.kind,
+    adapter: action.adapter,
+    amount: action.amountBase,
+    minOut: action.minOut ?? 0n,
+    dataHash: action.dataHash ?? '0x0000000000000000000000000000000000000000000000000000000000000000',
+  }));
+
+  // Generate proof for each action
+  return orderedActions.map((action) => {
+    const { proof } = generateMerkleProof(merkleActions, action.executionIndex);
+    return {
+      ...action,
+      merkleProof: proof,
+    };
+  });
 }
 
 /**
- * Hash an action for Merkle tree
+ * Get Merkle root for ordered actions
  */
-export function hashAction(action: OrderedAction): string {
-  const data = `${action.kind}:${action.adapter}:${action.amountBase.toString()}:${action.originalIndex}`;
-  return createHash('sha256').update(data).digest('hex');
-}
-
-/**
- * Build Merkle tree from leaves
- */
-function buildMerkleTree(leaves: string[]): string[][] {
-  if (leaves.length === 0) return [[createHash('sha256').update('').digest('hex')]];
-
-  let currentLevel = leaves.map((leaf) => leaf);
-  const tree: string[][] = [currentLevel];
-
-  while (currentLevel.length > 1) {
-    const nextLevel: string[] = [];
-
-    for (let i = 0; i < currentLevel.length; i += 2) {
-      const left = currentLevel[i]!;
-      const right = currentLevel[i + 1] ?? left;
-      const combined = createHash('sha256').update(left + right).digest('hex');
-      nextLevel.push(combined);
-    }
-
-    tree.push(nextLevel);
-    currentLevel = nextLevel;
+export function getOrderedActionsMerkleRoot(orderedActions: OrderedAction[]): string {
+  if (orderedActions.length === 0) {
+    return '0x0000000000000000000000000000000000000000000000000000000000000000';
   }
 
-  return tree;
-}
+  const merkleActions: MerkleAction[] = orderedActions.map((action) => ({
+    index: action.executionIndex,
+    kind: action.kind,
+    adapter: action.adapter,
+    amount: action.amountBase,
+    minOut: action.minOut ?? 0n,
+    dataHash: action.dataHash ?? '0x0000000000000000000000000000000000000000000000000000000000000000',
+  }));
 
-/**
- * Verify Merkle proof
- */
-export function verifyMerkleProof(
-  action: OrderedAction,
-  proof: string[],
-  root: string
-): boolean {
-  let hash = hashAction(action);
-
-  for (const sibling of proof) {
-    hash = createHash('sha256').update(hash + sibling).digest('hex');
-  }
-
-  return hash === root;
+  const leaves = merkleActions.map((a) => hashActionLeaf(a));
+  return getMerkleRoot(leaves);
 }
 
 /**
@@ -370,34 +350,6 @@ export function planActionsToOrdered(
 }
 
 /**
- * Convert OrderedAction back to PlanAction format
- */
-export function orderedToPlanAction(action: OrderedAction): PlanAction {
-  return {
-    kind: action.kind === 'deploy' ? 0
-      : action.kind === 'divest' ? 1
-        : action.kind === 'harvest' ? 2
-          : 3,
-    adapter: action.adapter,
-    amountBase: action.amountBase,
-    merkleRoot: '0x' + generateMerkleRoot([action]),
-  };
-}
-
-/**
- * Generate Merkle root for a list of actions
- */
-export function generateMerkleRoot(actions: OrderedAction[]): string {
-  if (actions.length === 0) {
-    return createHash('sha256').update('').digest('hex');
-  }
-
-  const leaves = actions.map((action) => hashAction(action));
-  const tree = buildMerkleTree(leaves);
-  return tree[tree.length - 1]![0]!;
-}
-
-/**
  * Validate execution ordering constraints
  */
 export function validateOrderingConstraints(
@@ -441,5 +393,20 @@ export function validateOrderingConstraints(
   return {
     valid: errors.length === 0,
     errors,
+  };
+}
+
+/**
+ * Convert OrderedAction to PlanAction format
+ */
+export function orderedToPlanAction(action: OrderedAction): PlanAction {
+  return {
+    kind: action.kind === 'deploy' ? 0
+      : action.kind === 'divest' ? 1
+        : action.kind === 'harvest' ? 2
+          : 3,
+    adapter: action.adapter,
+    amountBase: action.amountBase,
+    merkleRoot: getOrderedActionsMerkleRoot([action]),
   };
 }

@@ -38,3 +38,52 @@ export function toMerchantDto<T>(m: T): T extends null ? null : T extends undefi
   })) as any;
 }
 
+export interface OrderDto {
+  id: string;
+  orderId: string;
+  merchantId: string;
+  reference: string;
+  amount: string;
+  feeBps: number;
+  status: string;
+  txSignature: string | null;
+  payer: string;
+  expiresAt: Date;
+  paidAt: Date | null;
+  createdAt: Date;
+}
+
+export function toOrderDto<T>(o: T): T extends null ? null : T extends undefined ? undefined : OrderDto | OrderDto[] {
+  return mapMaybe(o as any, (v: any): OrderDto => ({
+    id: v.id,
+    orderId: v.id,
+    merchantId: v.merchantId,
+    reference: v.reference ?? '',
+    amount: String(v.amount ?? 0),
+    feeBps: v.feeBps ?? 0,
+    status: v.status ?? 'unknown',
+    txSignature: v.txSignature ?? null,
+    payer: v.payer ?? '',
+    expiresAt: v.expiresAt ?? new Date(),
+    paidAt: v.paidAt ?? null,
+    createdAt: v.createdAt ?? new Date(),
+  })) as any;
+}
+
+export interface FarmingEventDto {
+  id: string;
+  kind: string;
+  amount: string;
+  txSignature: string | null;
+  createdAt: Date;
+}
+
+export function toFarmingEventDto<T>(e: T): T extends null ? null : T extends undefined ? undefined : FarmingEventDto | FarmingEventDto[] {
+  return mapMaybe(e as any, (v: any): FarmingEventDto => ({
+    id: v.id,
+    kind: v.kind ?? 'unknown',
+    amount: String(v.amount ?? 0),
+    txSignature: v.txSignature ?? null,
+    createdAt: v.createdAt ?? new Date(),
+  })) as any;
+}

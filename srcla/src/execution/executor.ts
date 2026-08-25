@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import { PlanBuilder, type PlanAction } from './plan-builder.js';
-import { preflight, type PreflightParams } from './preflight.js';
 import type { VaultState } from './reconciler.js';
 import type { MarketState } from '../protocols/simulation/types.js';
 
@@ -52,12 +51,12 @@ export interface ExecutorConfig {
 export interface ExecutionResult {
   /** Whether the execution succeeded */
   success: boolean;
-  /** Transaction hash if successful */
-  txHash?: string;
-  /** Gas used by the transaction */
-  gasUsed?: bigint;
-  /** Error message if failed */
-  error?: string;
+  /** Transaction hash if successful (undefined if failed) */
+  txHash?: string | undefined;
+  /** Gas used by the transaction (undefined if failed) */
+  gasUsed?: bigint | undefined;
+  /** Error message if failed (undefined if succeeded) */
+  error?: string | undefined;
   /** Whether preflight check failed */
   preflightFailed?: boolean;
 }
@@ -179,7 +178,8 @@ export enum ActionKindCode {
  */
 export class PlanExecutor {
   private wallet: ethers.Wallet;
-  private vault: ethers.BaseContract;
+  private vaultAddress: string;
+  private iface: ethers.Interface;
   private config: ExecutorConfig;
 
   constructor(
@@ -188,7 +188,8 @@ export class PlanExecutor {
     config: ExecutorConfig
   ) {
     this.wallet = wallet;
-    this.vault = new ethers.Contract(vaultAddress, VAULT_ABI, wallet) as ethers.BaseContract;
+    this.vaultAddress = vaultAddress;
+    this.iface = new ethers.Interface(VAULT_ABI);
     this.config = config;
   }
 
@@ -196,8 +197,8 @@ export class PlanExecutor {
    * Create executor with provider instead of wallet
    * Useful for read-only operations
    */
-  static withProvider(vaultAddress: string, provider: ethers.JsonRpcProvider): ethers.BaseContract {
-    return new ethers.Contract(vaultAddress, VAULT_ABI, provider) as ethers.BaseContract;
+  static withProvider(vaultAddress: string, provider: ethers.JsonRpcProvider): ethers.Contract {
+    return new ethers.Contract(vaultAddress, VAULT_ABI, provider);
   }
 
   /**
@@ -226,7 +227,6 @@ export class PlanExecutor {
   ): Promise<ExecutionResult> {
     try {
       // Encode the PlanHeader struct: (uint256,uint64,uint64,uint64,uint32,uint256,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256)
-      const iface = this.vault.interface;
       const encodedHeader = ethers.AbiCoder.defaultAbiCoder().encode(
         ['(uint256,uint64,uint64,uint64,uint32,uint256,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256)'],
         [{
@@ -247,16 +247,16 @@ export class PlanExecutor {
       );
 
       const tx = await this.wallet.sendTransaction({
-        to: this.vault.target,
-        data: iface.encodeFunctionData('submitPlan', [encodedHeader, merkleRoot]),
+        to: this.vaultAddress,
+        data: this.iface.encodeFunctionData('submitPlan', [encodedHeader, merkleRoot]),
         gasLimit: this.config.gasLimit ?? 500_000n,
       });
 
       const receipt = await tx.wait(this.config.confirmations);
       return {
         success: true,
-        txHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
       };
     } catch (error) {
       return {
@@ -289,7 +289,7 @@ export class PlanExecutor {
     proof: string[]
   ): Promise<ExecutionResult> {
     try {
-      const tx = await (this.vault.executeAction as Function)(
+      const data = this.iface.encodeFunctionData('executeAction', [
         planId,
         actionIndex,
         kind,
@@ -298,16 +298,19 @@ export class PlanExecutor {
         minOut,
         dataHash,
         proof,
-        {
-          gasLimit: this.config.gasLimit ?? 500_000n,
-        }
-      );
+      ]);
+
+      const tx = await this.wallet.sendTransaction({
+        to: this.vaultAddress,
+        data,
+        gasLimit: this.config.gasLimit ?? 500_000n,
+      });
 
       const receipt = await tx.wait(this.config.confirmations);
       return {
         success: true,
-        txHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
       };
     } catch (error) {
       return {
@@ -336,26 +339,30 @@ export class PlanExecutor {
     deadline: bigint
   ): Promise<ExecutionResult & { usdcReceived?: bigint }> {
     try {
-      const tx = await (this.vault.harvest as Function)(
+      const data = this.iface.encodeFunctionData('harvest', [
         adapter,
         token,
         maxClaim,
         routeId,
         minOut,
         deadline,
-        { gasLimit: this.config.gasLimit ?? 300_000n }
-      );
+      ]);
+
+      const tx = await this.wallet.sendTransaction({
+        to: this.vaultAddress,
+        data,
+        gasLimit: this.config.gasLimit ?? 300_000n,
+      });
 
       const receipt = await tx.wait(this.config.confirmations);
 
       // Decode Harvested event
       let usdcReceived: bigint | undefined;
       try {
-        const iface = this.vault.interface;
-        const harvestedTopic = iface.getEvent('Harvested')!.topicHash;
-        const log = receipt!.logs.find((l: { topics: string[] }) => l.topics[0] === harvestedTopic);
+        const harvestedTopic = this.iface.getEvent('Harvested')!.topicHash;
+        const log = receipt?.logs.find((l) => l.topics[0] === harvestedTopic);
         if (log) {
-          const decoded = iface.decodeEventLog('Harvested', log.data, log.topics);
+          const decoded = this.iface.decodeEventLog('Harvested', log.data, log.topics);
           usdcReceived = decoded.usdcReceived as bigint;
         }
       } catch {
@@ -364,9 +371,9 @@ export class PlanExecutor {
 
       return {
         success: true,
-        txHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
-        usdcReceived,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
+        ...(usdcReceived !== undefined && { usdcReceived }),
       };
     } catch (error) {
       return {
@@ -383,15 +390,19 @@ export class PlanExecutor {
    */
   async emergencyExit(adapter: string): Promise<ExecutionResult> {
     try {
-      const tx = await (this.vault.emergencyExit as Function)(adapter, {
+      const data = this.iface.encodeFunctionData('emergencyExit', [adapter]);
+
+      const tx = await this.wallet.sendTransaction({
+        to: this.vaultAddress,
+        data,
         gasLimit: this.config.gasLimit ?? 500_000n,
       });
 
       const receipt = await tx.wait(this.config.confirmations);
       return {
         success: true,
-        txHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
       };
     } catch (error) {
       return {
@@ -407,15 +418,19 @@ export class PlanExecutor {
    */
   async cancelPlan(): Promise<ExecutionResult> {
     try {
-      const tx = await (this.vault.cancelPlan as Function)({
+      const data = this.iface.encodeFunctionData('cancelPlan', []);
+
+      const tx = await this.wallet.sendTransaction({
+        to: this.vaultAddress,
+        data,
         gasLimit: 200_000n,
       });
 
       const receipt = await tx.wait(this.config.confirmations);
       return {
         success: true,
-        txHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
       };
     } catch (error) {
       return {
@@ -435,20 +450,22 @@ export class PlanExecutor {
     actionCount: bigint;
     expiresAt: bigint;
   }> {
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+
     const [activePlanId, merkleRoot, nextActionIndex, actionCount, expiresAt] = await Promise.all([
-      this.vault.activePlanId() as Promise<string>,
-      this.vault.activePlanMerkleRoot() as Promise<string>,
-      this.vault.activePlanNextActionIndex() as Promise<bigint>,
-      this.vault.activePlanActionCount() as Promise<bigint>,
-      this.vault.activePlanExpiresAt() as Promise<bigint>,
+      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanId') }),
+      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanMerkleRoot') }),
+      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanNextActionIndex') }),
+      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanActionCount') }),
+      provider.call({ to: this.vaultAddress, data: this.iface.encodeFunctionData('activePlanExpiresAt') }),
     ]);
 
     return {
-      activePlanId,
-      merkleRoot,
-      nextActionIndex,
-      actionCount,
-      expiresAt,
+      activePlanId: ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], activePlanId)[0] as string,
+      merkleRoot: ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], merkleRoot)[0] as string,
+      nextActionIndex: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], nextActionIndex)[0] as bigint,
+      actionCount: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], actionCount)[0] as bigint,
+      expiresAt: ethers.AbiCoder.defaultAbiCoder().decode(['uint64'], expiresAt)[0] as bigint,
     };
   }
 
@@ -456,53 +473,53 @@ export class PlanExecutor {
    * Check if an address has ADMIN_ROLE
    */
   async hasAdminRole(address: string): Promise<boolean> {
-    return (this.vault.hasRole as Function)(
-      await (this.vault.ADMIN_ROLE as Function)(),
-      address
-    ) as Promise<boolean>;
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+    const adminRole = await provider.call({
+      to: this.vaultAddress,
+      data: this.iface.encodeFunctionData('ADMIN_ROLE'),
+    });
+    const hasRoleData = await provider.call({
+      to: this.vaultAddress,
+      data: this.iface.encodeFunctionData('hasRole', [ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], adminRole)[0], address]),
+    });
+    return ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean;
   }
 
   /**
    * Check if an address has ALLOCATOR_ROLE
    */
   async hasAllocatorRole(address: string): Promise<boolean> {
-    return (this.vault.hasRole as Function)(
-      await (this.vault.ALLOCATOR_ROLE as Function)(),
-      address
-    ) as Promise<boolean>;
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+    const allocatorRoleData = await provider.call({
+      to: this.vaultAddress,
+      data: this.iface.encodeFunctionData('ALLOCATOR_ROLE'),
+    });
+    const hasRoleData = await provider.call({
+      to: this.vaultAddress,
+      data: this.iface.encodeFunctionData('hasRole', [
+        ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], allocatorRoleData)[0],
+        address,
+      ]),
+    });
+    return ethers.AbiCoder.defaultAbiCoder().decode(['bool'], hasRoleData)[0] as boolean;
   }
 
   /**
    * Execute full plan with staged actions
-   * @param plan Plan to execute
-   * @param preflightParamsFactory Factory function to create preflight params for each action
+   * Note: Plan submission should be done separately via submitPlan()
+   * @param plan Plan to execute (simplified format with decisionHash and actions)
    * @returns Plan execution result
    */
   async executePlan(
-    plan: ReturnType<typeof PlanBuilder.build>,
-    preflightParamsFactory: (action: PlanAction) => PreflightParams
+    plan: { decisionHash: string; actions: PlanAction[] }
   ): Promise<PlanExecutionResult> {
     const results: ExecutionResult[] = [];
     let completed = 0;
     let failed = 0;
     let stoppedEarly = false;
 
-    // Check if plan has expired
-    if (PlanBuilder.isExpired(plan)) {
-      return {
-        completed: 0,
-        failed: plan.actions.length,
-        results: [{
-          success: false,
-          error: 'Plan has expired',
-        }],
-        stoppedEarly: true,
-      };
-    }
-
     for (const action of plan.actions) {
-      const preflightParams = preflightParamsFactory(action);
-      const result = await this.execute(action, preflightParams);
+      const result = await this.execute(action);
       results.push(result);
 
       if (result.success) {
@@ -525,11 +542,11 @@ export class PlanExecutor {
 
   /**
    * Execute a single action
+   * Note: This requires a plan to be submitted first via submitPlan()
    * @param action Action to execute
-   * @param _preflightParams Preflight parameters for validation (unused in this simplified version)
    * @returns Execution result
    */
-  async execute(action: PlanAction, _preflightParams: PreflightParams): Promise<ExecutionResult> {
+  async execute(action: PlanAction): Promise<ExecutionResult> {
     // Get current plan state
     const planState = await this.getPlanState();
 
@@ -553,7 +570,7 @@ export class PlanExecutor {
         // Simplified: return success if plan is active
         return {
           success: planState.activePlanId !== ethers.ZeroHash,
-          txHash: undefined,
+          txHash: '',
           error: planState.activePlanId === ethers.ZeroHash ? 'No active plan' : undefined,
         };
 
@@ -570,21 +587,28 @@ export class PlanExecutor {
 
   /**
    * Estimate gas for an action
+   * Uses eth_estimateGas RPC call
    */
   async estimateGas(action: PlanAction): Promise<bigint> {
     try {
-      const populatedTx = await (this.vault.executeAction as Function).populateTransaction(
-        0n,
-        0,
+      const provider = this.wallet.provider as ethers.JsonRpcProvider;
+      const data = this.iface.encodeFunctionData('executeAction', [
+        0n, // planId
+        0,  // actionIndex
         action.kind,
         action.adapter,
         action.amountBase,
-        0n,
+        0n, // minOut
         ethers.ZeroHash,
-        [],
-        { from: this.wallet.address }
-      );
-      return await this.wallet.provider.estimateGas(populatedTx as ethers.TransactionRequest);
+        [],  // proof
+      ]);
+
+      const gas = await provider.estimateGas({
+        from: this.wallet.address,
+        to: this.vaultAddress,
+        data,
+      });
+      return gas;
     } catch {
       return 500_000n;
     }
@@ -594,7 +618,8 @@ export class PlanExecutor {
    * Get current gas price from provider
    */
   async getGasPrice(): Promise<bigint> {
-    const feeData = await this.wallet.provider!.getFeeData();
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+    const feeData = await provider.getFeeData();
     return feeData.gasPrice ?? 50_000_000_000n;
   }
 
@@ -640,10 +665,10 @@ export class PlanExecutor {
 
   /**
    * Execute plan with failure recovery strategies
+   * Note: Plan submission should be done separately via submitPlan()
    */
   async executeWithRecovery(
     plan: ReturnType<typeof PlanBuilder.build>,
-    preflightParamsFactory: (action: PlanAction) => PreflightParams,
     recoveryConfig: RecoveryConfig
   ): Promise<PlanExecutionResult & { recoveredAmount?: bigint; fallbackUsed?: boolean }> {
     const results: ExecutionResult[] = [];
@@ -669,8 +694,7 @@ export class PlanExecutor {
 
     for (let i = 0; i < plan.actions.length; i++) {
       const action = plan.actions[i]!;
-      const preflightParams = preflightParamsFactory(action);
-      const result = await this.execute(action, preflightParams);
+      const result = await this.execute(action);
       results.push(result);
 
       if (result.success) {
