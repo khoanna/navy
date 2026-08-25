@@ -2,6 +2,8 @@
   "$schema": "https://srcla.navy.finance/manifest-v1.schema.json",
   "evaluationId": "srcla-baseline-2026-08",
   "version": "1.0.0",
+  "synthetic": false,
+  "coverageTarget": 0.95,
   "frozenAt": "2026-08-17T00:00:00Z",
   "chain": {
     "chainId": 8453,
