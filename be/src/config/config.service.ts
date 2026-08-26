@@ -54,7 +54,7 @@ export class NavyConfigService {
   // --- NavyVault (rebalancing) ---
   get vaultAddress(): string { return this.req('NAVY_VAULT_ADDRESS'); }
   get keeperPrivateKey(): string { return this.env.NAVY_KEEPER_PRIVATE_KEY ?? this.req('NAVY_OWNER_PRIVATE_KEY'); }
-  get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault USDC'; }
+  get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault SRCLA'; }
   get vaultShareEip712Version(): string { return this.env.NAVY_VAULT_EIP712_VERSION ?? '1'; }
   // --- Rebalancer keeper ---
   get rebalanceDriftBandBps(): number { return parseInt(this.env.NAVY_REBALANCE_DRIFT_BPS ?? '500', 10); }

@@ -361,7 +361,7 @@ export class VaultDepositService {
     await assertRelayerBalance(
       this.evm.provider,
       this.evm.relayer.address,
-      20_000_000_000_000_00n,
+      20_000_000_000_000_000n,
     );
 
     // Check synchronous liquidity (maxRedeem caps at synchronous exit capacity)
