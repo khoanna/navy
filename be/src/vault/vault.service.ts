@@ -6,12 +6,19 @@ import { Injectable } from '@nestjs/common';
 import { ethers } from 'ethers';
 import { NavyConfigService } from '../config/config.service';
 import { SrclaClient, StrategyAllocation } from './srcla-client';
-import { TransactionProposal, VaultPositionDto, VaultLimitsDto } from './vault.types';
+import { TransactionProposal, VaultPositionDto, VaultLimitsDto, HarvestRecordDto, HarvestsResponseDto } from './vault.types';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ] as const;
+
+/** Known adapter addresses → human-readable protocol names */
+const ADAPTER_NAMES: Record<string, string> = {
+  '0x5b53a25fF5Ec56a852CB4c0D193754308C6e99A0': 'Compound III',
+  '0xfDCaC27247ecb3452f88c8ea10CACeabc19348eb': 'Aave V3',
+  '0x5bb77832BA9CBe335fCCdF8Ef5520ae041326598': 'Moonwell',
+};
 
 const VAULT_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -200,9 +207,21 @@ export class VaultService {
   }
 
   /**
-   * Get recent harvests from SRCLA
+   * Get recent harvests from SRCLA.
+   * Transforms the SRCLA PaginatedResponse { data, meta } into the flat
+   * client-friendly shape { harvests, next } so the expo client stays simple.
    */
-  async getHarvests(params?: { adapter?: string; cursor?: string; limit?: string }) {
-    return this.srclaClient.getHarvests(params);
+  async getHarvests(params?: { adapter?: string; cursor?: string; limit?: string }): Promise<HarvestsResponseDto> {
+    const res = await this.srclaClient.getHarvests(params);
+    const harvests: HarvestRecordDto[] = res.data.map((r) => ({
+      id: r.id,
+      adapter: r.adapter,
+      protocol: ADAPTER_NAMES[r.adapter.toLowerCase()] ?? r.adapter,
+      harvestedAt: r.timestamp,
+      grossBase: r.amountOutBase, // no fee deducted at harvest — same as amountOut
+      netBase: r.amountOutBase,
+      recipients: [{ address: this.vaultAddress, shares: r.amountOutBase }],
+    }));
+    return { harvests, next: res.meta.nextCursor };
   }
 }
