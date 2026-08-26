@@ -41,6 +41,7 @@ interface AdapterConfig {
   aUsdc?: string;
   mUsdc?: string;
   comptroller?: string;
+  interestRateModel?: string;
 }
 
 /**
@@ -66,6 +67,7 @@ export const KNOWN_ADAPTERS: AdapterConfig[] = [
     protocol: 'moonwell',
     mUsdc: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
     comptroller: '0xfBb21d0380beE3312B33c4353c8936a0F13EF26C',
+    interestRateModel: '0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C',
   },
 ];
 
@@ -143,7 +145,7 @@ export class VaultApyService {
     } else if (config.protocol === 'aave') {
       apyBps = await this.computeAaveApy();
     } else if (config.protocol === 'moonwell') {
-      apyBps = await this.computeMoonwellApy(config.mUsdc!, config.comptroller!);
+      apyBps = await this.computeMoonwellApy(config.mUsdc!, config.comptroller!, config.interestRateModel!);
     } else {
       throw new Error(`Unknown protocol: ${config.protocol}`);
     }
@@ -234,39 +236,39 @@ export class VaultApyService {
   }
 
   /**
-   * Moonwell: supply rate from the interest rate model via Comptroller.
-   * supplyRate is per second in 1e18 scale.
+   * Moonwell: supply rate from the Interest Rate Model via mToken.
+   * Mirrors MoonwellAdapter.supplyRatePerYear():
+   * 1. Read mToken state: getCash(), totalBorrows(), totalReserves(), reserveFactorMantissa()
+   * 2. Call interestRateModel.getSupplyRate(cash, borrows, reserves, reserveFactor)
+   * 3. Returns rate in 1e18 per second, multiply by SECONDS_PER_YEAR for annual rate
    */
-  private async computeMoonwellApy(mUsdcAddress: string, comptrollerAddress: string): Promise<number> {
-    // getMarketData(address mToken) → MarketData struct
-    // MarketData: underlying(0), supplyRate(1), borrowRate(2), totalBorrows(3), totalReserves(4),
-    //   supplyCap(5), borrowCap(6), underlyingPrice(7), collateralFactor(8),
-    //   isListed(9), isTransferPaused(10), mintGuardianPaused(11), borrowGuardianPaused(12)
-    const iface = new ethers.Interface([
-      'function getMarketData(address mToken) view returns ('
-      + 'address underlying,'
-      + 'uint256 supplyRate,'
-      + 'uint256 borrowRate,'
-      + 'uint256 totalBorrows,'
-      + 'uint256 totalReserves,'
-      + 'uint256 supplyCap,'
-      + 'uint256 borrowCap,'
-      + 'uint256 underlyingPrice,'
-      + 'uint256 collateralFactor,'
-      + 'bool isListed,'
-      + 'bool isTransferPaused,'
-      + 'bool mintGuardianPaused,'
-      + 'bool borrowGuardianPaused)'
+  private async computeMoonwellApy(
+    mUsdcAddress: string,
+    _comptrollerAddress: string,
+    interestRateModelAddress: string,
+  ): Promise<number> {
+    const provider = this.evm.provider;
+
+    // Read mToken state
+    const [cash, totalBorrows, totalReserves, reserveFactorMantissa] = await Promise.all([
+      this.callViewUint256(mUsdcAddress, 'getCash()'),
+      this.callViewUint256(mUsdcAddress, 'totalBorrows()'),
+      this.callViewUint256(mUsdcAddress, 'totalReserves()'),
+      this.callViewUint256(mUsdcAddress, 'reserveFactorMantissa()'),
     ]);
-    const fn = 'getMarketData';
-    const data = iface.encodeFunctionData(fn, [mUsdcAddress]);
-    const result = await this.evm.provider.call({ to: comptrollerAddress, data });
-    const decoded = iface.decodeFunctionResult(fn, result) as any;
 
-    // supplyRate is the 2nd field (index 1)
-    const supplyRatePerSecond = BigInt(decoded[1]);
+    // Call Interest Rate Model: getSupplyRate(cash, borrows, reserves, reserveFactor)
+    // Returns rate in 1e18 per second
+    const iface = new ethers.Interface([
+      'function getSupplyRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa) view returns (uint256)',
+    ]);
+    const fn = 'getSupplyRate';
+    const data = iface.encodeFunctionData(fn, [cash, totalBorrows, totalReserves, reserveFactorMantissa]);
+    const result = await provider.call({ to: interestRateModelAddress, data });
+    const [rate] = iface.decodeFunctionResult(fn, result);
+    const supplyRatePerSecond = BigInt(rate);
 
-    // APY = supplyRatePerSecond * 31536000 * 10000 / 1e18 (WAD scale)
+    // APY = supplyRatePerSecond * SECONDS_PER_YEAR * 10000 / 1e18 (WAD scale)
     const WAD_SCALE = 1_000_000_000_000_000_000n; // 1e18
     const apy = supplyRatePerSecond * SECONDS_PER_YEAR * 10000n / WAD_SCALE;
     return Number(apy);
