@@ -203,6 +203,8 @@ export default function Assistant() {
               isTrailing={i === state.messages.length - 1}
               onConfirmTransfer={onConfirmTransfer}
               onConfirmFarming={onConfirmFarming}
+              authedFetch={authedFetch!}
+              signTypedData={signTypedData}
             />
           ))}
 
@@ -255,12 +257,16 @@ function MessageRow({
   isTrailing,
   onConfirmTransfer,
   onConfirmFarming,
+  authedFetch,
+  signTypedData,
 }: {
   message: ChatMessageVM;
   streaming: boolean;
   isTrailing: boolean;
   onConfirmTransfer: (result: any) => () => Promise<void>;
   onConfirmFarming: (result: any) => () => Promise<void>;
+  authedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  signTypedData: (typedData: any) => Promise<string>;
 }) {
   if (message.role === 'user') {
     return (
@@ -289,6 +295,8 @@ function MessageRow({
         message={message}
         onConfirmTransfer={onConfirmTransfer}
         onConfirmFarming={onConfirmFarming}
+        authedFetch={authedFetch}
+        signTypedData={signTypedData}
       />
     </View>
   );
@@ -324,10 +332,14 @@ function ToolRender({
   message,
   onConfirmTransfer,
   onConfirmFarming,
+  authedFetch,
+  signTypedData,
 }: {
   message: Extract<ChatMessageVM, { role: 'tool' }>;
   onConfirmTransfer: (result: any) => () => Promise<void>;
   onConfirmFarming: (result: any) => () => Promise<void>;
+  authedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  signTypedData: (typedData: any) => Promise<string>;
 }) {
   const { name, result } = message;
 
@@ -358,7 +370,14 @@ function ToolRender({
       return <TransferConfirmCard result={result} onConfirm={onConfirmTransfer(result)} />;
     }
     if (display.action === 'farming_deposit' || display.action === 'farming_withdraw') {
-      return <FarmingConfirmCard result={result} onConfirm={onConfirmFarming(result)} />;
+      return (
+        <FarmingConfirmCard
+          result={result}
+          authedFetch={authedFetch}
+          signTypedData={signTypedData}
+          onConfirm={onConfirmFarming(result)}
+        />
+      );
     }
   }
 
