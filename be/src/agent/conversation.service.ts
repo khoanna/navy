@@ -41,4 +41,11 @@ export class ConversationService {
   listForUser(userId: string) {
     return this.prisma.agentConversation.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' }, take: 30 });
   }
+
+  /** Delete a conversation (and all its messages via cascade) after verifying ownership. */
+  async delete(userId: string, conversationId: string) {
+    const c = await this.prisma.agentConversation.findUnique({ where: { id: conversationId } });
+    if (!c || c.userId !== userId) throw new BadRequestException('Conversation not found');
+    await this.prisma.agentConversation.delete({ where: { id: conversationId } });
+  }
 }

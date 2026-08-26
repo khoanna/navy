@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AgentService, type StreamSink } from './agent.service';
 import { ConversationService } from './conversation.service';
@@ -49,5 +49,11 @@ export class AgentController {
   async one(@Req() req: any, @Param('id') id: string) {
     await this.conversations.getOrCreate(req.user.sub, id);
     return this.conversations.history(id);
+  }
+
+  @Delete('conversations/:id')
+  async deleteConversation(@Req() req: any, @Param('id') id: string) {
+    await this.conversations.delete(req.user.sub, id);
+    return { ok: true };
   }
 }
