@@ -6,7 +6,7 @@ import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { VaultClient } from '@/lib/vault/vaultClient';
-import type { VaultPosition, VaultApy } from '@/lib/vault/types';
+import type { VaultPosition, VaultApy, StrategyAllocation, HarvestsResponse } from '@/lib/vault/types';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { useAsync } from '@/lib/ui/useAsync';
 import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
@@ -20,6 +20,8 @@ import { ErrorState } from '@/ui/ErrorState';
 import { StaleChip } from '@/ui/StaleChip';
 import { useToast } from '@/ui/Toast';
 import { colors, gradients, radius, space } from '@/ui/theme';
+import { StrategySection } from '@/features/farming/StrategySection';
+import { HarvestHistoryList } from '@/features/farming/HarvestHistoryList';
 
 /** amount (decimal display string) → USDC base units (6dp) string. null if invalid / non-positive. */
 function usdcAmountToBase(amount: string): string | null {
@@ -70,6 +72,16 @@ export default function Farming() {
       ]);
       return { pos, apys: apyResponse.adapters };
     },
+    { deps: [token, vault] },
+  );
+
+  const { data: strategy } = useAsync<StrategyAllocation>(
+    () => (vault && token ? vault.getStrategy() : Promise.reject()),
+    { deps: [token, vault] },
+  );
+
+  const { data: harvests } = useAsync<HarvestsResponse>(
+    () => (vault && token ? vault.getHarvests({ limit: '10' }) : Promise.reject()),
     { deps: [token, vault] },
   );
 
@@ -261,6 +273,12 @@ export default function Farming() {
               </View>
             </Card>
           )}
+
+          {/* Strategy allocation */}
+          <StrategySection strategy={strategy} apys={apys} />
+
+          {/* Harvest history */}
+          <HarvestHistoryList harvests={harvests} />
 
           {/* Devnet note */}
           <View style={styles.noteRow}>
