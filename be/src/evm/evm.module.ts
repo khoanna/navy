@@ -9,7 +9,7 @@ const artifact = require('./navy-payments-abi.json');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const usdcArtifact = require('./usdc-abi.json');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const vaultArtifact = require('./navy-vault-abi.json'); // BARE ARRAY
+const vaultArtifact = (require('./navy-vault-abi.json') as { abi: unknown }).abi as ethers.InterfaceAbi;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const adapterArtifact = require('./yield-adapter-abi.json'); // BARE ARRAY
 

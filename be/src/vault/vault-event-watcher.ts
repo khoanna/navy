@@ -88,7 +88,8 @@ export class VaultEventWatcher implements OnModuleInit, OnModuleDestroy {
     this.provider = new ethers.JsonRpcProvider(rpcUrl, config.evmChainId);
     // Use a read-only contract for filtering events (no signer needed)
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const vaultArtifact = require('../evm/navy-vault-abi.json');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const vaultArtifact = (require('../evm/navy-vault-abi.json') as { abi: unknown }).abi as ethers.InterfaceAbi;
     this.contract = new ethers.Contract(vaultAddress, vaultArtifact, this.provider);
   }
 
