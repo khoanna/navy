@@ -3,6 +3,7 @@ import type { NavItem } from './Sidebar';
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Overview', icon: 'chart' },
   { href: '/admin/merchants', label: 'Merchants', icon: 'store' },
+  { href: '/admin/vault', label: 'Vault', icon: 'vault' },
 ];
 
 export const MERCHANT_NAV: NavItem[] = [

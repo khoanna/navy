@@ -32,7 +32,8 @@ export type IconName =
   | 'users'
   | 'store'
   | 'orders'
-  | 'chart';
+  | 'chart'
+  | 'vault';
 
 const PATHS: Record<IconName, string[]> = {
   home: ['M4 11.4 12 5l8 6.4', 'M6 10.2V19h12v-8.8', 'M10 19v-4.2h4V19'],
@@ -60,6 +61,7 @@ const PATHS: Record<IconName, string[]> = {
   store: ['M4 9.5 5.2 5h13.6L20 9.5', 'M4 9.5v9.5h16V9.5', 'M4 9.5a2.4 2.4 0 0 0 4 0 2.4 2.4 0 0 0 4 0 2.4 2.4 0 0 0 4 0 2.4 2.4 0 0 0 4 0', 'M9.5 19v-4.5h5V19'],
   orders: ['M5 5.5A2 2 0 0 1 7 3.5h10a2 2 0 0 1 2 2v15h-14z', 'M8.5 8h7', 'M8.5 12h7', 'M8.5 16h4'],
   chart: ['M4 4v16h16', 'M8 15l3-4 3 2 4-6'],
+  vault: ['M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z', 'M9 9h6', 'M9 12h6', 'M9 15h4'],
 };
 
 /** Icons that are closed glyphs better expressed as filled shapes. */
