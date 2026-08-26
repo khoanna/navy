@@ -13,7 +13,8 @@ import type { NavyEvm } from '../evm/evm.module';
 // ---------------------------------------------------------------------------
 
 const SECONDS_PER_YEAR = 31_536_000n;
-const RAY_SCALE = 1_000_000_000_000_000_000_000_000_000n; // 1e27
+const WAD_SCALE = 1_000_000_000_000_000_000n; // 1e18
+const RAY_SCALE = 1_000_000_000_000_000_000_000_000_000n; // 1e27 (Aave liquidity rate)
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
@@ -48,21 +49,22 @@ interface AdapterConfig {
  * Known adapter addresses per deployment.
  * In production these come from the vault's registered-adapter events or config.
  */
+// Anvil deployment (2026-08-26): script/DeployFull.s.sol
 export const KNOWN_ADAPTERS: AdapterConfig[] = [
   {
-    address: '0x5b53a25fF5Ec56a852CB4c0D193754308C6e99A0',
+    address: '0xc7b28f9F39b100279C3E1b58ff347EAd6a6f80fD',
     name: 'Compound III',
     protocol: 'compound',
     comet: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
   },
   {
-    address: '0xfDCaC27247ecb3452f88c8ea10CACeabc19348eb',
+    address: '0xb2e21e76AC02C2E348eD4e3EA1c3E32b7067978c',
     name: 'Aave V3',
     protocol: 'aave',
     aUsdc: '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB',
   },
   {
-    address: '0x5bb77832BA9CBe335fCCdF8Ef5520ae041326598',
+    address: '0x696B6f3e6Bc0E2B43F50285f8f65795a6608b3b5',
     name: 'Moonwell',
     protocol: 'moonwell',
     mUsdc: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
@@ -190,8 +192,9 @@ export class VaultApyService {
     const [rate] = iface.decodeFunctionResult(fn, result);
     const supplyRatePerSecond = BigInt(rate);
 
-    // APY = supplyRatePerSecond * 31536000 * 10000 / 1e27 (multiply first to avoid integer truncation)
-    const apy = supplyRatePerSecond * SECONDS_PER_YEAR * 10000n / RAY_SCALE;
+    // APY bps = rate_per_second * 31536000 * 10000 / 1e18 (multiply first, then divide)
+    // Compound's getSupplyRate returns rate in WAD (1e18), which is the annualized rate per second
+    const apy = (supplyRatePerSecond * SECONDS_PER_YEAR * 10000n) / WAD_SCALE;
     return Number(apy);
   }
 
@@ -203,32 +206,33 @@ export class VaultApyService {
     const aavePool = '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
     const usdcAddress = this.evm.usdcAddress;
 
-    // getReserveData(address asset) → ReserveData struct
-    // liquidityRate is the 1st field (index 0)
+    // getReserveData(address asset) → ReserveData struct (Aave V3)
+    // Struct: configuration(0), liquidityIndex(1), currentLiquidityRate(2), ...
     const iface = new ethers.Interface([
       'function getReserveData(address asset) view returns ('
-      + 'uint128 liquidityRate,'
-      + 'uint128 variableBorrowRate,'
-      + 'uint128 stableBorrowRate,'
+      + 'uint256 configuration,'
       + 'uint128 liquidityIndex,'
+      + 'uint128 currentLiquidityRate,'
       + 'uint128 variableBorrowIndex,'
+      + 'uint128 currentVariableBorrowRate,'
+      + 'uint128 currentStableBorrowRate,'
+      + 'uint40 lastUpdateTimestamp,'
+      + 'uint16 usageAsCollateralEnabled,'
+      + 'address stableBorrowToken,'
       + 'address aTokenAddress,'
       + 'address stableDebtTokenAddress,'
       + 'address interestRateStrategyAddress,'
       + 'uint128 accruedToTreasury,'
       + 'uint128 unbacked,'
-      + 'uint128 isolationModeTotalDebt,'
-      + 'uint128 accruedToTreasuryScaled,'
-      + 'uint128 unbackedScaled,'
-      + 'uint128 isolationModeTotalDebtScaled)'
+      + 'uint128 isolationModeTotalDebt)'
     ]);
     const fn = 'getReserveData';
     const data = iface.encodeFunctionData(fn, [usdcAddress]);
     const result = await this.evm.provider.call({ to: aavePool, data });
     const decoded = iface.decodeFunctionResult(fn, result) as any;
 
-    // liquidityRate is the 1st field in the struct (index 0)
-    const liquidityRate = BigInt(decoded[0]);
+    // currentLiquidityRate is at index 2 (RAY = 1e27)
+    const liquidityRate = BigInt(decoded[2]);
 
     // APY = liquidityRate * 10000 / 1e27 (multiply first to avoid integer truncation)
     const apy = liquidityRate * 10000n / RAY_SCALE;

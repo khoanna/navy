@@ -15,9 +15,9 @@ const MOONWELL_COMPTROLLER = '0xfBb21d0380beE3312B33c4353c8936a0F13EF26C';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const M_USDC = '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22';
 
-const COMPOUND_ADAPTER = '0x5b53a25fF5Ec56a852CB4c0D193754308C6e99A0';
-const AAVE_ADAPTER = '0xfDCaC27247ecb3452f88c8ea10CACeabc19348eb';
-const MOONWELL_ADAPTER = '0x5bb77832BA9CBe335fCCdF8Ef5520ae041326598';
+const COMPOUND_ADAPTER = '0xc7b28f9F39b100279C3E1b58ff347EAd6a6f80fD';
+const AAVE_ADAPTER = '0xb2e21e76AC02C2E348eD4e3EA1c3E32b7067978c';
+const MOONWELL_ADAPTER = '0x696B6f3e6Bc0E2B43F50285f8f65795a6608b3b5';
 
 // Constant for zero address (ethers requires valid address format for address fields)
 const ZERO_ADDR = ethers.ZeroAddress;
@@ -40,7 +40,7 @@ function abiResult(signature: string, args: unknown[]): string {
     'totalAssets()': 'function totalAssets() returns (uint256)',
     'getUtilization()': 'function getUtilization() returns (uint256)',
     'getSupplyRate(uint256)': 'function getSupplyRate(uint256) returns (uint256)',
-    'getReserveData(address)': 'function getReserveData(address asset) view returns (uint128 liquidityRate, uint128 variableBorrowRate, uint128 stableBorrowRate, uint128 liquidityIndex, uint128 variableBorrowIndex, address aTokenAddress, address stableDebtTokenAddress, address interestRateStrategyAddress, uint128 accruedToTreasury, uint128 unbacked, uint128 isolationModeTotalDebt, uint128 accruedToTreasuryScaled, uint128 unbackedScaled, uint128 isolationModeTotalDebtScaled)',
+    'getReserveData(address)': 'function getReserveData(address asset) view returns (uint256 configuration, uint128 liquidityIndex, uint128 currentLiquidityRate, uint128 variableBorrowIndex, uint128 currentVariableBorrowRate, uint128 currentStableBorrowRate, uint40 lastUpdateTimestamp, uint16 usageAsCollateralEnabled, address stableBorrowToken, address aTokenAddress, address stableDebtTokenAddress, address interestRateStrategyAddress, uint128 accruedToTreasury, uint128 unbacked, uint128 isolationModeTotalDebt)',
     'getMarketData(address)': 'function getMarketData(address mToken) view returns (address underlying, uint256 supplyRate, uint256 borrowRate, uint256 totalBorrows, uint256 totalReserves, uint256 supplyCap, uint256 borrowCap, uint256 underlyingPrice, uint256 collateralFactor, bool isListed, bool isTransferPaused, bool mintGuardianPaused, bool borrowGuardianPaused)',
   };
   const fullSig = abiMap[signature] || `function ${fnName}() returns (uint256)`;
@@ -118,8 +118,9 @@ describe('computeAggregateApy (pure function)', () => {
 describe('VaultApyService — Compound III', () => {
   it('computes ~798 bps APY from 90% utilization and 7.98% supply rate', async () => {
     const utilRay = BigInt('9' + '0'.repeat(26)); // 90% in ray
-    // rate * 31536000 * 10000 / 1e27 = 798 bps → rate = 2.53e21
-    const rateRay = BigInt('2530441400304414003'); // 7.98% in ray per second
+    // rate * 31536000 * 10000 / 1e18 = 798 bps → rate = 2.53e9
+    // Compound's getSupplyRate returns rate in WAD (1e18)
+    const rateWad = 2_530_441_400n; // ~798 bps APY in WAD
     const tvl = 10_000_000_000_000n;
 
     const provider = makeMockProvider(12345678, (to, data) => {
@@ -129,7 +130,7 @@ describe('VaultApyService — Compound III', () => {
           return abiResult('getUtilization()', [utilRay]);
         }
         if (data.startsWith(ethers.id('getSupplyRate(uint256)').slice(0, 10))) {
-          return abiResult('getSupplyRate(uint256)', [rateRay]);
+          return abiResult('getSupplyRate(uint256)', [rateWad]);
         }
       }
       if (to === COMPOUND_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
@@ -137,8 +138,7 @@ describe('VaultApyService — Compound III', () => {
       }
       // Aave V3 - return 0
       if (to === AAVE_POOL.toLowerCase() && data.startsWith(ethers.id('getReserveData(address)').slice(0, 10))) {
-        return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+        return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === AAVE_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -181,7 +181,7 @@ describe('VaultApyService — Compound III', () => {
       // Aave V3 - return 0
       if (to === AAVE_POOL.toLowerCase() && data.startsWith(ethers.id('getReserveData(address)').slice(0, 10))) {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === AAVE_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -218,9 +218,16 @@ describe('VaultApyService — Aave V3', () => {
       // Aave V3
       if (to === AAVE_POOL.toLowerCase() && data.startsWith(ethers.id('getReserveData(address)').slice(0, 10))) {
         return abiResult('getReserveData(address)', [
-          liquidityRateRay, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR,
-          0n, 0n, 0n, 0n, 0n,
+          0n, // configuration
+          0n, // liquidityIndex
+          liquidityRateRay, // currentLiquidityRate (index 2)
+          0n, 0n, 0n, // variableBorrowIndex, currentVariableBorrowRate, currentStableBorrowRate
+          0n, 0n, // lastUpdateTimestamp, usageAsCollateralEnabled
+          ZERO_ADDR, // stableBorrowToken
+          ZERO_ADDR, // aTokenAddress
+          ZERO_ADDR, // stableDebtTokenAddress
+          ZERO_ADDR, // interestRateStrategyAddress
+          0n, 0n, 0n, // accruedToTreasury, unbacked, isolationModeTotalDebt
         ]);
       }
       if (to === AAVE_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
@@ -289,7 +296,7 @@ describe('VaultApyService — Moonwell', () => {
       // Aave V3 - return 0
       if (to === AAVE_POOL.toLowerCase() && data.startsWith(ethers.id('getReserveData(address)').slice(0, 10))) {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === AAVE_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -342,7 +349,7 @@ describe('VaultApyService — response format', () => {
       const ZERO_ADDR = ethers.ZeroAddress;
       if (to === AAVE_POOL.toLowerCase()) {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
         return abiResult('getMarketData(address)', [
@@ -380,7 +387,7 @@ describe('VaultApyService — response format', () => {
       const ZERO_ADDR = ethers.ZeroAddress;
       if (to === AAVE_POOL.toLowerCase()) {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
         return abiResult('getMarketData(address)', [
@@ -431,7 +438,7 @@ describe('VaultApyService — caching', () => {
       const ZERO_ADDR = ethers.ZeroAddress;
       if (to === AAVE_POOL.toLowerCase()) {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
-          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n, 0n, 0n]);
+          ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
       if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
         return abiResult('getMarketData(address)', [
