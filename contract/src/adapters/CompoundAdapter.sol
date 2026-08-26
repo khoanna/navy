@@ -84,9 +84,9 @@ contract CompoundAdapter is IStrategyAdapter {
     }
 
     /// @notice Current value of Compound position in USDC terms
-    /// @dev Uses Comet supplier balance which includes accrued interest
+    /// @dev Returns the adapter's own USDC balance + Comet supplier balance
     function totalAssets() external view returns (uint256) {
-        return comet.balanceOf(address(this));
+        return usdc.balanceOf(address(this)) + comet.balanceOf(address(this));
     }
 
     function sync() external view returns (uint256) {
