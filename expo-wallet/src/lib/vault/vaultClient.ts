@@ -1,40 +1,44 @@
+/**
+ * VaultClient — client for the pooled ERC-4626 vault (NavyVaultSRCLA).
+ *
+ * All routes require a valid Navy JWT; walletAddress is extracted from req.user.
+ * Routes through `authedFetch` so an expired access token is transparently
+ * refreshed + retried on 401.
+ *
+ * Flows (both gasless — relayer pays gas):
+ *
+ * Deposit (EIP-3009 ReceiveWithAuthorization):
+ *   1. POST /vault/deposit/authorization → typed data
+ *   2. Sign typed data with Privy embedded wallet
+ *   3. POST /vault/deposit/submit → relayer calls USDC.receiveWithAuthorization + vault.deposit
+ *
+ * Redeem (EIP-2612 Permit):
+ *   1. POST /vault/redeem/permit → typed data
+ *   2. Sign typed data with Privy embedded wallet
+ *   3. POST /vault/redeem/submit → relayer calls vault.redeem with the permit
+ */
+
 import type { Eip712TypedData } from '@/lib/pay/navyPayClient';
-import type { VaultPosition } from './withdrawShares';
-
-// The pooled ERC-4626 vault backend (be/src/vault) exposes a 2-step, gasless flow
-// that mirrors the transfer/payment rails: build typed data → sign with the Privy
-// embedded wallet → submit the signature (the relayer pays gas).
-//   - deposit: EIP-3009 `receiveWithAuthorization` on USDC → vault deposits for the user
-//   - redeem:  EIP-2612 `permit` on the vault share token → vault redeems shares → USDC
-// Amounts are base units (USDC 6-decimals; shares in the share token's base units).
-
-export interface VaultAuthResult {
-  typedData: Eip712TypedData;
-  deposit: { id: string };
-}
-export interface VaultPermitResult {
-  typedData: Eip712TypedData;
-  redeem: { id: string };
-}
-export interface VaultSubmitResult {
-  status: string;
-  txHash: string;
-}
-export interface VaultApy {
-  adapter: string;
-  aprE18: string;
-  assetsBase: string;
-}
-
-export type { VaultPosition };
+import type {
+  DepositAuthorizationResponse,
+  DepositSubmitResponse,
+  RedeemPermitResponse,
+  RedeemSubmitResponse,
+  VaultPosition,
+  VaultApysResponse,
+  AdapterApy,
+  StrategyAllocation,
+  HarvestsResponse,
+  HarvestRecord,
+} from './types';
 
 /**
  * Client for the pooled vault's 2-step deposit/redeem flow.
  *
- * Mirrors `TransferClient`: every call routes through the session's `authedFetch`
- * so an expired access token is transparently refreshed + retried on 401. The
- * `signTypedData` callback is the Privy embedded-wallet signer (`useMobileSigner`),
- * i.e. the exact same EIP-712 signature path payments/transfers use.
+ * Mirrors `TransferClient` and `NavyPayClient`: every call routes through the
+ * session's `authedFetch` so an expired access token is transparently
+ * refreshed + retried on 401.  The `signTypedData` callback is the Privy
+ * embedded-wallet signer (`useMobileSigner`).
  */
 export class VaultClient {
   constructor(
@@ -48,41 +52,104 @@ export class VaultClient {
       ...init,
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
-    if (!res.ok) throw new Error(`vault ${path} failed (${res.status})`);
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const body = await res.json();
+        detail = body && (body.message || body.error) ? `: ${body.message ?? body.error}` : '';
+      } catch {
+        try {
+          const t = (await res.text()).trim();
+          if (t) detail = `: ${t}`;
+        } catch { /* ignore */ }
+      }
+      throw new Error(`vault ${path} failed (${res.status})${detail}`);
+    }
     return (await res.json()) as T;
   }
 
-  /** Deposit `amountBase` USDC (base units): build → sign → submit. */
-  async deposit(amountBase: string): Promise<VaultSubmitResult> {
-    const { typedData, deposit } = await this.json<VaultAuthResult>('/vault/deposit/authorization', {
+  /**
+   * Deposit `amountBase` USDC (6-decimal base units).
+   * Calls authorization → signs typed data → submits.
+   */
+  async deposit(amountBase: string): Promise<DepositSubmitResponse> {
+    // Step 1: Get EIP-3009 typed data
+    const auth = await this.json<DepositAuthorizationResponse>('/vault/deposit/authorization', {
       method: 'POST',
       body: JSON.stringify({ amountBase }),
     });
-    const signature = await this.signTypedData(typedData);
-    return this.json<VaultSubmitResult>('/vault/deposit/submit', {
+
+    // Step 2: Sign with Privy embedded wallet
+    const signature = await this.signTypedData(auth.typedData);
+
+    // Step 3: Submit — relayer pays gas
+    return this.json<DepositSubmitResponse>('/vault/deposit/submit', {
       method: 'POST',
-      body: JSON.stringify({ id: deposit.id, signature }),
+      body: JSON.stringify({ id: auth.id, signature }),
     });
   }
 
-  /** Redeem `sharesBase` vault shares (base units): permit → sign → submit. */
-  async redeemShares(sharesBase: string): Promise<VaultSubmitResult> {
-    const { typedData, redeem } = await this.json<VaultPermitResult>('/vault/redeem/permit', {
+  /**
+   * Redeem `sharesBase` vault shares (base units).
+   * Calls permit → signs typed data → submits.
+   */
+  async redeemShares(sharesBase: string): Promise<RedeemSubmitResponse> {
+    // Step 1: Get EIP-2612 permit typed data
+    const permit = await this.json<RedeemPermitResponse>('/vault/redeem/permit', {
       method: 'POST',
       body: JSON.stringify({ sharesBase }),
     });
-    const signature = await this.signTypedData(typedData);
-    return this.json<VaultSubmitResult>('/vault/redeem/submit', {
+
+    // Step 2: Sign with Privy embedded wallet
+    const signature = await this.signTypedData(permit.typedData);
+
+    // Step 3: Submit — relayer pays gas
+    return this.json<RedeemSubmitResponse>('/vault/redeem/submit', {
       method: 'POST',
-      body: JSON.stringify({ id: redeem.id, signature }),
+      body: JSON.stringify({ id: permit.id, signature }),
     });
   }
 
+  /** Get user's vault position. */
   getPosition(): Promise<VaultPosition> {
     return this.json<VaultPosition>('/vault/position');
   }
 
-  getApys(): Promise<VaultApy[]> {
-    return this.json<VaultApy[]>('/vault/apys');
+  /** Get current vault APY and TVL per adapter. */
+  getApys(): Promise<VaultApysResponse> {
+    return this.json<VaultApysResponse>('/vault/apys');
+  }
+
+  /** Get current SRCLA strategy allocation. */
+  getStrategy(): Promise<StrategyAllocation> {
+    return this.json<StrategyAllocation>('/vault/strategy');
+  }
+
+  /** Get harvest history with optional adapter filter and cursor pagination. */
+  getHarvests(params?: {
+    adapter?: string;
+    cursor?: string;
+    limit?: string;
+  }): Promise<HarvestsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.adapter) searchParams.set('adapter', params.adapter);
+    if (params?.cursor) searchParams.set('cursor', params.cursor);
+    if (params?.limit) searchParams.set('limit', params.limit);
+    const query = searchParams.toString();
+    return this.json<HarvestsResponse>(
+      `/vault/harvests${query ? `?${query}` : ''}`,
+    );
   }
 }
+
+// Re-export types for consumers
+export type {
+  VaultPosition,
+  VaultApysResponse,
+  AdapterApy as VaultApy, // backward compat with farming.tsx
+  StrategyAllocation,
+  HarvestsResponse,
+  HarvestRecord,
+  DepositSubmitResponse,
+  RedeemSubmitResponse,
+};

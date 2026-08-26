@@ -5,7 +5,8 @@ import { parseUnits } from 'ethers';
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
-import { VaultClient, type VaultPosition, type VaultApy } from '@/lib/vault/vaultClient';
+import { VaultClient } from '@/lib/vault/vaultClient';
+import type { VaultPosition, VaultApy } from '@/lib/vault/types';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { useAsync } from '@/lib/ui/useAsync';
 import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
@@ -32,14 +33,9 @@ function usdcAmountToBase(amount: string): string | null {
   }
 }
 
-/** Convert an aprE18 (1e18-scaled) rate to a human APR percentage string. */
-function aprE18ToPct(aprE18: string): string {
-  try {
-    const bps = (BigInt(aprE18) * 10000n) / 1_000_000_000_000_000_000n; // → basis points
-    return (Number(bps) / 100).toFixed(2);
-  } catch {
-    return '—';
-  }
+/** Convert apyBps (basis points) to a human APR percentage string. */
+function apyBpsToPct(apyBps: number): string {
+  return (apyBps / 100).toFixed(2);
 }
 
 export default function Farming() {
@@ -68,8 +64,11 @@ export default function Farming() {
   } = useAsync<{ pos: VaultPosition; apys: VaultApy[] } | null>(
     async () => {
       if (!vault || !token) return null;
-      const [pos, apys] = await Promise.all([vault.getPosition(), vault.getApys().catch(() => [])]);
-      return { pos, apys };
+      const [pos, apyResponse] = await Promise.all([
+        vault.getPosition(),
+        vault.getApys().catch(() => ({ adapters: [] })),
+      ]);
+      return { pos, apys: apyResponse.adapters };
     },
     { deps: [token, vault] },
   );
@@ -77,15 +76,8 @@ export default function Farming() {
   const pos = data?.pos ?? null;
   const apys = data?.apys ?? [];
 
-  // Headline APR: the best (highest) adapter APR currently in the vault, if any.
-  const bestApr = apys.reduce<bigint>((max, a) => {
-    try {
-      const v = BigInt(a.aprE18);
-      return v > max ? v : max;
-    } catch {
-      return max;
-    }
-  }, 0n);
+  // Headline APR: the best (highest) apyBps currently in the vault, if any.
+  const bestApyBps = apys.reduce<number>((max, a) => (a.apyBps > max ? a.apyBps : max), 0);
 
   const guard = async (fn: () => Promise<void>, action: () => void) => {
     if (!vault || !token) return;
@@ -137,7 +129,7 @@ export default function Farming() {
         </Text>
         <Text variant="caption" dim>
           Navy vault · Sepolia
-          {bestApr > 0n ? `  ·  ${aprE18ToPct(bestApr.toString())}% APR` : ''}
+          {bestApyBps > 0 ? `  ·  ${apyBpsToPct(bestApyBps)}% APY` : ''}
         </Text>
       </View>
 
