@@ -16,7 +16,8 @@ export type ChatAction =
   | { type: 'tool_start'; name: string }
   | { type: 'tool_result'; name: string; result: any }
   | { type: 'done'; conversationId?: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'clear' };
 
 export function initialChat(): ChatState { return { messages: [], streaming: false }; }
 
@@ -51,6 +52,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, streaming: false, conversationId: action.conversationId ?? state.conversationId };
     case 'error':
       return { ...state, streaming: false, error: action.message };
+    case 'clear':
+      return { ...state, messages: [], streaming: false, error: undefined };
     default:
       return state;
   }

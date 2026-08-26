@@ -42,6 +42,7 @@ import { TokenInfoCard, formatUsd } from '@/features/assistant/TokenInfoCard';
 import { Markdown } from '@/features/assistant/Markdown';
 import { TypingDots } from '@/features/assistant/TypingDots';
 import { useTypewriter } from '@/features/assistant/useTypewriter';
+import { ConversationList } from '@/features/assistant/ConversationList';
 
 export default function Assistant() {
   const { session, authedFetch } = useNavySession();
@@ -52,6 +53,8 @@ export default function Assistant() {
   const [state, dispatch] = useReducer(chatReducer, undefined, initialChat);
   const [input, setInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [showConversations, setShowConversations] = useState(false);
 
   // Map an SSE frame to a reducer action.
   const onEvent = useCallback((e: SseEvent) => {
@@ -84,7 +87,7 @@ export default function Assistant() {
         await streamAgentChat(
           getEnv().navyApiUrl,
           token,
-          { message: text, conversationId: state.conversationId },
+          { message: text, conversationId: conversationId ?? undefined },
           onEvent,
         );
       } catch (err) {
@@ -94,7 +97,7 @@ export default function Assistant() {
         toast(mapped.detail, 'error');
       }
     },
-    [token, state.conversationId, onEvent, toast],
+    [token, conversationId, onEvent, toast],
   );
 
   // The input's send button: guard streaming, clear the box, then dispatch.
@@ -173,6 +176,13 @@ export default function Assistant() {
         <Text variant="h2" color={colors.textHi}>
           Assistant
         </Text>
+        <Pressable
+          style={styles.menuBtn}
+          onPress={() => setShowConversations(true)}
+          hitSlop={8}
+        >
+          <Icon name="settings" size={22} color={colors.textHi} />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView
@@ -245,6 +255,24 @@ export default function Assistant() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <ConversationList
+        open={showConversations}
+        onClose={() => setShowConversations(false)}
+        activeId={conversationId}
+        onSelect={(id) => {
+          setConversationId(id);
+          dispatch({ type: 'clear' });
+          // TODO: load conversation history — the backend surfaces it via the
+          // conversation list payload; wire it up when GET /agent/conversations/:id
+          // is implemented.
+        }}
+        onNew={() => {
+          setConversationId(null);
+          dispatch({ type: 'clear' });
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -490,9 +518,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: space.xl,
     paddingTop: space.lg,
     paddingBottom: space.sm,
+  },
+  menuBtn: {
+    padding: space.sm,
   },
   center: {
     flex: 1,
