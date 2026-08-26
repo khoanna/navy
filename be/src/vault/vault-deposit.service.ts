@@ -170,7 +170,7 @@ export class VaultDepositService {
     await assertRelayerBalance(
       this.evm.provider,
       this.evm.relayer.address,
-      20_000_000_000_000_00n, // 0.02 ETH
+      20_000_000_000_000_000n, // 0.02 ETH
     );
 
     // Insufficient balance guard
@@ -218,6 +218,7 @@ export class VaultDepositService {
         assetsBase: amount,
         nonce: nonceDigest,
         digest: this.eip3009Digest(typedData),
+        validAfter: validAfter,
         validBefore: expiresAt,
         status: 'awaiting_signature',
       },
@@ -462,7 +463,25 @@ export class VaultDepositService {
     const sharesBase = record.sharesBase.toString();
 
     try {
-      // Relayer calls vault.redeem(shares, receiver, owner) — assets go to walletAddress
+      // Step 1: Call vault.permit so the relayer gets allowance to transfer shares
+      // EIP-2612 requires permit BEFORE the ERC-20 transfer/redeem
+      const sig = ethers.Signature.from(signature);
+      const deadlineSec = record.deadline
+        ? Math.floor(record.deadline.getTime() / 1000)
+        : 0;
+      const permitTx = await this.evm.vault.permit(
+        walletAddress,
+        this.evm.relayer.address,
+        record.sharesBase,
+        deadlineSec,
+        sig.v,
+        sig.r,
+        sig.s,
+        { gasLimit: 200_000n },
+      );
+      await permitTx.wait();
+
+      // Step 2: Relayer calls vault.redeem(shares, receiver, owner) — assets go to walletAddress
       const redeemTx = await this.evm.vault.redeem(
         record.sharesBase,
         walletAddress,
@@ -540,7 +559,7 @@ export class VaultDepositService {
   }
 
   private reconstructDepositTypedData(
-    record: { assetsBase: bigint; userAddress: string; nonce: string; validBefore: Date | null },
+    record: { assetsBase: bigint; userAddress: string; nonce: string; validAfter: number; validBefore: Date | null },
     id: string,
   ): Eip3009TypedData {
     const validBefore = record.validBefore
@@ -555,7 +574,7 @@ export class VaultDepositService {
         from: record.userAddress,
         to: vaultAddr,
         value: record.assetsBase.toString(),
-        validAfter: '0',
+        validAfter: record.validAfter.toString(),
         validBefore: validBefore.toString(),
         nonce: record.nonce,
       },

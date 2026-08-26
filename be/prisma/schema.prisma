@@ -221,6 +221,7 @@ model VaultDeposit {
   assetsBase  BigInt
   nonce       String    @unique
   digest      String    @unique
+  validAfter  Int       // Unix timestamp (seconds) when authorization becomes valid
   validBefore DateTime?
   status      String    @default("awaiting_signature")
   txHash      String?

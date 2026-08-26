@@ -161,6 +161,7 @@ describe('VaultDepositService', () => {
     });
 
     it('expired authorization is rejected by submitDeposit', async () => {
+      const nowSec = Math.floor(Date.now() / 1000);
       const expiredRecord = {
         id: 'uuid',
         userId: USER_ID,
@@ -168,6 +169,7 @@ describe('VaultDepositService', () => {
         assetsBase: 1_000_000n,
         nonce: ethers.keccak256(ethers.toUtf8Bytes('test')),
         digest: '0x' + '00'.repeat(32),
+        validAfter: nowSec,
         validBefore: new Date(Date.now() - 1000),
         status: 'awaiting_signature',
         consumedAt: null as Date | null,
@@ -195,7 +197,7 @@ describe('VaultDepositService', () => {
           from: USER,
           to: VAULT,
           value: '1000000',
-          validAfter: '0',
+          validAfter: nowSec.toString(),
           validBefore: Math.floor(expiredRecord.validBefore.getTime() / 1000).toString(),
           nonce: expiredRecord.nonce,
         },
@@ -225,7 +227,8 @@ describe('VaultDepositService', () => {
       const record = {
         id: 'uuid', userId: 'different-user', userAddress: ethers.Wallet.createRandom().address.toLowerCase(),
         assetsBase: 1_000_000n, nonce: '0x' + '00'.repeat(32),
-        digest: '0x' + '00'.repeat(32), validBefore: new Date(Date.now() + 3600_000),
+        digest: '0x' + '00'.repeat(32), validAfter: Math.floor(Date.now() / 1000),
+        validBefore: new Date(Date.now() + 3600_000),
         status: 'awaiting_signature', consumedAt: null as Date | null,
         txHash: null as string | null, createdAt: new Date(),
       };
@@ -243,7 +246,8 @@ describe('VaultDepositService', () => {
       const record = {
         id: 'uuid', userId: USER_ID, userAddress: USER.toLowerCase(),
         assetsBase: 1_000_000n, nonce,
-        digest: '0x' + '00'.repeat(32), validBefore: new Date(Date.now() + 3600_000),
+        digest: '0x' + '00'.repeat(32), validAfter: Math.floor(Date.now() / 1000),
+        validBefore: new Date(Date.now() + 3600_000),
         status: 'awaiting_signature', consumedAt: null as Date | null,
         txHash: null as string | null, createdAt: new Date(),
       };

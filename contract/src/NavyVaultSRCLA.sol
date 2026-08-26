@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -20,7 +21,7 @@ import {HarvestLib} from "./libraries/HarvestLib.sol";
 /// @title NavyVaultSRCLA
 /// @notice ERC-4626 vault with staged plan execution for SRCLA
 /// @dev Uses ERC20 as base and ERC4626 separately with explicit constructor arguments
-contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
+contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEvents {
     using SafeERC20 for IERC20;
 
     /// @notice Role for vault administration
@@ -218,7 +219,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, AccessControl, IVaultEvents {
 
     // ---- Constructor ----
 
-    constructor(IERC20 asset_) ERC20("Navy Vault SRCLA", "nvSRCLA") ERC4626(asset_) {
+    constructor(IERC20 asset_) ERC20("Navy Vault SRCLA", "nvSRCLA") ERC4626(asset_) ERC20Permit("Navy Vault SRCLA") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
     }
