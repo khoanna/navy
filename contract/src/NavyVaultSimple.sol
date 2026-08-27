@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -10,7 +11,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title NavyVaultSimple - Minimal ERC-4626 vault for SRCLA testing
 /// @notice Simplified version without full Merkle/plan complexity
-contract NavyVaultSimple is ERC20, ERC4626, AccessControl {
+contract NavyVaultSimple is ERC20, ERC4626, AccessControl, EIP712 {
     using SafeERC20 for IERC20;
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -74,9 +75,19 @@ contract NavyVaultSimple is ERC20, ERC4626, AccessControl {
     event FundsDeployed(address indexed adapter, uint256 amount);
     event FundsDivested(address indexed adapter, uint256 amount);
 
-    constructor(IERC20 asset_) ERC20("Navy Vault Simple", "nvSimple") ERC4626(asset_) {
+    /// @notice Deploys vault with USDC as underlying asset.
+    /// @dev IMPORTANT: The vault must be seeded with a non-trivial initial deposit before
+    /// first user deposits to prevent the ERC-4626 "first depositor inflation attack".
+    /// When totalAssets > 0 but totalSupply = 0, the share price formula floors to 0 shares.
+    /// Seed the vault via an initial deposit or by transferring assets directly.
+    constructor(IERC20 asset_) ERC20("Navy Vault Simple", "nvSimple") ERC4626(asset_) EIP712("Navy Vault Simple", "1") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
+    }
+
+    /// @dev Expose DOMAIN_SEPARATOR for ERC-2612 / EIP-3009 compatibility.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return _domainSeparatorV4();
     }
 
     function decimals() public view override(ERC20, ERC4626) returns (uint8) {
@@ -117,9 +128,10 @@ contract NavyVaultSimple is ERC20, ERC4626, AccessControl {
         return super.mint(shares, receiver);
     }
 
-    function _withdraw(address, address receiver, address, uint256 assets, uint256)
+    function _withdraw(address owner, address receiver, address, uint256 assets, uint256 shares)
         internal override
     {
+        _burn(owner, shares);
         IERC20(asset()).safeTransfer(receiver, assets);
     }
 

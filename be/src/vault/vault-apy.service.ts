@@ -49,22 +49,22 @@ interface AdapterConfig {
  * Known adapter addresses per deployment.
  * In production these come from the vault's registered-adapter events or config.
  */
-// Anvil deployment (2026-08-26): script/DeployFull.s.sol
+// Anvil deployment (2026-08-27): script/SetupAnvil.s.sol
 export const KNOWN_ADAPTERS: AdapterConfig[] = [
   {
-    address: '0xc7b28f9F39b100279C3E1b58ff347EAd6a6f80fD',
+    address: '0x20E293C90ADC169E5B67Ab1a27f7a94c1b47f0cA',
     name: 'Compound III',
     protocol: 'compound',
     comet: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
   },
   {
-    address: '0xb2e21e76AC02C2E348eD4e3EA1c3E32b7067978c',
+    address: '0xcf05075cB5132fD1D2B17A0C1f21C27171564A22',
     name: 'Aave V3',
     protocol: 'aave',
     aUsdc: '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB',
   },
   {
-    address: '0x696B6f3e6Bc0E2B43F50285f8f65795a6608b3b5',
+    address: '0x88fb6D244e946ab08B011274603BEf404a7Ba4b8',
     name: 'Moonwell',
     protocol: 'moonwell',
     mUsdc: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
@@ -273,7 +273,6 @@ export class VaultApyService {
     const supplyRatePerSecond = BigInt(rate);
 
     // APY = supplyRatePerSecond * SECONDS_PER_YEAR * 10000 / 1e18 (WAD scale)
-    const WAD_SCALE = 1_000_000_000_000_000_000n; // 1e18
     const apy = supplyRatePerSecond * SECONDS_PER_YEAR * 10000n / WAD_SCALE;
     return Number(apy);
   }
