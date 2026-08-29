@@ -56,8 +56,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [manager]);
 
   const establishFromPrivy = useCallback(async () => {
+    // Set latch BEFORE calling to prevent the auto-establish effect from also firing
+    establishingRef.current = true;
     const privyToken = await getAccessToken();
-    if (!privyToken) throw new Error('No Privy access token available');
+    if (!privyToken) {
+      establishingRef.current = false; // Reset on error so retry works
+      throw new Error('No Privy access token available');
+    }
     const s = await manager.establish(privyToken);
     setSession(s);
   }, [getAccessToken, manager]);

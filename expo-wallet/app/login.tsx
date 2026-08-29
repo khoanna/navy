@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, TextInput, View, Pressable } from 'react-native';
+import { StyleSheet, TextInput, View, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
-import { useLoginWithPasskey } from '@privy-io/expo/passkey';
+import { useLoginWithEmail, useLoginWithOAuth, usePrivy } from '@privy-io/expo';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useToast } from '@/ui/Toast';
 import { Splash } from '@/ui/Splash';
@@ -15,20 +14,19 @@ import { Icon } from '@/ui/Icon';
 import { OtpInput } from '@/ui/OtpInput';
 import { isComplete } from '@/lib/ui/otp';
 import { mapError, MappedError } from '@/lib/ui/mapError';
-import { RELYING_PARTY } from '@/lib/config/privy';
 import { colors, gradients, radius, space } from '@/ui/theme';
 
 export default function Login() {
   const router = useRouter();
   const toast = useToast();
   const { session, initializing, establishFromPrivy } = useNavySession();
+  // usePrivy gives us access to logout for cleanup on establishment failure
+  const { logout } = usePrivy();
 
   // useLoginWithOAuth: { login(input: { provider: OAuthProviderID, ... }) → Promise<User|undefined>, state }
   const { login: loginWithOAuth } = useLoginWithOAuth();
   // useLoginWithEmail: { sendCode({ email }) → Promise<...>, loginWithCode({ code, email? }) → Promise<User|undefined>, state }
   const email = useLoginWithEmail();
-  // useLoginWithPasskey: { loginWithPasskey({ relyingParty }) → Promise<User|undefined>, state }
-  const { loginWithPasskey } = useLoginWithPasskey();
 
   const [emailAddr, setEmailAddr] = useState('');
   const [code, setCode] = useState('');
@@ -59,26 +57,32 @@ export default function Login() {
     if (!initializing && session) router.replace('/home');
   }, [initializing, session, router]);
 
+  /**
+   * Finish login by establishing a Navy session from the Privy token.
+   * If the Navy backend fails, log out of Privy to prevent a stuck state where
+   * the user is logged into Privy but has no Navy session.
+   */
   const finish = async () => {
-    await establishFromPrivy();
-    router.replace('/home');
+    try {
+      await establishFromPrivy();
+      router.replace('/home');
+    } catch (e) {
+      // Navy establishment failed — clean up Privy session to avoid a stuck state
+      await logout();
+      const mapped = mapError(e);
+      setAuthError({ title: 'Session failed', detail: mapped.detail });
+      toast('Session failed. Please try again.', 'error');
+      throw e; // Re-throw so the caller knows it failed
+    }
   };
-
-  // Passkey: loginWithPasskey requires a relyingParty (the app's associated domain).
-  // On Expo this triggers the native passkey sheet.
-  const passkey = () =>
-    run(async () => {
-      await loginWithPasskey({ relyingParty: RELYING_PARTY });
-      await finish();
-    }, 'Passkey login failed', passkey);
 
   // OAuth on Expo: login({ provider }) opens an in-app browser via expo-web-browser.
   // The promise resolves inline (not redirect-based), so we call finish() after.
-  const social = (provider: 'google' | 'apple') =>
+  const social = (provider: 'google') =>
     run(async () => {
       await loginWithOAuth({ provider });
       await finish();
-    }, 'Social login failed', () => social(provider));
+    }, 'Google login failed', () => social(provider));
 
   const sendCode = () =>
     run(async () => {
@@ -88,7 +92,7 @@ export default function Login() {
 
   const verify = (c: string) =>
     run(async () => {
-      await email.loginWithCode({ code: c });
+      await email.loginWithCode({ code: c, email: emailAddr });
       await finish();
     }, 'Verification failed', () => verify(c));
 
@@ -97,6 +101,10 @@ export default function Login() {
 
   return (
     <Screen scroll>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardView}
+      >
       {/* Brand header */}
       <View style={styles.brand}>
         <Gradient
@@ -118,7 +126,7 @@ export default function Login() {
         <>
           {/* Email + send code block */}
           <View style={styles.emailBlock}>
-            <Text variant="label" muted upper>Sign in with</Text>
+            <Text variant="label" muted upper>Email</Text>
             <TextInput
               style={styles.input}
               placeholder="you@example.com"
@@ -147,25 +155,13 @@ export default function Login() {
             <View style={styles.dividerLine} />
           </View>
 
-          {/* Social / passkey buttons */}
+          {/* Google OAuth button */}
           <View style={styles.altButtons}>
-            <Button
-              label="Continue with passkey"
-              icon="shield"
-              variant="secondary"
-              onPress={passkey}
-            />
             <Button
               label="Continue with Google"
               icon="shield"
               variant="secondary"
               onPress={() => social('google')}
-            />
-            <Button
-              label="Continue with Apple"
-              icon="shield"
-              variant="secondary"
-              onPress={() => social('apple')}
             />
           </View>
 
@@ -213,11 +209,15 @@ export default function Login() {
           />
         </View>
       )}
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardView: {
+    flex: 1,
+  },
   brand: {
     marginTop: space.huge,
   },
