@@ -19,6 +19,7 @@ import { IconBadge, GlowIcon, Pill } from '@/ui/Bits';
 import { ErrorState } from '@/ui/ErrorState';
 import { StaleChip } from '@/ui/StaleChip';
 import { useToast } from '@/ui/Toast';
+import { Skeleton } from '@/ui/Skeleton';
 import { colors, gradients, radius, space } from '@/ui/theme';
 import { StrategySection } from '@/features/farming/StrategySection';
 import { HarvestHistoryList } from '@/features/farming/HarvestHistoryList';
@@ -35,7 +36,10 @@ function usdcAmountToBase(amount: string): string | null {
   }
 }
 
-/** Convert apyBps (basis points) to a human APR percentage string. */
+/** Convert apyBps (basis points) to a human APR percentage string.
+ * Displays real APY including high-utilization markets (which can exceed 30%).
+ * High utilization = high yield opportunity.
+ */
 function apyBpsToPct(apyBps: number): string {
   return (apyBps / 100).toFixed(2);
 }
@@ -156,7 +160,10 @@ export default function Farming() {
           <Text variant="label" upper center color="rgba(255,255,255,0.6)">
             Deposited · earning
           </Text>
-          <View style={styles.heroSkeleton} />
+          <View style={styles.heroSkeletonContent}>
+            <Skeleton width={140} height={44} />
+            <Skeleton width={80} height={16} style={{ marginTop: space.sm }} />
+          </View>
         </Gradient>
       ) : error ? (
         <View style={styles.loadErrorWrap}>
@@ -320,6 +327,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.16)',
     marginTop: 6,
     marginBottom: 2,
+  },
+  heroSkeletonContent: {
+    marginTop: space.md,
+    alignItems: 'center',
+    gap: space.sm,
   },
   heroAmt: {
     flexDirection: 'row',

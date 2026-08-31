@@ -32,7 +32,10 @@ export type IconName =
   | 'download'
   | 'trendingUp'
   | 'x'
-  | 'close';
+  | 'close'
+  | 'refresh'
+  | 'alert'
+  | 'info';
 
 /** Mapping from Navy semantic icon names to the closest Feather glyph. */
 const FEATHER_MAP: Record<IconName, keyof typeof Feather.glyphMap> = {
@@ -61,6 +64,9 @@ const FEATHER_MAP: Record<IconName, keyof typeof Feather.glyphMap> = {
   trendingUp: 'trending-up',
   x: 'x',
   close: 'x',
+  refresh: 'refresh-cw',
+  alert: 'alert-circle',
+  info: 'info',
 };
 
 export interface IconProps {

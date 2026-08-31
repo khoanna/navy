@@ -17,7 +17,10 @@ function apyFor(apys: AdapterApy[], address: string): number {
   return apys.find((a) => a.address.toLowerCase() === address.toLowerCase())?.apyBps ?? 0;
 }
 
-/** Format basis points as a percentage string. */
+/** Format basis points as a percentage string.
+ * Shows real APY including high-utilization markets (which can exceed 30%).
+ * High utilization = high yield opportunity.
+ */
 function fmtPct(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`;
 }

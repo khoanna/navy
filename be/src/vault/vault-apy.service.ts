@@ -49,22 +49,22 @@ interface AdapterConfig {
  * Known adapter addresses per deployment.
  * In production these come from the vault's registered-adapter events or config.
  */
-// Anvil deployment (2026-08-27): script/SetupAnvil.s.sol
+// Anvil deployment (2026-08-30): DeploySimpleAnvil.s.sol
 export const KNOWN_ADAPTERS: AdapterConfig[] = [
   {
-    address: '0x20E293C90ADC169E5B67Ab1a27f7a94c1b47f0cA',
+    address: '0xb4DE08Ae7d977FC220d963D0823123C88f0069c8',
     name: 'Compound III',
     protocol: 'compound',
     comet: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
   },
   {
-    address: '0xcf05075cB5132fD1D2B17A0C1f21C27171564A22',
+    address: '0x401D5D9a4Fa8B46197cA52e681E0f1f52402bdDA',
     name: 'Aave V3',
     protocol: 'aave',
     aUsdc: '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB',
   },
   {
-    address: '0x88fb6D244e946ab08B011274603BEf404a7Ba4b8',
+    address: '0x30FDC180f5dBD86955beEebd1D1D5596bF745BfD',
     name: 'Moonwell',
     protocol: 'moonwell',
     mUsdc: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
@@ -207,7 +207,9 @@ export class VaultApyService {
     const usdcAddress = this.evm.usdcAddress;
 
     // getReserveData(address asset) → ReserveData struct (Aave V3)
-    // Struct: configuration(0), liquidityIndex(1), currentLiquidityRate(2), ...
+    // Ethers.js with typed returns decodes each field as separate array element.
+    // Verified field order from cast with typed returns:
+    // 0: configuration(uint256), 1: liquidityIndex(uint128), 2: currentLiquidityRate(uint128), ...
     const iface = new ethers.Interface([
       'function getReserveData(address asset) view returns ('
       + 'uint256 configuration,'
@@ -231,7 +233,7 @@ export class VaultApyService {
     const result = await this.evm.provider.call({ to: aavePool, data });
     const decoded = iface.decodeFunctionResult(fn, result) as any;
 
-    // currentLiquidityRate is at index 2 (RAY = 1e27)
+    // currentLiquidityRate is at index 2 (RAY = 1e27, already annualized)
     const liquidityRate = BigInt(decoded[2]);
 
     // APY = liquidityRate * 10000 / 1e27 (multiply first to avoid integer truncation)

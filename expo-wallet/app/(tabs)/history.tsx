@@ -248,7 +248,9 @@ export default function History() {
       {/* Loading skeleton */}
       {loading && (
         <View style={styles.skeletonWrap}>
-          <SkeletonList rows={3} height={64} />
+          <Card glass compact style={styles.listCard}>
+            <SkeletonList rows={5} variant="card" height={64} />
+          </Card>
         </View>
       )}
 
@@ -277,7 +279,11 @@ export default function History() {
       {/* Empty state */}
       {!loading && !error && filtered.length === 0 && (
         <View style={styles.empty}>
-          <GlowIcon name="clock" color={colors.textDim} size={92} />
+          <GlowIcon
+            name={payments.length === 0 ? 'clock' : 'search'}
+            color={payments.length === 0 ? colors.textDim : colors.warning}
+            size={92}
+          />
           <Text
             variant="h3"
             color={colors.text}

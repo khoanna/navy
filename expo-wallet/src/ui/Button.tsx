@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   Pressable,
   View,
@@ -29,7 +29,12 @@ export interface ButtonProps {
 
 /**
  * Pressable button with a scale press effect. Primary rides the ocean gradient;
- * others are flat surfaces. Ports the web Button exactly.
+ * others are flat surfaces.
+ *
+ * Features:
+ * - Animated press feedback with spring effect
+ * - Loading state with spinner
+ * - Disabled state with visual feedback
  */
 export function Button({
   label,
@@ -42,6 +47,27 @@ export function Button({
   style,
 }: ButtonProps) {
   const isDisabled = disabled || loading;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    if (!isDisabled) {
+      Animated.spring(scaleAnim, {
+        toValue: 0.96,
+        useNativeDriver: true,
+        speed: 50,
+        bounciness: 4,
+      }).start();
+    }
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  };
 
   const tint =
     variant === 'primary'
@@ -57,7 +83,7 @@ export function Button({
       ) : (
         <>
           {icon && <Icon name={icon} size={18} color={tint} strokeWidth={2} />}
-          <Text variant="bodyStrong" color={tint}>
+          <Text variant="bodyStrong" color={isDisabled ? colors.textDim : tint}>
             {label}
           </Text>
         </>
@@ -66,35 +92,36 @@ export function Button({
   );
 
   return (
-    <Pressable
-      onPress={isDisabled ? undefined : onPress}
-      disabled={isDisabled}
-      style={({ pressed }) => [
-        styles.wrapper,
-        full ? styles.fullWidth : null,
-        { opacity: isDisabled ? 0.45 : 1, transform: [{ scale: pressed ? 0.96 : 1 }] },
-        style,
-      ]}
-    >
-      {variant === 'primary' ? (
-        <Gradient
-          colors={gradients.ocean}
-          style={styles.fill}
-        >
-          {Inner}
-        </Gradient>
-      ) : (
-        <View
-          style={[
-            styles.fill,
-            variant === 'ghost' ? styles.ghost : styles.secondary,
-            variant === 'danger' ? styles.dangerBg : null,
-          ]}
-        >
-          {Inner}
-        </View>
-      )}
-    </Pressable>
+    <Animated.View style={[{ transform: [{ scale: scaleAnim }] }, full && styles.fullWidth]}>
+      <Pressable
+        onPress={isDisabled ? undefined : onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={isDisabled}
+        style={({ pressed }) => [
+          styles.wrapper,
+          isDisabled && styles.disabled,
+          pressed && !isDisabled && styles.pressed,
+          style,
+        ]}
+      >
+        {variant === 'primary' ? (
+          <Gradient colors={gradients.ocean} style={styles.fill}>
+            {Inner}
+          </Gradient>
+        ) : (
+          <View
+            style={[
+              styles.fill,
+              variant === 'ghost' ? styles.ghost : styles.secondary,
+              variant === 'danger' ? styles.dangerBg : null,
+            ]}
+          >
+            {Inner}
+          </View>
+        )}
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -118,6 +145,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   secondary: {
     backgroundColor: colors.surfaceHi,

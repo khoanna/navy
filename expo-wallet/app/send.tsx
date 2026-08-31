@@ -30,6 +30,7 @@ import { Card } from '@/ui/Card';
 import { ErrorState } from '@/ui/ErrorState';
 import { SlideToConfirm } from '@/ui/SlideToConfirm';
 import { useToast, ToastIntent } from '@/ui/Toast';
+import { Skeleton } from '@/ui/Skeleton';
 import { colors, radius, space } from '@/ui/theme';
 
 /** Reserve a little ETH for gas so a MAX/ETH send can still be mined. Matches the backend. */
@@ -135,6 +136,7 @@ function SendInner({
   // Balances.
   const [usdcBase, setUsdcBase] = useState<string>('0');
   const [ethWei, setEthWei] = useState<string>('0');
+  const [balanceLoading, setBalanceLoading] = useState(true);
 
   // Send phase + error.
   const [phase, setPhase] = useState<Phase>('idle');
@@ -167,6 +169,7 @@ function SendInner({
   // Load balances.
   useEffect(() => {
     let active = true;
+    setBalanceLoading(true);
     const provider = new JsonRpcProvider(getEnv().baseRpc);
     const usdcReader = makeUsdcReader(provider, getEnv().usdcAddress);
     fetchBalances(provider, myAddress, usdcReader)
@@ -177,6 +180,9 @@ function SendInner({
       })
       .catch(() => {
         /* leave zeros on failure */
+      })
+      .finally(() => {
+        if (active) setBalanceLoading(false);
       });
     return () => {
       active = false;
@@ -355,14 +361,18 @@ function SendInner({
 
         {/* Big amount */}
         <View style={styles.amountWrap}>
-          <TextInput
-            style={styles.amountInput}
-            placeholder="0"
-            placeholderTextColor={colors.textMute}
-            keyboardType="decimal-pad"
-            value={amount}
-            onChangeText={setAmount}
-          />
+          {balanceLoading ? (
+            <Skeleton width={120} height={52} />
+          ) : (
+            <TextInput
+              style={styles.amountInput}
+              placeholder="0"
+              placeholderTextColor={colors.textMute}
+              keyboardType="decimal-pad"
+              value={amount}
+              onChangeText={setAmount}
+            />
+          )}
           <Text variant="h2" color={colors.textDim} style={styles.amountUnit}>
             {asset}
           </Text>
@@ -370,14 +380,20 @@ function SendInner({
 
         {/* Available + MAX */}
         <View style={styles.availRow}>
-          <Text variant="caption" muted>
-            Available {balanceDisplay}
-          </Text>
-          <Pressable onPress={setMax} hitSlop={8}>
-            <Text variant="label" color={colors.accent} upper>
-              Max
+          {balanceLoading ? (
+            <Skeleton width={120} height={14} />
+          ) : (
+            <Text variant="caption" muted>
+              Available {balanceDisplay}
             </Text>
-          </Pressable>
+          )}
+          {!balanceLoading && (
+            <Pressable onPress={setMax} hitSlop={8}>
+              <Text variant="label" color={colors.accent} upper>
+                Max
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         {/* Fee bar */}

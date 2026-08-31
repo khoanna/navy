@@ -53,6 +53,8 @@ export function FarmingConfirmCard({
   const verb = isWithdraw ? 'Withdraw' : 'Deposit';
 
   // Estimated 1-year value for a deposit: amount * (1 + aggregateApyBps / 10000)
+  // Shows real APY including high-utilization markets (can exceed 30%).
+  // High utilization = high yield opportunity.
   const estimatedValue = (() => {
     if (!isWithdraw && apyData && rawAmount) {
       const amount = parseFloat(usdcBaseToDisplay(rawAmount));

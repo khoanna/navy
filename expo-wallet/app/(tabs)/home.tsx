@@ -29,6 +29,7 @@ import { Icon, IconName } from '@/ui/Icon';
 import { IconBadge, GlowIcon, PressRow } from '@/ui/Bits';
 import { ErrorState } from '@/ui/ErrorState';
 import { StaleChip } from '@/ui/StaleChip';
+import { Skeleton } from '@/ui/Skeleton';
 import { colors, gradients, radius, space } from '@/ui/theme';
 import { FundButton } from '@/features/wallet/FundButton';
 
@@ -141,27 +142,39 @@ export default function Home() {
           <View style={styles.heroTop}>
             <View style={styles.idRow}>
               {/* Avatar disc — gradient approximated with two solid stops */}
-              <View
-                style={[
-                  styles.avatar,
-                  { backgroundColor: avA },
-                ]}
-              />
-              <View style={styles.idText}>
-                <Text variant="caption" color="rgba(255,255,255,0.72)">
-                  Welcome back
-                </Text>
-                <Pressable
-                  onPress={copyAddress}
-                  style={styles.addrPill}
-                  accessibilityLabel="Copy wallet address"
-                >
-                  <Text variant="bodyStrong" numeric color={colors.textHi}>
-                    {short(address)}
-                  </Text>
-                  <Icon name={copied ? 'check' : 'copy'} size={13} color="rgba(255,255,255,0.9)" />
-                </Pressable>
-              </View>
+              {loading || !address ? (
+                <>
+                  <Skeleton circle height={46} width={46} />
+                  <View style={styles.idText}>
+                    <Skeleton width={60} height={12} />
+                    <Skeleton width={100} height={16} round style={styles.addrPillSkeleton} />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View
+                    style={[
+                      styles.avatar,
+                      { backgroundColor: avA },
+                    ]}
+                  />
+                  <View style={styles.idText}>
+                    <Text variant="caption" color="rgba(255,255,255,0.72)">
+                      Welcome back
+                    </Text>
+                    <Pressable
+                      onPress={copyAddress}
+                      style={styles.addrPill}
+                      accessibilityLabel="Copy wallet address"
+                    >
+                      <Text variant="bodyStrong" numeric color={colors.textHi}>
+                        {short(address)}
+                      </Text>
+                      <Icon name={copied ? 'check' : 'copy'} size={13} color="rgba(255,255,255,0.9)" />
+                    </Pressable>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Gasless badge */}
@@ -183,7 +196,10 @@ export default function Home() {
                 <ErrorState compact error={error} onRetry={retry} />
               </View>
             ) : loading || usdc === '—' ? (
-              <View style={styles.balSkeleton} />
+              <View style={styles.balanceSkeletonWrap}>
+                <Skeleton width={160} height={44} style={styles.balSkeleton} />
+                <Skeleton width={200} height={14} style={styles.subtextSkeleton} />
+              </View>
             ) : totalUsd != null ? (
               <>
                 <View style={styles.balRow}>
@@ -262,7 +278,24 @@ export default function Home() {
         </View>
 
         <Card glass compact>
-          {recent.length === 0 ? (
+          {loading ? (
+            // Skeleton loading for recent activity
+            <View style={styles.recentSkeleton}>
+              {[1, 2, 3].map((i) => (
+                <View key={i}>
+                  {i > 1 && <View style={styles.rowDiv} />}
+                  <View style={styles.txRow}>
+                    <Skeleton circle height={40} width={40} />
+                    <View style={styles.txMid}>
+                      <Skeleton width="70%" height={14} />
+                      <Skeleton width="40%" height={12} style={{ marginTop: 4 }} />
+                    </View>
+                    <Skeleton width={60} height={16} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : recent.length === 0 ? (
             <View style={styles.empty}>
               <GlowIcon name="clock" color={colors.textDim} size={72} />
               <Text
@@ -420,6 +453,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignSelf: 'flex-start',
   },
+  addrPillSkeleton: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
   gasless: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -454,11 +491,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   balSkeleton: {
-    width: 180,
-    height: 44,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    marginTop: 6,
+    marginTop: space.sm,
+  },
+  balanceSkeletonWrap: {
+    marginTop: space.sm,
+  },
+  subtextSkeleton: {
+    marginTop: space.sm,
   },
   heroError: {
     marginTop: space.sm,
@@ -553,5 +592,8 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: space.xs,
+  },
+  recentSkeleton: {
+    paddingVertical: space.sm,
   },
 });

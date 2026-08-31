@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleProp, ViewStyle, StyleSheet } from 'react-native';
-import { radius } from './theme';
+import { Animated, StyleProp, ViewStyle, StyleSheet, View } from 'react-native';
+import { colors, radius } from './theme';
 
 export interface SkeletonProps {
   width?: number | `${number}%`;
@@ -8,27 +8,58 @@ export interface SkeletonProps {
   /** Fully round (pill) ends. */
   round?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** Avatar circle shape */
+  circle?: boolean;
+  /** Shimmer animation speed in ms (default 1200ms per cycle) */
+  speed?: number;
 }
 
 /**
- * Shimmering placeholder block for loading balances/lists. The web version uses
- * a CSS moving-gradient shimmer; React Native does not support background-size
- * animations, so we replicate the shimmer with an opacity pulse (same visual
- * frequency: 1.4 s per cycle).
+ * Shimmering placeholder block for loading balances/lists.
+ * Uses a gradient-like animation to simulate the shimmer effect.
  */
-export function Skeleton({ width = '100%', height = 16, round, style }: SkeletonProps) {
-  const anim = useRef(new Animated.Value(0)).current;
+export function Skeleton({
+  width = '100%',
+  height = 16,
+  round,
+  circle,
+  style,
+  speed = 1200,
+}: SkeletonProps) {
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 0, duration: 700, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, {
+          toValue: 1,
+          duration: speed,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmerAnim, {
+          toValue: 0,
+          duration: speed,
+          useNativeDriver: true,
+        }),
       ]),
     ).start();
-  }, [anim]);
+  }, [shimmerAnim, speed]);
 
-  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.04, 0.1] });
+  // Interpolate background color for shimmer effect
+  const bgColor = shimmerAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [
+      'rgba(255,255,255,0.06)',
+      'rgba(255,255,255,0.12)',
+      'rgba(255,255,255,0.06)',
+    ],
+  });
+
+  const borderRadius = circle
+    ? (typeof height === 'number' ? height / 2 : 20)
+    : round
+    ? radius.pill
+    : radius.sm;
 
   return (
     <Animated.View
@@ -37,8 +68,8 @@ export function Skeleton({ width = '100%', height = 16, round, style }: Skeleton
         {
           width: width as ViewStyle['width'],
           height: height as ViewStyle['height'],
-          borderRadius: round ? radius.pill : radius.sm,
-          opacity,
+          borderRadius,
+          backgroundColor: bgColor,
         },
         style,
       ]}
@@ -48,6 +79,6 @@ export function Skeleton({ width = '100%', height = 16, round, style }: Skeleton
 
 const styles = StyleSheet.create({
   base: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
 });

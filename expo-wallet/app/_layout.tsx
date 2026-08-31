@@ -4,7 +4,7 @@ import { PrivyProvider } from '@privy-io/expo';
 import { PrivyElements } from '@privy-io/expo/ui';
 import { Slot } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { base } from '@privy-io/react-native'; // Base chain for Anvil/Base mainnet
+import { base } from 'viem/chains'; // Base chain for Base mainnet
 import { getEnv } from '@/lib/config/env';
 import { SessionProvider } from '@/lib/auth/SessionContext';
 import { ToastProvider } from '@/ui/Toast';
