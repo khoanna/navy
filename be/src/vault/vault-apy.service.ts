@@ -49,22 +49,22 @@ interface AdapterConfig {
  * Known adapter addresses per deployment.
  * In production these come from the vault's registered-adapter events or config.
  */
-// Anvil deployment (2026-08-30): DeploySimpleAnvil.s.sol
+// Fresh Anvil deployment (2026-09-01): DeploySimpleAnvil.s.sol
 export const KNOWN_ADAPTERS: AdapterConfig[] = [
   {
-    address: '0xb4DE08Ae7d977FC220d963D0823123C88f0069c8',
+    address: '0x2709697528EEC08d91d5Fd7f7018A0f43ebad972',
     name: 'Compound III',
     protocol: 'compound',
     comet: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
   },
   {
-    address: '0x401D5D9a4Fa8B46197cA52e681E0f1f52402bdDA',
+    address: '0xE7826c7322DBa57E32890B029B932a8a6084EfB2',
     name: 'Aave V3',
     protocol: 'aave',
     aUsdc: '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB',
   },
   {
-    address: '0x30FDC180f5dBD86955beEebd1D1D5596bF745BfD',
+    address: '0x22c830fBcf48aeDE04b9f6FAa735f28Bb2E2e005',
     name: 'Moonwell',
     protocol: 'moonwell',
     mUsdc: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
