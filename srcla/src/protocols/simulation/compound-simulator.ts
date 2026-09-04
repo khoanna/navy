@@ -2,26 +2,22 @@
  * Compound III Interest Rate Simulator
  *
  * Implements post-deposit interest rate simulation for Compound III protocol.
- * Compound III uses an exponential interest rate model that smoothly
- * transitions from a base rate to a peak rate based on utilization.
+ * Compound III uses a kinked linear interest rate model per Comet governance.
  *
- * Rate Model (per §6.4):
- *   rate = baseRate + (peakRate - baseRate) * exp(-k * (1 - utilization))
+ * Rate Model (per docs.compound.finance/interest-rates/):
+ *   if util <= kink: rate = baseRate + slopeLow * util
+ *   if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
  *
  * Where:
  *   - baseRate: Minimum rate at 0% utilization (e.g., 3%)
- *   - peakRate: Maximum rate at 100% utilization (e.g., 15%)
- *   - k: Curve steepness parameter (typically 5)
- *   - exp(): Natural exponential function
- *
- * The exponential model provides a smoother rate transition compared to
- * Aave's piecewise model, making it more predictable but potentially
- * less optimal at extreme utilizations.
+ *   - kink: Utilization point where slope changes (e.g., 80%)
+ *   - slopeLow: Rate slope below kink
+ *   - slopeHigh: Rate slope above kink
  *
  * @module protocols/simulation
  */
 
-import { WAD, RAY, utilization as calcUtil } from '../math.js';
+import { WAD, RAY, SECONDS_PER_YEAR, utilization as calcUtil } from '../math.js';
 import {
   CompoundSimulatorConfig,
   DEFAULT_COMPOUND_CONFIG,
@@ -65,99 +61,23 @@ export class CompoundV3Simulator implements ISimulator {
   /**
    * Calculate Compound III supply rate from utilization.
    *
-   * Uses Compound's exponential rate model:
-   *   rate = baseRate + (peakRate - baseRate) * exp(-k * (1 - utilization))
-   *
-   * The rate smoothly increases as utilization approaches 100%, providing
-   * a more predictable rate curve than piecewise models.
+   * Uses Compound's kinked linear rate model:
+   *   if util <= kink: rate = baseRate + slopeLow * util
+   *   if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Compound III configuration parameters
-   * @returns Annualized supply rate (WAD)
+   * @returns Supply rate per second (WAD)
    */
   calculateRateFromUtilization(
     util: bigint,
     config: CompoundSimulatorConfig
   ): bigint {
-    const { baseRate, peakRate, k } = config;
-
-    if (util === 0n) {
-      // At 0% utilization, rate = baseRate
-      return baseRate;
-    }
-
-    if (util >= RAY) {
-      // At 100% utilization, rate = peakRate
-      return peakRate;
-    }
-
-    // Calculate exp(-k * (1 - utilization))
-    // (1 - utilization) in RAY = RAY - util
-    const oneMinusUtil = RAY - util;
-
-    // For exp(-k * (1 - util)), we use exp() with negative rate
-    // exp(-k * (1 - util)) = exp(-k * oneMinusUtil / RAY)
-    // But exp() expects rate in WAD and time in seconds
-    // We need: exp(-k * (1 - util) / RAY) where -k * (1 - util) / RAY is "rate"
-    //
-    // Alternative: use the exp function with a synthetic "time" of 1 year
-    // But that would compound incorrectly. Instead, use Taylor series directly.
-
-    // For small x, exp(-x) ≈ 1 - x + x^2/2 - x^3/6 + ...
-    // where x = k * (1 - util) / RAY
-    //
-    // We compute: expFactor = exp(-k * (1 - util) / RAY) using Taylor series
-    // Then: rate = baseRate + (peakRate - baseRate) * expFactor / RAY
-
-    const rateParam = (BigInt(k) * oneMinusUtil) / RAY;
-    const expFactor = this.expNegative(rateParam);
-
-    // rate = baseRate + (peakRate - baseRate) * expFactor / RAY
-    const rateRange = peakRate - baseRate;
-    const rateContribution = (rateRange * expFactor) / RAY;
-
-    return baseRate + rateContribution;
+    return calculateRateFromUtilization(util, config);
   }
 
   /**
-   * Calculate exp(-x) for bigint x in RAY scale.
-   *
-   * Uses Taylor series: exp(-x) = 1 - x + x^2/2! - x^3/3! + ...
-   * where x is in RAY scale.
-   *
-   * @param x - Value to compute exp(-x) for (in RAY scale)
-   * @returns exp(-x) in RAY scale
-   */
-  private expNegative(x: bigint): bigint {
-    // For negative "rate", we compute e^(-x)
-    // We iterate until terms become negligible
-
-    // Taylor series: sum from n=0 to infinity of (-x)^n / n!
-    let result = RAY; // n=0 term: RAY * 1
-    let term = RAY;   // Will be RAY * (-x) / 1 for n=1
-
-    // Convert x to WAD scale for the first division
-    const xWad = (x * WAD) / RAY;
-
-    for (let n = 1; n < 20; n++) {
-      // term_n = -term_(n-1) * x / n
-      // term is in RAY scale
-      term = (term * xWad) / (WAD * BigInt(n));
-      // Alternate sign
-      if (n % 2 === 1) {
-        result = result - term;
-      } else {
-        result = result + term;
-      }
-    }
-
-    // Ensure result is positive (exp is always positive)
-    if (result < 0n) result = 0n;
-    return result;
-  }
-
-  /**
-   * Calculate effective capacity based on max utilization (100% for Compound).
+   * Calculate effective capacity based on max utilization.
    *
    * Compound III can technically reach 100% utilization, but we use a
    * conservative limit to ensure withdrawals are always possible.
@@ -170,21 +90,9 @@ export class CompoundV3Simulator implements ISimulator {
   calculateEffectiveCapacity(
     cash: bigint,
     borrows: bigint,
-    maxUtilization: bigint = RAY - 1n // Leave 1 RAY for rounding
+    maxUtilization: bigint = RAY
   ): bigint {
-    if (maxUtilization === 0n) return 0n;
-
-    // At maxUtilization: borrows / (cash + deposit + borrows) = maxUtilization
-    // Solving for deposit:
-    // deposit = borrows * (1 - maxUtilization) / maxUtilization - cash
-
-    const numerator = borrows * (RAY - maxUtilization);
-    const maxCash = (numerator / maxUtilization);
-
-    // We can add up to: maxCash - currentCash (before reaching maxUtilization)
-    const capacity = maxCash > cash ? maxCash - cash : 0n;
-
-    return capacity > 0n ? capacity : 0n;
+    return calculateEffectiveCapacity(cash, borrows, maxUtilization);
   }
 
   /**
@@ -295,4 +203,65 @@ export class CompoundV3Simulator implements ISimulator {
     if (initialIndex === 0n) return 0n;
     return (cTokenBalance * supplyIndex) / initialIndex;
   }
+}
+
+// ============================================================================
+// Standalone Rate Calculation Functions
+// ============================================================================
+
+/**
+ * Calculate supply rate from utilization using kinked linear model.
+ * Per Compound III Comet governance: docs.compound.finance/interest-rates/
+ *
+ * Formula (per second, scaled WAD):
+ *   if util <= kink: rate = baseRate + slopeLow * util
+ *   if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
+ *
+ * All inputs in RAY scale (1e27). All outputs in WAD per second.
+ *
+ * @param util - Utilization ratio (RAY, e.g., 8e17 = 80%)
+ * @param config - Compound simulator configuration with baseRate, kink, slopeLow, slopeHigh
+ * @returns Supply rate per second (WAD scale)
+ */
+export function calculateRateFromUtilization(
+  util: bigint,
+  config: CompoundSimulatorConfig
+): bigint {
+  const { baseRate, kink, slopeLow, slopeHigh } = config;
+
+  // Convert annual rates to per-second
+  const basePerSec = baseRate / SECONDS_PER_YEAR;
+  const slopeLowPerSec = slopeLow / SECONDS_PER_YEAR;
+  const slopeHighPerSec = slopeHigh / SECONDS_PER_YEAR;
+
+  if (util <= kink) {
+    // rate = base + slopeLow * util
+    return basePerSec + (slopeLowPerSec * util) / RAY;
+  } else {
+    // rate = base + slopeLow * kink + slopeHigh * (util - kink)
+    const low = (slopeLowPerSec * kink) / RAY;
+    const high = (slopeHighPerSec * (util - kink)) / RAY;
+    return basePerSec + low + high;
+  }
+}
+
+/**
+ * Calculate effective capacity given current cash and borrows.
+ * Returns the maximum additional deposit before hitting maxUtilization.
+ *
+ * @param cash - Current cash in the market (USDC base units)
+ * @param borrows - Current total borrows (USDC base units)
+ * @param maxUtilization - Maximum utilization threshold (RAY), defaults to full RAY (100%)
+ * @returns Maximum additional deposit amount (USDC base units), 0 if at max utilization
+ */
+export function calculateEffectiveCapacity(
+  cash: bigint,
+  borrows: bigint,
+  maxUtilization: bigint = RAY
+): bigint {
+  if (maxUtilization === 0n) return 0n;
+  if (borrows === 0n) return 0n;
+  // maxCash = borrows * RAY / maxUtilization - cash
+  const maxCash = (borrows * RAY) / maxUtilization;
+  return maxCash > cash ? maxCash - cash : 0n;
 }

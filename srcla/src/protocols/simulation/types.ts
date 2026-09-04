@@ -53,34 +53,32 @@ export interface AaveSimulatorConfig {
 /**
  * Configuration for Compound III interest rate simulation.
  *
- * Compound III uses an exponential interest rate model based on utilization.
- * The rate smoothly transitions from baseRate to peakRate as utilization
- * approaches 100%.
+ * Compound III uses a kinked linear interest rate model based on utilization.
+ * The rate has a "kink" point where the slope changes, per Compound Comet governance.
  *
- * Rate formula:
- *   rate = baseRate + (peakRate - baseRate) * exp(-k * (1 - utilization))
- *
- * Where:
- *   - baseRate: Minimum rate at 0% utilization
- *   - peakRate: Maximum rate at 100% utilization
- *   - k: Curve steepness parameter (higher = steeper transition)
+ * Rate formula (per docs.compound.finance/interest-rates/):
+ *   - if util <= kink: rate = baseRate + slopeLow * util
+ *   - if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
  *
  * @example
  * ```typescript
  * const config: CompoundSimulatorConfig = {
- *   baseRate: 3n * WAD / 100n,   // 3% APY minimum
- *   peakRate: 15n * WAD / 100n,  // 15% APY at 100% utilization
- *   k: 5,                         // Curve steepness
+ *   baseRate: 3n * WAD / 100n,          // 3% APY minimum
+ *   kink: 8n * RAY / 10n,               // 80% kink point
+ *   slopeLow: 32n * WAD / 1_000_000_000n,  // ~1% APY per RAY below kink
+ *   slopeHigh: 300n * WAD / 1_000_000_000n, // ~10% APY per RAY above kink
  * };
  * ```
  */
 export interface CompoundSimulatorConfig {
-  /** Minimum supply rate at 0% utilization (WAD, e.g., 3e16 = 3%) */
+  /** Annualized base rate at 0% utilization (WAD, e.g., 3e16 = 3%) */
   baseRate: bigint;
-  /** Maximum supply rate at 100% utilization (WAD, e.g., 15e16 = 15%) */
-  peakRate: bigint;
-  /** Curve steepness parameter (higher = steeper transition) */
-  k: number;
+  /** Utilization kink point (RAY, e.g., 8e17 = 80%) */
+  kink: bigint;
+  /** Annualized slope below kink (WAD / RAY) */
+  slopeLow: bigint;
+  /** Annualized slope above kink (WAD / RAY) */
+  slopeHigh: bigint;
 }
 
 /**
@@ -92,11 +90,12 @@ export interface CompoundSimulatorConfig {
  * @example
  * ```typescript
  * const config: MoonwellSimulatorConfig = {
- *   baseRate: 3n * WAD / 100n,   // 3% APY minimum
- *   peakRate: 15n * WAD / 100n,  // 15% APY maximum
- *   k: 5,                         // Curve steepness
- *   minRate: 1n * WAD / 100n,    // 1% APY floor from oracle
- *   maxRate: 20n * WAD / 100n,   // 20% APY ceiling from oracle
+ *   baseRate: 3n * WAD / 100n,              // 3% APY minimum
+ *   kink: 8n * RAY / 10n,                   // 80% kink point
+ *   slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY below kink
+ *   slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY above kink
+ *   minRate: 1n * WAD / 100n,              // 1% APY floor from oracle
+ *   maxRate: 20n * WAD / 100n,              // 20% APY ceiling from oracle
  * };
  * ```
  */
@@ -250,12 +249,13 @@ export const DEFAULT_AAVE_CONFIG: AaveSimulatorConfig = {
 
 /**
  * Default Compound III simulation configuration.
- * Based on Compound III mainnet/USDC market parameters.
+ * Based on Compound III Comet USDC market parameters.
  */
 export const DEFAULT_COMPOUND_CONFIG: CompoundSimulatorConfig = {
-  baseRate: 3n * WAD / 100n,   // 3% minimum
-  peakRate: 15n * WAD / 100n,  // 15% at 100% utilization
-  k: 5,                         // Curve steepness
+  baseRate: 3n * WAD / 100n,              // 3% APY
+  kink: 8n * RAY / 10n,                    // 80% kink
+  slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY
+  slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY
 };
 
 /**
@@ -263,9 +263,10 @@ export const DEFAULT_COMPOUND_CONFIG: CompoundSimulatorConfig = {
  * Based on Moonwell Apollo deployment parameters.
  */
 export const DEFAULT_MOONWELL_CONFIG: MoonwellSimulatorConfig = {
-  baseRate: 3n * WAD / 100n,   // 3% minimum
-  peakRate: 15n * WAD / 100n,  // 15% maximum
-  k: 5,                         // Curve steepness
-  minRate: 1n * WAD / 100n,    // 1% floor from oracle
-  maxRate: 20n * WAD / 100n,   // 20% ceiling from oracle
+  baseRate: 3n * WAD / 100n,              // 3% APY
+  kink: 8n * RAY / 10n,                   // 80% kink
+  slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY
+  slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY
+  minRate: 1n * WAD / 100n,              // 1% floor from oracle
+  maxRate: 20n * WAD / 100n,             // 20% ceiling from oracle
 };

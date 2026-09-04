@@ -4,24 +4,22 @@
  * Implements post-deposit interest rate simulation for Moonwell protocol.
  * Moonwell is a Compound III fork with Apollo oracle bounds on interest rates.
  *
- * Rate Model (per §6.5):
- *   rate = clamp(
- *     baseRate + (peakRate - baseRate) * exp(-k * (1 - utilization)),
- *     minRate,
- *     maxRate
- *   )
+ * Rate Model (per docs.compound.finance/interest-rates/):
+ *   baseRate = kinked linear rate from Compound model
+ *   rate = clamp(baseRate, minRate, maxRate)
  *
  * Where minRate and maxRate are provided by the Apollo oracle.
  *
  * Key differences from Compound III:
  *   - Rate is bounded by [minRate, maxRate] from Apollo oracle
  *   - More conservative rate adjustments due to oracle bounds
- *   - Slightly different base/peak rate parameters
+ *   - Same kinked linear model as Compound
  *
  * @module protocols/simulation
  */
 
 import { WAD, RAY, utilization as calcUtil } from '../math.js';
+import { calculateRateFromUtilization } from './compound-simulator.js';
 import {
   CompoundSimulatorConfig,
   DEFAULT_MOONWELL_CONFIG,
@@ -35,7 +33,7 @@ import {
  * Moonwell Interest Rate Simulator
  *
  * Simulates how the supply interest rate changes when new capital is deposited
- * into a Moonwell market. The simulator uses Moonwell's exponential rate model
+ * into a Moonwell market. The simulator uses the kinked linear rate model
  * with Apollo oracle bounds to calculate post-deposit rates.
  *
  * @example
@@ -63,73 +61,21 @@ export class MoonwellSimulator implements ISimulator {
   }
 
   /**
-   * Calculate Moonwell supply rate from utilization.
+   * Calculate Moonwell supply rate from utilization (unbounded).
    *
-   * Uses Moonwell's exponential rate model with Apollo oracle bounds:
-   *   baseRate = baseRate + (peakRate - baseRate) * exp(-k * (1 - utilization))
-   *   rate = clamp(baseRate, minRate, maxRate)
-   *
-   * The exponential component provides smooth rate transitions, while
-   * the oracle bounds ensure rates stay within acceptable ranges.
+   * Uses Compound's kinked linear rate model:
+   *   if util <= kink: rate = baseRate + slopeLow * util
+   *   if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Moonwell configuration parameters
-   * @returns Annualized supply rate bounded by [minRate, maxRate] (WAD)
+   * @returns Annualized supply rate (WAD)
    */
   calculateRateFromUtilization(
     util: bigint,
     config: CompoundSimulatorConfig
   ): bigint {
-    const { baseRate, peakRate, k } = config;
-
-    if (util === 0n) {
-      return baseRate;
-    }
-
-    if (util >= RAY) {
-      return peakRate;
-    }
-
-    // Calculate exp(-k * (1 - utilization)) using Taylor series
-    const oneMinusUtil = RAY - util;
-    const rateParam = (BigInt(k) * oneMinusUtil) / RAY;
-    const expFactor = this.expNegative(rateParam);
-
-    // Calculate the unbounded rate
-    const rateRange = peakRate - baseRate;
-    const rateContribution = (rateRange * expFactor) / RAY;
-    const unboundedRate = baseRate + rateContribution;
-
-    return unboundedRate;
-  }
-
-  /**
-   * Calculate exp(-x) for bigint x in RAY scale.
-   *
-   * Uses Taylor series: exp(-x) = 1 - x + x^2/2! - x^3/3! + ...
-   * where x is in RAY scale.
-   *
-   * @param x - Value to compute exp(-x) for (in RAY scale)
-   * @returns exp(-x) in RAY scale
-   */
-  private expNegative(x: bigint): bigint {
-    let result = RAY; // n=0 term: RAY * 1
-    let term = RAY;
-
-    // Convert x to WAD scale for the first division
-    const xWad = (x * WAD) / RAY;
-
-    for (let n = 1; n < 20; n++) {
-      term = (term * xWad) / (WAD * BigInt(n));
-      if (n % 2 === 1) {
-        result = result - term;
-      } else {
-        result = result + term;
-      }
-    }
-
-    if (result < 0n) result = 0n;
-    return result;
+    return calculateRateFromUtilization(util, config);
   }
 
   /**
@@ -163,11 +109,10 @@ export class MoonwellSimulator implements ISimulator {
     maxUtilization: bigint = (95n * RAY) / 100n // 95% for Moonwell (more conservative)
   ): bigint {
     if (maxUtilization === 0n) return 0n;
+    if (borrows === 0n) return 0n;
 
-    // Similar to Compound but with more conservative limits
-    const numerator = borrows * (RAY - maxUtilization);
-    const maxCash = (numerator / maxUtilization);
-
+    // At maxUtilization: borrows / (cash + deposit + borrows) = maxUtilization
+    const maxCash = (borrows * RAY) / maxUtilization;
     const capacity = maxCash > cash ? maxCash - cash : 0n;
 
     return capacity > 0n ? capacity : 0n;
@@ -200,7 +145,7 @@ export class MoonwellSimulator implements ISimulator {
     const newCash = cash + depositAmount;
     const utilizationAfter = this.calculateUtilization(newCash, borrows);
 
-    // Calculate unbounded post-deposit rate
+    // Calculate unbounded post-deposit rate using kinked linear model
     const unboundedRate = this.calculateRateFromUtilization(utilizationAfter, moonwellConfig);
 
     // Apply Apollo oracle bounds for Moonwell
@@ -309,7 +254,7 @@ export class MoonwellSimulator implements ISimulator {
   ): bigint {
     if (stressUtilization === 0n) return config.baseRate;
 
-    // Calculate rate at stress utilization
+    // Calculate rate at stress utilization using kinked linear model
     const unboundedRate = this.calculateRateFromUtilization(stressUtilization, config);
 
     // Apply bounds
