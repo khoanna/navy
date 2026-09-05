@@ -1,5 +1,6 @@
 import { SnapshotCollector } from '../collector/snapshot-collector.js';
 import { WithdrawalTracker } from '../collector/withdrawal-tracker.js';
+import { RegimeTracker } from '../regime/regime-tracker.js';
 import { PrismaClient } from '@prisma/client';
 import type { RollingForecast } from '../forecast/rolling.js';
 import type { ForecastResult } from '../forecast/types.js';
@@ -33,6 +34,10 @@ export interface SchedulerConfig {
   forecaster?: RollingForecast;
   /** Enable execution (default: true) */
   executionEnabled?: boolean;
+  /** Cold-start capacity factor (default: 0.5 = 50%) */
+  coldStartCapacityFactor?: number;
+  /** Cold-start reserve factor (default: 1.5 = 150%) */
+  coldStartReserveFactor?: number;
 }
 
 /**
@@ -61,6 +66,10 @@ export class Scheduler {
   private selectedMethod: string = 'rolling';
   private selectedConfig: Record<string, unknown> = { windowDays: 30, quantile: 0.10 };
   private keeperExecutor: KeeperExecutor | null = null;
+  /** Cold-start capacity factor (default: 0.5 = 50%) */
+  private coldStartCapacityFactor: number;
+  /** Cold-start reserve factor (default: 1.5 = 150%) */
+  private coldStartReserveFactor: number;
 
   constructor(
     collector: SnapshotCollector,
@@ -73,6 +82,9 @@ export class Scheduler {
     this.config = config;
     this.forecaster = config.forecaster ?? undefined;
     this.withdrawalTracker = new WithdrawalTracker(collector['client'], vaultAddress, prisma);
+    // Initialize cold-start factors with defaults
+    this.coldStartCapacityFactor = config.coldStartCapacityFactor ?? 0.5;
+    this.coldStartReserveFactor = config.coldStartReserveFactor ?? 1.5;
   }
 
   /**
@@ -330,9 +342,36 @@ export class Scheduler {
         return;
       }
 
+      // Get regime tracker for cold-start eligibility checks
+      const regimeTracker = this.getRegimeTracker();
+
+      // Apply cold-start constraints to each market before computing forecasts
+      // Per paper §9.4: ineligible markets get coldStartCapacityFactor (50%) applied
+      const eligibleMarkets = snapshot.strategies.map(strategy => {
+        const isEligible = regimeTracker?.isEligible(strategy.address) ?? true;
+        const effectiveCap = strategy.effectiveCap ?? strategy.totalAssets;
+        return this.applyColdStartConstraints(
+          { marketId: strategy.address, effectiveCap },
+          isEligible
+        );
+      });
+
+      // Log any markets with cold-start constraints applied
+      const coldStartApplied = eligibleMarkets.filter(m => m.coldStartApplied);
+      if (coldStartApplied.length > 0) {
+        console.log(`[Scheduler] Cold-start constraints applied to ${coldStartApplied.length} markets:`);
+        for (const market of coldStartApplied) {
+          console.log(`  - ${market.marketId}: capacity reduced to ${market.effectiveCap}`);
+        }
+      }
+
       // Update market histories and compute forecasts
       const forecasts: ForecastResult[] = [];
       for (const strategy of snapshot.strategies) {
+        // Find the eligible market data (with cold-start adjustments)
+        const eligibleMarket = eligibleMarkets.find(m => m.marketId === strategy.address);
+        const effectiveCap = eligibleMarket?.effectiveCap ?? strategy.effectiveCap ?? strategy.totalAssets;
+
         // Update history
         const history = this.marketHistories.get(strategy.address) ?? [];
         history.push(strategy.supplyRate);
@@ -350,6 +389,8 @@ export class Scheduler {
             marketId: strategy.address,
             method: this.selectedMethod,
             config: this.selectedConfig,
+            // Include effectiveCap with cold-start adjustments for decision-making
+            effectiveCap,
           });
         }
       }
@@ -505,6 +546,46 @@ export class Scheduler {
       targetAdapter: null,
       reason: 'ALLOCATION_WITHIN_TOLERANCE',
     };
+  }
+
+  /**
+   * Apply cold-start constraints to a market snapshot.
+   * Reduces effective capacity for markets that haven't completed cold-start.
+   *
+   * Per paper §9.4 and RegimeTracker.isEligible():
+   * - Ineligible markets get coldStartCapacityFactor (50%) applied to effective capacity
+   * - coldStartReserveFactor (150%) applied to reserve requirement
+   *
+   * @param market - Market snapshot with marketId and effectiveCap
+   * @param isEligible - Whether the market is eligible per RegimeTracker.isEligible()
+   * @returns Modified market with adjusted effectiveCap and coldStartApplied flag
+   */
+  applyColdStartConstraints(
+    market: { marketId: string; effectiveCap: bigint },
+    isEligible: boolean
+  ): { marketId: string; effectiveCap: bigint; coldStartApplied: boolean } {
+    if (isEligible) {
+      return { ...market, coldStartApplied: false };
+    }
+
+    // Apply 50% capacity reduction for ineligible (cold-start) markets
+    const reducedCap = (market.effectiveCap * BigInt(Math.round(this.coldStartCapacityFactor * 100))) / 100n;
+    return {
+      ...market,
+      effectiveCap: reducedCap,
+      coldStartApplied: true,
+    };
+  }
+
+  /**
+   * Get the RegimeTracker from WithdrawalTracker.
+   * Returns null if WithdrawalTracker doesn't expose it.
+   */
+  getRegimeTracker(): RegimeTracker | null {
+    // WithdrawalTracker may expose regimeTracker via a getter
+    // Check if withdrawalTracker has the property
+    const wt = this.withdrawalTracker as unknown as { regimeTracker?: RegimeTracker };
+    return wt.regimeTracker ?? null;
   }
 
   /**

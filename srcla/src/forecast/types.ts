@@ -8,6 +8,8 @@ export interface ForecastResult {
   coverage: number;
   method: string;
   config: Record<string, unknown>;
+  /** Effective capacity after cold-start adjustments (optional) */
+  effectiveCap?: bigint;
 }
 
 export interface CalibrationResult {
