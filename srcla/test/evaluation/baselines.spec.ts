@@ -248,28 +248,157 @@ describe('Baselines B0-B5', () => {
     });
 
     it('should skip unavailable adapters', () => {
-      const state = mockState(0n, 1_000_000_000_000n);
-      // Snapshot only has 'compound', but B4 targets compound, aave, moonwell
+      const state = mockState(100_000_000_000n, 1_000_000_000_000n); // has idle
+      // Snapshot only has 'compound'
       const actions = b4Policy(state, mockSnapshot(500, false, 5000, 'compound'));
 
-      // Should only target 'compound', skip 'aave' and 'moonwell'
+      // Should deploy all idle to 'compound' since it's the only available
       const targetedAdapters = actions.map((a) => a.adapter);
       expect(targetedAdapters).toContain('compound');
     });
 
     it('should generate deploy and divest actions', () => {
       const state = {
-        ...mockState(0n, 1_000_000_000_000n),
+        ...mockState(100_000_000_000n, 1_000_000_000_000n), // has idle
         strategyBalances: new Map([
-          ['compound', 600_000_000_000n], // over-allocated
-          ['aave', 100_000_000_000n], // under-allocated
+          ['compound', 60_000_000_000n], // over-allocated (40% of total but we have 100 idle)
+          ['aave', 20_000_000_000n], // under-allocated (20% of total)
         ]),
       };
       const actions = b4Policy(state, mockMultiMarketSnapshot());
 
+      // B4 deploys idle (100) as 40/40/20 to compound/aave/marketwell
+      // Current: compound=60, aave=20 (needs ~40 more each), moonwell=0 (needs 20)
+      // Target: compound=40, aave=40, moonwell=20 (40% each from 100 idle)
+      // Actions: compound divest 20, aave deploy 20, moonwell deploy 20
       const kinds = actions.map((a) => a.kind);
       expect(kinds).toContain('deploy');
       expect(kinds).toContain('divest');
+    });
+
+    it('should use marketId (adapter address) as stable key', () => {
+      // B4 should use adapter addresses, not hardcoded positional indices
+      const state = {
+        ...mockState(100_000_000_000n, 1_000_000_000_000n), // 100 USDC idle
+        strategyBalances: new Map(),
+      };
+      const dataset = createSyntheticDataset('test', 1, new Date('2025-01-01'));
+      const snapshot = dataset.snapshots[0]!;
+      snapshot.snapshots = [
+        {
+          marketId: '0xAAAA111122223333444455556666777788889999',
+          blockHash: '0x' + '0'.repeat(64),
+          timestamp: new Date(),
+          totalAssetsBase: 1_000_000_000_000n,
+          idleBase: 100_000_000_000n,
+          supplyRateE18: 50_000_000_000_000_000n, // 5% - highest
+          utilizationE18: 800_000_000_000_000_000n,
+          cashBase: 200_000_000_000n,
+          borrowsBase: 800_000_000_000_000_000n,
+          reservesBase: 10_000_000_000n,
+          capBps: 10_000,
+          paused: false,
+          configDigest: '0x' + 'a'.repeat(64),
+        },
+        {
+          marketId: '0xBBBB111122223333444455556666777788889999',
+          blockHash: '0x' + '1'.repeat(64),
+          timestamp: new Date(),
+          totalAssetsBase: 1_000_000_000_000n,
+          idleBase: 100_000_000_000_000n,
+          supplyRateE18: 40_000_000_000_000_000n, // 4%
+          utilizationE18: 750_000_000_000_000_000n,
+          cashBase: 250_000_000_000n,
+          borrowsBase: 750_000_000_000n,
+          reservesBase: 15_000_000_000n,
+          capBps: 10_000,
+          paused: false,
+          configDigest: '0x' + 'b'.repeat(64),
+        },
+        {
+          marketId: '0xCCCC111122223333444455556666777788889999',
+          blockHash: '0x' + '2'.repeat(64),
+          timestamp: new Date(),
+          totalAssetsBase: 1_000_000_000_000n,
+          idleBase: 100_000_000_000n,
+          supplyRateE18: 30_000_000_000_000_000n, // 3%
+          utilizationE18: 600_000_000_000_000_000n,
+          cashBase: 400_000_000_000n,
+          borrowsBase: 600_000_000_000n,
+          reservesBase: 5_000_000_000n,
+          capBps: 10_000,
+          paused: false,
+          configDigest: '0x' + 'c'.repeat(64),
+        },
+      ];
+
+      const actions = b4Policy(state as any, snapshot as any);
+
+      // Check that adapter addresses are used as keys
+      const adapterAddresses = actions.map((a) => a.adapter);
+      expect(adapterAddresses).toContain('0xAAAA111122223333444455556666777788889999');
+      expect(adapterAddresses).toContain('0xBBBB111122223333444455556666777788889999');
+      expect(adapterAddresses).toContain('0xCCCC111122223333444455556666777788889999');
+
+      // Verify 40/40/20 allocation
+      const totalDeployed = actions.reduce((sum, a) => sum + a.amount, 0n);
+      expect(totalDeployed).toBe(100_000_000_000n); // all idle deployed
+
+      // Check each allocation
+      for (const action of actions) {
+        if (action.adapter === '0xAAAA111122223333444455556666777788889999') {
+          // Highest rate gets 40%
+          expect(action.amount).toBe(40_000_000_000n);
+        }
+      }
+    });
+
+    it('should handle fewer than 3 available adapters', () => {
+      const state = {
+        ...mockState(100_000_000_000n, 1_000_000_000_000n),
+        strategyBalances: new Map(),
+      };
+      const dataset = createSyntheticDataset('test', 1, new Date('2025-01-01'));
+      const snapshot = dataset.snapshots[0]!;
+      snapshot.snapshots = [
+        {
+          marketId: '0xONLY1',
+          blockHash: '0x' + '0'.repeat(64),
+          timestamp: new Date(),
+          totalAssetsBase: 1_000_000_000_000n,
+          idleBase: 100_000_000_000n,
+          supplyRateE18: 50_000_000_000_000_000n,
+          utilizationE18: 800_000_000_000_000_000n,
+          cashBase: 200_000_000_000n,
+          borrowsBase: 800_000_000_000n,
+          reservesBase: 10_000_000_000n,
+          capBps: 10_000,
+          paused: false,
+          configDigest: '0x' + 'a'.repeat(64),
+        },
+        {
+          marketId: '0xONLY2',
+          blockHash: '0x' + '1'.repeat(64),
+          timestamp: new Date(),
+          totalAssetsBase: 1_000_000_000_000n,
+          idleBase: 100_000_000_000n,
+          supplyRateE18: 40_000_000_000_000_000n,
+          utilizationE18: 750_000_000_000_000_000n,
+          cashBase: 250_000_000_000n,
+          borrowsBase: 750_000_000_000n,
+          reservesBase: 15_000_000_000n,
+          capBps: 10_000,
+          paused: false,
+          configDigest: '0x' + 'b'.repeat(64),
+        },
+      ];
+
+      const actions = b4Policy(state as any, snapshot as any);
+
+      // With only 2 adapters, both should get 40% and fallback 20% should go to first
+      expect(actions.length).toBeGreaterThan(0);
+      const totalDeployed = actions.reduce((sum, a) => sum + a.amount, 0n);
+      expect(totalDeployed).toBe(100_000_000_000n);
     });
   });
 

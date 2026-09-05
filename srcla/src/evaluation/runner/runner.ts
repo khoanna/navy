@@ -521,13 +521,16 @@ export class EvaluationRunner {
       return this.createBaselinePolicy({ ...baseline, id: 'b2' });
     }
 
-    // B4: Fixed robust allocation
+    // B4: Fixed robust allocation — use adapter addresses from snapshot
     if (baseline.id === 'b4') {
       return (state, snapshot) => {
         const actions: { kind: 'deploy' | 'divest'; adapter: string; amount: bigint }[] = [];
-        const markets = snapshot.snapshots.filter((m) => !m.paused && m.capBps > 0);
+        const markets = snapshot.snapshots
+          .filter((m) => !m.paused && m.capBps > 0)
+          .sort((a, b) => Number(b.supplyRateE18 - a.supplyRateE18));
 
-        // Fixed 40/40/20 allocation across top 3 markets
+        if (markets.length === 0) return actions;
+
         const totalToDeploy = state.idleBase;
         if (totalToDeploy === 0n) return actions;
 
@@ -535,14 +538,21 @@ export class EvaluationRunner {
         const amount2 = totalToDeploy * 40n / 100n;
         const amount3 = totalToDeploy * 20n / 100n;
 
-        for (let i = 0; i < Math.min(3, markets.length); i++) {
-          const amount = i === 0 ? amount1 : i === 1 ? amount2 : amount3;
-          if (amount > 0n) {
-            actions.push({
-              kind: 'deploy',
-              adapter: markets[i]!.marketId,
-              amount,
-            });
+        const targets = [
+          { adapter: markets[0]!.marketId, amount: amount1 },
+          { adapter: markets[1]?.marketId ?? markets[0]!.marketId, amount: amount2 },
+          { adapter: markets[2]?.marketId ?? markets[0]!.marketId, amount: amount3 },
+        ];
+
+        for (const target of targets) {
+          if (target.amount > 0n) {
+            const current = state.strategyBalances.get(target.adapter) ?? 0n;
+            const diff = target.amount - current;
+            if (diff > 0n) {
+              actions.push({ kind: 'deploy', adapter: target.adapter, amount: diff });
+            } else if (diff < 0n) {
+              actions.push({ kind: 'divest', adapter: target.adapter, amount: -diff });
+            }
           }
         }
 
