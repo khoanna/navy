@@ -14,6 +14,7 @@ import { runReplay, type PolicyFn, type ReplayResult } from '../replay/replay.js
 import { calculateReturnMetrics } from '../metrics/returns.js';
 import { calculateRiskMetrics } from '../metrics/risk.js';
 import type { ForecastMetrics } from '../metrics/forecast.js';
+import { computeSharpeFromSnapshots } from '../metrics/statistics.js';
 import { CoverageTracker } from '../coverage-tracker.js';
 import { createSRCLAPolicy } from '../srcla-policy.js';
 import { getDeployableBaselines, type EvaluationManifest } from '../manifest/manifest.js';
@@ -174,16 +175,15 @@ export class EvaluationRunner {
 
     // Compute forecast metrics from coverage tracker
     for (const marketId of coverageTracker.getMarketIds()) {
-      const coverageMetrics = coverageTracker.calculateCoverage(marketId);
-      const forecastMetricsEntry: ForecastMetrics = {
-        mae: 0, // Would need actual predictions
-        rmse: 0,
-        mase: 0,
-        pinballLoss: 0,
-        coverage: coverageMetrics.coverage,
-        sharpness: 0,
-      };
-      forecastMetrics.set(marketId, forecastMetricsEntry);
+      const fm = coverageTracker.calculateForecastMetrics(marketId);
+      forecastMetrics.set(marketId, {
+        mae: fm.mae,
+        rmse: fm.rmse,
+        mase: 0, // TODO: add MASE calculation
+        pinballLoss: fm.pinballLoss,
+        coverage: fm.coverage,
+        sharpness: fm.sharpness,
+      });
     }
 
     // Compute comparison
@@ -270,8 +270,8 @@ export class EvaluationRunner {
       }
     }
 
-    // Estimate Sharpe ratio (simplified: APY / 0.10, assuming 10% std dev)
-    const sharpeRatio = returnMetrics.realizedNetApy / 0.10;
+    // Compute real Sharpe ratio from snapshot series
+    const sharpeRatio = computeSharpeFromSnapshots(snapshots);
 
     return {
       policyId,

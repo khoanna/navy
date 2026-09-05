@@ -79,6 +79,34 @@ function normalCDF(x: number): number {
 }
 
 /**
+ * Compute Sharpe ratio from snapshot series.
+ * Returns annualized Sharpe: (mean return / std dev) * sqrt(periods per year)
+ */
+export function computeSharpeFromSnapshots(
+  snapshots: Array<{ assets: bigint; timestamp: Date }>,
+): number {
+  if (snapshots.length < 2) return 0;
+
+  const returns: number[] = [];
+  for (let i = 1; i < snapshots.length; i++) {
+    const prev = Number(snapshots[i - 1]!.assets);
+    const curr = Number(snapshots[i]!.assets);
+    if (prev === 0) continue;
+    returns.push((curr - prev) / prev);
+  }
+
+  if (returns.length === 0) return 0;
+
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / returns.length;
+  const stdDev = Math.sqrt(variance);
+
+  if (stdDev === 0) return 0;
+  // Annualize: assume daily data → multiply by sqrt(365)
+  return (mean / stdDev) * Math.sqrt(365);
+}
+
+/**
  * Bootstrap confidence interval
  */
 export interface BootstrapCI {
