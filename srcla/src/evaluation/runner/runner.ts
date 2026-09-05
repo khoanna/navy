@@ -595,9 +595,35 @@ export class EvaluationRunner {
       return this.createBaselinePolicy({ id: 'b1', name: 'Highest Rate', deployable: true, description: '' });
     }
 
-    // H3: No cost gate
+    // H3: No cost gate - deploys whenever capacity exists (no cost gate check)
     if (ablation.id === 'h3') {
-      return this.createBaselinePolicy({ id: 'b2', name: 'Capacity-Aware', deployable: true, description: '' });
+      return (state, snapshot) => {
+        const actions: { kind: 'deploy' | 'divest'; adapter: string; amount: bigint }[] = [];
+        const idleBase = state.idleBase;
+        if (idleBase === 0n) return [];
+
+        const markets = [...snapshot.snapshots]
+          .filter((m) => !m.paused && m.capBps > 0)
+          .sort((a, b) => Number(b.supplyRateE18 - a.supplyRateE18));
+
+        let remaining = idleBase;
+        for (const market of markets) {
+          if (remaining === 0n) break;
+
+          // No cost gate check - deploy if capacity exists
+          const marketCapacity = (state.totalAssets * BigInt(market.capBps)) / 10_000n;
+          const currentExposure = state.strategyBalances.get(market.marketId) ?? 0n;
+          const available = marketCapacity > currentExposure ? marketCapacity - currentExposure : 0n;
+
+          if (available > 0n) {
+            const deployAmount = available < remaining ? available : remaining;
+            actions.push({ kind: 'deploy', adapter: market.marketId, amount: deployAmount });
+            remaining -= deployAmount;
+          }
+        }
+
+        return actions;
+      };
     }
 
     // H4: Weekly rebalance only
@@ -613,9 +639,37 @@ export class EvaluationRunner {
       };
     }
 
-    // H5: No uncertainty - ignore prediction interval
+    // H5: No uncertainty - use mean forecast directly (sort by supplyRateE18, no lower-bound discount)
     if (ablation.id === 'h5') {
-      return this.createBaselinePolicy({ id: 'b2', name: 'Capacity-Aware', deployable: true, description: '' });
+      return (state, snapshot) => {
+        const actions: { kind: 'deploy' | 'divest'; adapter: string; amount: bigint }[] = [];
+        const idleBase = state.idleBase;
+        if (idleBase === 0n) return [];
+
+        // Sort by mean (supplyRateE18) - no uncertainty discount
+        const markets = [...snapshot.snapshots]
+          .filter((m) => !m.paused && m.capBps > 0)
+          .sort((a, b) => Number(b.supplyRateE18 - a.supplyRateE18));
+
+        if (markets.length === 0) return [];
+
+        let remaining = idleBase;
+        for (const market of markets) {
+          if (remaining === 0n) break;
+
+          const marketCapacity = (state.totalAssets * BigInt(market.capBps)) / 10_000n;
+          const currentExposure = state.strategyBalances.get(market.marketId) ?? 0n;
+          const available = marketCapacity > currentExposure ? marketCapacity - currentExposure : 0n;
+
+          if (available > 0n) {
+            const deployAmount = available < remaining ? available : remaining;
+            actions.push({ kind: 'deploy', adapter: market.marketId, amount: deployAmount });
+            remaining -= deployAmount;
+          }
+        }
+
+        return actions;
+      };
     }
 
     // Default: use B1
