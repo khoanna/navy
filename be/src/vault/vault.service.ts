@@ -6,18 +6,18 @@ import { Injectable } from '@nestjs/common';
 import { ethers } from 'ethers';
 import { NavyConfigService } from '../config/config.service';
 import { SrclaClient, StrategyAllocation } from './srcla-client';
-import { TransactionProposal, VaultPositionDto, VaultLimitsDto, HarvestRecordDto, HarvestsResponseDto } from './vault.types';
+import { TransactionProposal, VaultPositionDto, VaultLimitsDto, HarvestRecordDto, HarvestsResponseDto, RebalanceStatusDto } from './vault.types';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ] as const;
 
-/** Known adapter addresses → human-readable protocol names */
+/** Known adapter addresses → human-readable protocol names (lowercase keys for case-insensitive lookup) */
 const ADAPTER_NAMES: Record<string, string> = {
-  '0x5b53a25fF5Ec56a852CB4c0D193754308C6e99A0': 'Compound III',
-  '0xfDCaC27247ecb3452f88c8ea10CACeabc19348eb': 'Aave V3',
-  '0x5bb77832BA9CBe335fCCdF8Ef5520ae041326598': 'Moonwell',
+  '0x5b53a25ff5ec56a852cb4c0d193754308c6e99a0': 'Compound III',
+  '0xfdcac27247ecb3452f88c8ea10caceabc19348eb': 'Aave V3',
+  '0x5bb77832ba9cbe335fccddf8ef5520ae041326598': 'Moonwell',
 };
 
 const VAULT_ABI = [
@@ -34,6 +34,17 @@ const VAULT_ABI = [
   'function withdraw(uint256 assets, address receiver, address owner) returns (uint256)',
 ] as const;
 
+/** Extended ABI for reserve/plan state view functions */
+const VAULT_STATE_ABI = [
+  'function requiredIdle() view returns (uint256)',
+  'function adminReserve() view returns (uint256)',
+  'function dynamicReserve() view returns (uint256)',
+  'function activePlanReserve() view returns (uint256)',
+  'function minIdleBps() view returns (uint256)',
+  'function activePlanId() view returns (bytes32)',
+  'function activePlanExpiresAt() view returns (uint64)',
+] as const;
+
 @Injectable()
 export class VaultService {
   readonly provider: ethers.JsonRpcProvider;
@@ -42,6 +53,7 @@ export class VaultService {
   readonly vaultAddress: string;
   readonly usdc: ethers.Contract;
   readonly vault: ethers.Contract;
+  readonly vaultState: ethers.Contract; // read-only contract for reserve/plan state
 
   constructor(
     private readonly config: NavyConfigService,
@@ -59,6 +71,7 @@ export class VaultService {
     this.provider = new ethers.JsonRpcProvider(rpcUrl, this.chainId);
     this.usdc = new ethers.Contract(this.usdcAddress, ERC20_ABI, this.provider);
     this.vault = new ethers.Contract(this.vaultAddress, VAULT_ABI, this.provider);
+    this.vaultState = new ethers.Contract(this.vaultAddress, VAULT_STATE_ABI, this.provider);
   }
 
   /**
@@ -200,6 +213,54 @@ export class VaultService {
   }
 
   /**
+   * Get aggregated rebalance status: latest SRCLA decision + vault reserve state.
+   * Combines on-chain vault data with SRCLA decision data for the admin dashboard.
+   */
+  async getRebalanceStatus(): Promise<RebalanceStatusDto> {
+    // Fetch vault state and latest decision in parallel
+    const [decision, adminReserve, dynamicReserve, activePlanReserve, minIdleBps, activePlanId, activePlanExpiresAt] =
+      await Promise.all([
+        this.srclaClient.getLatestDecision(),
+        this.vaultState.adminReserve() as Promise<bigint>,
+        this.vaultState.dynamicReserve() as Promise<bigint>,
+        this.vaultState.activePlanReserve() as Promise<bigint>,
+        this.vaultState.minIdleBps() as Promise<bigint>,
+        this.vaultState.activePlanId() as Promise<string>,
+        this.vaultState.activePlanExpiresAt() as Promise<bigint>,
+      ]);
+
+    // requiredIdle = max(adminReserve, dynamicReserve, activePlanReserve)
+    const requiredIdle = [adminReserve, dynamicReserve, activePlanReserve].reduce(
+      (max, val) => (val > max ? val : max),
+      0n,
+    );
+
+    return {
+      latestDecision: decision
+        ? {
+            decisionHash: decision.decisionHash,
+            timestamp: decision.timestamp,
+            policyVersion: decision.policyVersion,
+            reserveBase: decision.reserveBase,
+            allocation: decision.allocation,
+            actionDecision: decision.actionDecision,
+          }
+        : null,
+      vaultReserve: {
+        requiredIdle: requiredIdle.toString(),
+        adminReserve: adminReserve.toString(),
+        dynamicReserve: dynamicReserve.toString(),
+        activePlanReserve: activePlanReserve.toString(),
+        minIdleBps: Number(minIdleBps),
+      },
+      planStatus: {
+        activePlanId: activePlanId === ethers.ZeroHash ? null : activePlanId,
+        planExpiresAt: activePlanExpiresAt > 0n ? new Date(Number(activePlanExpiresAt) * 1000).toISOString() : null,
+      },
+    };
+  }
+
+  /**
    * Get recent decisions from SRCLA
    */
   async getDecisions(params?: { cursor?: string; limit?: string }) {
@@ -223,5 +284,13 @@ export class VaultService {
       recipients: [{ address: this.vaultAddress, shares: r.amountOutBase }],
     }));
     return { harvests, next: res.meta.nextCursor };
+  }
+
+  /**
+   * Trigger a manual rebalance decision cycle in SRCLA.
+   * Proxies the request to the SRCLA internal trigger endpoint.
+   */
+  async triggerRebalance(force = false): Promise<{ triggered: boolean; message: string }> {
+    return this.srclaClient.triggerRebalance(force);
   }
 }

@@ -68,4 +68,30 @@ describe('SrclaClient', () => {
 
     await expect(client.getHealth()).rejects.toThrow(/unavailable/);
   });
+
+  it('should trigger rebalance', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ triggered: true, message: 'Rebalance triggered' }),
+    } as any);
+
+    const result = await client.triggerRebalance(false);
+    expect(result.triggered).toBe(true);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/v1/internal/trigger'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    mockFetch.mockRestore();
+  });
+
+  it('should trigger rebalance with force=true', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ triggered: true, message: 'Force rebalance triggered' }),
+    } as any);
+
+    const result = await client.triggerRebalance(true);
+    expect(result.triggered).toBe(true);
+    mockFetch.mockRestore();
+  });
 });

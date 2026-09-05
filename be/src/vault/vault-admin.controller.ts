@@ -2,11 +2,12 @@
  * VaultAdminController — cohort-level accounting endpoints (admin-only).
  * Exposes read-only views of vault event history and profit tracking.
  */
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { VaultEventWatcher, DEFAULT_COHORT_ADDRESS } from './vault-event-watcher';
 import { VaultService } from './vault.service';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { ProposalService } from './proposal.service';
 
 @Controller('vault/admin')
 @UseGuards(RolesGuard)
@@ -15,6 +16,7 @@ export class VaultController {
   constructor(
     private readonly vaultWatcher: VaultEventWatcher,
     private readonly vaultService: VaultService,
+    private readonly proposalService: ProposalService,
   ) {}
 
   /**
@@ -92,6 +94,28 @@ export class VaultController {
   }
 
   /**
+   * GET /vault/admin/rebalance/status
+   * Get aggregated rebalance status: latest SRCLA decision + vault reserve state.
+   * Combines on-chain vault data (requiredIdle, reserves, plan status) with
+   * SRCLA decision data for the admin dashboard.
+   */
+  @Get('rebalance/status')
+  async getRebalanceStatus() {
+    return this.vaultService.getRebalanceStatus();
+  }
+
+  /**
+   * GET /vault/admin/rebalance/proposals
+   * Get vault rebalance proposal history.
+   */
+  @Get('rebalance/proposals')
+  async getRebalanceProposals(@Query('status') status?: string) {
+    return this.proposalService.getProposalsByStatus(
+      status as any,
+    );
+  }
+
+  /**
    * GET /vault/admin/harvests
    * Get harvest history from SRCLA.
    */
@@ -102,5 +126,16 @@ export class VaultController {
     @Query('limit') limit?: string,
   ) {
     return this.vaultService.getHarvests({ adapter, cursor, limit });
+  }
+
+  /**
+   * POST /vault/admin/rebalance/trigger
+   * Trigger a manual rebalance decision cycle in SRCLA.
+   * Calls the SRCLA internal trigger endpoint to force a decision evaluation.
+   */
+  @Post('rebalance/trigger')
+  async triggerRebalance(@Body() body: { force?: boolean }) {
+    const force = body.force ?? false;
+    return this.vaultService.triggerRebalance(force);
   }
 }
