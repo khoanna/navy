@@ -184,6 +184,9 @@ export class KeeperExecutor {
       // Get Merkle root
       const merkleRoot = getOrderedActionsMerkleRoot(actionsWithProofs);
 
+      // Read real configuration digest from vault (not ethers.ZeroHash)
+      const configurationDigest = await this.executor.getConfigurationDigest();
+
       // Build plan header
       const now = Math.floor(Date.now() / 1000);
       const planId = BigInt(this.generatePlanId(decisionHash));
@@ -196,7 +199,7 @@ export class KeeperExecutor {
         snapshotBlockNumber: BigInt(snapshotBlockNumber),
         snapshotHash: ethers.ZeroHash, // Would be computed from snapshot
         decisionHash,
-        configurationDigest: ethers.ZeroHash, // Would be computed from current config
+        configurationDigest,
         reserve,
         minFinalAssets: 0n,
         maxRecognizedLoss: 0n,
@@ -290,6 +293,9 @@ export class KeeperExecutor {
   ): Promise<KeeperExecutionResult> {
     const decisionHash = this.generatePlanId(`single-${Date.now()}`);
 
+    // Read real configuration digest from vault
+    const configurationDigest = await this.executor.getConfigurationDigest();
+
     // For single actions, we still need to submit a plan
     const now = Math.floor(Date.now() / 1000);
     const planId = BigInt(decisionHash);
@@ -302,7 +308,7 @@ export class KeeperExecutor {
       snapshotBlockNumber: 0n,
       snapshotHash: ethers.ZeroHash,
       decisionHash,
-      configurationDigest: ethers.ZeroHash,
+      configurationDigest,
       reserve: 0n,
       minFinalAssets: 0n,
       maxRecognizedLoss: 0n,

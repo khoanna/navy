@@ -480,6 +480,25 @@ export class PlanExecutor {
     }
   }
 
+  /**
+   * Read current configuration digest from the vault contract.
+   * This is required for submitPlan() to not revert with InvalidConfigurationDigest.
+   */
+  async getConfigurationDigest(): Promise<string> {
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+    try {
+      const data = await provider.call({
+        to: this.vaultAddress,
+        data: this.iface.encodeFunctionData('currentConfigurationDigest'),
+      });
+      if (data === '0x' || data === ethers.ZeroHash) return ethers.ZeroHash;
+      const [digest] = ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], data);
+      return digest as string;
+    } catch {
+      return ethers.ZeroHash;
+    }
+  }
+
   // Role hashes (computed from contract constants)
   private static readonly ADMIN_ROLE_HASH = '0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775';
   private static readonly ALLOCATOR_ROLE_HASH = '0x7935be9171d225aed0f1e3092f6e45b2c8c1b97c41c25e5077c07d3f3e71a62f';

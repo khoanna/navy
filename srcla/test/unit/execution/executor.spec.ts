@@ -1,8 +1,13 @@
+import { ethers } from 'ethers';
 import { PlanBuilder, type ExecutionPlan, type PlanAction } from '../../../src/execution/plan-builder.js';
 import { preflight, type PreflightParams } from '../../../src/execution/preflight.js';
 import { reconcile, type VaultState } from '../../../src/execution/reconciler.js';
 import { hashData } from '../../../src/domain/hashing.js';
 import type { MarketState } from '../../../src/protocols/simulation/types.js';
+import { PlanExecutor, DEFAULT_EXECUTOR_CONFIG } from '../../../src/execution/executor.js';
+import { jest } from '@jest/globals';
+
+const VAULT_ADDRESS = '0x' + 'a1'.repeat(20);
 
 /**
  * Create a mock ExecutionPlan for testing
@@ -798,5 +803,61 @@ describe('DirectAllocationResult', () => {
     expect(result).toHaveProperty('amount');
     expect(typeof result.adapter).toBe('string');
     expect(typeof result.amount).toBe('bigint');
+  });
+});
+
+describe('PlanExecutor', () => {
+  describe('getConfigurationDigest', () => {
+    it('should read currentConfigurationDigest from vault', async () => {
+      const expectedDigest = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+
+      const mockCallFn = jest.fn<() => Promise<string>>().mockResolvedValue(expectedDigest);
+      const mockProvider = { call: mockCallFn } as unknown as ethers.JsonRpcProvider;
+
+      const mockWallet = {
+        provider: mockProvider,
+        address: '0x' + 'b2'.repeat(20),
+      } as unknown as ethers.Wallet;
+
+      const executor = new PlanExecutor(mockWallet, VAULT_ADDRESS, DEFAULT_EXECUTOR_CONFIG);
+      const digest = await executor.getConfigurationDigest();
+
+      expect(digest).toBe(expectedDigest);
+      expect(mockCallFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: VAULT_ADDRESS,
+        })
+      );
+    });
+
+    it('should return ZeroHash when call returns 0x', async () => {
+      const mockCallFn = jest.fn<() => Promise<string>>().mockResolvedValue('0x');
+      const mockProvider = { call: mockCallFn } as unknown as ethers.JsonRpcProvider;
+
+      const mockWallet = {
+        provider: mockProvider,
+        address: '0x' + 'b2'.repeat(20),
+      } as unknown as ethers.Wallet;
+
+      const executor = new PlanExecutor(mockWallet, VAULT_ADDRESS, DEFAULT_EXECUTOR_CONFIG);
+      const digest = await executor.getConfigurationDigest();
+
+      expect(digest).toBe(ethers.ZeroHash);
+    });
+
+    it('should return ZeroHash on call error', async () => {
+      const mockCallFn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('RPC error'));
+      const mockProvider = { call: mockCallFn } as unknown as ethers.JsonRpcProvider;
+
+      const mockWallet = {
+        provider: mockProvider,
+        address: '0x' + 'b2'.repeat(20),
+      } as unknown as ethers.Wallet;
+
+      const executor = new PlanExecutor(mockWallet, VAULT_ADDRESS, DEFAULT_EXECUTOR_CONFIG);
+      const digest = await executor.getConfigurationDigest();
+
+      expect(digest).toBe(ethers.ZeroHash);
+    });
   });
 });
