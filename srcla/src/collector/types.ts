@@ -90,4 +90,6 @@ export interface StrategySnapshot {
   cash: bigint;
   paused: boolean;
   configDigest: string;
+  /** Effective cap after cold-start constraints (optional) */
+  effectiveCap?: bigint;
 }

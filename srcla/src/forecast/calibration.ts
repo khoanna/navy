@@ -189,7 +189,10 @@ export function calibrateAllMethods(
     }
   }
 
-  return { results, arxForecaster: bestArxForecaster };
+  return {
+    results,
+    ...(bestArxForecaster !== undefined ? { arxForecaster: bestArxForecaster } : {}),
+  };
 }
 
 export interface CalibrationConfig {
@@ -232,7 +235,7 @@ export async function persistCalibration(
  */
 export async function getSelectedMethod(
   client: PrismaClient
-): Promise<{ method: string; config: Record<string, unknown> }> {
+): Promise<{ method: string; config: Record<string, unknown>; arxForecaster?: DirectARXForecast }> {
   const latest = await client.forecastCalibration.findFirst({
     where: { selected: true },
     orderBy: { createdAt: 'desc' },
@@ -330,7 +333,7 @@ export async function getHistoricalReturns(
 export async function runWalkForwardCalibration(
   client: PrismaClient,
   config: CalibrationConfig
-): Promise<{ selectedMethod: string; calibrations: ForecastCalibration[] }> {
+): Promise<{ selectedMethod: string; calibrations: ForecastCalibration[]; arxForecaster?: DirectARXForecast }> {
   // Get all markets with sufficient history
   const markets = await client.marketSnapshot.findMany({
     select: { marketId: true },
@@ -385,7 +388,11 @@ export async function runWalkForwardCalibration(
     console.log('[Calibration] ARX selected with calibrated residuals - lower bound uses quantile');
   }
 
-  return { selectedMethod: best.method, calibrations, arxForecaster };
+  return {
+    selectedMethod: best.method,
+    calibrations,
+    ...(arxForecaster !== undefined ? { arxForecaster } : {}),
+  };
 }
 
 /**

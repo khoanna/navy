@@ -68,8 +68,6 @@ export class Scheduler {
   private keeperExecutor: KeeperExecutor | null = null;
   /** Cold-start capacity factor (default: 0.5 = 50%) */
   private coldStartCapacityFactor: number;
-  /** Cold-start reserve factor (default: 1.5 = 150%) */
-  private coldStartReserveFactor: number;
 
   constructor(
     collector: SnapshotCollector,
@@ -84,7 +82,6 @@ export class Scheduler {
     this.withdrawalTracker = new WithdrawalTracker(collector['client'], vaultAddress, prisma);
     // Initialize cold-start factors with defaults
     this.coldStartCapacityFactor = config.coldStartCapacityFactor ?? 0.5;
-    this.coldStartReserveFactor = config.coldStartReserveFactor ?? 1.5;
   }
 
   /**
