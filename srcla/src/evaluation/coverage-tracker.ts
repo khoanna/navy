@@ -194,16 +194,10 @@ export class CoverageTracker {
   }
 
   /**
-   * Calculate full forecast metrics from stored records.
-   * Computes MAE, RMSE, sharpness from actual vs predicted.
+   * Compute forecast metrics from an array of coverage records.
+   * Used internally by calculateCoverage and calculateOverallCoverage.
    */
-  calculateForecastMetrics(marketId: string, windowDays?: number): ForecastMetrics {
-    const allRecords = this.records.get(marketId) ?? [];
-
-    const records = windowDays
-      ? this.filterByWindow(allRecords, windowDays)
-      : allRecords;
-
+  private computeForecastMetricsFromRecords(records: CoverageRecord[]): ForecastMetrics {
     if (records.length === 0) {
       return { mae: 0, rmse: 0, sharpness: 0, pinballLoss: 0, coverage: 0 };
     }
@@ -230,6 +224,18 @@ export class CoverageTracker {
       pinballLoss: totalAbsError / n,
       coverage: belowCount / n,
     };
+  }
+
+  /**
+   * Calculate full forecast metrics from stored records.
+   * Computes MAE, RMSE, sharpness from actual vs predicted.
+   */
+  calculateForecastMetrics(marketId: string, windowDays?: number): ForecastMetrics {
+    const allRecords = this.records.get(marketId) ?? [];
+    const records = windowDays
+      ? this.filterByWindow(allRecords, windowDays)
+      : allRecords;
+    return this.computeForecastMetricsFromRecords(records);
   }
 
   /**
@@ -281,6 +287,9 @@ export class CoverageTracker {
       0n,
     );
 
+    // Calculate forecast metrics from the aggregated records
+    const forecastMetrics = this.computeForecastMetricsFromRecords(allRecords);
+
     return {
       coverage,
       totalRecords,
@@ -288,10 +297,10 @@ export class CoverageTracker {
       averageShortfall,
       maxShortfall,
       exceedsTarget: coverage >= this.config.targetCoverage,
-      mae: 0,
-      rmse: 0,
-      sharpness: 0,
-      pinballLoss: 0,
+      mae: forecastMetrics.mae,
+      rmse: forecastMetrics.rmse,
+      sharpness: forecastMetrics.sharpness,
+      pinballLoss: forecastMetrics.pinballLoss,
     };
   }
 
