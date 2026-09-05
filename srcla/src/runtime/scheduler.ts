@@ -215,9 +215,15 @@ export class Scheduler {
       const calibrations = await getSelectedMethod(this.prisma);
       this.selectedConfig = calibrations.config;
 
-      // Re-initialize forecaster with new config
-      const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
-      this.forecaster = forecasterInstance;
+      // Use calibrated ARX forecaster if available (paper §7.2 calibrated lower bound)
+      // Otherwise create a fresh one via createForecaster
+      if (this.selectedMethod === 'arx' && result.arxForecaster) {
+        this.forecaster = result.arxForecaster as unknown as RollingForecast;
+        console.log('[Scheduler] Using calibrated ARX forecaster with residual-based lower bound');
+      } else {
+        const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
+        this.forecaster = forecasterInstance;
+      }
 
       console.log(`[Scheduler] Calibration complete. Selected method: ${this.selectedMethod}`);
     } catch (error) {

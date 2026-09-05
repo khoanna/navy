@@ -34,15 +34,29 @@ export function selectBestMethod(candidates: ForecastCandidate[]): ForecastCandi
 }
 
 /**
+ * Result of calibrating all forecast methods, including the calibrated ARX forecaster.
+ */
+export interface CalibrationOutput {
+  results: CalibrationResult[];
+  /** The best ARX forecaster with calibrated residuals (if ARX configs were run) */
+  arxForecaster?: DirectARXForecast;
+}
+
+/**
  * Run all forecast methods with various configurations and compute loss metrics.
  * Used for walk-forward calibration to select the best method.
+ *
+ * Per paper §7.2: captures residuals during ARX calibration to enable
+ * calibrated lower bound computation (mean + quantile of residuals).
  */
 export function calibrateAllMethods(
   historicalReturns: bigint[],
   horizonSeconds: number,
   artifactHash: string
-): CalibrationResult[] {
+): CalibrationOutput {
   const results: CalibrationResult[] = [];
+  let bestArxForecaster: DirectARXForecast | undefined;
+  let bestArxLoss = Infinity;
 
   // Rolling method configurations to calibrate
   const rollingWindows = [7, 14, 30];
@@ -121,6 +135,7 @@ export function calibrateAllMethods(
   }
 
   // ARX method configurations
+  // Per paper §7.2: collect residuals for calibrated lower bound
   const lagsOptions = [3, 7, 14];
 
   for (const lags of lagsOptions) {
@@ -128,14 +143,25 @@ export function calibrateAllMethods(
 
     const predictions: bigint[] = [];
     const realized: bigint[] = [];
+    const residuals: bigint[] = [];
+    let meanSum = 0n;
+    let count = 0;
 
     for (let i = lags + 10; i < historicalReturns.length; i++) {
       const history = historicalReturns.slice(Math.max(0, i - 100), i);
       const result = method.forecast(history, { rate: history }, horizonSeconds);
       predictions.push(result.lowerReturn);
-      realized.push(historicalReturns[i] ?? WAD);
+      const actual = historicalReturns[i] ?? WAD;
+      realized.push(actual);
+
+      // Compute residual: actual - predicted (in WAD scale)
+      const residual = actual - result.meanReturn;
+      residuals.push(residual);
+      meanSum += result.meanReturn;
+      count++;
     }
 
+    const mean = count > 0 ? meanSum / BigInt(count) : WAD;
     const { loss, coverage } = method.calculateLoss(
       predictions.map((p) => ({ lowerReturn: p } as any)),
       realized
@@ -153,9 +179,17 @@ export function calibrateAllMethods(
       },
       artifactHash,
     });
+
+    // Track the best ARX forecaster with its residuals
+    if (loss < bestArxLoss) {
+      bestArxLoss = loss;
+      // Create a fresh forecaster and set calibrated residuals
+      bestArxForecaster = new DirectARXForecast({ lags, features: ['rate'] });
+      bestArxForecaster.setCalibratedResiduals(residuals, mean);
+    }
   }
 
-  return results;
+  return { results, arxForecaster: bestArxForecaster };
 }
 
 export interface CalibrationConfig {
@@ -323,7 +357,8 @@ export async function runWalkForwardCalibration(
   }
 
   // Run all methods on historical data
-  const results = calibrateAllMethods(
+  // Returns results + the best ARX forecaster with calibrated residuals
+  const { results, arxForecaster } = calibrateAllMethods(
     allReturns,
     config.horizonSeconds,
     config.artifactHash
@@ -344,7 +379,13 @@ export async function runWalkForwardCalibration(
 
   console.log(`[Calibration] Selected method: ${best.method} (loss: ${best.loss})`);
 
-  return { selectedMethod: best.method, calibrations };
+  // If ARX was selected and we have a calibrated forecaster, store it for later use
+  // This enables the calibrated lower bound (paper §7.2)
+  if (best.method === 'arx' && arxForecaster) {
+    console.log('[Calibration] ARX selected with calibrated residuals - lower bound uses quantile');
+  }
+
+  return { selectedMethod: best.method, calibrations, arxForecaster };
 }
 
 /**
