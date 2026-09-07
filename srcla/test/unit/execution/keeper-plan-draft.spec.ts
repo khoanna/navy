@@ -22,12 +22,15 @@ import type { PlanDraft } from '../../../src/policy/types.js';
 const ALLOWED_GUARD = { placeholderPricesInUse: false, placeholderPriceFields: [] };
 const BLOCKED_GUARD = { placeholderPricesInUse: true, placeholderPriceFields: ['ethUsdE8'] };
 
+/** Real wall-clock "now", in seconds -- Task 14 review Finding 2 added a live expiresAt/createdAt-vs-now preflight check, so fixture headers must be realistic relative to it, not fixed early-epoch values. */
+const NOW = BigInt(Math.floor(Date.now() / 1000));
+
 function draft(over: Partial<PlanDraft['header']> = {}): PlanDraft {
   const header: PlanDraft['header'] = {
     planId: 42n,
     policyVersion: 5n,
-    createdAt: 1_000_000n,
-    expiresAt: 1_001_800n,
+    createdAt: NOW - 100n,
+    expiresAt: NOW + 1_800n,
     actionCount: 1n,
     snapshotBlockNumber: 12345n,
     snapshotHash: '0x' + 'ef'.repeat(32),
@@ -178,6 +181,44 @@ describe('KeeperExecutor.executePlanDraft', () => {
       expect(r.errors.join(' ')).toMatch(/planId/i);
     });
 
+    // Task 14 review, Finding 2: submitPlan's require conditions this
+    // executor can check without an RPC call.
+    it('refuses a draft whose actionCount is zero, distinctly from a mismatch', async () => {
+      const d = draft({ actionCount: 0n });
+      d.actions = [];
+      const r = await keeper().executePlanDraft(d);
+      expect(r.success).toBe(false);
+      expect(r.errors.join(' ')).toMatch(/actionCount is zero/i);
+    });
+
+    it('refuses a draft whose merkleRoot is zero', async () => {
+      const d = draft();
+      d.merkleRoot = ethers.ZeroHash;
+      const r = await keeper().executePlanDraft(d);
+      expect(r.success).toBe(false);
+      expect(r.errors.join(' ')).toMatch(/merkleRoot/i);
+    });
+
+    it('refuses a draft whose createdAt is in the future', async () => {
+      const r = await keeper().executePlanDraft(
+        draft({ createdAt: NOW + 100_000n, expiresAt: NOW + 200_000n })
+      );
+      expect(r.success).toBe(false);
+      expect(r.errors.join(' ')).toMatch(/createdAt is in the future/i);
+    });
+
+    it('refuses a draft whose expiresAt is in the past by wall clock, even when expiresAt > createdAt', async () => {
+      // Isolates the live "expiresAt < now" check from the unconditional
+      // "expiresAt <= createdAt" check: both createdAt and expiresAt are in
+      // the past here, but expiresAt is still after createdAt.
+      const r = await keeper().executePlanDraft(
+        draft({ createdAt: NOW - 500_000n, expiresAt: NOW - 100_000n })
+      );
+      expect(r.success).toBe(false);
+      expect(r.errors.join(' ')).toMatch(/expiresAt < now/i);
+      expect(r.errors.join(' ')).not.toMatch(/expiresAt <= createdAt/i);
+    });
+
     it('reports every violated field at once rather than stopping at the first', async () => {
       const r = await keeper().executePlanDraft(
         draft({ snapshotHash: ethers.ZeroHash, decisionHash: ethers.ZeroHash, actionCount: 9n })
@@ -315,5 +356,47 @@ describe('KeeperExecutor.executePlanDraft', () => {
       const failure = await keeper(ALLOWED_GUARD, failExecutor).executePlanDraft(draft());
       expect(failure.planId).toBe('0x2a');
     });
+  });
+});
+
+describe('KeeperExecutor.executeAction guard scoping (Task 14 review, Finding 4)', () => {
+  it('blocks harvest when placeholder prices are in use, without ever calling the executor', async () => {
+    const { executor } = mockExecutor();
+    const r = await keeper(BLOCKED_GUARD, executor).executeAction({
+      action: 'harvest',
+      adapter: '0x' + 'aa'.repeat(20),
+      amount: 1_000_000n,
+      reason: 'test',
+    });
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/execution blocked/i);
+    expect(executor.harvest).not.toHaveBeenCalled();
+  });
+
+  it('permits harvest when the guard allows it', async () => {
+    const { executor } = mockExecutor();
+    const r = await keeper(ALLOWED_GUARD, executor).executeAction({
+      action: 'harvest',
+      adapter: '0x' + 'aa'.repeat(20),
+      amount: 1_000_000n,
+      reason: 'test',
+    });
+
+    expect(r.success).toBe(true);
+    expect(executor.harvest).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not gate emergency exit on the pricing guard', async () => {
+    const { executor } = mockExecutor();
+    const r = await keeper(BLOCKED_GUARD, executor).executeAction({
+      action: 'emergency',
+      adapter: '0x' + 'aa'.repeat(20),
+      amount: 0n,
+      reason: 'incident',
+    });
+
+    expect(r.success).toBe(true);
+    expect(executor.emergencyExit).toHaveBeenCalledTimes(1);
   });
 });

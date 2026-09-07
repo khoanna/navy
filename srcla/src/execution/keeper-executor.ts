@@ -139,8 +139,31 @@ export class KeeperExecutor {
     // call, or duplicate with different logic elsewhere.
     assertExecutionAllowed(this.pricingGuard);
 
+    // Mirrors NavyVaultSRCLA.submitPlan's own require conditions
+    // (contract/src/NavyVaultSRCLA.sol ~line 627) as closely as possible
+    // without an RPC call, so a malformed draft fails here instead of
+    // costing a wasted transaction and an opaque on-chain revert:
+    //
+    //   if (usedPlanIds[planId]) revert PlanAlreadyUsed();                    <- needs chain state, not checked here
+    //   if (activePlanId != 0) revert PlanAlreadyActive();                    <- handled below (cancel-stale-plan)
+    //   if (header.expiresAt < block.timestamp) revert PlanExecutionExpired();
+    //   if (planId == 0 || actionCount == 0 || merkleRoot == 0
+    //       || decisionHash == 0 || snapshotHash == 0
+    //       || createdAt > block.timestamp || expiresAt <= createdAt
+    //       || snapshotBlockNumber > block.number) revert InvalidPlan();      <- snapshotBlockNumber needs chain state, not checked here
+    //   if (configurationDigest != currentConfigurationDigest())
+    //       revert InvalidConfigurationDigest();                             <- needs chain state, not checked here
+    //
+    // `snapshotBlockNumber > block.number` and the configuration-digest
+    // match both require live chain state (current block number,
+    // currentConfigurationDigest()) that this method deliberately does not
+    // fetch — see the "Preflight validation must happen BEFORE any RPC
+    // call" requirement. Those two belong to a pre-submission simulation
+    // step (an explicit eth_call dry run against the vault) rather than a
+    // silent RPC bolted onto this preflight; not implemented here.
     const errors: string[] = [];
     const ZERO = ethers.ZeroHash;
+    const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
 
     if (draft.header.snapshotHash === ZERO) {
       errors.push('header.snapshotHash is zero; submitPlan would revert InvalidPlan');
@@ -151,11 +174,23 @@ export class KeeperExecutor {
     if (draft.header.planId === 0n) {
       errors.push('header.planId is zero; submitPlan would revert InvalidPlan');
     }
+    if (draft.header.actionCount === 0n) {
+      errors.push('header.actionCount is zero; submitPlan would revert InvalidPlan');
+    }
     if (draft.header.actionCount !== BigInt(draft.actions.length)) {
       errors.push(`header.actionCount ${draft.header.actionCount} != ${draft.actions.length} actions`);
     }
+    if (draft.merkleRoot === ZERO) {
+      errors.push('merkleRoot is zero; submitPlan would revert InvalidPlan');
+    }
     if (draft.header.expiresAt <= draft.header.createdAt) {
       errors.push('plan already expired: expiresAt <= createdAt');
+    }
+    if (draft.header.createdAt > nowSeconds) {
+      errors.push('header.createdAt is in the future; submitPlan would revert InvalidPlan (createdAt > block.timestamp)');
+    }
+    if (draft.header.expiresAt < nowSeconds) {
+      errors.push('plan already expired: header.expiresAt < now; submitPlan would revert PlanExecutionExpired');
     }
     if (errors.length > 0) {
       return { success: false, txHashes: [], errors };
@@ -215,12 +250,16 @@ export class KeeperExecutor {
    * executePlanDraft with a real PlanDraft (src/policy/steps/plan.ts's
    * buildPlan) instead.
    *
-   * Deliberately NOT gated by assertExecutionAllowed: the pricing guard
-   * protects a plan priced by the decide() cost gate against fabricated
-   * ETH/gas inputs. Harvest and emergency exit are not decide()-produced
-   * plans — in particular, gating emergency exit on the pricing guard would
-   * be actively unsafe (it must remain available to pull funds out during an
-   * incident regardless of oracle placeholder status).
+   * Guard scoping (Task 14 review, Finding 4): harvest IS gated by
+   * assertExecutionAllowed — a harvest performs a swap whose minOut and
+   * route economics are exactly the price-dependent risk the guard exists
+   * for, the same class of risk executePlanDraft is gated against.
+   * emergencyExit deliberately is NOT gated: it is an admin incident lever
+   * with no price-dependent economics, and it must remain available to pull
+   * funds out during an incident regardless of oracle-placeholder status —
+   * gating it on the pricing guard would be actively unsafe. This method has
+   * no live caller today (Scheduler only calls executePlanDraft), but keep
+   * this scoping if a caller is ever wired up rather than reverting it.
    */
   async executeAction(decision: KeeperActionDecision): Promise<KeeperExecutionResult> {
     if (decision.action === 'hold') {
@@ -235,6 +274,12 @@ export class KeeperExecutor {
       const kind = this.actionToKind(decision.action);
 
       if (kind === ActionKindCode.HARVEST) {
+        // Finding 4: a harvest's minOut/route economics are exactly the
+        // price-dependent risk the guard exists for -- gate it, same as
+        // executePlanDraft. Thrown ExecutionBlockedError is caught by this
+        // method's own catch below and returned as a normal failure result.
+        assertExecutionAllowed(this.pricingGuard);
+
         // deadline = now + 1 hour
         const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
         const result = await this.executor.harvest(

@@ -1,25 +1,7 @@
 import { ethers } from 'ethers';
-import { PlanBuilder, type PlanAction } from './plan-builder.js';
+import type { PlanAction } from './plan-builder.js';
 import type { VaultState } from './reconciler.js';
 import type { MarketState } from '../protocols/simulation/types.js';
-
-/**
- * Failure strategies for plan execution
- */
-export type DivestFailureStrategy = 'stop' | 'continue';
-export type DeployFailureStrategy = 'stop' | 'recover_idle';
-
-/**
- * Recovery configuration for executeWithRecovery
- */
-export interface RecoveryConfig {
-  /** Strategy when a divest action fails */
-  divestFailureStrategy: DivestFailureStrategy;
-  /** Strategy when a deploy action fails */
-  deployFailureStrategy: DeployFailureStrategy;
-  /** Enable direct allocation fallback */
-  enableDirectAllocationFallback: boolean;
-}
 
 /**
  * Direct allocation result
@@ -59,20 +41,6 @@ export interface ExecutionResult {
   error?: string | undefined;
   /** Whether preflight check failed */
   preflightFailed?: boolean;
-}
-
-/**
- * Result of executing a full plan
- */
-export interface PlanExecutionResult {
-  /** Number of successfully completed actions */
-  completed: number;
-  /** Number of failed actions */
-  failed: number;
-  /** Individual action results */
-  results: ExecutionResult[];
-  /** Whether execution was stopped early due to failure */
-  stoppedEarly: boolean;
 }
 
 /**
@@ -294,29 +262,22 @@ export class PlanExecutor implements IPlanExecutor {
     merkleRoot: string
   ): Promise<ExecutionResult> {
     try {
-      // Encode the PlanHeader struct: (uint256,uint64,uint64,uint64,uint32,uint256,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256)
-      const encodedHeader = ethers.AbiCoder.defaultAbiCoder().encode(
-        ['(uint256,uint64,uint64,uint64,uint32,uint256,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256)'],
-        [{
-          planId: header.planId,
-          policyVersion: header.policyVersion,
-          createdAt: header.createdAt,
-          expiresAt: header.expiresAt,
-          actionCount: header.actionCount,
-          snapshotBlockNumber: header.snapshotBlockNumber,
-          snapshotHash: header.snapshotHash,
-          decisionHash: header.decisionHash,
-          configurationDigest: header.configurationDigest,
-          reserve: header.reserve,
-          minFinalAssets: header.minFinalAssets,
-          maxRecognizedLoss: header.maxRecognizedLoss,
-          turnoverLimit: header.turnoverLimit,
-        }]
-      );
-
+      // The ABI entry for submitPlan (VAULT_ABI above) declares `header` as
+      // a NAMED tuple struct, so ethers.Interface.encodeFunctionData accepts
+      // the header object directly -- no manual AbiCoder step is needed or
+      // correct here. (A prior version of this method ran the header through
+      // `AbiCoder.defaultAbiCoder().encode(['(uint256,uint64,...)'], [obj])`
+      // first: an UNNAMED tuple type string cannot encode a plain object --
+      // ethers throws "cannot encode object for signature with missing
+      // names" -- so that call threw on every invocation, was swallowed by
+      // this method's own try/catch into `{success:false, error}`, and
+      // `submitPlan` never once actually sent a transaction. Even had it not
+      // thrown, the resulting bytes blob would have been passed where the
+      // ABI expects a tuple, which encodeFunctionData would also reject.
+      // Covered by the round-trip test in test/unit/execution/executor.spec.ts.)
       const tx = await this.wallet.sendTransaction({
         to: this.vaultAddress,
-        data: this.iface.encodeFunctionData('submitPlan', [encodedHeader, merkleRoot]),
+        data: this.iface.encodeFunctionData('submitPlan', [header, merkleRoot]),
         gasLimit: this.config.gasLimit ?? 500_000n,
       });
 
@@ -661,87 +622,6 @@ export class PlanExecutor implements IPlanExecutor {
   }
 
   /**
-   * Execute full plan with staged actions
-   * Note: Plan submission should be done separately via submitPlan()
-   * @param plan Plan to execute (simplified format with decisionHash and actions)
-   * @returns Plan execution result
-   */
-  async executePlan(
-    plan: { decisionHash: string; actions: PlanAction[] }
-  ): Promise<PlanExecutionResult> {
-    const results: ExecutionResult[] = [];
-    let completed = 0;
-    let failed = 0;
-    let stoppedEarly = false;
-
-    for (const action of plan.actions) {
-      const result = await this.execute(action);
-      results.push(result);
-
-      if (result.success) {
-        completed++;
-      } else {
-        failed++;
-        // Stop on failure for safety
-        stoppedEarly = true;
-        break;
-      }
-    }
-
-    return {
-      completed,
-      failed,
-      results,
-      stoppedEarly,
-    };
-  }
-
-  /**
-   * Execute a single action
-   * Note: This requires a plan to be submitted first via submitPlan()
-   * @param action Action to execute
-   * @returns Execution result
-   */
-  async execute(action: PlanAction): Promise<ExecutionResult> {
-    // Get current plan state
-    const planState = await this.getPlanState();
-
-    // Execute based on action kind
-    switch (action.kind) {
-      case ActionKindCode.DEPLOY:
-      case ActionKindCode.DIVEST:
-        return await this.executeAction(
-          BigInt(planState.activePlanId),
-          Number(planState.nextActionIndex),
-          action.kind,
-          action.adapter,
-          action.amountBase,
-          0n, // minOut
-          ethers.ZeroHash,
-          [] // proof - would need proper merkle proof in production
-        );
-
-      case ActionKindCode.HARVEST:
-        // For harvest, we'd need the token and route params from the action
-        // Simplified: return success if plan is active
-        return {
-          success: planState.activePlanId !== ethers.ZeroHash,
-          txHash: '',
-          error: planState.activePlanId === ethers.ZeroHash ? 'No active plan' : undefined,
-        };
-
-      case ActionKindCode.EMERGENCY:
-        return await this.emergencyExit(action.adapter);
-
-      default:
-        return {
-          success: false,
-          error: `Unknown action kind: ${action.kind}`,
-        };
-    }
-  }
-
-  /**
    * Estimate gas for an action
    * Uses eth_estimateGas RPC call
    */
@@ -818,82 +698,6 @@ export class PlanExecutor implements IPlanExecutor {
       amount: actualAmount,
     };
   }
-
-  /**
-   * Execute plan with failure recovery strategies
-   * Note: Plan submission should be done separately via submitPlan()
-   */
-  async executeWithRecovery(
-    plan: ReturnType<typeof PlanBuilder.build>,
-    recoveryConfig: RecoveryConfig
-  ): Promise<PlanExecutionResult & { recoveredAmount?: bigint; fallbackUsed?: boolean }> {
-    const results: ExecutionResult[] = [];
-    let completed = 0;
-    let failed = 0;
-    let stoppedEarly = false;
-    let recoveredAmount: bigint | undefined;
-    let fallbackUsed = false;
-
-    if (PlanBuilder.isExpired(plan)) {
-      return {
-        completed: 0,
-        failed: plan.actions.length,
-        results: [{
-          success: false,
-          error: 'Plan has expired',
-        }],
-        stoppedEarly: true,
-      };
-    }
-
-    let failedDeployAmount = 0n;
-
-    for (let i = 0; i < plan.actions.length; i++) {
-      const action = plan.actions[i]!;
-      const result = await this.execute(action);
-      results.push(result);
-
-      if (result.success) {
-        completed++;
-        failedDeployAmount = 0n;
-      } else {
-        failed++;
-
-        if (action.kind === ActionKindCode.DEPLOY) {
-          if (recoveryConfig.deployFailureStrategy === 'stop') {
-            stoppedEarly = true;
-            break;
-          }
-          failedDeployAmount += action.amountBase;
-        } else if (action.kind === ActionKindCode.DIVEST) {
-          if (recoveryConfig.divestFailureStrategy === 'stop') {
-            stoppedEarly = true;
-            break;
-          }
-        } else {
-          stoppedEarly = true;
-          break;
-        }
-      }
-    }
-
-    if (
-      recoveryConfig.enableDirectAllocationFallback &&
-      failedDeployAmount > 0n &&
-      stoppedEarly
-    ) {
-      fallbackUsed = true;
-    }
-
-    return {
-      completed,
-      failed,
-      results,
-      stoppedEarly,
-      ...(recoveredAmount !== undefined && { recoveredAmount }),
-      ...(fallbackUsed && { fallbackUsed }),
-    };
-  }
 }
 
 /**
@@ -904,24 +708,4 @@ export const DEFAULT_EXECUTOR_CONFIG: ExecutorConfig = {
   maxSlippageBps: 50n, // 0.5%
   confirmations: 2,
   gasLimit: 500_000n,
-};
-
-/**
- * Default recovery configuration
- * Conservative defaults: stop on any failure
- */
-export const DEFAULT_RECOVERY_CONFIG: RecoveryConfig = {
-  divestFailureStrategy: 'stop',
-  deployFailureStrategy: 'stop',
-  enableDirectAllocationFallback: false,
-};
-
-/**
- * Aggressive recovery configuration
- * Continues on divest failure, recovers idle on deploy failure
- */
-export const AGGRESSIVE_RECOVERY_CONFIG: RecoveryConfig = {
-  divestFailureStrategy: 'continue',
-  deployFailureStrategy: 'recover_idle',
-  enableDirectAllocationFallback: true,
 };

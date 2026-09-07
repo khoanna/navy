@@ -860,4 +860,105 @@ describe('PlanExecutor', () => {
       expect(digest).toBe(ethers.ZeroHash);
     });
   });
+
+  /**
+   * Task 14 review finding (CRITICAL): submitPlan's calldata was never
+   * exercised by any test -- KeeperExecutor's own tests inject a mock
+   * IPlanExecutor that fully substitutes for PlanExecutor, so a broken real
+   * encoder passed 19 tests. This block calls the REAL PlanExecutor.submitPlan
+   * against a mocked ethers.Wallet (no network -- sendTransaction is a plain
+   * jest mock that never opens a socket) and decodes the calldata it produced
+   * with the vault's own ABI fragment, round-tripping every header field.
+   *
+   * This test FAILED against the pre-fix implementation, which called
+   * `ethers.AbiCoder.defaultAbiCoder().encode(['(uint256,uint64,...)'], [obj])`
+   * -- an object cannot be encoded against an unnamed tuple type string, so
+   * that line threw "cannot encode object for signature with missing names"
+   * on every call, submitPlan's try/catch converted it to
+   * `{ success: false, error }`, and sendTransaction was never even called
+   * (confirmed: `mockSendTransaction` had zero calls). Reproduced with a
+   * standalone `node -e` snippet using ethers straight from this repo's
+   * node_modules before writing this test; see task-14-report.md.
+   */
+  describe('submitPlan (real encoding, no network)', () => {
+    // The exact submitPlan fragment from VAULT_ABI (executor.ts), duplicated
+    // here only to decode the calldata this test captures -- this is a
+    // black-box round-trip through the class's own public API, not a peek
+    // at its internals.
+    const SUBMIT_PLAN_ABI = [
+      'function submitPlan((uint256 planId, uint64 policyVersion, uint64 createdAt, uint64 expiresAt, uint32 actionCount, uint256 snapshotBlockNumber, bytes32 snapshotHash, bytes32 decisionHash, bytes32 configurationDigest, uint256 reserve, uint256 minFinalAssets, uint256 maxRecognizedLoss, uint256 turnoverLimit) header, bytes32 merkleRoot)',
+    ];
+
+    function header() {
+      return {
+        planId: 42n,
+        policyVersion: 5n,
+        createdAt: 1_000_000n,
+        expiresAt: 1_001_800n,
+        actionCount: 2n,
+        snapshotBlockNumber: 12_345n,
+        snapshotHash: '0x' + 'ef'.repeat(32),
+        decisionHash: '0x' + '99'.repeat(32),
+        configurationDigest: '0x' + 'cd'.repeat(32),
+        reserve: 1_000_000n,
+        minFinalAssets: 9_000_000n,
+        maxRecognizedLoss: 5_000n,
+        turnoverLimit: 10_000_000n,
+      };
+    }
+    const merkleRoot = '0x' + '01'.repeat(32);
+
+    it('sends calldata whose header round-trips through the real ABI, field for field', async () => {
+      let capturedData: string | undefined;
+      const mockSendTransaction = jest
+        .fn<(tx: { to: string; data: string; gasLimit?: bigint }) => Promise<{
+          hash: string;
+          wait: (confirmations?: number) => Promise<{ hash: string; status: number; gasUsed: bigint }>;
+        }>>()
+        .mockImplementation(async (tx) => {
+          capturedData = tx.data;
+          return {
+            hash: '0xsubmit',
+            wait: async () => ({ hash: '0xsubmit', status: 1, gasUsed: 123_456n }),
+          };
+        });
+
+      const mockWallet = {
+        sendTransaction: mockSendTransaction,
+        provider: {} as ethers.JsonRpcProvider,
+        address: '0x' + 'b2'.repeat(20),
+      } as unknown as ethers.Wallet;
+
+      const executor = new PlanExecutor(mockWallet, VAULT_ADDRESS, DEFAULT_EXECUTOR_CONFIG);
+      const h = header();
+      const result = await executor.submitPlan(h, merkleRoot);
+
+      // The headline assertion: this must actually succeed, not silently
+      // swallow an encode error into {success:false}.
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(mockSendTransaction).toHaveBeenCalledTimes(1);
+      expect(capturedData).toBeDefined();
+
+      const iface = new ethers.Interface(SUBMIT_PLAN_ABI);
+      const decoded = iface.decodeFunctionData('submitPlan', capturedData!);
+      const decodedHeader = decoded[0] as unknown as Record<string, unknown>;
+      const decodedMerkleRoot = decoded[1] as string;
+
+      expect(decodedHeader.planId).toBe(h.planId);
+      expect(decodedHeader.policyVersion).toBe(h.policyVersion);
+      expect(decodedHeader.createdAt).toBe(h.createdAt);
+      expect(decodedHeader.expiresAt).toBe(h.expiresAt);
+      expect(decodedHeader.actionCount).toBe(h.actionCount);
+      expect(decodedHeader.snapshotBlockNumber).toBe(h.snapshotBlockNumber);
+      expect(decodedHeader.snapshotHash).toBe(h.snapshotHash);
+      expect(decodedHeader.decisionHash).toBe(h.decisionHash);
+      expect(decodedHeader.configurationDigest).toBe(h.configurationDigest);
+      expect(decodedHeader.reserve).toBe(h.reserve);
+      expect(decodedHeader.minFinalAssets).toBe(h.minFinalAssets);
+      expect(decodedHeader.maxRecognizedLoss).toBe(h.maxRecognizedLoss);
+      expect(decodedHeader.turnoverLimit).toBe(h.turnoverLimit);
+      expect(decodedMerkleRoot).toBe(merkleRoot);
+    });
+  });
 });
