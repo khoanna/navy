@@ -3,6 +3,7 @@ import { PrismaClient, PlanAction } from '@prisma/client';
 import { serializeMarket, serializeDecision, serializePlan, serializeHarvest } from './serializers.js';
 import { ProposalEvaluator, RebalanceProposal } from '../evaluation/proposal-evaluator.js';
 import { loadConfig } from '../config.js';
+import type { Scheduler } from '../runtime/scheduler.js';
 
 const prisma = new PrismaClient();
 
@@ -17,7 +18,7 @@ type ExecutionPlanWithActions = {
   actions: PlanAction[];
 };
 
-export async function registerRoutes(server: FastifyInstance): Promise<void> {
+export async function registerRoutes(server: FastifyInstance, scheduler?: Scheduler): Promise<void> {
   // GET /v1/health - Service health
   server.get('/v1/health', async () => {
     const lastSnapshot = await prisma.marketSnapshot.findFirst({
@@ -468,6 +469,36 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
       const message = err instanceof Error ? err.message : 'Proposal review failed';
       return reply.status(500).send({
         error: { code: 'EVALUATION_FAILED', message },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Internal Trigger Route (§4)
+  // Called by backend to force a rebalance decision evaluation
+  // ─────────────────────────────────────────────────────────────
+
+  // POST /v1/internal/trigger - Trigger manual decision cycle
+  server.post('/v1/internal/trigger', async (request, reply) => {
+    const { force = false } = request.body as { force?: boolean } ?? {};
+
+    if (!scheduler) {
+      return reply.status(503).send({
+        error: { code: 'SCHEDULER_NOT_INITIALIZED', message: 'Scheduler not available' },
+      });
+    }
+
+    try {
+      const result = await scheduler.trigger(force);
+      if (result.triggered) {
+        return { triggered: true, message: result.message };
+      } else {
+        return reply.status(429).send({ triggered: false, message: result.message });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: { code: 'TRIGGER_FAILED', message },
       });
     }
   });

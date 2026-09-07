@@ -592,6 +592,51 @@ export class Scheduler {
   }
 
   /**
+   * Trigger a manual decision cycle.
+   * This endpoint allows the backend to force a rebalance evaluation.
+   *
+   * @param force - If true, skip the decision interval check and force immediate evaluation
+   */
+  async trigger(force = false): Promise<{ triggered: boolean; message: string }> {
+    try {
+      // Check if enough time has passed since last decision (unless force is true)
+      if (!force) {
+        const lastDecision = await this.prisma.decision.findFirst({
+          orderBy: { timestamp: 'desc' },
+        });
+
+        if (lastDecision) {
+          const timeSinceLastDecision = Date.now() - lastDecision.timestamp.getTime();
+          const minInterval = this.config.controllerIntervalMs;
+
+          if (timeSinceLastDecision < minInterval) {
+            const remainingSeconds = Math.ceil((minInterval - timeSinceLastDecision) / 1000);
+            return {
+              triggered: false,
+              message: `Decision interval not elapsed. Try again in ${remainingSeconds} seconds.`,
+            };
+          }
+        }
+      }
+
+      // Run the controller
+      await this.runController();
+
+      return {
+        triggered: true,
+        message: 'Decision cycle triggered successfully.',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Scheduler] Trigger failed:', message);
+      return {
+        triggered: false,
+        message: `Trigger failed: ${message}`,
+      };
+    }
+  }
+
+  /**
    * Persist decision and execution result to database
    */
   private async persistDecision(

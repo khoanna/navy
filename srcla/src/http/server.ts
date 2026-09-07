@@ -1,13 +1,17 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { registerRoutes } from './routes.js';
+import type { Scheduler } from '../runtime/scheduler.js';
 
 export interface ServerConfig {
   host: string;
   port: number;
 }
 
-export async function buildServer(_config: ServerConfig): Promise<FastifyInstance> {
+export async function buildServer(
+  _config: ServerConfig,
+  scheduler?: Scheduler
+): Promise<FastifyInstance> {
   const server = Fastify({
     logger: {
       level: 'info',
@@ -20,8 +24,8 @@ export async function buildServer(_config: ServerConfig): Promise<FastifyInstanc
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   });
 
-  // Register API routes
-  await registerRoutes(server);
+  // Register API routes with optional scheduler for trigger endpoint
+  await registerRoutes(server, scheduler);
 
   // Health check at root
   server.get('/health', async () => {

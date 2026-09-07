@@ -72,11 +72,11 @@ async function main(): Promise<void> {
     chainId: config.chainId,
   }, config.vaultAddress);
 
-  // Build HTTP server
+  // Build HTTP server with scheduler for trigger endpoint
   const server = await buildServer({
     host: config.httpHost,
     port: config.httpPort,
-  });
+  }, scheduler);
 
   // Start
   await scheduler.start();
