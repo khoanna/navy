@@ -54,6 +54,24 @@ let cached: PolicyArtifact | null = null;
  * MUST populate `pinnedConfigDigests` from chain before this artifact — or
  * its Phase 4 replacement — can admit anything. Do not weaken the admission
  * rule or invent digests to paper over this here.
+ *
+ * Whole-branch review, MEDIUM 7 (provenance correction): pinning digests is
+ * NOT the only reason nothing admits end to end today — fixing it alone will
+ * not make the kernel deploy. Two other, independent blockers exist:
+ *   1. `forecast/forecast-label.ts`'s `persistForecastLabel`/
+ *      `persistForecastLabels` have no caller anywhere in `src/` (verified
+ *      by grep) and never write `horizonEndsAt`/`regimeId`, so
+ *      `buildRawOriginFromCollector`'s `where: { horizonEndsAt: { not: null } }`
+ *      filter (runtime/decision-driver.ts) always returns zero rows —
+ *      `input.history` is permanently empty in production, so
+ *      `admit.ts`'s REGIME_MIN_HISTORY rule (`minObservations: 30` here)
+ *      can never pass either, regardless of pinning.
+ *   2. `collector/snapshot-collector.ts`'s `collectStrategy` hardcodes
+ *      `supplyRate`/`utilization`/`cash` to `0n` for every market ("Would
+ *      need protocol-specific calls"), which `admit.ts`'s NO_MARKET_DATA
+ *      rule now rejects independently of both of the above.
+ * All three must be fixed (or the artifact test-only) before this kernel can
+ * genuinely admit and deploy against a live vault.
  */
 export function loadBootstrapArtifact(): PolicyArtifact {
   if (cached) return cached;

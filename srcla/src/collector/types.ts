@@ -39,6 +39,25 @@ export interface VaultSnapshot {
   idleBase: bigint;
   minIdleBps: bigint;
   paused: boolean;
+  /**
+   * Reserve breakdown: admin (immutable floor, `NavyVaultSRCLA.adminReserve`)
+   * + dynamic (policy-calculated, `NavyVaultSRCLA.dynamicReserve`). BOTH are
+   * `public` state vars on the deployed vault (contract/src/NavyVaultSRCLA.sol),
+   * not reward-plumbing-dependent — always read as part of the CORE vault
+   * snapshot (collectVault), not gated behind reward-contract configuration.
+   * A genuinely zero value here means the collector actually read 0 from
+   * chain, never "the collector didn't try": whole-branch review, HIGH 5 —
+   * an earlier revision only populated this when a reward accountant/executor
+   * address happened to be configured (which src/index.ts never sets), so it
+   * silently read as 0n in production regardless of the real on-chain
+   * reserve, and the vault's own `requiredIdle() = max(adminReserve,
+   * dynamicReserve)` floor could be materially higher than what the kernel
+   * sized a plan against.
+   */
+  reserve: {
+    admin: bigint;
+    dynamic: bigint;
+  };
 
   // Extended fields for production vault policy alignment
   /** Absolute caps from vault configuration */
@@ -53,11 +72,6 @@ export interface VaultSnapshot {
     exposure: bigint;
     cap: bigint;
   }> | undefined;
-  /** Reserve breakdown: admin (immutable floor) + dynamic (policy-calculated) */
-  reserve?: {
-    admin: bigint;
-    dynamic: bigint;
-  } | undefined;
   /** Reward cache timestamp (Unix seconds) */
   rewardCacheTimestamp?: bigint;
   /** Cached reward value in base units */

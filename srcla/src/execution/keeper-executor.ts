@@ -376,13 +376,39 @@ export class KeeperExecutor {
 
       // "reconciles receipt, events, and balance deltas... re-reads all
       // affected chain state" (§10.3.6-7): confirms the vault's plan cursor
-      // actually advanced past this action. A receipt that claimed success
-      // with no matching on-chain state change is exactly the divergence
-      // this step exists to catch — per the design brief, a divergence here
-      // is as fatal as a failed submission and halts the remaining plan.
+      // actually advanced past this action, EXCEPT on the plan's final
+      // action, where NavyVaultSRCLA clears the cursor back to 0 on
+      // completion (see below) — so completion is recognised by the plan no
+      // longer being active, not by the cursor. A receipt that claimed
+      // success with no matching on-chain state change is exactly the
+      // divergence this step exists to catch — per the design brief, a
+      // divergence here is as fatal as a failed submission and halts the
+      // remaining plan.
       reconcile: async (_planId, index) => {
         try {
           const state = await this.executor.getPlanState();
+          const isFinalAction = index === draft.actions.length - 1;
+          if (isFinalAction) {
+            // NavyVaultSRCLA.executeNextActionWithProof (contract/src/
+            // NavyVaultSRCLA.sol) calls _clearActivePlan() when the plan's
+            // LAST action completes, which `delete`s activePlanId AND
+            // activePlanNextActionIndex -- both go back to their zero
+            // values, not "nextActionIndex = actionCount". So on the final
+            // action, nextActionIndex reading back 0 is exactly what a
+            // SUCCESSFUL completion looks like, not a failure to advance.
+            // The reliable signal here is whether OUR plan is still the
+            // active one: if it is no longer active, the vault cleared it,
+            // which only happens on successful completion (or cancelPlan,
+            // which this loop never calls). If it is still active, the
+            // final action genuinely did not land.
+            if (state.activePlanId !== draft.planId) {
+              return { ok: true };
+            }
+            return {
+              ok: false,
+              error: `plan ${draft.planId} is still the active plan after its final action (index ${index}); expected NavyVaultSRCLA to have cleared it on completion`,
+            };
+          }
           if (state.nextActionIndex <= BigInt(index)) {
             return {
               ok: false,

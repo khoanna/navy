@@ -35,9 +35,56 @@ describe('simulateCurves', () => {
     expect(curves[0]!.points.length).toBe(10);
   });
 
-  it('point 0 is the current pre-deposit rate', () => {
+  it('point 0 (a market at zero position) closely approximates the observed pre-deposit rate', () => {
+    // Point 0 is x=0, the vault's ABSOLUTE target allocation (see
+    // RateCurve.points' doc comment) -- for a market at positionBase=0 that
+    // coincides with "no change" from the observed state, but it is now
+    // SIMULATED via DefaultConfigs and the per-second-annualisation round
+    // trip (whole-branch review, HIGH 4 fix), not copied verbatim from the
+    // observation, so it only approximates m.supplyRateWad to that model's
+    // rounding, not bit-for-bit.
     const [c] = simulateCurves(input([compoundMarket()]), ['compound'], QUANTUM, 5);
-    expect(c!.points[0]).toBe((WAD * 8n) / 100n);
+    const expected = (WAD * 8n) / 100n;
+    const diff = c!.points[0]! > expected ? c!.points[0]! - expected : expected - c!.points[0]!;
+    expect(diff).toBeLessThan(expected / 1_000_000n); // within 1 part in a million
+  });
+
+  // Whole-branch review, HIGH 4: the curve's x is documented (RateCurve.points)
+  // as the vault's ABSOLUTE target allocation, not an incremental deposit on
+  // top of the vault's current position. This test fails under the OLD,
+  // incremental-x construction and every fixture above passed only because
+  // positionBase was 0n throughout this file (absolute and incremental
+  // coincide at zero position).
+  it('a market with an existing position produces the same rate at its absolute current allocation as an equivalent zero-position market at x=0', () => {
+    // Two markets describe the SAME final on-chain state (same observed
+    // cash/borrows) but attribute the cash differently: `withPosition` says
+    // the vault already holds `position` of it; `noPosition` says the vault
+    // holds none (someone else does). Because x is absolute, the rate the
+    // vault would see holding exactly `position` in `withPosition` must
+    // equal the rate it would see holding exactly 0 in `noPosition` — under
+    // the old incremental interpretation, `withPosition`'s curve added
+    // `position` ON TOP of cash that already included it, landing on a
+    // materially higher (and so differently-rated) simulated cash figure
+    // than `noPosition`'s point at x=0.
+    const cash = 800_000_000_000n;
+    const borrows = 3_200_000_000_000n;
+    const position = 200_000_000_000n;
+
+    const noPosition = compoundMarket();
+    noPosition.cash = cash;
+    noPosition.borrows = borrows;
+    noPosition.positionBase = 0n;
+
+    const withPosition = compoundMarket();
+    withPosition.cash = cash;
+    withPosition.borrows = borrows;
+    withPosition.positionBase = position;
+
+    const quantum = position; // x = position lands exactly on grid point k=1
+    const [noPosCurve] = simulateCurves(input([noPosition]), ['compound'], quantum, 3);
+    const [withPosCurve] = simulateCurves(input([withPosition]), ['compound'], quantum, 3);
+
+    expect(rateAt(withPosCurve!, position)).toBe(rateAt(noPosCurve!, 0n));
   });
 
   it('rate is non-increasing as allocation grows (capacity effect)', () => {

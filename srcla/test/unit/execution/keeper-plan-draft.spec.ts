@@ -129,10 +129,23 @@ function mockExecutionLock() {
 
 /**
  * A mock IPlanExecutor recording calls, for asserting orchestration order.
- * `nextActionIndex` advances only when executeNextActionWithProof actually
- * reports success, mirroring the vault's real plan cursor — this is what
- * lets the wired-in simulate/reconcile steps (which read getPlanState) tell
- * a real advance from a receipt that merely claims one.
+ *
+ * Whole-branch review, Critical 2: an earlier revision of this mock kept a
+ * `nextActionIndex` that only ever incremented on a successful
+ * executeNextActionWithProof, with a docstring claiming it "mirrors the
+ * vault's real plan cursor". It did not: NavyVaultSRCLA.executeNextActionWithProof
+ * (contract/src/NavyVaultSRCLA.sol) calls `_clearActivePlan()` when the
+ * plan's LAST action completes, which `delete`s BOTH activePlanId and
+ * activePlanNextActionIndex — the real on-chain cursor goes back to 0 on
+ * completion, it does not keep counting up. Because the old mock always
+ * counted up, every "successful plan" test was green over a reconcile
+ * implementation that would fail 100% of the time against the real vault.
+ *
+ * This mock now tracks `planActionCount` (defaulting to 1, matching the
+ * single-action `draft()` fixture) and, when the action that completes the
+ * plan succeeds, resets `nextActionIndex` to 0 and reports `activePlanId`
+ * as cleared (ethers.ZeroHash) — exactly what `_clearActivePlan()` produces
+ * — instead of pretending the cursor just keeps advancing.
  */
 function mockExecutor(
   overrides: Partial<{
@@ -148,10 +161,24 @@ function mockExecutor(
       actionCount: bigint;
       expiresAt: bigint;
     }>;
+    /** The plan id this mock reports as "active" until it clears on
+     * completion — must match the `planId` field of whatever PlanDraft is
+     * passed to executePlanDraft in the test (the `draft()`/`twoActionDraft()`
+     * helpers above always use '0x2a'). */
+    planId: string;
+    /** Total actions in the plan under test, so this mock knows which
+     * action index is the FINAL one and should clear the plan rather than
+     * merely advance the cursor. Defaults to 1 (draft()'s default
+     * actionCount) — pass the real count for any 2+-action draft that
+     * relies on this default (unoverridden) getPlanState. */
+    planActionCount: number;
   }> = {}
 ) {
   const calls: string[] = [];
+  const totalActions = overrides.planActionCount ?? 1;
+  const activePlanIdWhileRunning = overrides.planId ?? '0x2a';
   let nextActionIndex = 0n;
+  let planCleared = false;
   const executor: IPlanExecutor = {
     getActivePlanId: jest.fn<() => Promise<string>>().mockImplementation(async () => {
       calls.push('getActivePlanId');
@@ -172,7 +199,16 @@ function mockExecutor(
         const result = overrides.executeNextActionWithProof
           ? await overrides.executeNextActionWithProof(action.index)
           : ok(`0xaction${action.index}`);
-        if (result.success) nextActionIndex = BigInt(action.index) + 1n;
+        if (result.success) {
+          if (action.index + 1 >= totalActions) {
+            // Mirrors _clearActivePlan(): the cursor resets to 0 and the
+            // plan is no longer active, it does NOT advance to actionCount.
+            planCleared = true;
+            nextActionIndex = 0n;
+          } else {
+            nextActionIndex = BigInt(action.index) + 1n;
+          }
+        }
         return result;
       }),
     getConfigurationDigest: jest
@@ -205,10 +241,10 @@ function mockExecutor(
         overrides.getPlanState
           ? overrides.getPlanState()
           : {
-              activePlanId: ethers.ZeroHash,
+              activePlanId: planCleared ? ethers.ZeroHash : activePlanIdWhileRunning,
               merkleRoot: ethers.ZeroHash,
               nextActionIndex,
-              actionCount: 0n,
+              actionCount: planCleared ? 0n : BigInt(totalActions),
               expiresAt: 0n,
             }
       ),
@@ -344,7 +380,7 @@ describe('KeeperExecutor.executePlanDraft', () => {
 
   describe('orchestration (injected mock executor, no network)', () => {
     it('submits the plan then executes each action in order', async () => {
-      const { executor, calls } = mockExecutor();
+      const { executor, calls } = mockExecutor({ planActionCount: 2 });
       const d = draft({ actionCount: 2n });
       d.actions = [
         { ...d.actions[0]!, index: 0 },
@@ -438,7 +474,7 @@ function twoActionDraft(): PlanDraft {
 
 describe('KeeperExecutor.executePlanDraft — §10.3 submission loop wiring (Task 15 review, Finding 1)', () => {
   it('acquires the lock once, persists intent once per action, and releases it once on a successful plan', async () => {
-    const { executor } = mockExecutor();
+    const { executor } = mockExecutor({ planActionCount: 2 });
     const { lock } = mockExecutionLock();
     const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
 
@@ -548,6 +584,53 @@ describe('KeeperExecutor.executePlanDraft — §10.3 submission loop wiring (Tas
     // nothing to release, so releaseLock correctly is NOT called here.
     expect(lock.persistIntent).not.toHaveBeenCalled();
     expect(lock.releaseLock).not.toHaveBeenCalled();
+  });
+});
+
+describe('KeeperExecutor.executePlanDraft — reconcile vs NavyVaultSRCLA._clearActivePlan() (whole-branch review, Critical 2)', () => {
+  it('reports success on a single-action plan whose only (and therefore final) action completes and clears the plan', async () => {
+    // Under the OLD reconcile logic (`nextActionIndex <= index` = failure),
+    // this exact scenario -- a real, faithfully-modelled completion where
+    // the cursor resets to 0 -- would have reported `success: false` with
+    // "did not advance past action 0", because 0 <= 0 is true. This is the
+    // failure this whole test class catches: reconciliation failing on the
+    // last action of every plan, including single-action ones.
+    const { executor, calls } = mockExecutor();
+    const r = await keeper(ALLOWED_GUARD, executor).executePlanDraft(draft());
+
+    expect(r.success).toBe(true);
+    expect(r.errors).toEqual([]);
+    expect(calls).toEqual(['getActivePlanId', 'submitPlan', 'execute:0']);
+  });
+
+  it('reports success on the second (final) action of a two-action plan once it clears, after correctly requiring advancement on the first', async () => {
+    const { executor, calls } = mockExecutor({ planActionCount: 2 });
+    const r = await keeper(ALLOWED_GUARD, executor).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(true);
+    expect(r.errors).toEqual([]);
+    expect(calls).toEqual(['getActivePlanId', 'submitPlan', 'execute:0', 'execute:1']);
+  });
+
+  it('reports failure on the final action when the plan never actually clears (still active, cursor unchanged) — proves the fix does not just always pass the last action', async () => {
+    const { executor, calls } = mockExecutor({
+      // A faithful "the submitted tx did not actually land" state for the
+      // final action: still active, cursor never advanced. This must still
+      // be a reconcile failure -- the fix only treats "our plan is no
+      // longer active" as success, not "this happened to be the last index".
+      getPlanState: async () => ({
+        activePlanId: '0x2a',
+        merkleRoot: ethers.ZeroHash,
+        nextActionIndex: 0n,
+        actionCount: 1n,
+        expiresAt: 0n,
+      }),
+    });
+    const r = await keeper(ALLOWED_GUARD, executor).executePlanDraft(draft());
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/still the active plan/i);
+    expect(calls).toEqual(['getActivePlanId', 'submitPlan', 'execute:0']);
   });
 });
 

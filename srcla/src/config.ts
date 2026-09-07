@@ -8,17 +8,27 @@ const DependencyGroupSchema = z.object({
 });
 
 /**
- * Env vars backing the four GasObservation price placeholders (Task 13).
- * The keys are the SrclaConfig field names; the values are their env vars.
- * Declared once here so the schema default, computePlaceholderPriceStatus,
- * and parseSrclaConfig cannot list a different set of fields from each
- * other.
+ * Env vars that supply a GENUINE, oracle-sourced value for the four
+ * GasObservation price inputs (Task 13). The keys are the SrclaConfig field
+ * names; the values are their env vars. Declared once here so the schema
+ * default, computePlaceholderPriceStatus, and parseSrclaConfig cannot list a
+ * different set of fields from each other.
+ *
+ * NAMING IS LOAD-BEARING: these vars are named `SRCLA_REAL_*`, not
+ * `SRCLA_PLACEHOLDER_*`, because setting one means "a real value has been
+ * supplied" -- the opposite of what a `PLACEHOLDER`-prefixed name would
+ * suggest. An earlier revision named them `SRCLA_PLACEHOLDER_*` and shipped
+ * `.env.example` with all four SET to fabricated defaults; because
+ * `computePlaceholderPriceStatus` treats "set" as "real", that shipped
+ * `.env.example` silently disengaged the Task-13 execution guard on the
+ * documented `cp .env.example .env` setup path. Do not reintroduce a
+ * `PLACEHOLDER`-named var whose presence means "real value supplied".
  */
-const PLACEHOLDER_PRICE_ENV_VARS: Record<string, string> = {
-  l1BaseFeeWei: 'SRCLA_PLACEHOLDER_L1_BASE_FEE_WEI',
-  l1BlobBaseFeeWei: 'SRCLA_PLACEHOLDER_L1_BLOB_BASE_FEE_WEI',
-  ethUsdE8: 'SRCLA_PLACEHOLDER_ETH_USD_E8',
-  usdcUsdE8: 'SRCLA_PLACEHOLDER_USDC_USD_E8',
+const REAL_PRICE_ENV_VARS: Record<string, string> = {
+  l1BaseFeeWei: 'SRCLA_REAL_L1_BASE_FEE_WEI',
+  l1BlobBaseFeeWei: 'SRCLA_REAL_L1_BLOB_BASE_FEE_WEI',
+  ethUsdE8: 'SRCLA_REAL_ETH_USD_E8',
+  usdcUsdE8: 'SRCLA_REAL_USDC_USD_E8',
 };
 
 /**
@@ -79,11 +89,13 @@ export const SrclaConfigSchema = z.object({
   // l1BlobBaseFeeWei, ethUsdE8 and usdcUsdE8. Only l2BaseFeeWei is sourced
   // live from chain (ChainClient.getGasPrice(), wired in src/index.ts) --
   // this service has no L1-base-fee, L1-blob-base-fee, ETH/USD or USDC/USD
-  // oracle wired yet. These four are deliberately NAMED, CONFIGURABLE
-  // placeholders rather than values baked into the code: a wrong ETH price
-  // silently mis-scales every cost term in policy/steps/cost.ts, and this
-  // plan has already found three separate unit/scale bugs of exactly that
-  // kind. Replace with a real oracle before citing any cost-gate result.
+  // oracle wired yet. These four fields hold the HARDCODED FALLBACK values
+  // used when no genuine value has been supplied via the corresponding
+  // `SRCLA_REAL_*` env var (see REAL_PRICE_ENV_VARS above) -- a wrong ETH
+  // price silently mis-scales every cost term in policy/steps/cost.ts, and
+  // this plan has already found three separate unit/scale bugs of exactly
+  // that kind. Replace with a real oracle before citing any cost-gate
+  // result.
   placeholderL1BaseFeeWei: z.bigint().default(8_000_000_000n), // ~8 gwei on L1 - NOT read from chain
   placeholderL1BlobBaseFeeWei: z.bigint().default(10_000_000n), // ~0.01 gwei-equivalent - NOT read from chain
   placeholderEthUsdE8: z.bigint().default(350_000_000_000n), // $3,500.00, 8 decimals - NOT read from an oracle
@@ -91,9 +103,9 @@ export const SrclaConfigSchema = z.object({
 
   // Derived from the four fields above (see computePlaceholderPriceStatus) -
   // NOT independently settable, and NOT a second hand-maintained flag: it is
-  // recomputed from which SRCLA_PLACEHOLDER_* env vars were actually set
-  // every time parseSrclaConfig() runs, so it cannot drift out of sync with
-  // them. This is the single source of truth the Task-13 execution guard
+  // recomputed from which SRCLA_REAL_* env vars were actually set every time
+  // parseSrclaConfig() runs, so it cannot drift out of sync with them. This
+  // is the single source of truth the Task-13 execution guard
   // (src/runtime/decision-driver.ts's assertExecutionAllowed) reads to
   // refuse handing a produced plan to any executor.
   // Defaults here are the fail-safe (execution-blocked) state and are only
@@ -101,7 +113,7 @@ export const SrclaConfigSchema = z.object({
   // input; loadConfig() always supplies both via parseSrclaConfig() /
   // computePlaceholderPriceStatus(), which is the real source of truth.
   placeholderPricesInUse: z.boolean().default(true),
-  placeholderPriceFields: z.array(z.string()).default(Object.keys(PLACEHOLDER_PRICE_ENV_VARS)),
+  placeholderPriceFields: z.array(z.string()).default(Object.keys(REAL_PRICE_ENV_VARS)),
 });
 
 export const ConfigSchema = z.object({
@@ -150,7 +162,7 @@ function isEnvSet(name: string, env: NodeJS.ProcessEnv): boolean {
 /**
  * Derives which GasObservation price inputs are still running on their
  * hardcoded fallback (the operator never set the corresponding
- * SRCLA_PLACEHOLDER_* env var) and whether ANY of them are. Exported and
+ * SRCLA_REAL_* env var) and whether ANY of them are. Exported and
  * pure (takes `env` explicitly, defaulting to `process.env`) so it is unit
  * testable without booting the service.
  *
@@ -162,7 +174,7 @@ function isEnvSet(name: string, env: NodeJS.ProcessEnv): boolean {
 export function computePlaceholderPriceStatus(
   env: NodeJS.ProcessEnv = process.env
 ): { placeholderPricesInUse: boolean; placeholderPriceFields: string[] } {
-  const placeholderPriceFields = Object.entries(PLACEHOLDER_PRICE_ENV_VARS)
+  const placeholderPriceFields = Object.entries(REAL_PRICE_ENV_VARS)
     .filter(([, envVar]) => !isEnvSet(envVar, env))
     .map(([field]) => field);
   return {
@@ -248,10 +260,12 @@ function parseSrclaConfig(): SrclaConfig {
     deployFailureStrategy: (process.env.SRCLA_DEPLOY_FAILURE_STRATEGY as 'stop' | 'recover_idle') ?? 'recover_idle',
 
     // Gas/price oracle placeholders (Task 13) - see SrclaConfigSchema comment.
-    placeholderL1BaseFeeWei: BigInt(process.env.SRCLA_PLACEHOLDER_L1_BASE_FEE_WEI ?? '8000000000'),
-    placeholderL1BlobBaseFeeWei: BigInt(process.env.SRCLA_PLACEHOLDER_L1_BLOB_BASE_FEE_WEI ?? '10000000'),
-    placeholderEthUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_ETH_USD_E8 ?? '350000000000'),
-    placeholderUsdcUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_USDC_USD_E8 ?? '100000000'),
+    // Reads the SRCLA_REAL_* env vars (see REAL_PRICE_ENV_VARS) and falls
+    // back to the hardcoded placeholder constant when unset.
+    placeholderL1BaseFeeWei: BigInt(process.env.SRCLA_REAL_L1_BASE_FEE_WEI ?? '8000000000'),
+    placeholderL1BlobBaseFeeWei: BigInt(process.env.SRCLA_REAL_L1_BLOB_BASE_FEE_WEI ?? '10000000'),
+    placeholderEthUsdE8: BigInt(process.env.SRCLA_REAL_ETH_USD_E8 ?? '350000000000'),
+    placeholderUsdcUsdE8: BigInt(process.env.SRCLA_REAL_USDC_USD_E8 ?? '100000000'),
 
     // Derived, not hand-maintained - see computePlaceholderPriceStatus.
     ...computePlaceholderPriceStatus(),

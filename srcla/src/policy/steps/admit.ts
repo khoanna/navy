@@ -33,6 +33,30 @@ const RULES: Rule[] = [
     },
   },
   {
+    // Whole-branch review, Critical 3: snapshot-collector.ts's collectStrategy
+    // cannot yet read supplyRate/utilization/cash for any protocol and
+    // hardcodes all three to 0n ("Would need protocol-specific calls"). A
+    // market reporting a literal zero rate AND zero cash AND zero borrows
+    // simultaneously is that placeholder signature, not a plausible live
+    // venue state (a real pool at zero cash/borrows would also report the
+    // IRM's base rate, not exactly zero). Refuse to admit it rather than
+    // let a flat-zero curve flow through the rest of the kernel and produce
+    // a HOLD that looks like a considered decision instead of "the pipeline
+    // cannot see this market". decide() additionally surfaces a distinct
+    // top-level NO_MARKET_DATA reason when this fires for every market.
+    code: 'NO_MARKET_DATA',
+    check: (m) => {
+      const ok = !(m.supplyRateWad === 0n && m.cash === 0n && m.borrows === 0n);
+      return {
+        passed: ok,
+        detail: ok
+          ? `supplyRateWad=${m.supplyRateWad} cash=${m.cash} borrows=${m.borrows}`
+          : 'no usable rate/liquidity data: supplyRateWad, cash and borrows are all zero -- treated as an ' +
+            'unreadable market (see snapshot-collector.ts), not a real zero-yield/zero-liquidity venue',
+      };
+    },
+  },
+  {
     code: 'NO_SYNC_LIQUIDITY',
     check: (m) => {
       // At zero position there is nothing to withdraw yet, so the gate is

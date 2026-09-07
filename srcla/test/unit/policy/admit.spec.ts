@@ -7,6 +7,7 @@ const ALL_CODES = [
   'PAUSED',
   'CONFIG_DIGEST_UNPINNED',
   'REGIME_MIN_HISTORY',
+  'NO_MARKET_DATA',
   'NO_SYNC_LIQUIDITY',
   'CAP_ZERO',
   'KINK_EXCEEDED',
@@ -127,6 +128,31 @@ describe('admit', () => {
     for (const other of otherCodes('CONFIG_DIGEST_UNPINNED')) {
       expect(r.reasons.some((x) => x.marketId === 'unregistered' && x.code === other && !x.passed)).toBe(false);
     }
+  });
+
+  it('rejects a market with zero rate, zero cash and zero borrows on NO_MARKET_DATA alone — whole-branch review, Critical 3', () => {
+    // This is exactly what snapshot-collector.ts's collectStrategy reports
+    // for every market today (supplyRate/utilization/cash hardcoded to 0n,
+    // "Would need protocol-specific calls"). Catches a regression where
+    // this rule is removed or narrowed, letting a data-less market flow
+    // through admission and produce a decision that looks considered.
+    // positionBase/maxWithdrawableBase kept non-zero so NO_SYNC_LIQUIDITY
+    // (which also reacts to cash=0n at zero position) does not also fire —
+    // this isolates NO_MARKET_DATA as the only failing rule.
+    const r = admit(
+      input([market({ supplyRateWad: 0n, cash: 0n, borrows: 0n, positionBase: 500n, maxWithdrawableBase: 500n })]),
+      artifact
+    );
+    expect(r.eligible).toEqual([]);
+    expectOnlyCodeFails(r.reasons, 'NO_MARKET_DATA');
+  });
+
+  it('admits a market with a genuinely zero rate as long as cash or borrows is non-zero — NO_MARKET_DATA requires all three', () => {
+    // A real venue can legitimately have a 0% supply rate; that alone must
+    // not be mistaken for "the collector returned nothing". Only the
+    // rate+cash+borrows-all-zero combination is treated as no-data.
+    const r = admit(input([market({ supplyRateWad: 0n })]), artifact);
+    expect(r.eligible).toEqual(['aave']);
   });
 
   it('rejects a market with no synchronous exit capacity (existing position) on NO_SYNC_LIQUIDITY alone', () => {

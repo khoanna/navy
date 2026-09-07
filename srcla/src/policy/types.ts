@@ -96,7 +96,31 @@ export interface DecisionInput {
 export interface RateCurve {
   marketId: string;
   quantumBase: bigint;
-  /** points[k] is the post-deposit supply rate at x = k * quantumBase. */
+  /**
+   * points[k] is the post-deposit supply rate at x = k * quantumBase, where
+   * x is the vault's ABSOLUTE (total) target allocation to this venue after
+   * the move — NOT an incremental amount added on top of the vault's
+   * current position. This matches every consumer: optimize.ts's
+   * `target: Map<marketId, allocationBase>` is an absolute allocation
+   * (its `effectiveCapBase` composes `positionBase + headroom` as an
+   * absolute ceiling, and `decide.ts` computes plan deltas as
+   * `target - positionBase`), and forecast.ts's `forecastMarkets` evaluates
+   * `rateAt(curve, m.positionBase)` — the rate AT the vault's current
+   * (absolute) holding, which only lands on the right curve point if x is
+   * absolute. It also matches the paper: §8.2's objective evaluates
+   * `\hat\mu_{i,t,H}(w_i V_t)` at the absolute candidate position
+   * `x_i = w_i V_t`, and §6.3-6.5 simulate "candidate cash" after the move,
+   * not cash plus a further deposit on top of the vault's own contribution.
+   *
+   * Whole-branch review, HIGH 4: an earlier revision built these points by
+   * calling each protocol simulator with x as an INCREMENTAL deposit added
+   * on top of the market's raw observed cash (which already includes the
+   * vault's own position) — double-counting any existing position in the
+   * curve's utilisation. simulate.ts's `simulateCurves` must exclude the
+   * vault's own `positionBase` from the simulator's baseline cash before
+   * adding the absolute target x back in; see its comment for the exact
+   * construction.
+   */
   points: bigint[];
   /** Largest x with a defined point. */
   maxXBase: bigint;

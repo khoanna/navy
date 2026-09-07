@@ -117,6 +117,29 @@ function toMarketState(m: MarketObservation, origin: DecisionInput['origin']): M
 }
 
 /**
+ * The cash NOT attributable to the vault's own current position — every
+ * `ISimulator.simulateRate(state, x, config)` computes `newCash = state.cash
+ * + x`, treating `x` as an amount added on top of `state.cash`. `m.cash` is
+ * the protocol's raw observed cash, which already includes whatever the
+ * vault currently holds here (`m.positionBase`). To make `x` mean the
+ * vault's ABSOLUTE target allocation (see the `RateCurve.points` doc
+ * comment), the simulator's baseline must start from the cash contributed
+ * by everyone else, so `externalCash + x` reproduces the true post-target
+ * cash for any x — including `x = m.positionBase` reproducing today's
+ * observed `m.cash` exactly, and `x = 0` correctly modelling a full exit
+ * (the vault's own contribution removed, not `m.cash` unchanged).
+ *
+ * Clamped at 0: `positionBase` is off-chain-tracked and `cash` is an
+ * on-chain snapshot, so a same-block mismatch could in principle make the
+ * subtraction negative; treating that as "no external cash" is the
+ * conservative (lowest-capacity) reading, not a crash.
+ */
+function externalCash(m: MarketObservation): bigint {
+  const v = m.cash - m.positionBase;
+  return v > 0n ? v : 0n;
+}
+
+/**
  * §6.3-6.5 — the protocol-exact post-deposit supply rate as a function of the
  * vault's own allocation x, sampled at the allocation quantum.
  *
@@ -142,19 +165,25 @@ export function simulateCurves(
     const protocol: ProtocolId = m.protocol;
     const simulator = ProtocolSimulators[protocol];
     const config = resolveConfig(m, protocol);
-    const state = toMarketState(m, input.origin);
+    // Baseline cash EXCLUDES the vault's own current position — see
+    // externalCash's doc comment. x (below) is then the vault's ABSOLUTE
+    // target allocation, matching every consumer of RateCurve.
+    const state: MarketState = { ...toMarketState(m, input.origin), cash: externalCash(m) };
 
     const points: bigint[] = [];
     for (let k = 0; k < maxPoints; k++) {
       const x = quantumBase * BigInt(k);
-      if (k === 0) {
-        // points[0] is the current pre-deposit rate taken from the
-        // observation itself, not from the simulator.
-        points.push(m.supplyRateWad);
-        continue;
-      }
+      // Every point, including k=0 (x=0, a full exit), is simulated from
+      // the external-cash baseline — x=0 is NOT the same as "today's
+      // observed rate" whenever the vault holds a non-zero position, so it
+      // can no longer be special-cased to `m.supplyRateWad` (that was only
+      // correct under the old, incremental-x interpretation).
       const sim = simulator.simulateRate(state, x, config);
       const rateWad = toAnnualizedRateWad(protocol, sim.postDepositRate);
+      if (k === 0) {
+        points.push(rateWad);
+        continue;
+      }
       // A deposit can only lower the supply rate; clamp to enforce
       // monotonicity so rounding in a protocol model cannot produce a
       // non-monotone curve.

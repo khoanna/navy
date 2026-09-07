@@ -11,6 +11,9 @@ import type {
 import type { SnapshotCollector } from '../collector/snapshot-collector.js';
 import type { PrismaClient, Prisma } from '@prisma/client';
 
+/** A well-formed, ABI-encodable all-zero bytes32 -- see its use below. */
+const ZERO_BYTES32 = '0x' + '00'.repeat(32);
+
 export interface DecisionDriverDeps {
   loadOrigin: () => Promise<RawOrigin | null>;
   artifact: PolicyArtifact;
@@ -71,7 +74,7 @@ export class ExecutionBlockedError extends Error {
   constructor(public readonly placeholderPriceFields: string[]) {
     super(
       `Execution blocked: placeholder price input(s) in use: ${placeholderPriceFields.join(', ')}. ` +
-      'These are named, configurable fallbacks (SRCLA_PLACEHOLDER_* in config.ts / .env.example), not ' +
+      'These are named, configurable fallbacks (SRCLA_REAL_* in config.ts / .env.example), not ' +
       'real oracle readings -- acting on a plan priced with them would move real funds on a fabricated ' +
       'ETH price / L1 fee. Wire real values for these before any produced plan may be handed to an ' +
       'executor. This does not affect deciding, persisting or logging decisions.'
@@ -178,7 +181,13 @@ export async function buildRawOriginFromCollector(
     // there is nothing to filter since it can never be null. `horizonEndsAt`
     // IS optional and is the real gate for "has an outcome been recorded".
     where: { horizonEndsAt: { not: null } },
-    orderBy: { horizonEndsAt: 'asc' },
+    // Whole-branch review, MEDIUM 6: `take: N` with an `asc` order returns
+    // the OLDEST N rows, the opposite of a rolling window's intent — once
+    // history exceeds 5000 rows, every decision would train on the oldest
+    // data forever and never see anything recent. `desc` takes the most
+    // recent 5000 instead. Order of the returned array does not matter to
+    // any consumer (admit.ts's REGIME_MIN_HISTORY only counts/filters it).
+    orderBy: { horizonEndsAt: 'desc' },
     take: 5000,
   });
 
@@ -201,7 +210,14 @@ export async function buildRawOriginFromCollector(
   }));
 
   const withdrawals = (
-    await prisma.withdrawalEvent.findMany({ orderBy: { timestamp: 'asc' }, take: 5000 })
+    // Whole-branch review, MEDIUM 6: same `take` + ordering defect as
+    // forecastLabel above — `desc` takes the most recent 5000 withdrawal
+    // events, not the oldest, so reserve.ts's rolling withdrawal-demand
+    // quantile can actually see recent withdrawals once history exceeds the
+    // cap. `demandQuantileBase` (policy/steps/reserve.ts) re-sorts its input
+    // ascending itself, so the order of this array does not matter, only
+    // WHICH rows come back.
+    await prisma.withdrawalEvent.findMany({ orderBy: { timestamp: 'desc' }, take: 5000 })
   ).map((w) => ({
     timestampSeconds: Math.floor(w.timestamp.getTime() / 1000),
     // Task-13 correction 1: the column is `assets`, not `assetsBase`.
@@ -225,11 +241,30 @@ export async function buildRawOriginFromCollector(
       // NOT a real reading — do not rely on it once something starts
       // consuming that field.
       sharesOutstanding: snap.vault.totalAssets,
-      adminReserveBase: snap.vault.reserve?.admin ?? 0n,
-      dynamicReserveBase: snap.vault.reserve?.dynamic ?? 0n,
+      // snap.vault.reserve is a required field (collector/types.ts) --
+      // adminReserve()/dynamicReserve() are core vault state, always
+      // attempted by collectVault, and a failed read propagates as a
+      // thrown error from collector.collect() rather than landing here as
+      // an optional field to silently default to 0n (whole-branch review,
+      // HIGH 5).
+      adminReserveBase: snap.vault.reserve.admin,
+      dynamicReserveBase: snap.vault.reserve.dynamic,
       minIdleBps: Number(snap.vault.minIdleBps),
       paused: snap.vault.paused,
-      configurationDigest: chainConfigDigests['vault'] ?? '0x',
+      // Whole-branch review, MEDIUM 6: '0x' (a ZERO-LENGTH byte string) is
+      // NOT a valid bytes32 — plan.ts's ABI-encodes this field as a fixed
+      // bytes32 (HEADER_TUPLE), and ethers throws on a 0-length BytesLike
+      // for a fixed-size type. This only stayed latent because admission
+      // never succeeds while `pinnedConfigDigests: {}` (CONFIG_DIGEST_UNPINNED
+      // rejects every market before buildPlan is ever reached) — the moment
+      // digest pinning is wired up, this becomes an uncaught throw inside
+      // decide(). There is no live configuration-digest oracle to supply the
+      // REAL vault digest here yet (chainConfigDigests is caller-supplied
+      // and src/index.ts passes {} — see its own comment), so this uses a
+      // well-formed all-zero bytes32 sentinel instead of a malformed one:
+      // it ABI-encodes safely AND can never coincidentally equal a real
+      // pinned digest, so CONFIG_DIGEST_UNPINNED's behavior is unchanged.
+      configurationDigest: chainConfigDigests['vault'] ?? ZERO_BYTES32,
     },
     markets,
     dependencyGroups: [],

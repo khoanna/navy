@@ -52,6 +52,32 @@ describe('requiredReserve (P3)', () => {
     expect(r.floorBase).toBe(10_000_000_000n);
   });
 
+  // Whole-branch review, HIGH 5: the vault enforces
+  // `requiredIdle() = max(adminReserve, dynamicReserve)` on chain
+  // (NavyVaultSRCLA.sol). Before this fix, requiredReserve read
+  // `input.vault.adminReserveBase` and `minIdleBps` but never
+  // `dynamicReserveBase`, so a dynamic reserve activated by a PRIOR plan
+  // (which persists past that plan's expiry per §8.1) would not raise the
+  // off-chain floor here, and a later, lower-computed reserve could size a
+  // deploy the on-chain call then rejects with InsufficientIdle. This test
+  // fails under the old implementation: dynamicReserveBase (80B) exceeds
+  // both adminReserveBase (10B) and the minIdleBps floor, so the old code's
+  // floorBase/requiredBase would incorrectly stay at 10B.
+  it('never falls below the dynamic reserve activated by a prior plan', () => {
+    const i = input([market()]);
+    i.vault.dynamicReserveBase = 80_000_000_000n; // > adminReserveBase (10B) and > the bps floor
+    const r = requiredReserve(i, new Map([['aave', 0n]]), OPTS);
+    expect(r.floorBase).toBe(80_000_000_000n);
+    expect(r.requiredBase).toBeGreaterThanOrEqual(80_000_000_000n);
+  });
+
+  it('the dynamic reserve floor still yields to a higher admin floor or demand/stress term', () => {
+    const i = input([market()]);
+    i.vault.dynamicReserveBase = 5_000_000_000n; // < adminReserveBase (10B)
+    const r = requiredReserve(i, new Map([['aave', 0n]]), OPTS);
+    expect(r.floorBase).toBe(10_000_000_000n); // admin floor still wins
+  });
+
   it('nets demand against executable venue exits, so deep liquidity lowers the reserve', () => {
     const w = [{ timestampSeconds: 999_000, assetsBase: 50_000_000_000n }];
     const liquid = requiredReserve(

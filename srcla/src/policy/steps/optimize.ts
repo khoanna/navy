@@ -111,10 +111,20 @@ export function portfolioLowerBound(
 
 /**
  * §8.2 - greedy fill at the allocation quantum over conservative curves, then
- * exhaustive verification at the same quantum for small universes with the
- * approximation regret persisted. A candidate that fails any stress scenario
- * is rejected BEFORE returns are compared (§8.1) - `feasible` below always
- * runs the reserve/scenario check ahead of any objective comparison.
+ * exhaustive verification at the same quantum for small universes, returning
+ * the approximation regret as part of this function's result (`enumeration`
+ * below). Whole-branch review, MEDIUM 7: nothing in `src/` actually persists
+ * that regret anywhere durable today -- `DecisionOutput.enumeration` is
+ * written into the in-memory decision only; `persistDecisionOutput`
+ * (runtime/decision-driver.ts) writes admissions/forecasts/reserve/
+ * allocation/actionDecision into the `Decision` row but not `enumeration`,
+ * and the `EnumerationResult` Prisma model (prisma/schema.prisma) has no
+ * writer anywhere in `src/` (verified by grep). §10.2's storage requirement
+ * for this value is not yet met; a future task must either write it there or
+ * this comment must be corrected again once it does. A candidate that fails
+ * any stress scenario is rejected BEFORE returns are compared (§8.1) -
+ * `feasible` below always runs the reserve/scenario check ahead of any
+ * objective comparison.
  *
  * PURE: no I/O, no Date.now(), no randomness. The tie-break is total: markets
  * are visited in sorted id order and only a strictly-greater objective value

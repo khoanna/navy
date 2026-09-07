@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import { SnapshotCollector } from '../../../src/collector/snapshot-collector.js';
 import { CollectorConfig, type VaultSnapshot, type CollectedSnapshot } from '../../../src/collector/types.js';
 
@@ -105,6 +106,7 @@ describe('VaultSnapshot - Extended Fields', () => {
         idleBase: 0n,
         minIdleBps: 0n,
         paused: false,
+        reserve: { admin: 0n, dynamic: 0n },
         routeStatus: status,
       };
       expect(snapshot.routeStatus).toBe(status);
@@ -118,6 +120,7 @@ describe('VaultSnapshot - Extended Fields', () => {
       idleBase: 0n,
       minIdleBps: 0n,
       paused: false,
+      reserve: { admin: 0n, dynamic: 0n },
       feedRounds: [
         { feed: '0x1111', round: 100n, staleness: false },
         { feed: '0x2222', round: 50n, staleness: true }, // stale feed
@@ -173,5 +176,93 @@ describe('CollectedSnapshot - Full Production Snapshot', () => {
     expect(snapshot.vault.rewardReady).toBeDefined();
     expect(snapshot.vault.routeStatus).toBeDefined();
     expect(snapshot.vault.sequencerRound).toBeDefined();
+  });
+});
+
+describe('SnapshotCollector.collect - reserve is collected unconditionally (whole-branch review, HIGH 5)', () => {
+  function selectorFor(sig: string): string {
+    const fn = sig.slice(0, sig.indexOf('('));
+    return ethers.id(fn + '()').slice(0, 10);
+  }
+
+  /**
+   * A minimal ChainClient stub, selector-routed: vault-address calls answer
+   * from `vaultResponses`, everything else (strategy calls) harmlessly
+   * returns `0x` (interpreted by the collector as 0n) — collectStrategies
+   * swallows per-strategy failures, so this is enough to let `collect()`
+   * run end-to-end without a real chain.
+   */
+  function makeClient(vaultAddress: string, vaultResponses: Record<string, bigint>) {
+    return {
+      chainId: 8453,
+      getFinalizedBlock: async () => ({
+        number: 100,
+        hash: '0x' + 'aa'.repeat(32),
+        timestamp: 1_000_000,
+      } as unknown as ReturnType<typeof Object>),
+      getBalance: async () => 500_000_000_000n,
+      call: async (to: string, data: string) => {
+        if (to.toLowerCase() !== vaultAddress.toLowerCase()) return '0x';
+        const v = vaultResponses[data.slice(0, 10)];
+        return v === undefined ? '0x' : '0x' + v.toString(16);
+      },
+    };
+  }
+
+  const VAULT = '0x0000000000000000000000000000000000000001';
+  const BASE_CONFIG: CollectorConfig = {
+    vaultAddress: VAULT,
+    strategyAddresses: {
+      aave: '0x0000000000000000000000000000000000000002',
+      compound: '0x0000000000000000000000000000000000000003',
+      moonwell: '0x0000000000000000000000000000000000000004',
+    },
+    usdcAddress: '0x0000000000000000000000000000000000000005',
+    // Deliberately NOT configuring rewardAccountantAddress/rewardExecutorAddress
+    // -- this is exactly src/index.ts's production configuration (it wires
+    // neither), and the whole point of this test: reserve collection must
+    // not depend on it.
+  };
+
+  // This test fails under the pre-fix implementation: adminReserve()/
+  // dynamicReserve() were only read inside collectExtendedVaultFields,
+  // gated behind `rewardAccountantAddress || rewardExecutorAddress` being
+  // configured, so with neither set (as here, and as in production)
+  // vault.reserve stayed `undefined` regardless of what the chain reported.
+  it('populates vault.reserve from adminReserve()/dynamicReserve() even when no reward contracts are configured', async () => {
+    const client = makeClient(VAULT, {
+      [selectorFor('totalAssets()')]: 10_000_000_000_000n,
+      [selectorFor('synchronousLiquidity()')]: 9_000_000_000_000n,
+      [selectorFor('minIdleBps()')]: 100n,
+      [selectorFor('paused()')]: 0n,
+      [selectorFor('adminReserve()')]: 123_000_000_000n,
+      [selectorFor('dynamicReserve()')]: 456_000_000_000n,
+    });
+    const collector = new SnapshotCollector(client as any, BASE_CONFIG);
+
+    const snap = await collector.collect();
+
+    expect(snap?.vault.reserve).toEqual({ admin: 123_000_000_000n, dynamic: 456_000_000_000n });
+  });
+
+  it('reports a genuinely zero on-chain reserve as zero, not as "not collected"', async () => {
+    const client = makeClient(VAULT, {
+      [selectorFor('totalAssets()')]: 10_000_000_000_000n,
+      [selectorFor('synchronousLiquidity()')]: 9_000_000_000_000n,
+      [selectorFor('minIdleBps()')]: 100n,
+      [selectorFor('paused()')]: 0n,
+      [selectorFor('adminReserve()')]: 0n,
+      [selectorFor('dynamicReserve()')]: 0n,
+    });
+    const collector = new SnapshotCollector(client as any, BASE_CONFIG);
+
+    const snap = await collector.collect();
+
+    // Under the pre-fix implementation this ALSO produced {admin:0, dynamic:0}
+    // in the reward-configured case, but only by conflating "read 0 from
+    // chain" with "collection skipped" (`if (adminReserve > 0n ||
+    // dynamicReserve > 0n)`); this test pins that the field is always a
+    // concrete value, never left `undefined`.
+    expect(snap?.vault.reserve).toEqual({ admin: 0n, dynamic: 0n });
   });
 });

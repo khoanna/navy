@@ -37,12 +37,21 @@ export class SnapshotCollector {
   private async collectVault(blockNumber: number): Promise<VaultSnapshot> {
     const vault = this.config.vaultAddress;
 
-    // Core vault state
-    const [totalAssets, syncLiquidity, minIdleBps, pausedResult] = await Promise.all([
+    // Core vault state. adminReserve()/dynamicReserve() are `public` state
+    // vars on every deployed NavyVaultSRCLA (contract/src/NavyVaultSRCLA.sol)
+    // -- unlike absoluteCaps/dependency groups/reward state below, they are
+    // NOT reward-plumbing-dependent and NOT optional on some vault version,
+    // so they belong here, unconditionally, alongside totalAssets/paused/etc,
+    // and a failed read propagates like any of those do (a refusal, not a
+    // silent 0n) rather than being swallowed by collectExtendedVaultFields's
+    // reward-address gate (whole-branch review, HIGH 5).
+    const [totalAssets, syncLiquidity, minIdleBps, pausedResult, adminReserve, dynamicReserve] = await Promise.all([
       this.callVault(vault, 'totalAssets()', blockNumber),
       this.callVault(vault, 'synchronousLiquidity()', blockNumber),
       this.callVault(vault, 'minIdleBps()', blockNumber),
       this.callVault(vault, 'paused()', blockNumber),
+      this.callVault(vault, 'adminReserve()', blockNumber),
+      this.callVault(vault, 'dynamicReserve()', blockNumber),
     ]);
 
     // Get idle = vault USDC balance
@@ -55,6 +64,7 @@ export class SnapshotCollector {
       idleBase,
       minIdleBps,
       paused: pausedResult !== 0n,
+      reserve: { admin: adminReserve, dynamic: dynamicReserve },
     };
 
     // Collect production vault fields if reward contracts are configured
@@ -273,26 +283,17 @@ export class SnapshotCollector {
         }
       }
 
-      // Try to get reserve breakdown if available
-      let reserve: { admin: bigint; dynamic: bigint } | undefined;
-
-      try {
-        const [adminReserve, dynamicReserve] = await Promise.all([
-          this.callVault(vault, 'adminReserve()', blockNumber).catch(() => 0n),
-          this.callVault(vault, 'dynamicReserve()', blockNumber).catch(() => 0n),
-        ]);
-
-        if (adminReserve > 0n || dynamicReserve > 0n) {
-          reserve = { admin: adminReserve, dynamic: dynamicReserve };
-        }
-      } catch {
-        // reserve breakdown not available
-      }
+      // Reserve breakdown (admin/dynamic) is now read unconditionally as
+      // part of the CORE vault snapshot in collectVault -- see its comment
+      // (whole-branch review, HIGH 5). Deliberately not duplicated here:
+      // this method's result is merged into the snapshot via
+      // `Object.assign`, and a second, reward-gated read that came back
+      // `undefined` (e.g. both values legitimately 0) would silently
+      // clobber the already-collected core value.
 
       return {
         absoluteCaps,
         groups,
-        reserve,
       };
     } catch (error) {
       console.warn('Failed to collect vault policy:', error);

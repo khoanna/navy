@@ -213,7 +213,7 @@ function printPricingGuardStatus(guard: PricingGuardStatus): void {
   if (guard.placeholderPricesInUse) {
     console.log(
       `${HEADER}   placeholder (NOT real oracle) fields in use: ${guard.placeholderPriceFields.join(', ')} ` +
-        '-- see SRCLA_PLACEHOLDER_* in .env.example. Any produced plan will be BLOCKED from execution ' +
+        '-- see SRCLA_REAL_* in .env.example. Any produced plan will be BLOCKED from execution ' +
         'while any of these remain unset.'
     );
   } else {
@@ -289,6 +289,23 @@ function classifyHold(
   }
 
   if (tag === 'ADMISSION_EMPTY') {
+    // Whole-branch review, Critical 3: decide() pushes a distinct
+    // NO_MARKET_DATA reason (in addition to ADMISSION_EMPTY) when every
+    // market observation carries a literal zero rate/cash/borrows -- the
+    // collector's "I could not read this" signature (snapshot-collector.ts).
+    // That is the pipeline being broken, not an expected hold on a fresh
+    // environment, and must not be classified the same as e.g.
+    // REGIME_MIN_HISTORY on an empty database.
+    if (out.reasons.includes('NO_MARKET_DATA')) {
+      return {
+        expected: false,
+        detail:
+          'every market failed admission via NO_MARKET_DATA: the collector returned a literal zero ' +
+          'supplyRate/cash/borrows for every market (snapshot-collector.ts cannot yet read protocol-specific ' +
+          'rate/liquidity data). This is the collector supplying no market data, not a legitimate hold -- ' +
+          'do not treat this run as an expected checkpoint result.',
+      };
+    }
     const badPins = out.admission.reasons.filter(
       (r) => r.code === 'CONFIG_DIGEST_UNPINNED' && !r.passed && pinnedMarketNames.has(r.marketId)
     );

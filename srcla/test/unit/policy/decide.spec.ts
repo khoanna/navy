@@ -242,6 +242,43 @@ describe('decide', () => {
     expect(out.reasons.some((r) => r.includes('ADMISSION'))).toBe(true);
   });
 
+  // Whole-branch review, Critical 3: snapshot-collector.ts's collectStrategy
+  // cannot yet read supplyRate/utilization/cash for any protocol and reports
+  // a hardcoded 0n for all three. Without this distinction, decide() would
+  // report a plain ADMISSION_EMPTY hold that reads exactly like a legitimate
+  // "nothing is admissible right now" outcome (e.g. REGIME_MIN_HISTORY on a
+  // fresh database) rather than "the pipeline cannot see the market at
+  // all". This test fails if the NO_MARKET_DATA top-level reason is removed
+  // or the rule is weakened to allow a data-less market to admit.
+  it('surfaces a distinct NO_MARKET_DATA reason (not a plain admission-empty hold) when every market carries a literal zero rate/cash/borrows', () => {
+    const i = input();
+    for (const m of i.markets) {
+      m.supplyRateWad = 0n;
+      m.cash = 0n;
+      m.borrows = 0n;
+      m.utilizationWad = 0n;
+    }
+    const out = decide(i, artifact(), DEFAULT_DECIDE_OPTS);
+    expect(out.action).toBe('hold');
+    expect(out.reasons).toContain('ADMISSION_EMPTY');
+    expect(out.reasons).toContain('NO_MARKET_DATA');
+    expect(
+      out.admission.reasons.every((r) => (r.code === 'NO_MARKET_DATA' ? !r.passed : true))
+    ).toBe(true);
+  });
+
+  it('does NOT surface NO_MARKET_DATA when admission is empty for an unrelated, data-dependent reason', () => {
+    // Same "hold and explains" scenario as above (every market paused) but
+    // every market still carries real rate/cash/borrows data -- proves the
+    // new reason is specific to the no-data signature, not tacked onto
+    // every empty admission.
+    const i = input();
+    for (const m of i.markets) m.paused = true;
+    const out = decide(i, artifact(), DEFAULT_DECIDE_OPTS);
+    expect(out.reasons).toContain('ADMISSION_EMPTY');
+    expect(out.reasons).not.toContain('NO_MARKET_DATA');
+  });
+
   // Correctness check for defect (2) in the task brief: the SHIPPED bootstrap
   // artifact carries pinnedConfigDigests: {} by design (a pinned digest is
   // only knowable against a live deployment; a later task populates it from

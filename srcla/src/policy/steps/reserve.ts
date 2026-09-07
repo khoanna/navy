@@ -9,9 +9,20 @@ export interface StressScenario {
 }
 
 /**
- * Registered stress set (paper §8.1). The report's demand set was 5/10/25/50% of
- * TVL with a conservative variant assuming supplied cash has been borrowed out;
- * the haircut encodes that variant.
+ * Registered stress set (paper §8.1 / Appendix B: "5%, 10%, 25%, 50% of
+ * TVL"). The four `demandBps` values are registered — both the paper and
+ * SRCLA-REPORT.md (§"Withdrawal success", the release-gate table, and
+ * Appendix "Stress demand set") cite exactly 5/10/25/50%.
+ *
+ * Whole-branch review, MEDIUM 7 (provenance correction): the per-scenario
+ * `liquidityHaircutBps` values (0/1000/2500/5000, i.e. graduated 0-50%) are
+ * NOT from that source. SRCLA-REPORT.md describes only a single binary
+ * "conservative" variant — "assuming the vault's own supplied cash has been
+ * borrowed out" — applied uniformly to the whole stress test, not a
+ * graduated per-scenario schedule. This graduated schedule (which happens to
+ * equal `demandBps` in three of the four rows) is this implementation's own
+ * construction, not a measured or registered figure. Treat it as a design
+ * choice to be justified or replaced, not as ground truth to cite.
  */
 export const STRESS_SCENARIOS: readonly StressScenario[] = [
   { name: 'w5', demandBps: 500, liquidityHaircutBps: 0 },
@@ -82,10 +93,18 @@ export function requiredReserve(
   target: Map<string, bigint>,
   opts: { quantile: number; horizonSeconds: number }
 ): ReserveResult {
-  const { totalAssetsBase, adminReserveBase, minIdleBps } = input.vault;
+  const { totalAssetsBase, adminReserveBase, dynamicReserveBase, minIdleBps } = input.vault;
 
   const bpsFloor = (totalAssetsBase * BigInt(minIdleBps)) / 10_000n;
-  const floorBase = adminReserveBase > bpsFloor ? adminReserveBase : bpsFloor;
+  // Whole-branch review, HIGH 5: the vault enforces `requiredIdle() =
+  // max(adminReserve, dynamicReserve)` on-chain (NavyVaultSRCLA.sol) --
+  // `dynamicReserveBase` (the reserve an earlier plan already activated,
+  // §8.1's "an activated dynamic reserve persists after plan expiry")
+  // must be part of this off-chain floor too, or a newly computed reserve
+  // that is LOWER than the previous plan's can size a deploy against a
+  // floor the on-chain call will reject with InsufficientIdle.
+  let floorBase = adminReserveBase > bpsFloor ? adminReserveBase : bpsFloor;
+  if (dynamicReserveBase > floorBase) floorBase = dynamicReserveBase;
 
   /** e_i^cons for the candidate target, optionally haircut for a stress scenario. */
   const executable = (haircutBps: number): bigint => {

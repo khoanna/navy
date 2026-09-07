@@ -154,6 +154,20 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   const admission = admit(input, artifact);
   if (admission.eligible.length === 0) {
     reasons.push('ADMISSION_EMPTY');
+    // Whole-branch review, Critical 3: distinguish "the pipeline has no
+    // usable market data at all" from a legitimate, data-dependent empty
+    // admission (e.g. REGIME_MIN_HISTORY on a fresh database). If every
+    // market observation failed the NO_MARKET_DATA rule (admit.ts), this
+    // is not a considered HOLD -- it means the collector could not read
+    // rate/liquidity data for anything, so the kernel decided on nothing.
+    // Callers (and scripts/phase1-fork-check.ts) must be able to tell the
+    // two apart rather than treat both as "expected: true".
+    const noDataMarketIds = new Set(
+      admission.reasons.filter((r) => r.code === 'NO_MARKET_DATA' && !r.passed).map((r) => r.marketId)
+    );
+    if (input.markets.length > 0 && noDataMarketIds.size === input.markets.length) {
+      reasons.push('NO_MARKET_DATA');
+    }
     return finish({ admission });
   }
 
