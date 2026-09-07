@@ -315,7 +315,7 @@ The registered grid is the full cross product of the three methods, the three
 horizons, the three coverage targets, and each method's parameter set, evaluated per
 venue. A second registered target is calibrated with the same machinery: a lower
 prediction bound on the venue's withdrawable cash over the horizon, which supplies
-$e_{i,s}$ in §8.1 and the exitable fraction in §8.2.
+$e_i^{\mathrm{cons}}$ in §8.1 and the exitable fraction in §8.2.
 
 ### 7.3 No-look-ahead and calibration gate
 
@@ -327,7 +327,7 @@ Candidate selection uses a published loss function covering point error, lower-b
 
 ### 8.1 Dynamic idle reserve
 
-Let $I^{\mathrm{floor}}$ be the administrator's non-bypassable idle floor, $Q_\beta(W_H)$ a registered withdrawal-demand quantile, $D_s$ withdrawal demand in stress scenario $s$, and $E_s(x)=\sum_i\min(x_i,e_{i,s})$ the stressed exit value of candidate positions $x$. The candidate-dependent required idle amount is:
+Let $I^{\mathrm{floor}}$ be the administrator's non-bypassable idle floor, $Q_\beta(W_H)$ a registered withdrawal-demand quantile, $D_s$ withdrawal demand in stress scenario $s$, and $E_s(x)=\sum_i\min(x_i,e_{i,s})$ the stressed exit value of candidate positions $x$. Let $e_i^{\mathrm{cons}}$ denote the conservatively executable same-transaction exit for position $x_i$ — the minimum of the vault's position and the live protocol cash available to that venue's withdrawal path — which is exactly what the second registered forecast target from §7.2 predicts over the horizon. The candidate-dependent required idle amount is:
 
 $$
 I_t^{\mathrm{required}}(x)=
@@ -414,7 +414,7 @@ $$
 G_H>\max\left(C_{\mathrm{move}},\;k\hat\sigma\right).
 $$
 
-The second term is a no-trade band scaled by forecast dispersion. On a low-fee chain
+The second term is a no-trade band scaled by forecast dispersion. Here, $\hat\sigma$ is the calibrated dispersion of portfolio horizon residuals — the same quantity the frozen forecast artifact carries as its portfolio residual quantile — and $k$ is a registered scalar multiplier fixed before held-out evaluation. On a low-fee chain
 $C_{\mathrm{move}}$ is small enough that it alone does not suppress churn, and
 repeated entry and exit incur self-impact and reversal risk that execution cost does
 not capture. Decisions are evaluated hourly while the forecast horizon is measured in
@@ -517,7 +517,7 @@ Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000 USDC. Every r
 | B1 | Select the highest currently displayed eligible rate. |
 | B2 | Use post-deposit capacity curves without uncertainty treatment, holding the same reserve as SRCLA. |
 | B2u | B2 without any reserve. Retained as a labelled diagnostic; not a deployable comparator. |
-| B3 | Add a movement-cost threshold to B2 but omit the full dynamic-reserve and dependency policy. |
+| B3 | Add a movement-cost threshold to B2 but omit the dependency policy and the P3 netting of the withdrawal quantile. |
 | B4 | Use one frozen robust allocation over the eligible market set. |
 | B5 | Use bounded hindsight as a non-deployable diagnostic upper bound. |
 
@@ -728,11 +728,12 @@ Morpho markets previously present in the research registry are explicitly exclud
 | Lower-bound coverage candidates | 90%, 95%, 99%; quantile solved to attain the target |
 | Second forecast target | Venue withdrawable-cash lower bound |
 | Market cold start | Ineligible until sufficient post-regime completed history |
-| Reserve | Maximum of admin floor, withdrawal quantile, and stress shortfall |
+| Reserve | Maximum of admin floor, withdrawal quantile minus conservatively executable venue exits, and stress shortfall |
 | Objective | Portfolio-level lower bound, liquidity-weighted |
 | Structural liquidity cap | Active; decreases toward zero near the venue kink |
 | Reward execution | Event-driven; Uniswap V3 only; no fixed weekly harvest |
 | Rebalance | Staged, expiring, ordered actions with complete-cost gate, turnover gate, and uncertainty no-trade band |
+| No-trade band multiplier | $k$ is a registered scalar multiplier that scales forecast dispersion $\hat\sigma$ into the action rule threshold; fixed before held-out evaluation |
 | Evaluation tiers | 10,000; 100,000; 1,000,000; 10,000,000 USDC |
 | User transactions | Standard synchronous ERC-4626; user pays gas |
 | Runtime keys | Admin key only in uncommitted contract environment; allocator key only in `/srcla` environment |
