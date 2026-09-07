@@ -1,0 +1,176 @@
+import type { HorizonSeconds, CoverageTarget, ForecastMethod } from './registered.js';
+
+/** Raw protocol state at one finalised origin, in native integer units. */
+export interface MarketObservation {
+  marketId: string;
+  adapter: string;
+  protocol: 'aave' | 'compound' | 'moonwell';
+  cash: bigint;
+  borrows: bigint;
+  reserves: bigint;
+  supplyRateWad: bigint;
+  utilizationWad: bigint;
+  /** Vault position currently held in this venue. */
+  positionBase: bigint;
+  /** Live protocol headroom: max additional assets deployable. */
+  maxDeployableBase: bigint;
+  /** Conservative same-transaction exit, min(position, protocol cash). */
+  maxWithdrawableBase: bigint;
+  configDigest: string;
+  regimeId: string;
+  paused: boolean;
+  capBps: number;
+  absoluteCapBase: bigint;
+  maxLossBps: number;
+  dependencyGroupIds: string[];
+}
+
+/** A completed, availability-lagged training observation. */
+export interface CompletedLabel {
+  marketId: string;
+  regimeId: string;
+  originSeconds: number;
+  horizonSeconds: HorizonSeconds;
+  /** Origin + horizon; must be <= decision origin to be usable. */
+  horizonEndSeconds: number;
+  /** When the outcome became readable off-chain. */
+  availableAtSeconds: number;
+  realizedReturnWad: bigint;
+  realizedMinCashBase: bigint;
+}
+
+export interface WithdrawalObservation {
+  timestampSeconds: number;
+  assetsBase: bigint;
+}
+
+export interface GasObservation {
+  l2BaseFeeWei: bigint;
+  l1BaseFeeWei: bigint;
+  l1BlobBaseFeeWei: bigint;
+  ethUsdE8: bigint;
+  usdcUsdE8: bigint;
+}
+
+export interface DecisionInput {
+  origin: {
+    blockNumber: number;
+    blockHash: string;
+    timestampSeconds: number;
+    finalized: true;
+  };
+  vault: {
+    totalAssetsBase: bigint;
+    idleBase: bigint;
+    sharesOutstanding: bigint;
+    adminReserveBase: bigint;
+    dynamicReserveBase: bigint;
+    minIdleBps: number;
+    paused: boolean;
+    configurationDigest: string;
+  };
+  markets: MarketObservation[];
+  dependencyGroups: Array<{ id: string; capBps: number; absoluteCapBase: bigint; members: string[] }>;
+  withdrawals: WithdrawalObservation[];
+  gas: GasObservation;
+  /** Only completed and availability-lagged labels reach here. */
+  history: CompletedLabel[];
+  lastAction: { timestampSeconds: number | null; turnoverWindowBase: bigint };
+}
+
+/** Piecewise-linear conservative rate curve over allocation x. */
+export interface RateCurve {
+  marketId: string;
+  quantumBase: bigint;
+  /** points[k] is the post-deposit supply rate at x = k * quantumBase. */
+  points: bigint[];
+  /** Largest x with a defined point. */
+  maxXBase: bigint;
+}
+
+export interface PolicyArtifact {
+  artifactHash: string;
+  policyVersion: number;
+  horizonSeconds: HorizonSeconds;
+  coverageTarget: CoverageTarget;
+  method: ForecastMethod;
+  methodParams: Record<string, number>;
+  /** P1: residual quantile per market id, all <= 0 in WAD. */
+  residualQuantileWadByMarket: Record<string, bigint>;
+  /** P2: portfolio residual quantile, <= 0 in WAD. */
+  portfolioResidualQuantileWad: bigint;
+  minObservations: number;
+  availabilityLagSeconds: number;
+  /** P8 band multiplier. */
+  noTradeBandK: number;
+  configDigest: string;
+  /** Paper §6.2 — market id -> pinned configuration digest at registration. */
+  pinnedConfigDigests: Record<string, string>;
+}
+
+export interface AdmissionResult {
+  eligible: string[];
+  reasons: Array<{ marketId: string; code: string; passed: boolean; detail: string }>;
+}
+
+export interface ReserveResult {
+  requiredBase: bigint;
+  floorBase: bigint;
+  netDemandQuantileBase: bigint;
+  stressShortfallBase: bigint;
+  scenarioFeasible: Array<{ scenario: string; feasible: boolean; shortfallBase: bigint }>;
+}
+
+export interface CostGateResult {
+  passed: boolean;
+  reason: string;
+  gainBase: bigint;
+  moveCostBase: bigint;
+  bandBase: bigint;
+  terms: Record<string, bigint>;
+}
+
+export interface PlanDraft {
+  planId: string;
+  decisionHash: string;
+  merkleRoot: string;
+  actions: Array<{
+    index: number;
+    kind: 0 | 1 | 2 | 3;
+    adapter: string;
+    amountBase: bigint;
+    minOutBase: bigint;
+    dataHash: string;
+    proof: string[];
+  }>;
+  header: {
+    planId: bigint;
+    policyVersion: bigint;
+    createdAt: bigint;
+    expiresAt: bigint;
+    actionCount: bigint;
+    snapshotBlockNumber: bigint;
+    snapshotHash: string;
+    decisionHash: string;
+    configurationDigest: string;
+    reserve: bigint;
+    minFinalAssets: bigint;
+    maxRecognizedLoss: bigint;
+    turnoverLimit: bigint;
+  };
+}
+
+export interface DecisionOutput {
+  snapshotHash: string;
+  decisionHash: string;
+  admission: AdmissionResult;
+  curves: RateCurve[];
+  lowerBounds: Array<{ marketId: string; muWad: bigint; lowerWad: bigint; exitableFraction: number }>;
+  reserve: ReserveResult;
+  target: Map<string, bigint>;
+  enumeration: { regretBps: bigint; enumerated: number; passed: boolean } | null;
+  costGate: CostGateResult;
+  plan: PlanDraft | null;
+  action: 'rebalance' | 'hold';
+  reasons: string[];
+}

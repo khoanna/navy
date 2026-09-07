@@ -51,11 +51,11 @@ describe('Protocol Math', () => {
   });
 
   it('should annualize a rate', () => {
-    const rate = 10000000000000000n; // 1% per month in WAD
-    const period = 2592000n; // 30 days in seconds
+    const rate = 10000000000000000n; // 1% per registered 14-day horizon, in WAD
+    const period = 1209600n; // 14 days in seconds (paper Appendix B horizon)
     const annualized = annualize(rate, period);
-    // 1% per 30 days * (31557600/2592000) ≈ 12.175% APY in WAD
+    // 1% per 14 days * (31557600/1209600) ≈ 26.089% APY in WAD
     const asFloat = Number(annualized) / 1e18;
-    expect(asFloat).toBeCloseTo(0.12175, 4);
+    expect(asFloat).toBeCloseTo(0.26089, 4);
   });
 });

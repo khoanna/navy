@@ -1,4 +1,5 @@
-export type HorizonSeconds = 86400 | 604800 | 2592000;
+import type { HorizonSeconds } from '../policy/registered.js';
+export type { HorizonSeconds };
 
 export interface ForecastResult {
   marketId: string;
