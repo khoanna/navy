@@ -1,0 +1,258 @@
+import { rateAt } from './simulate.js';
+import { lowerBoundAt, exitableFraction } from './forecast.js';
+import { requiredReserve } from './reserve.js';
+import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
+
+const WAD = 10n ** 18n;
+/** Matches forecast.ts's horizon-conversion convention exactly (365-day year,
+ *  not the 365.25-day constant `protocols/math.ts` uses internally for
+ *  per-second simulator math) so the ablated (`disable.portfolioBound`) and
+ *  non-ablated branches of `portfolioLowerBound` stay on the same horizon
+ *  scale as `lowerBoundAt`. */
+const SECONDS_PER_YEAR = 31_536_000n;
+/** Utilisation at which the structural liquidity cap begins to bind. */
+const LIQUIDITY_KINK_WAD = (WAD * 80n) / 100n;
+
+export interface OptimizeOpts {
+  quantumBase: bigint;
+  reserveQuantile: number;
+  reserveHorizonSeconds: number;
+  /** Disable individual components for the H1-H7 ablations. Each switch
+   *  removes ONLY its named component; every other constraint stays live. */
+  disable?: Partial<Record<'liquidityCap' | 'dependencyCaps' | 'reserve' | 'exitableWeight' | 'portfolioBound', boolean>>;
+}
+
+/**
+ * P5 - a deterministic cap that decreases toward zero as a venue approaches its
+ * kink. Requires no forecast. On 2026-07-21 Moonwell quoted 86.26% APR at
+ * 100.04% utilisation holding $6,163 of cash; this cap is what excludes it -
+ * not a zero-cash check, since real incidents like that one hold non-trivial
+ * residual cash right up to (and past) 100% utilisation.
+ */
+export function liquidityCapBase(m: import('../types.js').MarketObservation): bigint {
+  if (m.utilizationWad >= WAD) return 0n;
+  if (m.cash <= 0n) return 0n;
+  if (m.utilizationWad <= LIQUIDITY_KINK_WAD) return m.cash;
+
+  // Linear decay from full cash at the kink to zero at 100% utilisation.
+  const span = WAD - LIQUIDITY_KINK_WAD;
+  const remaining = WAD - m.utilizationWad;
+  return (m.cash * remaining) / span;
+}
+
+/** §6.1 - effective limit is the minimum of every applicable bound (P5 amends
+ *  in the structural liquidity cap alongside the pre-existing percentage,
+ *  absolute and protocol-headroom bounds). */
+export function effectiveCapBase(
+  m: import('../types.js').MarketObservation,
+  totalAssetsBase: bigint,
+  disableLiquidityCap = false
+): bigint {
+  const pct = (totalAssetsBase * BigInt(m.capBps)) / 10_000n;
+  let cap = pct;
+  if (m.absoluteCapBase < cap) cap = m.absoluteCapBase;
+  const headroom = m.positionBase + m.maxDeployableBase;
+  if (headroom < cap) cap = headroom;
+  if (!disableLiquidityCap) {
+    const liq = m.positionBase + liquidityCapBase(m);
+    if (liq < cap) cap = liq;
+  }
+  return cap < 0n ? 0n : cap;
+}
+
+/** Point forecast mu_hat_i,t,H(x): the annualised curve rate at cumulative
+ *  allocation x, converted to the horizon. Delegates all curve lookup/
+ *  interpolation to `rateAt` (simulate.ts) - this module never re-derives
+ *  that arithmetic. */
+function pointForecastAt(curve: RateCurve, xBase: bigint, horizonSeconds: number): bigint {
+  return (rateAt(curve, xBase) * BigInt(horizonSeconds)) / SECONDS_PER_YEAR;
+}
+
+/**
+ * P2 + P4 - the objective. mu_p is the exitable-weighted sum of per-venue
+ * horizon means; the portfolio residual quantile is applied once to the
+ * portfolio's combined notional, not summed per venue (which is why it is
+ * added once, outside the per-curve loop, scaled by total notional rather
+ * than inside the loop scaled by each x_i - those are NOT interchangeable
+ * when per-venue quantiles differ, which is exactly what the
+ * `disable.portfolioBound` (H2) branch below exercises).
+ *
+ * `disable.portfolioBound` reproduces the H2 marginal-sum baseline: each
+ * venue's OWN calibrated per-venue lower bound (`lowerBoundAt`, carrying its
+ * own quantile from `residualQuantileWadByMarket`) is summed instead of a
+ * single portfolio-level quantile applied once.
+ */
+export function portfolioLowerBound(
+  input: DecisionInput,
+  curves: RateCurve[],
+  artifact: PolicyArtifact,
+  target: Map<string, bigint>,
+  disable: OptimizeOpts['disable'] = {}
+): bigint {
+  let mu = 0n;
+
+  for (const c of curves) {
+    const x = target.get(c.marketId) ?? 0n;
+    if (x === 0n) continue;
+    const m = input.markets.find((k) => k.marketId === c.marketId)!;
+
+    const perVenue = disable.portfolioBound
+      ? lowerBoundAt(c, artifact, c.marketId, x, artifact.horizonSeconds)
+      : pointForecastAt(c, x, artifact.horizonSeconds);
+
+    const phi = disable.exitableWeight ? 1 : exitableFraction(x, m.maxWithdrawableBase);
+    mu += (perVenue * x * BigInt(Math.round(phi * 1_000_000))) / (WAD * 1_000_000n);
+  }
+
+  if (disable.portfolioBound) return mu;
+  const notional = [...target.values()].reduce((s, v) => s + v, 0n);
+  return mu + (artifact.portfolioResidualQuantileWad * notional) / WAD;
+}
+
+/**
+ * §8.2 - greedy fill at the allocation quantum over conservative curves, then
+ * exhaustive verification at the same quantum for small universes with the
+ * approximation regret persisted. A candidate that fails any stress scenario
+ * is rejected BEFORE returns are compared (§8.1) - `feasible` below always
+ * runs the reserve/scenario check ahead of any objective comparison.
+ *
+ * PURE: no I/O, no Date.now(), no randomness. The tie-break is total: markets
+ * are visited in sorted id order and only a strictly-greater objective value
+ * displaces the incumbent choice, so an equal-value alternative never wins.
+ */
+export function optimize(
+  input: DecisionInput,
+  curves: RateCurve[],
+  artifact: PolicyArtifact,
+  opts: OptimizeOpts
+): { target: Map<string, bigint>; enumeration: { regretBps: bigint; enumerated: number; passed: boolean } | null } {
+  const disable = opts.disable ?? {};
+  const { totalAssetsBase } = input.vault;
+  const q = opts.quantumBase;
+
+  const caps = new Map<string, bigint>();
+  for (const c of curves) {
+    const m = input.markets.find((k) => k.marketId === c.marketId)!;
+    caps.set(c.marketId, effectiveCapBase(m, totalAssetsBase, disable.liquidityCap));
+  }
+
+  const groupCap = (groupId: string): bigint => {
+    const g = input.dependencyGroups.find((x) => x.id === groupId)!;
+    const pct = (totalAssetsBase * BigInt(g.capBps)) / 10_000n;
+    return pct < g.absoluteCapBase ? pct : g.absoluteCapBase;
+  };
+
+  const feasible = (candidate: Map<string, bigint>): boolean => {
+    const deployed = [...candidate.values()].reduce((s, v) => s + v, 0n);
+    if (deployed > totalAssetsBase) return false;
+
+    for (const [id, x] of candidate) {
+      if (x > (caps.get(id) ?? 0n)) return false;
+    }
+
+    if (!disable.dependencyCaps) {
+      for (const g of input.dependencyGroups) {
+        let sum = 0n;
+        for (const member of g.members) sum += candidate.get(member) ?? 0n;
+        if (sum > groupCap(g.id)) return false;
+      }
+    }
+
+    if (!disable.reserve) {
+      const r = requiredReserve(input, candidate, {
+        quantile: opts.reserveQuantile,
+        horizonSeconds: opts.reserveHorizonSeconds,
+      });
+      // Guard: deployed can equal totalAssetsBase exactly (idle 0), never
+      // exceed it (checked above), so this subtraction cannot underflow.
+      if (totalAssetsBase - deployed < r.requiredBase) return false;
+      // §8.1 - a target that fails ANY stress scenario is rejected before
+      // returns are compared, not scored-and-penalised.
+      if (r.scenarioFeasible.some((s) => !s.feasible)) return false;
+    }
+
+    return true;
+  };
+
+  // Greedy: repeatedly add one quantum wherever it raises the objective most.
+  const target = new Map<string, bigint>(curves.map((c) => [c.marketId, 0n]));
+  const steps = Number(totalAssetsBase / q);
+
+  for (let step = 0; step < steps; step++) {
+    let bestId: string | null = null;
+    let bestValue = portfolioLowerBound(input, curves, artifact, target, disable);
+
+    // Deterministic tie-break: markets are visited in sorted id order, and
+    // only a strictly-greater value displaces the incumbent - an equal-value
+    // alternative discovered later in the sort never wins.
+    const ids = [...target.keys()].sort();
+    for (const id of ids) {
+      const trial = new Map(target);
+      trial.set(id, (trial.get(id) ?? 0n) + q);
+      if (!feasible(trial)) continue;
+      const value = portfolioLowerBound(input, curves, artifact, trial, disable);
+      if (value > bestValue) {
+        bestValue = value;
+        bestId = id;
+      }
+    }
+
+    if (bestId === null) break;
+    target.set(bestId, (target.get(bestId) ?? 0n) + q);
+  }
+
+  const enumeration = verifyExhaustively(input, curves, artifact, opts, target, feasible);
+  return { target, enumeration };
+}
+
+/** §8.2 - real enumeration for a small universe; regret is measured against
+ *  the actual best feasible candidate found by brute force, never assumed or
+ *  hardcoded. Returns null (not a guess) when the universe is too large to
+ *  enumerate at this quantum - the check exists to validate the greedy
+ *  solver, never to replace or dominate it. */
+function verifyExhaustively(
+  input: DecisionInput,
+  curves: RateCurve[],
+  artifact: PolicyArtifact,
+  opts: OptimizeOpts,
+  greedy: Map<string, bigint>,
+  feasible: (c: Map<string, bigint>) => boolean
+): { regretBps: bigint; enumerated: number; passed: boolean } | null {
+  const n = curves.length;
+  if (n === 0 || n > 3) return null;
+
+  const q = opts.quantumBase;
+  const steps = Number(input.vault.totalAssetsBase / q);
+  if (steps > 64) return null; // enumeration is only a check, never the solver
+
+  const disable = opts.disable;
+  const greedyValue = portfolioLowerBound(input, curves, artifact, greedy, disable);
+  let best = greedyValue;
+  let enumerated = 0;
+
+  const ids = curves.map((c) => c.marketId).sort();
+  const walk = (i: number, remaining: number, acc: Map<string, bigint>): void => {
+    if (i === ids.length) {
+      enumerated++;
+      if (!feasible(acc)) return;
+      const v = portfolioLowerBound(input, curves, artifact, acc, disable);
+      if (v > best) best = v;
+      return;
+    }
+    for (let k = 0; k <= remaining; k++) {
+      const next = new Map(acc);
+      next.set(ids[i]!, q * BigInt(k));
+      walk(i + 1, remaining - k, next);
+    }
+  };
+  walk(0, steps, new Map());
+
+  // best is measured from the actual enumerated feasible candidates (and
+  // seeded with the greedy value so best >= greedyValue always) - never a
+  // hardcoded constant. regretBps is only defined when best is strictly
+  // positive; a non-positive best (no profitable allocation exists) reports
+  // zero regret rather than dividing by a non-positive denominator.
+  const regretBps = best > 0n ? ((best - greedyValue) * 10_000n) / best : 0n;
+
+  return { regretBps, enumerated, passed: regretBps >= 0n && regretBps <= 100n };
+}
