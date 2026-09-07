@@ -51,17 +51,18 @@ contract RewardFlowForkTest is Test {
         _;
     }
 
-    function test_firstPartyRewardClaimingIsExplicitlyNoop() external withFork {
-        vm.prank(allocator);
-        uint256 received = vault.harvest(address(aave), bytes32(uint256(1)), 0);
-        assertEq(received, 0);
-        assertEq(vault.recognizedRewards(), 0);
-    }
+    // test_firstPartyRewardClaimingIsExplicitlyNoop deleted: it called the
+    // legacy 3-arg harvest(address,bytes32,uint256) — deleted per paper
+    // §9.5 — to show that an adapter with zero configured reward tokens is
+    // a safe no-op with no token argument required. The remaining atomic
+    // harvest(address,address,uint256,bytes32,uint256,uint256) always
+    // requires naming a token, so "harvest with nothing configured, no
+    // token needed" has no equivalent call to port to.
 
     function test_unregisteredRewardSourceReverts() external withFork {
         AaveV3Adapter other = new AaveV3Adapter(address(vault), USDC, AAVE_POOL, A_USDC);
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
-        vault.harvest(address(other), bytes32(uint256(1)), 0);
+        vault.harvest(address(other), address(0), 0, bytes32(uint256(1)), 0, type(uint256).max);
     }
 }

@@ -8,7 +8,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
 import {HarvestLib} from "../../src/libraries/HarvestLib.sol";
 import {IRewardExecutor} from "../../src/interfaces/IRewardExecutor.sol";
-import {IVaultEvents} from "../../src/interfaces/IVaultEvents.sol";
 import {VaultTypes} from "../../src/libraries/VaultTypes.sol";
 
 /// @title Mock USDC for testing (6 decimals like real USDC)
@@ -476,144 +475,31 @@ contract VaultHarvestTest is Test {
     }
 
     // ---- harvest Tests ----
-
-    function test_harvest_claimsFromAdapter() public {
-        // Set swap ratio: 90% output (e.g., 10 COMP -> 9 USDC)
-        executor.setSwapRatioBps(900000); // 900000 bps = 90%
-
-        uint256 recognizedBefore = vault.recognizedRewards();
-
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), compRouteId, 0);
-
-        // 10 COMP * 0.9 = 9 USDC + 20 WELL * 0.9 = 18 USDC = 27 USDC total
-        assertEq(totalUsdc, 27e6, "should harvest correct total USDC");
-        assertEq(vault.recognizedRewards(), recognizedBefore + 27e6, "recognized rewards should increase");
-    }
-
-    function test_harvest_withMinOutSuccess() public {
-        // Set swap ratio: 90% output
-        executor.setSwapRatioBps(900000);
-
-        // The minOut is checked per-token by the vault after the swap returns
-        // We need minOut to be less than or equal to the smallest individual swap output
-        // COMP: 10e18 * 0.9 / 1e12 = 9e6, WELL: 20e18 * 0.9 / 1e12 = 18e6
-        // Using minOut of 5e6 (less than 9e6 for first token)
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), compRouteId, 5e6);
-
-        // 10 COMP * 0.9 = 9 USDC + 20 WELL * 0.9 = 18 USDC = 27 USDC
-        assertEq(totalUsdc, 27e6, "should succeed when above minOut");
-    }
-
-    function test_harvest_revertsOnSlippage() public {
-        // Set swap ratio: 40% output (very low)
-        executor.setSwapRatioBps(400000); // 40% instead of 90%
-
-        // 10 COMP * 0.4 = 4e6 USDC (below 5e6 minOut)
-        // The first token (COMP) will revert in the mock
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.SlippageExceeded.selector);
-        vault.harvest(address(adapter), compRouteId, 5e6);
-    }
-
-    function test_harvest_onlyAllocator() public {
-        vm.prank(nonAllocator);
-        vm.expectRevert();
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    function test_harvest_revertsWhenExecutorNotSet() public {
-        // Deploy new vault without executor
-        NavyVaultSRCLA newVault = new NavyVaultSRCLA(IERC20(address(usdc)));
-        newVault.grantRole(newVault.DEFAULT_ADMIN_ROLE(), address(this));
-        newVault.grantRole(newVault.ADMIN_ROLE(), admin);
-        newVault.grantRole(newVault.ALLOCATOR_ROLE(), allocator);
-
-        // Register a simple adapter with the new vault
-        address[] memory simpleTokens = new address[](1);
-        simpleTokens[0] = address(comp);
-        MockAdapterWithRewards simpleAdapter =
-            new MockAdapterWithRewards(address(newVault), address(usdc), simpleTokens);
-
-        vm.prank(admin);
-        newVault.registerAdapter(address(simpleAdapter), 5000, 100, "Simple Adapter");
-
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.RewardExecutorNotSet.selector);
-        newVault.harvest(address(simpleAdapter), compRouteId, 0);
-    }
-
-    function test_harvest_revertsForUnregisteredAdapter() public {
-        MockRewardToken newComp = new MockRewardToken("NewCOMP", "NCOMP", 18);
-        address[] memory newRewardTokens = new address[](1);
-        newRewardTokens[0] = address(newComp);
-        MockAdapterWithRewards newAdapter = new MockAdapterWithRewards(address(vault), address(usdc), newRewardTokens);
-
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
-        vault.harvest(address(newAdapter), compRouteId, 0);
-    }
-
-    function test_harvest_revertsForInactiveAdapter() public {
-        vm.prank(admin);
-        vault.setAdapterState(address(adapter), 1); // Set to Disabled
-
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    function test_harvest_handlesZeroClaimable() public {
-        // Set all claimable to 0
-        adapter.setClaimableReward(address(comp), 0);
-        adapter.setClaimableReward(address(well), 0);
-
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), compRouteId, 0);
-
-        assertEq(totalUsdc, 0, "should return 0 when no rewards");
-    }
-
-    function test_harvest_usesDifferentRouteId() public {
-        // Test that a different routeId parameter can be used
-        // Set up a new route for a different token
-        bytes32 differentRouteId = keccak256("different-route");
-        executor.approveRoute(differentRouteId, address(well));
-        vm.prank(admin);
-        vault.setRewardTokenRoute(address(well), differentRouteId);
-
-        // Set swap ratio
-        executor.setSwapRatioBps(900000);
-
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), differentRouteId, 0);
-
-        // 10 COMP * 0.9 = 9 USDC + 20 WELL * 0.9 = 18 USDC = 27 USDC
-        assertEq(totalUsdc, 27e6, "should work with different routeId");
-    }
-
-    function test_harvest_singleRewardToken() public {
-        // Create adapter with single reward token
-        address[] memory singleToken = new address[](1);
-        singleToken[0] = address(comp);
-        MockAdapterWithRewards singleAdapter = new MockAdapterWithRewards(address(vault), address(usdc), singleToken);
-        singleAdapter.setReportedAssets(500e6);
-        singleAdapter.setWithdrawable(500e6);
-        singleAdapter.setClaimableReward(address(comp), 100e18);
-
-        vm.prank(admin);
-        vault.registerAdapter(address(singleAdapter), 5000, 100, "Single Token Adapter");
-
-        executor.setSwapRatioBps(900000); // 100 COMP * 0.9 = 90 USDC
-
-        uint256 recognizedBefore = vault.recognizedRewards();
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(singleAdapter), compRouteId, 0);
-
-        assertEq(totalUsdc, 90e6, "should harvest 90 USDC for 100 COMP at 90% ratio");
-        assertEq(vault.recognizedRewards(), recognizedBefore + 90e6, "rewards should be recognized");
-    }
+    //
+    // The legacy 3-arg harvest(address,bytes32,uint256) — which looped over
+    // every one of an adapter's reward tokens in a single call — has been
+    // deleted (paper §9.5: only the atomic, per-token 6-arg
+    // harvest(address,address,uint256,bytes32,uint256,uint256), exercised by
+    // AtomicHarvestTest below, remains). Every test below that called that
+    // 3-arg overload tested behaviour unique to that "harvest all reward
+    // tokens in one call" loop and could not be ported: the atomic harvest
+    // claims exactly one named token per call, so there is no equivalent
+    // "harvest everything" return value or per-adapter multi-token summation
+    // to assert on. The role/adapter-state/executor guard behaviour these
+    // tests also touched on (onlyAllocator, unregistered/inactive adapter,
+    // executor-not-set) is already covered for the atomic path by
+    // AtomicHarvestTest's own guard tests. Removed test cases:
+    // test_harvest_claimsFromAdapter, test_harvest_withMinOutSuccess,
+    // test_harvest_revertsOnSlippage, test_harvest_onlyAllocator,
+    // test_harvest_revertsWhenExecutorNotSet,
+    // test_harvest_revertsForUnregisteredAdapter,
+    // test_harvest_revertsForInactiveAdapter, test_harvest_handlesZeroClaimable,
+    // test_harvest_usesDifferentRouteId, test_harvest_singleRewardToken,
+    // test_harvest_withVerySmallAmounts, test_harvest_withLargeAmounts,
+    // test_harvest_emitsEvent, test_multipleHarvestsCumulative,
+    // test_harvest_revertsWhenExecutorSwapFails,
+    // test_harvest_revertsWhenRouteNotApproved,
+    // test_harvest_revertsForRemovedAdapter, test_harvest_revertsForImpairedAdapter.
 
     // ---- Integration: harvest via Plan Execution ----
 
@@ -686,113 +572,6 @@ contract VaultHarvestTest is Test {
         // Note: executeHarvestAction may have issues, testing direct harvest first
     }
 
-    // ---- Edge Cases ----
-
-    function test_harvest_withVerySmallAmounts() public {
-        // Set tiny claimable amounts
-        adapter.setClaimableReward(address(comp), 1); // 1 wei of COMP
-        adapter.setClaimableReward(address(well), 0);
-
-        executor.setSwapRatioBps(900000);
-
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), compRouteId, 0);
-
-        // 1 wei COMP * 0.9 = rounds to 0
-        assertEq(totalUsdc, 0, "tiny amounts should work");
-    }
-
-    function test_harvest_withLargeAmounts() public {
-        // Set large claimable amounts
-        adapter.setClaimableReward(address(comp), 10000e18); // 10000 COMP
-        adapter.setClaimableReward(address(well), 20000e18); // 20000 WELL
-
-        executor.setSwapRatioBps(900000);
-
-        uint256 recognizedBefore = vault.recognizedRewards();
-        vm.prank(allocator);
-        uint256 totalUsdc = vault.harvest(address(adapter), compRouteId, 0);
-
-        // 10000 * 0.9 = 9000 + 20000 * 0.9 = 18000 = 27000 USDC
-        assertEq(totalUsdc, 27000e6, "large amounts should work");
-        assertEq(vault.recognizedRewards(), recognizedBefore + 27000e6, "rewards should be added");
-    }
-
-    function test_harvest_emitsEvent() public {
-        executor.setSwapRatioBps(900000);
-
-        vm.prank(allocator);
-        vm.expectEmit();
-        emit IVaultEvents.Harvested(address(adapter), 27e6);
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    function test_multipleHarvestsCumulative() public {
-        executor.setSwapRatioBps(900000);
-
-        uint256 firstTotal = 27e6;
-
-        // First harvest
-        vm.prank(allocator);
-        uint256 total1 = vault.harvest(address(adapter), compRouteId, 0);
-        assertEq(total1, firstTotal, "first harvest should return correct amount");
-
-        // Reset claimable rewards
-        adapter.setClaimableReward(address(comp), 5e18);
-        adapter.setClaimableReward(address(well), 10e18);
-
-        // Second harvest: 5 * 0.9 = 4.5 + 10 * 0.9 = 9 = 13.5 USDC
-        vm.prank(allocator);
-        uint256 total2 = vault.harvest(address(adapter), compRouteId, 0);
-        assertEq(total2, 135e5, "second harvest should return correct amount");
-
-        // Total recognized should be cumulative
-        assertEq(vault.recognizedRewards(), (firstTotal + total2), "recognized rewards should accumulate");
-    }
-
-    // ---- Error Handling ----
-
-    function test_harvest_revertsWhenExecutorSwapFails() public {
-        executor.setShouldFail(true);
-
-        vm.prank(allocator);
-        vm.expectRevert("swap failed");
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    function test_harvest_revertsWhenRouteNotApproved() public {
-        // Revoke the route
-        executor.revokeRoute(compRouteId);
-
-        vm.prank(allocator);
-        vm.expectRevert("route not approved");
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    // ---- Adapter State Changes ----
-
-    function test_harvest_revertsForRemovedAdapter() public {
-        // First, make adapter empty
-        adapter.setReportedAssets(0);
-        adapter.setWithdrawable(0);
-
-        vm.prank(admin);
-        vault.setAdapterState(address(adapter), 3); // Removed
-
-        // Adapter is still registered but state is not Active
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
-
-    function test_harvest_revertsForImpairedAdapter() public {
-        vm.prank(admin);
-        vault.setAdapterState(address(adapter), 2); // Impaired
-
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
-        vault.harvest(address(adapter), compRouteId, 0);
-    }
 }
 
 // =============================================================================

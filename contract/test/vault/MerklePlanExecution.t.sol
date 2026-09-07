@@ -599,24 +599,11 @@ contract MerklePlanExecutionTest is Test {
         assertEq(vault.activePlanMerkleRoot(), bytes32(0), "merkle root should be cleared");
     }
 
-    function test_executePlan_legacyUncommittedPathIsDisabled() public {
-        NavyVaultSRCLA.Action[] memory plainActions = new NavyVaultSRCLA.Action[](1);
-        plainActions[0] = NavyVaultSRCLA.Action({
-            planId: 0,
-            index: 0,
-            kind: NavyVaultSRCLA.ActionKind.Deploy,
-            adapter: address(adapter),
-            amount: 50e6,
-            minOut: 49e6,
-            dataHash: bytes32(0)
-        });
-
-        bytes32 plainPlanId = keccak256("plain-plan");
-
-        vm.prank(allocator);
-        vm.expectRevert(NavyVaultSRCLA.InvalidPlan.selector);
-        vault.executePlan(plainPlanId, keccak256("decision"), uint64(block.timestamp + 3600), plainActions);
-    }
+    // test_executePlan_legacyUncommittedPathIsDisabled deleted: it asserted
+    // that the legacy unhashed executePlan(...) entry point reverted with
+    // InvalidPlan while still present. executePlan has now been deleted
+    // outright (paper §9.5 — see BypassRemovalTest, which asserts the
+    // selector is genuinely absent from the vault's bytecode).
 
     function test_submitPlan_rejectsWrongConfigurationDigest() public {
         VaultTypes.PlanHeader memory header = _buildPlanHeader(12345, 1, uint64(block.timestamp + 3600));

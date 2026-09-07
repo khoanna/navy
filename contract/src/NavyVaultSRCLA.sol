@@ -151,9 +151,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     mapping(bytes32 => VaultTypes.DependencyGroup) private _dependencyGroups;
     bytes32[] private _dependencyGroupIds;
 
-    /// @notice Actions in the active plan (keyed by index)
-    mapping(bytes32 => mapping(uint256 => Action)) private _planActions;
-
     // ---- Custom Errors ----
 
     error AdapterAlreadyRegistered();
@@ -207,15 +204,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     // Note: activePlanId, activePlanDecisionHash, activePlanExpiresAt,
     // activePlanNextActionIndex, activePlanActionCount, activePlanMerkleRoot
     // use Solidity's auto-generated public getter functions.
-
-    function getActivePlanAction(uint256 index)
-        external
-        view
-        returns (uint256 planId, uint32 actionIndex, ActionKind kind, address adapter, uint256 amount, uint256 minOut)
-    {
-        Action memory action = _planActions[activePlanId][index];
-        return (action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut);
-    }
 
     // ---- Constructor ----
 
@@ -562,65 +550,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
 
     // ---- Plan Execution Functions ----
 
-    /// @notice Create and activate a new execution plan
-    function executePlan(bytes32 planId, bytes32 decisionHash, uint64 expiresAt, Action[] calldata actions)
-        external
-        onlyRole(ALLOCATOR_ROLE)
-    {
-        // The legacy unhashed plan path cannot bind chain, vault, asset, or
-        // configuration. It is intentionally disabled for production safety.
-        planId;
-        decisionHash;
-        expiresAt;
-        actions;
-        revert InvalidPlan();
-    }
-
-    /// @notice Execute the next action in the active plan
-    function executeNextAction() external onlyRole(ALLOCATOR_ROLE) {
-        revert InvalidPlan();
-    }
-
-    /// @notice Harvest all reward tokens from an adapter (legacy)
-    /// @dev DEPRECATED: Use harvest(adapter, token, maxClaim, routeId, minOut, deadline) for atomic harvest
-    function harvest(address adapter, bytes32 routeId, uint256 minOut)
-        external
-        onlyRole(ALLOCATOR_ROLE)
-        returns (uint256 totalUsdcReceived)
-    {
-        if (paused) revert DepositPaused();
-        if (rewardExecutor == address(0)) revert RewardExecutorNotSet();
-        _requireActiveAdapter(adapter);
-
-        IStrategyAdapter a = IStrategyAdapter(adapter);
-        address[] memory tokens = a.rewardTokens();
-        address usdcAddr = asset();
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address token = tokens[i];
-            uint256 claimable = a.claimableReward(token);
-            if (claimable > 0 && token != usdcAddr) {
-                if (IERC20(token).balanceOf(address(this)) < claimable) revert RewardNotClaimed();
-                bytes32 tokenRouteId = rewardTokenRoutes[token];
-                if (tokenRouteId == bytes32(0)) tokenRouteId = routeId;
-                if (tokenRouteId != bytes32(0)) {
-                    uint256 tokenBefore = IERC20(token).balanceOf(address(this));
-                    uint256 usdcBefore = IERC20(usdcAddr).balanceOf(address(this));
-                    IERC20(token).forceApprove(rewardExecutor, claimable);
-                    uint256 usdcOut = IRewardExecutor(rewardExecutor).swap(tokenRouteId, claimable, minOut, block.timestamp + 3600);
-                    IERC20(token).forceApprove(rewardExecutor, 0);
-                    if (tokenBefore - IERC20(token).balanceOf(address(this)) != claimable) revert InvalidSwapOutput();
-                    uint256 actualUsdcOut = IERC20(usdcAddr).balanceOf(address(this)) - usdcBefore;
-                    if (actualUsdcOut != usdcOut) revert InvalidSwapOutput();
-                    if (usdcOut < minOut) revert SlippageExceeded();
-                    totalUsdcReceived += usdcOut;
-                }
-            }
-        }
-        recognizedRewards += totalUsdcReceived;
-        emit Harvested(adapter, totalUsdcReceived);
-    }
-
     /// @notice Submit a plan with Merkle root for verified execution
     /// @param header Plan header containing plan metadata
     /// @param merkleRoot The Merkle root for action verification
@@ -655,68 +584,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         activePlanTurnover = 0;
 
         emit PlanSubmitted(planId, merkleRoot);
-    }
-
-    /// @notice Execute a single action from an approved plan after Merkle proof validation
-    /// @param planId The plan identifier
-    /// @param actionIndex Index of the action to execute
-    /// @param kind The action kind (Deploy, Divest, Harvest, EmergencyExit)
-    /// @param adapter Target adapter address
-    /// @param amount Amount of assets to deploy/divest
-    /// @param minOut Minimum expected output for slippage protection
-    /// @param dataHash Hash of action-specific data
-    /// @param proof Merkle proof for action validation
-    function executeAction(
-        uint256 planId,
-        uint32 actionIndex,
-        ActionKind kind,
-        address adapter,
-        uint256 amount,
-        uint256 minOut,
-        bytes32 dataHash,
-        bytes32[] calldata proof
-    ) external onlyRole(ALLOCATOR_ROLE) {
-        // 1. Verify plan is active
-        if (activePlanId != bytes32(planId)) revert PlanNotActive();
-
-        // 2. Verify plan not expired
-        if (block.timestamp > activePlanExpiresAt) revert PlanExpired();
-
-        // 3. Verify action index matches next expected
-        if (actionIndex != activePlanNextActionIndex) revert InvalidActionIndex();
-
-        // 4. Build Merkle leaf with the specified format
-        bytes32 leaf = keccak256(abi.encodePacked(
-            actionIndex,
-            uint8(kind),
-            adapter,
-            amount,
-            minOut,
-            dataHash
-        ));
-
-        // 5. Verify Merkle proof
-        if (!MerkleTree.verifyProof(leaf, proof, activePlanMerkleRoot)) revert InvalidMerkleProof();
-
-        // 6. Execute action based on kind
-        if (kind == ActionKind.Deploy) {
-            _deploy(adapter, amount, minOut);
-        } else if (kind == ActionKind.Divest) {
-            _divest(adapter, amount, minOut);
-        } else if (kind == ActionKind.Harvest) {
-            if (paused) revert DepositPaused();
-            _requireActiveAdapter(adapter);
-        } else if (kind == ActionKind.EmergencyExit) {
-            uint256 balance = strategyAssets[adapter];
-            if (balance > 0) {
-                _divest(adapter, balance, minOut);
-            }
-        }
-
-        // 8. Advance action index
-        activePlanNextActionIndex++;
-
-        emit ActionExecuted(planId, actionIndex, kind);
     }
 
     /// @notice Execute the next action with Merkle proof verification
@@ -763,59 +630,19 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     }
 
     /// @notice Execute a Harvest action within an active plan with the HarvestRequest
-    /// @dev Verifies the request hash matches the committed dataHash
+    /// @dev Disabled: this previously sourced its expected Action from the
+    ///      now-deleted `_planActions` mapping via `_getExpectedAction`. That
+    ///      mapping was never populated by `submitPlan` (which only ever
+    ///      stores a Merkle root, not the actions themselves), so this path
+    ///      was already unreachable in practice before its source of truth
+    ///      was deleted. A later task rewrites this to source its action
+    ///      from a Merkle proof, matching `executeNextActionWithProof`; until
+    ///      then it reverts unconditionally rather than silently succeeding
+    ///      against zeroed-out expected-action data.
     /// @param request The harvest request to execute
     function executeHarvestAction(VaultTypes.HarvestRequest memory request) external onlyRole(ALLOCATOR_ROLE) {
-        if (activePlanId == bytes32(0)) revert PlanNotActive();
-        if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
-
-        uint256 nextIndex = activePlanNextActionIndex;
-        if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
-
-        // Build a partial action to get the dataHash from the plan
-        Action memory expectedAction = _getExpectedAction(nextIndex);
-
-        // For Harvest actions, verify the request matches the committed dataHash
-        if (expectedAction.kind == ActionKind.Harvest) {
-            bytes32 expectedHash = keccak256(abi.encode(request));
-            if (expectedHash != expectedAction.dataHash) revert InvalidDataHash();
-        }
-
-        // Build full action with request
-        Action memory fullAction = Action({
-            planId: expectedAction.planId,
-            index: expectedAction.index,
-            kind: expectedAction.kind,
-            adapter: expectedAction.adapter,
-            amount: expectedAction.amount,
-            minOut: expectedAction.minOut,
-            dataHash: expectedAction.dataHash
-        });
-
-        // Execute the harvest with the request
-        _executeHarvestWithRequest(fullAction, request);
-
-        activePlanTurnover += expectedAction.amount;
-        _enforceActivePlanRiskLimits(false);
-
-        activePlanNextActionIndex = uint64(nextIndex + 1);
-
-        if (activePlanNextActionIndex >= activePlanActionCount) {
-            _enforceActivePlanRiskLimits(true);
-            dynamicReserve = activePlanReserve;
-            emit DynamicReserveSet(activePlanReserve);
-            usedPlanIds[activePlanId] = true;
-            bytes32 completedPlanId = activePlanId;
-            _clearActivePlan();
-            emit PlanCompleted(completedPlanId);
-        } else {
-            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(ActionKind.Harvest)), expectedAction.amount);
-        }
-    }
-
-    /// @notice Get the expected action at a given index (for verification)
-    function _getExpectedAction(uint256 index) internal view returns (Action memory action) {
-        action = _planActions[activePlanId][index];
+        request;
+        revert InvalidPlan();
     }
 
     /// @notice Execute harvest with a specific HarvestRequest

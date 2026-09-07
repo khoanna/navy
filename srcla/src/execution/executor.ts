@@ -50,7 +50,6 @@ export interface ExecutionResult {
  * Key functions:
  * - submitPlan(header, merkleRoot): Submit a new execution plan
  * - executeNextActionWithProof(proof, action): Execute next action with Merkle proof
- * - executeAction(planId, actionIndex, kind, adapter, amount, minOut, dataHash, proof)
  * - harvest(adapter, token, maxClaim, routeId, minOut, deadline): Atomic harvest
  * - emergencyExit(adapter): Emergency exit from adapter
  * - cancelPlan(): Cancel active plan
@@ -93,7 +92,6 @@ const VAULT_ABI = [
   // VaultTypes.PlanHeader: planId, policyVersion, createdAt, expiresAt, actionCount, snapshotBlockNumber, snapshotHash, decisionHash, configurationDigest, reserve, minFinalAssets, maxRecognizedLoss, turnoverLimit
   'function submitPlan((uint256 planId, uint64 policyVersion, uint64 createdAt, uint64 expiresAt, uint32 actionCount, uint256 snapshotBlockNumber, bytes32 snapshotHash, bytes32 decisionHash, bytes32 configurationDigest, uint256 reserve, uint256 minFinalAssets, uint256 maxRecognizedLoss, uint256 turnoverLimit) header, bytes32 merkleRoot)',
   'function executeNextActionWithProof(bytes32[] calldata merkleProof, (uint256 planId, uint32 index, uint8 kind, address adapter, uint256 amount, uint256 minOut, bytes32 dataHash) calldata action)',
-  'function executeAction(uint256 planId, uint32 actionIndex, uint8 kind, address adapter, uint256 amount, uint256 minOut, bytes32 dataHash, bytes32[] calldata proof)',
   'function executeHarvestAction((address adapter, address token, uint256 maxClaim, bytes32 routeId, uint256 minOut, uint256 deadline) memory request)',
   'function cancelPlan()',
 
@@ -157,7 +155,7 @@ export interface PlanHeaderInput {
 
 /**
  * The `Action` struct consumed by `executeNextActionWithProof` (NOT the
- * older `executeAction` positional args).
+ * deleted `executeAction`'s positional args).
  */
 export interface PlanActionInput {
   planId: bigint;
@@ -207,7 +205,7 @@ export interface IPlanExecutor {
  *
  * Handles:
  * - Plan submission via submitPlan()
- * - Action execution via executeAction()
+ * - Action execution via executeNextActionWithProof()
  * - Harvest actions via harvest()
  * - Emergency exits via emergencyExit()
  * - Error handling and recovery
@@ -278,60 +276,6 @@ export class PlanExecutor implements IPlanExecutor {
       const tx = await this.wallet.sendTransaction({
         to: this.vaultAddress,
         data: this.iface.encodeFunctionData('submitPlan', [header, merkleRoot]),
-        gasLimit: this.config.gasLimit ?? 500_000n,
-      });
-
-      const receipt = await tx.wait(this.config.confirmations);
-      return {
-        success: true,
-        txHash: receipt?.hash ?? '',
-        gasUsed: receipt?.gasUsed,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  }
-
-  /**
-   * Execute a single action with Merkle proof
-   * @param planId Plan ID
-   * @param actionIndex Action index
-   * @param kind Action kind (0=deploy, 1=divest, 2=harvest, 3=emergency)
-   * @param adapter Target adapter
-   * @param amount Amount
-   * @param minOut Minimum output
-   * @param dataHash Data hash for verification
-   * @param proof Merkle proof
-   * @returns Execution result
-   */
-  async executeAction(
-    planId: bigint,
-    actionIndex: number,
-    kind: number,
-    adapter: string,
-    amount: bigint,
-    minOut: bigint,
-    dataHash: string,
-    proof: string[]
-  ): Promise<ExecutionResult> {
-    try {
-      const data = this.iface.encodeFunctionData('executeAction', [
-        planId,
-        actionIndex,
-        kind,
-        adapter,
-        amount,
-        minOut,
-        dataHash,
-        proof,
-      ]);
-
-      const tx = await this.wallet.sendTransaction({
-        to: this.vaultAddress,
-        data,
         gasLimit: this.config.gasLimit ?? 500_000n,
       });
 
@@ -443,12 +387,14 @@ export class PlanExecutor implements IPlanExecutor {
 
   /**
    * §9.5 — the only fund-moving path for a staged deploy/divest action.
-   * Unlike executeAction (which the vault still exposes but this task stops
-   * calling for plan actions), executeNextActionWithProof rechecks the
-   * configuration digest, enforces the plan's risk limits, accounts
-   * turnover, completes the plan and activates the dynamic reserve.
+   * The weaker executeAction (which never rechecked the configuration
+   * digest, plan risk limits, turnover, or plan completion) has been
+   * deleted from the vault outright — this is the sole surviving entry
+   * point. executeNextActionWithProof rechecks the configuration digest,
+   * enforces the plan's risk limits, accounts turnover, completes the plan
+   * and activates the dynamic reserve.
    * @param proof Merkle proof for the leaf `hashPlanAction(planDomain(header), action)`
-   *   (src/policy/steps/plan.ts) — NOT the old domain-less executeAction leaf.
+   *   (src/policy/steps/plan.ts) — NOT the deleted executeAction's domain-less leaf.
    * @param action The `Action` struct matching the leaf that was proved.
    */
   async executeNextActionWithProof(proof: string[], action: PlanActionInput): Promise<ExecutionResult> {
@@ -623,20 +569,17 @@ export class PlanExecutor implements IPlanExecutor {
 
   /**
    * Estimate gas for an action
-   * Uses eth_estimateGas RPC call
+   * Uses eth_estimateGas RPC call against executeNextActionWithProof — the
+   * only surviving action-execution entry point (executeAction is deleted).
+   * planId/index/proof are placeholders since this is a rough sizing
+   * estimate, not a real call.
    */
   async estimateGas(action: PlanAction): Promise<bigint> {
     try {
       const provider = this.wallet.provider as ethers.JsonRpcProvider;
-      const data = this.iface.encodeFunctionData('executeAction', [
-        0n, // planId
-        0,  // actionIndex
-        action.kind,
-        action.adapter,
-        action.amountBase,
-        0n, // minOut
-        ethers.ZeroHash,
-        [],  // proof
+      const data = this.iface.encodeFunctionData('executeNextActionWithProof', [
+        [], // merkleProof
+        [0n, 0, action.kind, action.adapter, action.amountBase, 0n, ethers.ZeroHash], // action
       ]);
 
       const gas = await provider.estimateGas({
