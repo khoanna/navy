@@ -1,8 +1,8 @@
 # Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
 
-**Research report version:** 0.4
+**Research report version:** 0.5
 
-**Date:** 2026-08-02
+**Date:** 2026-09-07
 
 **Release scope:** Base-native research release specification
 
@@ -12,9 +12,31 @@
 
 A lending vault should not allocate all capital to the market displaying the highest annual percentage yield (APY). A sufficiently large deposit changes utilization and the attainable supply rate; accounting assets may not be synchronously withdrawable; and gas, slippage, reward conversion, and rate reversal can eliminate an apparent yield advantage. 
 
-This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits. A separately deployable TypeScript service observes finalized Base state, simulates protocol-exact post-deposit rates, calibrates deterministic lower prediction bounds without look-ahead, solves a constrained allocation problem, and submits staged rebalances only when conservative benefit exceeds full cost. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes. A registered B0–B5 evaluation, H1–H5 ablations, cohort accounting, stress tests, and pinned Base-fork replays form two release gates: forecast calibration and statistically distinguishable after-cost policy outperformance. This paper specifies a falsifiable architecture and evaluation procedure; it does not claim completed performance results.
+This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits. A separately deployable TypeScript service observes finalized Base state, simulates protocol-exact post-deposit rates, calibrates deterministic lower prediction bounds without look-ahead, solves a constrained allocation problem, and submits staged rebalances only when conservative benefit exceeds full cost. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes. A registered B0–B5 evaluation, H1–H7 ablations, cohort accounting, stress tests, and pinned Base-fork replays form two release gates: forecast calibration and statistically distinguishable after-cost policy outperformance. This paper specifies a falsifiable architecture and evaluation procedure; it does not claim completed performance results.
 
 **Keywords:** DeFi, ERC-4626, Base, USDC, lending allocation, yield farming, deterministic forecasting, robust optimization, liquidity risk, transaction costs.
+
+## Amendment Record (v0.4 → v0.5)
+
+Version 0.4 specified an architecture that had not been evaluated. `SRCLA-REPORT.md`
+v2.0 evaluated it and returned a negative result. Eight amendments follow from that
+record. They are registered here, before the held-out evaluation of v0.5 is run.
+
+**Burned-window declaration.** The window `2026-05-26 → 2026-08-23` was inspected
+while diagnosing v0.4. It is therefore design data. It lies inside the calibration
+era of the v0.5 dataset and must never appear in the held-out era. Any result that
+violates this is rejected under §2.2.
+
+| ID | Amendment | Section | Evidence |
+|---|---|---|---|
+| P1 | Residual quantile becomes per-venue and is solved to hit the registered coverage target | §7.1, §7.2 | Best candidate reached 94.44% pooled; per-venue Compound 100%, Moonwell 94.87%, Aave 88.46%. All nine candidates used q=5% regardless of target; 99% was never evaluated |
+| P2 | Objective maximises a portfolio-level lower bound, not a sum of marginal bounds | §8.2 | H2 measured the marginal-sum form as pure yield cost with no measurable risk reduction |
+| P3 | Withdrawal-demand quantile is netted against executable venue exits | §8.1 | H4 produced identical results at every tier — the reserve never bound above the admin floor |
+| P4 | Objective contribution is weighted by conservatively exitable fraction | §8.2 | Moonwell quoted 86.26% APR on 2026-07-21 at 100.04% utilisation holding $6,163 cash |
+| P5 | Effective exposure limit gains a structural liquidity cap | §6.1 | The report's conclusion: the protections that bound were structural, not forecast-dependent |
+| P6 | Venue free cash gains a registered lower prediction bound | §7.2 | Feeds P3's exit term and P4's exitable fraction |
+| P7 | B2 is reserve-matched; the unconstrained form is retained as a diagnostic | §11.2 | The report had to introduce "B2r" mid-evaluation because B2 held no reserve |
+| P8 | Action rule gains an uncertainty-driven no-trade band; cadence/horizon relationship stated | §9.1 | Movement cost is ~$0.0105 per rebalance yet H3 still helped by 0.06–0.09 pp — the gain is churn suppression |
 
 ## 1. Introduction
 
@@ -223,7 +245,10 @@ Each adapter has:
 - a maximum withdrawal-loss limit; and
 - live external protocol headroom.
 
-Its effective exposure limit is the minimum of these applicable bounds. Dependency groups are opaque administrator-configured identifiers rather than hard-coded protocol categories. They may represent common governance, oracle, liquidation venue, reward router, or controller risk. Base and native USDC are accepted common-mode dependencies for this single-chain study and therefore receive 100% limits rather than being presented as diversification.
+Its effective exposure limit is the minimum of these applicable bounds together with a
+structural liquidity cap $c_i^{\mathrm{liquidity}}$, a deterministic function of the
+venue's free cash and utilisation that decreases toward zero as the venue approaches
+its kink. The liquidity cap requires no forecast and binds independently of one. Dependency groups are opaque administrator-configured identifiers rather than hard-coded protocol categories. They may represent common governance, oracle, liquidation venue, reward router, or controller risk. Base and native USDC are accepted common-mode dependencies for this single-chain study and therefore receive 100% limits rather than being presented as diversification.
 
 ### 6.2 Admission and configuration regimes
 
@@ -264,14 +289,17 @@ $$
 
 The protocol-exact origin curve supplies the capacity effect of $x$; historical observations supply evidence about how the base-rate and eligible-reward paths evolve after origin. The system stores both raw horizon return and a declared annualized display value, but it never treats an annualized amount as earnings realized during a shorter horizon.
 
-The planning input is a lower prediction bound for the next outcome, not a confidence interval around an estimated mean. If $\widehat\mu_{i,t,H}(x)$ is a deterministic point forecast and $q_{\alpha,t}$ is a calibrated lower quantile of completed horizon residuals, then:
+The planning input is a lower prediction bound for the next outcome, not a confidence interval around an estimated mean. If $\widehat\mu_{i,t,H}(x)$ is a deterministic point forecast and $q_{\alpha,i,t}$ is a calibrated lower quantile of completed horizon residuals, then:
 
 $$
-\ell_{i,t,H}(x)=\widehat\mu_{i,t,H}(x)+q_{\alpha,t},
-\qquad q_{\alpha,t}\le 0.
+\ell_{i,t,H}(x)=\widehat\mu_{i,t,H}(x)+q_{\alpha,i,t},
+\qquad q_{\alpha,i,t}\le 0.
 $$
 
-This empirical residual form avoids assuming that a normal standard-deviation multiplier correctly represents non-stationary lending returns. Every quantile rule, tie, minimum sample, and missing-data behavior is fixed before held-out evaluation.
+The quantile is indexed by market because venues differ in rate smoothness: a single
+pooled quantile that covers a volatile series over-covers a smooth one and vice versa.
+The quantile is *solved* so that realised calibration-era coverage attains the
+registered target, rather than fixed at a nominal value with coverage reported after. This empirical residual form avoids assuming that a normal standard-deviation multiplier correctly represents non-stationary lending returns. Every quantile rule, tie, minimum sample, and missing-data behavior is fixed before held-out evaluation.
 
 ### 7.2 Registered candidate methods
 
@@ -282,6 +310,12 @@ Calibration compares exactly three established deterministic candidates:
 3. a fixed-specification direct-horizon autoregressive model with exogenous features (ARX).
 
 The registered grid also compares horizons of 1, 7, and 14 days and lower-bound coverage targets of 90%, 95%, and 99%. The selected method, horizon, coverage, features, window or decay, residual treatment, minimum observations, and lexical tie-break are frozen from the calibration era before held-out evaluation.
+
+The registered grid is the full cross product of the three methods, the three
+horizons, the three coverage targets, and each method's parameter set, evaluated per
+venue. A second registered target is calibrated with the same machinery: a lower
+prediction bound on the venue's withdrawable cash over the horizon, which supplies
+$e_{i,s}$ in §8.1 and the exitable fraction in §8.2.
 
 ### 7.3 No-look-ahead and calibration gate
 
@@ -297,7 +331,9 @@ Let $I^{\mathrm{floor}}$ be the administrator's non-bypassable idle floor, $Q_\b
 
 $$
 I_t^{\mathrm{required}}(x)=
-\max\left(I^{\mathrm{floor}},Q_\beta(W_H),\max_s\{D_s-E_s(x)\}\right).
+\max\left(I^{\mathrm{floor}},\;
+Q_\beta(W_H)-\sum_i\min(x_i,e_i^{\mathrm{cons}}),\;
+\max_s\{D_s-E_s(x)\}\right).
 $$
 
 For target position $x_i$ and stressed executable exit $e_{i,s}$, every candidate must satisfy:
@@ -329,8 +365,17 @@ $$
 SRCLA chooses:
 
 $$
-w^*=\arg\max_w \sum_i w_i\,\ell_{i,t,H}(w_iV_t),
+w^*=\arg\max_w\;\left[\hat\mu_p(w)+q^p_{\alpha}(w)\right],
+\qquad
+\hat\mu_p(w)=\sum_i \phi_i\,w_i\,\hat\mu_{i,t,H}(w_iV_t),
 $$
+
+where $q^p_\alpha(w)$ is a calibrated lower quantile of *portfolio* horizon residuals
+under weights $w$, and $\phi_i=\min(x_i,e_i^{\mathrm{cons}})/x_i$ is the
+conservatively exitable fraction of the position. Summing marginal lower bounds would
+assume every venue realises its $\alpha$-quantile simultaneously; the portfolio
+residual does not. Weighting by $\phi_i$ prevents value that cannot be withdrawn from
+earning rank.
 
 subject to:
 
@@ -366,10 +411,14 @@ $$
 The economic action rule is:
 
 $$
-G_H>C_{\mathrm{move}}.
+G_H>\max\left(C_{\mathrm{move}},\;k\hat\sigma\right).
 $$
 
-Base costs include both L2 execution and L1 data availability [47]. Cooldown, minimum turnover, maximum turnover, and reversal allowances prevent repeated small moves. A market that becomes ineligible invokes a bounded safety unwind and bypasses the economic gate.
+The second term is a no-trade band scaled by forecast dispersion. On a low-fee chain
+$C_{\mathrm{move}}$ is small enough that it alone does not suppress churn, and
+repeated entry and exit incur self-impact and reversal risk that execution cost does
+not capture. Decisions are evaluated hourly while the forecast horizon is measured in
+days; the band, not the cadence, governs how often capital actually moves. Base costs include both L2 execution and L1 data availability [47]. Cooldown, minimum turnover, maximum turnover, and reversal allowances prevent repeated small moves. A market that becomes ineligible invokes a bounded safety unwind and bypasses the economic gate.
 
 ### 9.2 Base interest and incentives
 
@@ -466,7 +515,8 @@ Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000 USDC. Every r
 |---|---|
 | B0 | Hold native USDC idle. |
 | B1 | Select the highest currently displayed eligible rate. |
-| B2 | Use post-deposit capacity curves without uncertainty treatment. |
+| B2 | Use post-deposit capacity curves without uncertainty treatment, holding the same reserve as SRCLA. |
+| B2u | B2 without any reserve. Retained as a labelled diagnostic; not a deployable comparator. |
 | B3 | Add a movement-cost threshold to B2 but omit the full dynamic-reserve and dependency policy. |
 | B4 | Use one frozen robust allocation over the eligible market set. |
 | B5 | Use bounded hindsight as a non-deployable diagnostic upper bound. |
@@ -475,13 +525,16 @@ B5 cannot establish deployability and is excluded from the deployable outperform
 
 ### 11.3 Component hypotheses
 
-- **H1—capacity:** Post-deposit simulation improves after-cost return or reduces allocation regret relative to B1, especially at larger tiers.
-- **H2—uncertainty:** Calibrated lower bounds reduce reversals and downside outcomes relative to B2 without an unacceptable return penalty.
-- **H3—cost control:** The complete movement gate reduces turnover and execution cost relative to immediately following every target.
-- **H4—liquidity:** Dynamic reserve and scenario feasibility improve stressed synchronous-withdrawal success relative to a fixed reserve.
-- **H5—dependency:** Shared-dependency caps prevent common-mode limit breaches left by protocol-only diversification.
+- **H1—capacity:** remove post-deposit simulation; rank on displayed rate.
+- **H2—uncertainty:** remove calibrated lower bounds; use the point forecast.
+- **H3—cost:** remove the complete-cost gate and the no-trade band.
+- **H4—liquidity:** remove the dynamic reserve and stress feasibility; admin floor only.
+- **H5—dependency:** remove shared-dependency caps.
+- **H6—structural liquidity cap:** remove $c_i^{\mathrm{liquidity}}$.
+- **H7—liquidity-adjusted objective:** remove the $\phi_i$ weighting.
 
-Each hypothesis removes only its named component while holding other information, delays, costs, and rules fixed.
+Each hypothesis removes only its named component while holding other information,
+delays, costs, and rules fixed.
 
 ### 11.4 Metrics and fork evidence
 
@@ -670,13 +723,17 @@ Morpho markets previously present in the research registry are explicitly exclud
 | Chain and asset | Base 8453; Circle native USDC only |
 | Snapshot cadence | One finalized snapshot every 15 minutes |
 | Decision cadence | Hourly |
-| Forecast candidates | Rolling horizon distribution; exponentially weighted residual model; fixed direct-horizon ARX |
+| Forecast candidates | Rolling horizon distribution; exponentially weighted residual model; fixed direct-horizon ARX — full cross product with horizons and coverage targets, per venue |
 | Forecast horizons | 1, 7, and 14 days |
-| Lower-bound coverage candidates | 90%, 95%, and 99% |
+| Lower-bound coverage candidates | 90%, 95%, 99%; quantile solved to attain the target |
+| Second forecast target | Venue withdrawable-cash lower bound |
 | Market cold start | Ineligible until sufficient post-regime completed history |
 | Reserve | Maximum of admin floor, withdrawal quantile, and stress shortfall |
+| Objective | Portfolio-level lower bound, liquidity-weighted |
+| Structural liquidity cap | Active; decreases toward zero near the venue kink |
 | Reward execution | Event-driven; Uniswap V3 only; no fixed weekly harvest |
-| Rebalance | Staged, expiring, ordered actions with complete-cost and turnover gate |
+| Rebalance | Staged, expiring, ordered actions with complete-cost gate, turnover gate, and uncertainty no-trade band |
+| Evaluation tiers | 10,000; 100,000; 1,000,000; 10,000,000 USDC |
 | User transactions | Standard synchronous ERC-4626; user pays gas |
 | Runtime keys | Admin key only in uncommitted contract environment; allocator key only in `/srcla` environment |
 | Data ownership | `/srcla` owns its PostgreSQL schema; `/be` reads history via HTTP |
