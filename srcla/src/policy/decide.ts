@@ -135,6 +135,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       snapshotHash,
       originSeconds: input.origin.timestampSeconds,
       admissionReasons: base.admission.reasons,
+      curves: base.curves,
       lowerBounds: base.lowerBounds,
       reserve: base.reserve,
       target: [...base.target.entries()].sort(),

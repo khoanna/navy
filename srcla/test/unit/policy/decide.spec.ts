@@ -177,6 +177,41 @@ describe('decide', () => {
     expect(decide(input(), changed, DEFAULT_DECIDE_OPTS).decisionHash).not.toBe(a.decisionHash);
   });
 
+  // Finding 1 (review round 1): the hash must cover the curves themselves,
+  // the paper §10.2 "candidates" the optimiser actually searched over -
+  // `lowerBounds` is not a faithful proxy, since forecastMarkets evaluates
+  // it at each market's CURRENT position, not at the candidate allocations
+  // the optimiser explored. This isolates curves as the ONLY thing that
+  // differs: same input/artifact, only `quantumBase` (an opts field
+  // simulateCurves samples on) changes between the two calls. In this
+  // fixture (only 'aa' admitted, Aave's zero-borrow curve is flat at zero
+  // for every x > 0) the optimiser deploys nothing regardless of quantum,
+  // so target/reserve/costGate/reasons all come out byte-identical, and
+  // `lowerBounds` is also identical (forecastMarkets evaluates it at
+  // positionBase = 0, i.e. curve.points[0], which does not depend on
+  // quantumBase at all) - genuinely isolating curves as the one thing that
+  // differs, not several things at once.
+  it('changes the decision hash when only the curves differ (target/reserve/costs/reasons held constant)', () => {
+    const i = input();
+    const a = artifact();
+    const outA = decide(i, a, DEFAULT_DECIDE_OPTS);
+    const outB = decide(i, a, { ...DEFAULT_DECIDE_OPTS, quantumBase: 2_000_000_000n });
+
+    // Sanity: everything else the hash also covers is unchanged, so the
+    // hash difference below can only be attributed to curves.
+    expect([...outB.target.entries()]).toEqual([...outA.target.entries()]);
+    expect(outB.reserve).toEqual(outA.reserve);
+    expect(outB.costGate).toEqual(outA.costGate);
+    expect(outB.reasons).toEqual(outA.reasons);
+    expect(outB.lowerBounds).toEqual(outA.lowerBounds);
+    expect(outB.admission).toEqual(outA.admission);
+
+    // The thing that actually differs.
+    expect(outB.curves[0]!.quantumBase).not.toBe(outA.curves[0]!.quantumBase);
+
+    expect(outB.decisionHash).not.toBe(outA.decisionHash);
+  });
+
   it('changes the decision hash when market state changes', () => {
     const a = decide(input(), artifact(), DEFAULT_DECIDE_OPTS);
     const i = input();

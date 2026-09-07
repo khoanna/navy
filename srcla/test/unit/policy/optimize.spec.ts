@@ -38,18 +38,23 @@ function artifact(): PolicyArtifact {
   return {
     ...loadBootstrapArtifact(),
     residualQuantileWadByMarket: { a: 0n, b: 0n },
-    // FIXTURE NOTE (found auditing the brief): the bootstrap artifact's
-    // portfolioResidualQuantileWad is -0.2% per 7-day horizon (~-10.4%
-    // annualised) -- a deliberately conservative, UNCALIBRATED placeholder
-    // (see artifact.ts's `_provisional` warning). At that magnitude it
-    // swamps every venue's point forecast at the 1-5% test-fixture rates
-    // used below: the optimizer then correctly deploys nothing at every
-    // step, and every assertion in the `optimize` describe block that
-    // exercises actual capital movement (the dependency-group cap, the
-    // reserve floor, "prefers the higher lower bound") passed vacuously
-    // against an empty target, not because the mechanism under test
-    // worked. Overriding it to a small, still-nonzero value makes these
-    // fixtures exercise real, non-empty allocation dynamics.
+    // FIXTURE NOTE (found auditing the brief): as originally shipped, the
+    // bootstrap artifact's portfolioResidualQuantileWad was -0.2% per 7-day
+    // horizon (~-10.4% annualised) -- a deliberately conservative,
+    // UNCALIBRATED placeholder (see artifact.ts's `_provisional` warning).
+    // At that magnitude it swamped every venue's point forecast at the
+    // 1-5% test-fixture rates used below: the optimizer then deployed
+    // nothing at every step, and every assertion in the `optimize` describe
+    // block that exercises actual capital movement (the dependency-group
+    // cap, the reserve floor, "prefers the higher lower bound") passed
+    // vacuously against an empty target, not because the mechanism under
+    // test worked. Task 11 re-derived and shipped a smaller placeholder
+    // (-1e13, see config/bootstrap-artifact.json's own derivation note) that
+    // no longer swamps typical fixture rates on its own -- this override is
+    // kept anyway so this suite exercises real, non-empty allocation
+    // dynamics independent of whatever the shipped artifact currently
+    // carries, and so it does not regress silently if that value changes
+    // again before Phase 4 calibration lands.
     portfolioResidualQuantileWad: -1_000_000n,
   };
 }

@@ -67,6 +67,14 @@ export function computeDecisionHashV2(parts: {
   snapshotHash: string;
   originSeconds: number;
   admissionReasons: unknown;
+  /** The simulated RateCurve[] the optimiser actually searched over - the
+   *  "candidates" paper §10.2 requires the hash to cover. `lowerBounds`
+   *  alone is not a faithful proxy: it is evaluated at each market's
+   *  CURRENT position (a forecast.ts diagnostic choice), not at the
+   *  candidate allocations the optimiser explored, so a curve change that
+   *  happens not to move target/reserve/costs/reasons would otherwise be
+   *  invisible to the hash. */
+  curves: unknown;
   lowerBounds: unknown;
   reserve: unknown;
   target: unknown;
