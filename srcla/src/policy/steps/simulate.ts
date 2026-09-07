@@ -19,24 +19,24 @@ import type { DecisionInput, MarketObservation, RateCurve } from '../types.js';
  * uses (`MarketObservation.supplyRateWad`, `RateCurve.points`).
  *
  * This is not a hypothetical: `compound-simulator.ts#calculateRateFromUtilization`
- * divides the annual config rates by `SECONDS_PER_YEAR` internally and its own
- * docstring says "Supply rate per second (WAD scale)" — confirmed against
+ * divides the annual config rates (baseRate/slopeLow/slopeHigh) by
+ * `SECONDS_PER_YEAR` internally and its own docstring says "Supply rate per
+ * second (WAD scale)" — confirmed against
  * `test/unit/protocols/compound-simulator.spec.ts`, which asserts the result
  * against `config.baseRate / 31557600n`. Left unconverted, a Compound curve
- * would fall off a ~3.15e7x cliff between points[0] (the annualized observed
- * rate) and points[1] (a per-second simulator rate) that has nothing to do
- * with capacity — see task-5-report.md for the raw numbers.
+ * would fall off a ~3.15e7x (`SECONDS_PER_YEAR`) cliff between points[0]
+ * (the annualized observed rate) and points[1] (a raw per-second simulator
+ * rate) that has nothing to do with capacity.
  *
  * Moonwell reuses that same per-second function internally, but
- * `moonwell-simulator.ts#simulateRate` then clamps the raw value against
- * `[minRate, maxRate]` oracle bounds that are themselves WAD-annualized
- * (e.g. 1e16 = 1%) — so by the time its `postDepositRate` reaches us it is
- * already sitting on the WAD-annualized scale (that clamp saturates against
- * `minRate` for any realistic input, which is a pre-existing defect in that
- * module, not a scale problem — see task-5-report.md). Re-annualizing it here
- * would push an already-annualized number out by another `SECONDS_PER_YEAR`
- * and produce nonsense. Aave's simulator returns an annualized WAD rate
- * directly. So only Compound needs the conversion.
+ * `moonwell-simulator.ts#simulateRate` annualizes (`* SECONDS_PER_YEAR`)
+ * before clamping against its `[minRate, maxRate]` oracle bounds, which are
+ * themselves WAD-annualized (e.g. 1e16 = 1%) — so by the time its
+ * `postDepositRate` reaches us it is already sitting on the WAD-annualized
+ * scale. Re-annualizing it again here would push an already-annualized
+ * number out by another `SECONDS_PER_YEAR` and produce nonsense. Aave's
+ * simulator returns an annualized WAD rate directly. So only Compound needs
+ * the conversion below.
  */
 const PER_SECOND_PROTOCOLS: ReadonlySet<ProtocolId> = new Set<ProtocolId>(['compound']);
 
@@ -45,23 +45,41 @@ function toAnnualizedRateWad(protocol: ProtocolId, rateWad: bigint): bigint {
 }
 
 /**
- * §6.3-6.5 requires simulation to mirror the LIVE registered interest-rate
- * strategy, not a hardcoded default. `m.irmParams` is that seam: when
- * present, it overrides the kinked-linear model's four core fields
- * (baseRate/kink/slopeLow/slopeHigh). It is NOT populated from chain yet —
- * the collector that reads live IRM params off each venue's rate strategy
- * contract is a later task, so every market currently falls back to
- * DefaultConfigs.
+ * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
+ * interest-rate strategy, not a hardcoded default. `m.irmParams` is that
+ * seam: when present, it overrides the kinked-linear model's four core
+ * fields (baseRate/kink/slopeLow/slopeHigh — §6.4's Compound III kinked
+ * supply curve and §6.5's Moonwell jump-rate model share this shape). It is
+ * NOT populated from chain yet — the collector that reads live IRM params
+ * off each venue's rate strategy contract is a later task, so every market
+ * currently falls back to `DefaultConfigs`.
  *
- * `irmParams`'s shape matches `CompoundSimulatorConfig`, not Aave's
- * structurally different quadratic model (baseRate/variableRateSlope1/
- * variableRateSlope2/optimalUtilization/maxUtilization) — passing a
- * Compound-shaped config into `AaveV3Simulator.simulateRate` would read
- * `undefined` fields and throw. So Aave markets always use
- * `DefaultConfigs.aave` regardless of `m.irmParams`.
+ * `irmParams`'s shape does not fit Aave: §6.3's Aave V3 strategy is a
+ * piecewise-quadratic model (baseRate/variableRateSlope1/variableRateSlope2/
+ * optimalUtilization/maxUtilization), structurally different from the
+ * kinked-linear shape `irmParams` carries. Silently dropping an override
+ * that does not apply is exactly the failure mode this task already hit
+ * twice (an un-annualized Compound rate, then Moonwell's clamp comparing
+ * mismatched scales) — both produced plausible-looking numbers with no
+ * error. So an Aave market that supplies `irmParams` is a caller/config
+ * error, not something to ignore: this throws rather than silently falling
+ * back to `DefaultConfigs.aave`.
  */
 function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorConfig {
-  if (!m.irmParams || protocol === 'aave') {
+  if (protocol === 'aave') {
+    if (m.irmParams) {
+      throw new Error(
+        `simulateCurves: market '${m.marketId}' is protocol 'aave' but supplied irmParams. ` +
+          `Aave's rate model (paper §6.3) takes a structurally different parameter shape ` +
+          `(variableRateSlope1/variableRateSlope2/optimalUtilization/maxUtilization) than the ` +
+          `kinked-linear irmParams (baseRate/kink/slopeLow/slopeHigh) this seam carries — a ` +
+          `Compound-shaped override is not applicable to Aave. Remove irmParams for this market, ` +
+          `or do not set it until an Aave-shaped override is supported.`
+      );
+    }
+    return DefaultConfigs.aave;
+  }
+  if (!m.irmParams) {
     return DefaultConfigs[protocol];
   }
   const { baseRateWad, kinkRay, slopeLowWad, slopeHighWad } = m.irmParams;

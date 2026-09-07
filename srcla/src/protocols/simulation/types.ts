@@ -254,12 +254,15 @@ export const DEFAULT_AAVE_CONFIG: AaveSimulatorConfig = {
 // PLACEHOLDER pending live on-chain IRM parameters (paper §6.3-6.5 requires
 // mirroring the LIVE registered interest-rate strategy — see
 // MarketObservation.irmParams, which simulateCurves prefers when present).
-// Derivation (Task 5 review round 3): calculateRateFromUtilization computes
+//
+// Derivation: calculateRateFromUtilization computes
 // rate = baseRate + slopeLow*util (util<=kink RAY-fraction), so slopeLow is
-// "annualized WAD rate contributed at 100% utilization". The PREVIOUS value
-// (32n*WAD/1e9 = 3.2e-8 WAD = 0.0000032%) made the curve flat to 7 decimal
-// places across the entire utilization range — see task-5-report.md. To rise
-// from the 3% base to ~8% APY at the 80% kink: slopeLow = (8%-3%)/0.8 = 6.25%.
+// "annualized WAD rate contributed at 100% utilization". A value that is too
+// small relative to baseRate makes the curve flat across the whole
+// utilization range regardless of deposit size — e.g. 32n*WAD/1e9 (3.2e-8
+// WAD = 0.0000032%) made it flat to 7 decimal places, which is not a
+// capacity effect, just noise. To rise from the 3% base to ~8% APY at the
+// 80% kink: slopeLow = (8%-3%)/0.8 = 6.25%.
 // Above kink: rate = 8% (at kink) + slopeHigh*(util-kink)/(1-kink-normalized).
 // Target ~28% APY at 100% utilization (a steep post-kink cliff, typical of
 // kinked-rate protocols defending against liquidity exhaustion near full

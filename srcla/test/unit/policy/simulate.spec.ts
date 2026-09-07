@@ -112,11 +112,11 @@ describe('simulateCurves — curve continuity across protocols (unit-mismatch gu
   // baseRate(0) + variableRateSlope1(4%) * (util/optimal)^2 = 0 + 4% * 1 = 4%.
   const aaveMarket = marketFor('aave', 'aave', (WAD * 4n) / 100n);
   // DEFAULT_COMPOUND_CONFIG / DEFAULT_MOONWELL_CONFIG at 80% utilization
-  // (= kink) after the Finding-B slope fix: baseRate(3%) + slopeLow(6.25%) *
-  // 0.8 = 3% + 5% = 8%. Value below is the simulator's own zero-deposit
-  // output at this fixture's utilization (79999999964582400 ~= 8% less a
-  // few units of per-second/annualization truncation) — verified numerically
-  // in task-5-report.md (round 3).
+  // (= kink): baseRate(3%) + slopeLow(6.25%) * 0.8 = 3% + 5% = 8%. Value
+  // below is the simulator's own zero-deposit output at this fixture's
+  // utilization (79999999964582400 ~= 8% less a few units of per-second/
+  // annualization truncation, computed by calling the real simulator with
+  // this fixture and reading back postDepositRate at x=0).
   const compoundMarket80 = marketFor('compound', 'compound', 79_999_999_964_582_400n);
   const moonwellMarket = marketFor('moonwell', 'moonwell', 79_999_999_964_582_400n);
 
@@ -135,17 +135,17 @@ describe('simulateCurves — curve continuity across protocols (unit-mismatch gu
 const RAY = 10n ** 27n;
 
 /**
- * Materiality guard (Task 5 review round 3).
+ * Materiality guard.
  *
  * The continuity test above only proves points[0] and points[1] don't have
  * a *unit* cliff between them — it passes just as well against a flat curve
- * as against a correctly-sloped one, which is exactly how the degenerate
- * `DefaultConfigs.slopeLow = 32n * WAD / 1_000_000_000n` (~3.2e-8 WAD, off by
- * ~7 orders of magnitude) went undetected: it made the curve flat to 7
- * decimal places across the whole utilization range (see task-5-report.md
- * round 3 for the exact numbers). This test asserts an actual CAPACITY
- * EFFECT: a deposit large relative to free cash must move the rate by a
- * material amount.
+ * as against a correctly-sloped one, which is exactly how a degenerate slope
+ * (e.g. `32n * WAD / 1_000_000_000n` ~= 3.2e-8 WAD, ~7 orders of magnitude
+ * too small relative to a several-percent baseRate) can go undetected: it
+ * makes the curve flat to several decimal places across the whole
+ * utilization range with no error, no NaN, nothing a shape check catches.
+ * This test asserts an actual CAPACITY EFFECT instead: a deposit large
+ * relative to free cash must move the rate by a material amount.
  *
  * Uses explicit, test-local IRM parameters via `MarketObservation.irmParams`
  * — deliberately NOT `DefaultConfigs` — so this test pins the shape of the
@@ -191,14 +191,14 @@ describe('simulateCurves — materiality guard (deposit must move the rate mater
 
     expect(p1).toBeLessThan(p0);
     const relativeDeclineBps = ((p0 - p1) * 10_000n) / p0;
-    // Verified (task-5-report.md round 3): relativeDeclineBps = 7554 (~75.5%)
-    // with these parameters -- comfortably clears the 10% (1000 bps) bar.
+    // relativeDeclineBps computes to 7554 (~75.5%) with these parameters --
+    // comfortably clears the 10% (1000 bps) bar asserted below.
     expect(relativeDeclineBps >= 1000n).toBe(true);
   });
 });
 
 /**
- * Override-seam guard (Task 5 review round 3, Finding C).
+ * Override-seam guard.
  *
  * Proves `simulateCurves` actually reads `m.irmParams` rather than ignoring
  * it: the exact same market (cash/borrows/deposit) produces materially
@@ -230,9 +230,59 @@ describe('simulateCurves — irmParams override is actually used', () => {
     const [steepCurve] = simulateCurves(input([marketWithIrm(steep)]), ['override'], QUANTUM, 2);
     const [flatCurve] = simulateCurves(input([marketWithIrm(flat)]), ['override'], QUANTUM, 2);
 
-    // Verified (task-5-report.md round 3): steep -> ~79987503091867200 (~8%),
-    // flat -> ~29999999986718400 (~3%, exactly baseRate with zero slope).
+    // steep -> ~79987503091867200 (~8%), flat -> ~29999999986718400 (~3%,
+    // exactly baseRate with zero slope) -- computed by calling simulateCurves
+    // with each irmParams and reading back points[1].
     expect(steepCurve!.points[1]).not.toBe(flatCurve!.points[1]);
     expect(steepCurve!.points[1]!).toBeGreaterThan(flatCurve!.points[1]! * 2n);
+  });
+});
+
+const KINKED_IRM_PARAMS = {
+  baseRateWad: (3n * WAD) / 100n,
+  kinkRay: (8n * RAY) / 10n,
+  slopeLowWad: (625n * WAD) / 10_000n,
+  slopeHighWad: WAD,
+};
+
+function aaveMarketWith(irmParams?: MarketObservation['irmParams']): MarketObservation {
+  const base = {
+    marketId: 'aave-market', adapter: '0xa', protocol: 'aave' as const,
+    cash: 800_000_000_000n, borrows: 3_200_000_000_000n, reserves: 0n,
+    supplyRateWad: (WAD * 4n) / 100n, utilizationWad: (WAD * 80n) / 100n,
+    positionBase: 0n, maxDeployableBase: 100_000_000_000n, maxWithdrawableBase: 800_000_000_000n,
+    configDigest: '0xd', regimeId: 'r1', paused: false,
+    capBps: 5000, absoluteCapBase: 10n ** 13n, maxLossBps: 50, dependencyGroupIds: [],
+  };
+  return irmParams ? { ...base, irmParams } : base;
+}
+
+/**
+ * Aave + irmParams guard.
+ *
+ * irmParams' shape (baseRate/kink/slopeLow/slopeHigh) fits the kinked-linear
+ * Compound/Moonwell model, not Aave's structurally different piecewise-
+ * quadratic model. Silently dropping an override that does not apply is the
+ * same failure mode this task hit twice already (a wrong or ignored number
+ * producing plausible-looking output with no error) -- so an Aave market
+ * that supplies irmParams must fail loudly instead.
+ */
+describe('simulateCurves — Aave rejects irmParams instead of silently ignoring it', () => {
+  it('throws, naming the market id, when an Aave market supplies irmParams', () => {
+    const market = aaveMarketWith(KINKED_IRM_PARAMS);
+    expect(() => simulateCurves(input([market]), ['aave-market'], QUANTUM, 2)).toThrow(
+      /aave-market/
+    );
+  });
+
+  it('an Aave market with no irmParams still produces a normal curve', () => {
+    const market = aaveMarketWith();
+    const [c] = simulateCurves(input([market]), ['aave-market'], QUANTUM, 5);
+    expect(c!.marketId).toBe('aave-market');
+    expect(c!.points.length).toBe(5);
+    expect(c!.points[0]).toBe((WAD * 4n) / 100n);
+    for (let i = 1; i < c!.points.length; i++) {
+      expect(c!.points[i]! <= c!.points[i - 1]!).toBe(true);
+    }
   });
 });
