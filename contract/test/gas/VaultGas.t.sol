@@ -607,7 +607,12 @@ contract VaultGasTest16Adapters is VaultGasTestBase {
         uint256 gasUsed = gasStart - gasleft();
 
         emit log_named_uint("Gas used (plan deploy, 16 adapters)", gasUsed);
-        assertLt(gasUsed, 900_000, "plan deploy gas should be under budget");
+        // Budget raised from 900_000: totalAssets() now reads each active
+        // adapter's accountingCap (paper §5.1 impairment) in addition to its
+        // strategyAssets — one extra cold SLOAD per adapter, ~49k gas across
+        // 16 adapters (measured 855_374 before that field, 904_654 after).
+        // This is the cost of the new guardrail, not a regression.
+        assertLt(gasUsed, 950_000, "plan deploy gas should be under budget");
     }
 
     function test_gas_planDivest_16adapters() public {

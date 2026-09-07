@@ -15,6 +15,10 @@ interface IVaultEvents {
         address indexed adapter, uint16 capBps, uint256 absoluteCap, uint16 maxLossBps, uint16 liquidityFloorBps
     );
 
+    event AdapterAccountingCapSet(address indexed adapter, uint256 cap);
+
+    event LossRecognized(address indexed adapter, uint256 amount);
+
     event DependencyGroupSet(bytes32 indexed groupId, uint16 capBps, uint256 absoluteCap, address[] members);
 
     event AdminReserveSet(uint256 reserve);

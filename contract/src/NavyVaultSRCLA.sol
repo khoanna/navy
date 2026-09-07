@@ -57,6 +57,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         /// able to return synchronously, in basis points. Zero disables the
         /// check. Paper §6.1 as amended by P5.
         uint16 liquidityFloorBps;
+        /// @notice Upper bound on this adapter's contribution to totalAssets().
+        /// type(uint256).max means uncapped. Paper §5.1's "conservative value
+        /// cap" for an impaired position.
+        uint256 accountingCap;
     }
 
     /// @notice Action for execution plans
@@ -227,7 +231,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
 
         uint256 adapterCount = _activeAdapters.length;
         for (uint256 i = 0; i < adapterCount; i++) {
-            assets_ += strategyAssets[_activeAdapters[i]];
+            address adapter = _activeAdapters[i];
+            uint256 value = strategyAssets[adapter];
+            uint256 cap = adapters[adapter].accountingCap;
+            assets_ += value < cap ? value : cap;
         }
 
         // Add conservative cached reward NAV from the accountant
@@ -344,7 +351,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             maxLossBps: maxLossBps,
             state: AdapterState.Active,
             lastSyncIdleBase: 0,
-            liquidityFloorBps: 0
+            liquidityFloorBps: 0,
+            accountingCap: type(uint256).max
         });
 
         _activeAdapters.push(adapter);
@@ -374,6 +382,35 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         config.liquidityFloorBps = liquidityFloorBps;
 
         emit AdapterRiskSet(adapter, capBps, absoluteCap, maxLossBps, liquidityFloorBps);
+    }
+
+    /// @notice Bound an adapter's contribution to NAV. Paper §5.1's
+    /// "conservative value cap" for an impaired position.
+    function setAdapterAccountingCap(address adapter, uint256 cap) external onlyRole(ADMIN_ROLE) {
+        if (!registeredAdapters[adapter]) revert AdapterNotFound();
+        adapters[adapter].accountingCap = cap;
+        emit AdapterAccountingCapSet(adapter, cap);
+    }
+
+    /// @notice Record an unrecoverable amount as an explicit realized loss.
+    /// Paper §5.1's alternative to a value cap. Monotonic: losses never unwind.
+    function recognizeLoss(address adapter, uint256 amount) external onlyRole(ADMIN_ROLE) {
+        if (!registeredAdapters[adapter]) revert AdapterNotFound();
+        if (amount == 0) revert ZeroAmount();
+
+        // Write down the tracked position so the loss actually leaves NAV.
+        // Without this, recognizedLosses is pure telemetry (as it already is
+        // for the pre-existing divest-shortfall accumulations, where the
+        // adapter's own reported balance has already dropped) and this
+        // function would silently do nothing to totalAssets().
+        uint256 current = strategyAssets[adapter];
+        uint256 writeDown = amount < current ? amount : current;
+        if (writeDown != 0) {
+            strategyAssets[adapter] = current - writeDown;
+        }
+
+        recognizedLosses += amount;
+        emit LossRecognized(adapter, amount);
     }
 
     /// @notice Configure a bounded, ordered dependency group.
@@ -739,6 +776,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
                     config.state,
                     config.lastSyncIdleBase,
                     config.liquidityFloorBps,
+                    config.accountingCap,
                     IStrategyAdapter(adapter).configurationDigest()
                 )
             );

@@ -690,4 +690,50 @@ contract VaultPolicyTest is Test {
         _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
         assertEq(vault.strategyAssets(address(adapterA)), 1_000e6);
     }
+
+    /// @dev Paper §5.1 — an impaired adapter must not keep contributing its full
+    ///      nominal value to NAV just because it has not been divested.
+    function test_accountingCapBoundsAnAdaptersContributionToNav() public {
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        uint256 before = vault.totalAssets();
+
+        vault.setAdapterAccountingCap(address(adapterA), 400e6);
+
+        assertEq(vault.totalAssets(), before - 600e6, "capped adapter must contribute only its cap");
+    }
+
+    function test_accountingCapDoesNotInflateNavWhenAboveActualValue() public {
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        uint256 before = vault.totalAssets();
+        vault.setAdapterAccountingCap(address(adapterA), 5_000e6);
+        assertEq(vault.totalAssets(), before, "a cap above actual value must not raise NAV");
+    }
+
+    function test_recognizeLossReducesNavAndIsMonotonic() public {
+        // The brief's version of this test only checked the recognizedLosses
+        // counter, which is pure telemetry elsewhere in this contract (a
+        // divest shortfall already shows up via the adapter's own reduced
+        // reported balance). That would have passed even if recognizeLoss did
+        // nothing to totalAssets(), so it's strengthened here to actually
+        // check NAV, matching what the test's name claims.
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        uint256 lossesBefore = vault.recognizedLosses();
+        uint256 navBefore = vault.totalAssets();
+
+        vault.recognizeLoss(address(adapterA), 250e6);
+
+        assertEq(vault.recognizedLosses(), lossesBefore + 250e6, "loss counter must accumulate");
+        assertEq(vault.totalAssets(), navBefore - 250e6, "recognized loss must actually leave NAV");
+
+        // Monotonic: a second recognition strictly compounds, never unwinds.
+        vault.recognizeLoss(address(adapterA), 100e6);
+        assertEq(vault.recognizedLosses(), lossesBefore + 350e6, "losses must accumulate, never unwind");
+        assertEq(vault.totalAssets(), navBefore - 350e6);
+    }
+
+    function test_recognizeLossIsAdminOnly() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert();
+        vault.recognizeLoss(address(adapterA), 1);
+    }
 }
