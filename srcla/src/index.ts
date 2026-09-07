@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     forecastHorizonSeconds: FORECAST_HORIZON_SECONDS,
     artifactHash: '5ed517d128bab909',
     chainId: config.chainId,
-    // Task 13 Finding 1: derived from which SRCLA_PLACEHOLDER_* env vars
+    // Task 13 Finding 1: derived from which SRCLA_REAL_* env vars
     // were actually set (config.ts's computePlaceholderPriceStatus) -- the
     // scheduler refuses to hand a produced plan to any executor while this
     // is true.
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
       `[SRCLA] EXECUTION BLOCKED: placeholder price input(s) in use: ` +
       `${config.srcla.placeholderPriceFields.join(', ')}. Deciding, persisting and logging will proceed ` +
       'normally, but no produced plan will be handed to an executor until real values are set for ' +
-      'these (see SRCLA_PLACEHOLDER_* in .env.example).'
+      'these (see SRCLA_REAL_* in .env.example).'
     );
   }
 
