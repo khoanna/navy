@@ -61,8 +61,8 @@ export function buildDecisionInput(raw: RawOrigin, artifact: PolicyArtifact): De
   return {
     origin: raw.origin,
     vault: raw.vault,
-    markets: [...raw.markets].sort((a, b) => (a.marketId < b.marketId ? -1 : 1)),
-    dependencyGroups: [...raw.dependencyGroups].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    markets: [...raw.markets].sort((a, b) => (a.marketId < b.marketId ? -1 : a.marketId > b.marketId ? 1 : 0)),
+    dependencyGroups: [...raw.dependencyGroups].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     withdrawals,
     gas: raw.gas,
     history,
