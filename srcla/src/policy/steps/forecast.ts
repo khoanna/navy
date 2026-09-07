@@ -7,6 +7,16 @@ const SECONDS_PER_YEAR = 31_536_000n;
  * P1 — the residual quantile is per venue. A venue with no calibrated entry
  * falls back to the most conservative registered quantile rather than to
  * zero, so an unregistered market can never receive an optimistic bound.
+ *
+ * When `residualQuantileWadByMarket` is empty there is no per-venue minimum
+ * to take at all — the shipped bootstrap artifact
+ * (`config/bootstrap-artifact.json`) is exactly this case today, so this is
+ * live production behaviour, not a hypothetical branch. The only other
+ * calibrated conservative value the artifact carries is the P2 portfolio
+ * quantile (`portfolioResidualQuantileWad`), so that is the deliberate
+ * fallback here — never `0n`, which would be optimistic relative to any
+ * calibrated quantile and would silently break the conservatism invariant
+ * this whole module exists to enforce.
  */
 function quantileFor(artifact: PolicyArtifact, marketId: string): bigint {
   const own = artifact.residualQuantileWadByMarket[marketId];

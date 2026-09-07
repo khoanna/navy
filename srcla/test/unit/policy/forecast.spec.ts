@@ -1,6 +1,6 @@
 import { computeArtifactHash, loadBootstrapArtifact } from '../../../src/policy/artifact.js';
-import { lowerBoundAt, exitableFraction } from '../../../src/policy/steps/forecast.js';
-import type { PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
+import { lowerBoundAt, exitableFraction, forecastMarkets } from '../../../src/policy/steps/forecast.js';
+import type { DecisionInput, MarketObservation, PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
 
@@ -52,6 +52,21 @@ describe('lowerBoundAt', () => {
     const bad = artifact({ residualQuantileWadByMarket: { aave: WAD / 1000n } });
     expect(() => lowerBoundAt(curve, bad, 'aave', 0n, 604_800)).toThrow(/must be <= 0/);
   });
+
+  describe('empty per-venue map (the shipped bootstrap artifact today)', () => {
+    it('falls back to portfolioResidualQuantileWad and the bound is strictly below the point forecast', () => {
+      const a = artifact({ residualQuantileWadByMarket: {}, portfolioResidualQuantileWad: -(WAD / 400n) });
+      const lower = lowerBoundAt(curve, a, 'aave', 0n, 604_800);
+      const horizonMu = ((WAD * 5n) / 100n) * 604_800n / 31_536_000n;
+      expect(lower).toBe(horizonMu - WAD / 400n);
+      expect(lower < horizonMu).toBe(true);
+    });
+
+    it('still rejects a positive quantile via the fallback path, not only the per-venue path', () => {
+      const bad = artifact({ residualQuantileWadByMarket: {}, portfolioResidualQuantileWad: WAD / 400n });
+      expect(() => lowerBoundAt(curve, bad, 'aave', 0n, 604_800)).toThrow(/must be <= 0/);
+    });
+  });
 });
 
 describe('exitableFraction (P4)', () => {
@@ -69,6 +84,58 @@ describe('exitableFraction (P4)', () => {
 
   it('treats a zero target position as fully exitable', () => {
     expect(exitableFraction(0n, 0n)).toBe(1);
+  });
+});
+
+describe('forecastMarkets with the actual shipped bootstrap artifact', () => {
+  function market(over: Partial<MarketObservation> = {}): MarketObservation {
+    return {
+      marketId: 'aave', adapter: '0xa', protocol: 'aave',
+      cash: 1_000_000_000n, borrows: 500_000_000n, reserves: 0n,
+      supplyRateWad: (WAD * 5n) / 100n, utilizationWad: (WAD * 50n) / 100n,
+      positionBase: 0n, maxDeployableBase: 1_000_000_000n, maxWithdrawableBase: 500_000_000n,
+      configDigest: '0xdigest', regimeId: 'r1', paused: false,
+      capBps: 5000, absoluteCapBase: 10n ** 12n, maxLossBps: 50, dependencyGroupIds: [],
+      ...over,
+    };
+  }
+
+  function input(markets: MarketObservation[]): DecisionInput {
+    return {
+      origin: { blockNumber: 1, blockHash: '0xb', timestampSeconds: 1_000_000, finalized: true },
+      vault: {
+        totalAssetsBase: 10n ** 12n, idleBase: 10n ** 11n, sharesOutstanding: 10n ** 12n,
+        adminReserveBase: 0n, dynamicReserveBase: 0n, minIdleBps: 50,
+        paused: false, configurationDigest: '0xvault',
+      },
+      markets, dependencyGroups: [], withdrawals: [],
+      gas: { l2BaseFeeWei: 1n, l1BaseFeeWei: 1n, l1BlobBaseFeeWei: 1n, ethUsdE8: 350_000_000_000n, usdcUsdE8: 100_000_000n },
+      history: [],
+      lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    };
+  }
+
+  it('pins today\'s real behaviour: every lowerWad is <= muWad, using loadBootstrapArtifact() unmodified', () => {
+    const bootstrap = loadBootstrapArtifact();
+    // Sanity: this test is only meaningful while the shipped artifact still
+    // exercises the empty-map fallback branch — if that ever changes, this
+    // assertion should fail loudly rather than the test silently testing a
+    // different path than intended.
+    expect(Object.keys(bootstrap.residualQuantileWadByMarket)).toHaveLength(0);
+
+    const markets = [market({ marketId: 'aave' }), market({ marketId: 'compound', protocol: 'compound' })];
+    const curves: RateCurve[] = markets.map((m) => ({
+      marketId: m.marketId,
+      quantumBase: 1_000_000_000n,
+      points: [(WAD * 5n) / 100n, (WAD * 4n) / 100n, (WAD * 3n) / 100n],
+      maxXBase: 2_000_000_000n,
+    }));
+
+    const results = forecastMarkets(input(markets), curves, bootstrap);
+    expect(results).toHaveLength(2);
+    for (const r of results) {
+      expect(r.lowerWad <= r.muWad).toBe(true);
+    }
   });
 });
 
