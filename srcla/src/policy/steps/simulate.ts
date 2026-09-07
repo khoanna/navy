@@ -4,7 +4,12 @@ import {
   type ProtocolId,
 } from '../../protocols/simulation/index.js';
 import { SECONDS_PER_YEAR } from '../../protocols/math.js';
-import type { MarketState } from '../../protocols/simulation/types.js';
+import type {
+  CompoundSimulatorConfig,
+  MarketState,
+  MoonwellSimulatorConfig,
+  SimulatorConfig,
+} from '../../protocols/simulation/types.js';
 import type { DecisionInput, MarketObservation, RateCurve } from '../types.js';
 
 /**
@@ -37,6 +42,47 @@ const PER_SECOND_PROTOCOLS: ReadonlySet<ProtocolId> = new Set<ProtocolId>(['comp
 
 function toAnnualizedRateWad(protocol: ProtocolId, rateWad: bigint): bigint {
   return PER_SECOND_PROTOCOLS.has(protocol) ? rateWad * SECONDS_PER_YEAR : rateWad;
+}
+
+/**
+ * §6.3-6.5 requires simulation to mirror the LIVE registered interest-rate
+ * strategy, not a hardcoded default. `m.irmParams` is that seam: when
+ * present, it overrides the kinked-linear model's four core fields
+ * (baseRate/kink/slopeLow/slopeHigh). It is NOT populated from chain yet —
+ * the collector that reads live IRM params off each venue's rate strategy
+ * contract is a later task, so every market currently falls back to
+ * DefaultConfigs.
+ *
+ * `irmParams`'s shape matches `CompoundSimulatorConfig`, not Aave's
+ * structurally different quadratic model (baseRate/variableRateSlope1/
+ * variableRateSlope2/optimalUtilization/maxUtilization) — passing a
+ * Compound-shaped config into `AaveV3Simulator.simulateRate` would read
+ * `undefined` fields and throw. So Aave markets always use
+ * `DefaultConfigs.aave` regardless of `m.irmParams`.
+ */
+function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorConfig {
+  if (!m.irmParams || protocol === 'aave') {
+    return DefaultConfigs[protocol];
+  }
+  const { baseRateWad, kinkRay, slopeLowWad, slopeHighWad } = m.irmParams;
+  const kinked: CompoundSimulatorConfig = {
+    baseRate: baseRateWad,
+    kink: kinkRay,
+    slopeLow: slopeLowWad,
+    slopeHigh: slopeHighWad,
+  };
+  if (protocol === 'moonwell') {
+    // minRate/maxRate are Apollo oracle bounds, not part of the IRM curve
+    // shape irmParams carries — keep them from DefaultConfigs.
+    const defaults = DefaultConfigs.moonwell as MoonwellSimulatorConfig;
+    const moonwellConfig: MoonwellSimulatorConfig = {
+      ...kinked,
+      minRate: defaults.minRate,
+      maxRate: defaults.maxRate,
+    };
+    return moonwellConfig;
+  }
+  return kinked; // protocol === 'compound'
 }
 
 function toMarketState(m: MarketObservation, origin: DecisionInput['origin']): MarketState {
@@ -77,7 +123,7 @@ export function simulateCurves(
 
     const protocol: ProtocolId = m.protocol;
     const simulator = ProtocolSimulators[protocol];
-    const config = DefaultConfigs[protocol];
+    const config = resolveConfig(m, protocol);
     const state = toMarketState(m, input.origin);
 
     const points: bigint[] = [];

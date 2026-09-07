@@ -65,8 +65,8 @@ export interface AaveSimulatorConfig {
  * const config: CompoundSimulatorConfig = {
  *   baseRate: 3n * WAD / 100n,          // 3% APY minimum
  *   kink: 8n * RAY / 10n,               // 80% kink point
- *   slopeLow: 32n * WAD / 1_000_000_000n,  // ~1% APY per RAY below kink
- *   slopeHigh: 300n * WAD / 1_000_000_000n, // ~10% APY per RAY above kink
+ *   slopeLow: 625n * WAD / 10_000n,       // 6.25% WAD -> 8% APY at 80% kink
+ *   slopeHigh: WAD,                         // 100% WAD -> ~28% APY at 100% util
  * };
  * ```
  */
@@ -92,8 +92,8 @@ export interface CompoundSimulatorConfig {
  * const config: MoonwellSimulatorConfig = {
  *   baseRate: 3n * WAD / 100n,              // 3% APY minimum
  *   kink: 8n * RAY / 10n,                   // 80% kink point
- *   slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY below kink
- *   slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY above kink
+ *   slopeLow: 625n * WAD / 10_000n,        // 6.25% WAD -> 8% APY at 80% kink
+ *   slopeHigh: WAD,                          // 100% WAD -> ~28% APY at 100% util
  *   minRate: 1n * WAD / 100n,              // 1% APY floor from oracle
  *   maxRate: 20n * WAD / 100n,              // 20% APY ceiling from oracle
  * };
@@ -251,11 +251,27 @@ export const DEFAULT_AAVE_CONFIG: AaveSimulatorConfig = {
  * Default Compound III simulation configuration.
  * Based on Compound III Comet USDC market parameters.
  */
+// PLACEHOLDER pending live on-chain IRM parameters (paper §6.3-6.5 requires
+// mirroring the LIVE registered interest-rate strategy — see
+// MarketObservation.irmParams, which simulateCurves prefers when present).
+// Derivation (Task 5 review round 3): calculateRateFromUtilization computes
+// rate = baseRate + slopeLow*util (util<=kink RAY-fraction), so slopeLow is
+// "annualized WAD rate contributed at 100% utilization". The PREVIOUS value
+// (32n*WAD/1e9 = 3.2e-8 WAD = 0.0000032%) made the curve flat to 7 decimal
+// places across the entire utilization range — see task-5-report.md. To rise
+// from the 3% base to ~8% APY at the 80% kink: slopeLow = (8%-3%)/0.8 = 6.25%.
+// Above kink: rate = 8% (at kink) + slopeHigh*(util-kink)/(1-kink-normalized).
+// Target ~28% APY at 100% utilization (a steep post-kink cliff, typical of
+// kinked-rate protocols defending against liquidity exhaustion near full
+// utilization): slopeHigh = (28%-8%)/(1-0.8) = 20%/0.2 = 100%.
+const PLACEHOLDER_SLOPE_LOW = (625n * WAD) / 10_000n; // 6.25% WAD -> 8% APY at 80% kink
+const PLACEHOLDER_SLOPE_HIGH = WAD; // 100% WAD -> ~28% APY at 100% utilization
+
 export const DEFAULT_COMPOUND_CONFIG: CompoundSimulatorConfig = {
   baseRate: 3n * WAD / 100n,              // 3% APY
   kink: 8n * RAY / 10n,                    // 80% kink
-  slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY
-  slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY
+  slopeLow: PLACEHOLDER_SLOPE_LOW,
+  slopeHigh: PLACEHOLDER_SLOPE_HIGH,
 };
 
 /**
@@ -265,8 +281,10 @@ export const DEFAULT_COMPOUND_CONFIG: CompoundSimulatorConfig = {
 export const DEFAULT_MOONWELL_CONFIG: MoonwellSimulatorConfig = {
   baseRate: 3n * WAD / 100n,              // 3% APY
   kink: 8n * RAY / 10n,                   // 80% kink
-  slopeLow: 32n * WAD / 1_000_000_000n,   // ~1% APY per RAY
-  slopeHigh: 300n * WAD / 1_000_000_000n,  // ~10% APY per RAY
+  slopeLow: PLACEHOLDER_SLOPE_LOW,
+  slopeHigh: PLACEHOLDER_SLOPE_HIGH,
   minRate: 1n * WAD / 100n,              // 1% floor from oracle
-  maxRate: 20n * WAD / 100n,             // 20% ceiling from oracle
+  maxRate: 20n * WAD / 100n,             // 20% ceiling from oracle (caps the
+                                          // kinked curve above ~92% util given
+                                          // the slopes above — intentional)
 };

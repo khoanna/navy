@@ -23,6 +23,20 @@ export interface MarketObservation {
   absoluteCapBase: bigint;
   maxLossBps: number;
   dependencyGroupIds: string[];
+  /**
+   * Live on-chain IRM parameters. Falls back to DefaultConfigs when absent.
+   *
+   * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
+   * interest-rate strategy, not a hardcoded default — this is that seam.
+   * Shape matches the kinked-linear model (Compound/Moonwell); Aave's
+   * quadratic model has no equivalent field here and always uses
+   * DefaultConfigs.aave regardless of this value.
+   *
+   * NOT YET POPULATED from chain — the collector that reads live IRM params
+   * off each venue's rate strategy contract is a later task. Until then this
+   * is always undefined and every market falls back to DefaultConfigs.
+   */
+  irmParams?: { baseRateWad: bigint; kinkRay: bigint; slopeLowWad: bigint; slopeHighWad: bigint };
 }
 
 /** A completed, availability-lagged training observation. */
