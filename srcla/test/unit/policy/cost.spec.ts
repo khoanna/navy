@@ -67,7 +67,24 @@ const PARAMS = {
   impactBps: 2,
   failureRateBps: 50,
   bufferBps: 100,
+  // Per-protocol-call gas (exit/entry/claim only - see cost.ts's FINDING 1
+  // comment for why this must NOT also drive l2).
   gasPerAction: 250_000n,
+  // submitPlan (contract/src/NavyVaultSRCLA.sol) writes ~12 storage words
+  // for the PlanHeader plus a PlanSubmitted event; EIP-2929 cold SSTORE
+  // (~20k/word) plus the 21k base tx cost puts a full submission in the
+  // 150k-250k gas range.
+  planGasOverhead: 150_000n,
+  // executeAction's own dispatch overhead (Merkle proof verification at
+  // <=3-hash depth + next-index bookkeeping + ActionExecuted event),
+  // EXCLUDING the protocol call the action performs.
+  actionDispatchGas: 15_000n,
+  // Was hardcoded to 50,000 inline (task-9-brief.md FINDING 2); moved here
+  // with the same default value.
+  approveResetGas: 50_000n,
+  // Was hardcoded to 180,000 inline (task-9-brief.md FINDING 2); moved here
+  // with the same default value.
+  swapGas: 180_000n,
   // Sized to one `executeAction` call (see cost.ts's derivation comment),
   // not a whole plan submission - 2,000 was far too high (task-9-brief.md
   // FINDING A) and is what made the old calldata-priced L1 term dominate.
@@ -161,6 +178,50 @@ describe('movementCostBase - pure-execution cost anchor', () => {
 
     expect(total).toBeGreaterThan(0n);
     expect(total).toBeLessThan(100_000n); // $0.10 in USDC base units (6dp)
+  });
+
+  // FINDING 3 (task-9-brief.md round-3 addendum) - THE DURABLE GUARD. Every
+  // test above checks terms individually or checks that the total equals
+  // their sum; none checked that the terms are mutually EXCLUSIVE. That gap
+  // is exactly how FINDING 1 survived two rounds and every prior mutation
+  // check: pre-fix, `l2` was an exact algebraic duplicate of
+  // `exit + entry + claim` (both used `n * gasPerAction * l2BaseFeeWei`
+  // where `n = divestCount + deployCount + harvestCount`), so it passed
+  // "reports every term", "totals the sum", and the anchor bound - none of
+  // those can see a term double-counting another.
+  it('no gas-derived term duplicates another (non-overlap)', () => {
+    // At least one of each move kind, per the finding's instruction, so
+    // every one of the seven pure-execution terms is populated.
+    const i = input([market('a'), market('b'), market('c')]);
+    const moves = [
+      { adapter: '0xa', amountBase: Q, kind: 'divest' as const },
+      { adapter: '0xb', amountBase: Q, kind: 'deploy' as const },
+      { adapter: '0xc', amountBase: Q, kind: 'harvest' as const },
+    ];
+    const { terms } = movementCostBase(i, moves, PARAMS);
+
+    // The specific historical defect: l2 (plan submission + dispatch
+    // overhead) must not equal the sum of the three protocol-call terms
+    // (exit + entry + claim). This identity is exact and fixture-independent
+    // in the pre-fix formula (l2 = n*gasPerAction*fee = (divestCount+
+    // deployCount+harvestCount)*gasPerAction*fee = exit+entry+claim for ANY
+    // move counts), so it is not sensitive to the specific counts chosen
+    // here - any non-empty fixture reproduces it pre-fix.
+    const exitEntryClaim = terms['exit']! + terms['entry']! + terms['claim']!;
+    expect(terms['l2']!).not.toBe(exitEntryClaim);
+
+    // A few further targeted combinations that would indicate the same
+    // underlying gas being priced into two different terms. These are
+    // deliberately NOT a blind brute-force subset-sum over all seven terms:
+    // exit/entry/claim share one rate (gasPerAction) by design and are
+    // EXPECTED to be simple integer multiples of each other depending on
+    // move counts (e.g. equal counts make them numerically equal) - that is
+    // correct pricing, not duplication, and a blind combinatorial check
+    // would false-positive on it. Each comparison below crosses a genuine
+    // conceptual boundary (plan-level vs protocol-call vs harvest-only gas).
+    expect(terms['l2']!).not.toBe(terms['l1Data']! + terms['exit']! + terms['entry']! + terms['claim']!);
+    expect(terms['approveReset']! + terms['swap']!).not.toBe(exitEntryClaim);
+    expect(terms['l2']!).not.toBe(terms['approveReset']! + terms['swap']!);
   });
 });
 

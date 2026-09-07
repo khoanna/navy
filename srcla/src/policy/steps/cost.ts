@@ -40,7 +40,32 @@ export interface CostParams {
   impactBps: number;
   failureRateBps: number;
   bufferBps: number;
+  /**
+   * Per-protocol-call gas: the adapter's own deposit/withdraw/claim
+   * execution, priced into `exit`/`entry`/`claim` below. Deliberately NOT
+   * used for `l2` - see `planGasOverhead`/`actionDispatchGas`, which price
+   * a structurally different cost (submitting the plan and dispatching each
+   * action), not the protocol call itself. Reusing this single rate for
+   * both was FINDING 1: `l2` collapsed to an exact duplicate of
+   * `exit + entry + claim`.
+   */
   gasPerAction: bigint;
+  /** Flat, once-per-plan gas: submitting the plan header (`submitPlan` in
+   *  contract/src/NavyVaultSRCLA.sol writes ~12 storage words for the
+   *  PlanHeader plus a PlanSubmitted event) - independent of action count. */
+  planGasOverhead: bigint;
+  /** Per-action gas for the `executeAction` dispatch wrapper itself -
+   *  Merkle proof verification, next-index bookkeeping, and the
+   *  ActionExecuted event - EXCLUDING the protocol call the action performs
+   *  (that is `exit`/`entry`/`claim`, priced via `gasPerAction`). */
+  actionDispatchGas: bigint;
+  /** Per-harvest gas for ONE approve or reset call (the term multiplies by
+   *  2 internally: approve then zero-reset, per §9.4). FINDING 2: was
+   *  hardcoded to 50,000 inline; now a caller-supplied parameter. */
+  approveResetGas: bigint;
+  /** Per-harvest gas for the reward-executor swap call. FINDING 2: was
+   *  hardcoded to 180,000 inline; now a caller-supplied parameter. */
+  swapGas: bigint;
   l1BytesPerAction: bigint;
 }
 
@@ -83,7 +108,15 @@ export function movementCostBase(
   const deployCount = BigInt(moves.filter((m) => m.kind === 'deploy').length);
   const harvestCount = BigInt(moves.filter((m) => m.kind === 'harvest').length);
 
-  const l2Wei = n * p.gasPerAction * gas.l2BaseFeeWei;
+  // FINDING 1 - C_L2 is plan-level execution overhead: submitting the plan
+  // once (`planGasOverhead`) plus dispatching each action through
+  // `executeAction` (`actionDispatchGas` per action - proof verification +
+  // bookkeeping, NOT the protocol call the action performs). This must
+  // share no term with `exit`/`entry`/`claim` below, which price the
+  // protocol call itself via the separate `gasPerAction` rate - reusing
+  // that rate here made `l2` an exact duplicate of `exit + entry + claim`
+  // (caught by the non-overlap test).
+  const l2Wei = (p.planGasOverhead + n * p.actionDispatchGas) * gas.l2BaseFeeWei;
   // Data-availability cost, priced via the blob base fee (see
   // BLOB_GAS_PER_BYTE above) - a genuine second fee market on Base, not a
   // scaled-up copy of the L2 term. `p.l1BytesPerAction` should be sized to
@@ -93,15 +126,29 @@ export function movementCostBase(
   // 32-byte length + up to ~3 x 32-byte siblings for the <=8-leaf plans the
   // <=3-market universe produces) = 4 + 224 + 64 + 96 = 388 bytes, not the
   // multi-KB a whole plan submission would carry.
+  //
+  // At the EIP-4844 protocol-floor blob base fee (1 wei), this term rounds
+  // to exactly 0n in USDC's 6-decimal resolution. That is the economically
+  // correct answer, not a precision defect - the true cost genuinely sits
+  // below six-decimal resolution at floor blob fees, and it does not recur
+  // at realistic (non-floor) blob fees. Do not "fix" this into a fabricated
+  // non-zero floor.
   const l1Wei = n * p.l1BytesPerAction * BLOB_GAS_PER_BYTE * gas.l1BlobBaseFeeWei;
+  // The blob-based model above approximates Base's actual Ecotone L1-fee
+  // formula, which blends `l1BaseFeeWei` and `l1BlobBaseFeeWei` through two
+  // independently governed scalars (`baseFeeScalar`, `blobBaseFeeScalar`) -
+  // neither of which `GasObservation` carries. This is a deliberate
+  // simplification (single blob-gas-per-byte rate, no base-fee blend), not
+  // a literal reproduction of the two-scalar formula.
   const exitWei = divestCount * p.gasPerAction * gas.l2BaseFeeWei;
   const entryWei = deployCount * p.gasPerAction * gas.l2BaseFeeWei;
   const claimWei = harvestCount * p.gasPerAction * gas.l2BaseFeeWei;
   // A reward harvest needs an approve + a zero-reset (§9.4 - "every swap
   // uses an exact token allowance and resets it to zero") plus the swap
   // itself; both are flat per-harvest gas costs, not scaled by notional.
-  const approveResetWei = harvestCount * 2n * 50_000n * gas.l2BaseFeeWei;
-  const swapWei = harvestCount * 180_000n * gas.l2BaseFeeWei;
+  // FINDING 2 - gas limits are caller-supplied params, not hardcoded.
+  const approveResetWei = harvestCount * 2n * p.approveResetGas * gas.l2BaseFeeWei;
+  const swapWei = harvestCount * p.swapGas * gas.l2BaseFeeWei;
 
   const bpsOf = (bps: number) => (notional * BigInt(bps)) / 10_000n;
 
