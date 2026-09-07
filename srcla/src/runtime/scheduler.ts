@@ -1,17 +1,14 @@
 import { SnapshotCollector } from '../collector/snapshot-collector.js';
 import { WithdrawalTracker } from '../collector/withdrawal-tracker.js';
-import { RegimeTracker } from '../regime/regime-tracker.js';
 import { PrismaClient } from '@prisma/client';
-import type { RollingForecast } from '../forecast/rolling.js';
-import type { ForecastResult } from '../forecast/types.js';
 import {
   isCalibrationNeeded,
   runWalkForwardCalibration,
   getSelectedMethod,
-  createForecaster,
   type CalibrationConfig,
 } from '../forecast/calibration.js';
 import { KeeperExecutor, createKeeperExecutor } from '../execution/keeper-executor.js';
+import type { DecisionDriver } from './decision-driver.js';
 
 export interface SchedulerConfig {
   collectorEnabled: boolean;
@@ -30,14 +27,8 @@ export interface SchedulerConfig {
   artifactHash: string;
   /** Chain ID for block records */
   chainId: number;
-  /** Optional forecaster for production decisions (deprecated: use selected method from DB) */
-  forecaster?: RollingForecast;
   /** Enable execution (default: true) */
   executionEnabled?: boolean;
-  /** Cold-start capacity factor (default: 0.5 = 50%) */
-  coldStartCapacityFactor?: number;
-  /** Cold-start reserve factor (default: 1.5 = 150%) */
-  coldStartReserveFactor?: number;
 }
 
 /**
@@ -55,19 +46,16 @@ export class Scheduler {
   private withdrawalTracker: WithdrawalTracker;
   private prisma: PrismaClient;
   private config: SchedulerConfig;
-  private forecaster: RollingForecast | undefined;
   private timers: {
     collector?: ReturnType<typeof setInterval>;
     controller?: ReturnType<typeof setInterval>;
     calibration?: ReturnType<typeof setInterval>;
   } = {};
   private stopped = false;
-  private marketHistories: Map<string, bigint[]> = new Map();
   private selectedMethod: string = 'rolling';
-  private selectedConfig: Record<string, unknown> = { windowDays: 30, quantile: 0.10 };
   private keeperExecutor: KeeperExecutor | null = null;
-  /** Cold-start capacity factor (default: 0.5 = 50%) */
-  private coldStartCapacityFactor: number;
+  /** The decision kernel driver (Task 13). Set via setDecisionDriver(); runController is a no-op until it is. */
+  private decisionDriver: DecisionDriver | null = null;
 
   constructor(
     collector: SnapshotCollector,
@@ -78,10 +66,16 @@ export class Scheduler {
     this.collector = collector;
     this.prisma = prisma;
     this.config = config;
-    this.forecaster = config.forecaster ?? undefined;
     this.withdrawalTracker = new WithdrawalTracker(collector['client'], vaultAddress, prisma);
-    // Initialize cold-start factors with defaults
-    this.coldStartCapacityFactor = config.coldStartCapacityFactor ?? 0.5;
+  }
+
+  /**
+   * Wire the decision kernel driver (src/runtime/decision-driver.ts). Called
+   * from src/index.ts once the driver's dependencies (origin loader,
+   * artifact, decide() options, persistence) are constructed.
+   */
+  setDecisionDriver(driver: DecisionDriver): void {
+    this.decisionDriver = driver;
   }
 
   /**
@@ -129,18 +123,14 @@ export class Scheduler {
     try {
       const selected = await getSelectedMethod(this.prisma);
       this.selectedMethod = selected.method;
-      this.selectedConfig = selected.config;
-
-      // Initialize forecaster from selected method
-      const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
-      this.forecaster = forecasterInstance;
 
       console.log(`[Scheduler] Loaded selected method: ${this.selectedMethod}`);
     } catch (error) {
+      // selectedMethod keeps its class-level default ('rolling') on
+      // failure; decide()'s own forecast step (src/policy/steps/forecast.ts)
+      // reads the calibrated artifact, not an in-memory forecaster instance
+      // from here.
       console.warn('[Scheduler] Could not load selected method, using defaults:', error);
-      // Fallback: use rolling with default config
-      const { RollingForecast } = await import('../forecast/rolling.js');
-      this.forecaster = new RollingForecast({ windowDays: 30, quantile: 0.10 });
     }
   }
 
@@ -207,19 +197,11 @@ export class Scheduler {
 
       const result = await runWalkForwardCalibration(this.prisma, calibrationConfig);
 
-      // Update the selected method and forecaster
+      // Update the selected method (persisted by runWalkForwardCalibration).
       this.selectedMethod = result.selectedMethod;
-      const calibrations = await getSelectedMethod(this.prisma);
-      this.selectedConfig = calibrations.config;
 
-      // Use calibrated ARX forecaster if available (paper §7.2 calibrated lower bound)
-      // Otherwise create a fresh one via createForecaster
       if (this.selectedMethod === 'arx' && result.arxForecaster) {
-        this.forecaster = result.arxForecaster as unknown as RollingForecast;
         console.log('[Scheduler] Using calibrated ARX forecaster with residual-based lower bound');
-      } else {
-        const forecasterInstance = createForecaster(this.selectedMethod, this.selectedConfig) as RollingForecast;
-        this.forecaster = forecasterInstance;
       }
 
       console.log(`[Scheduler] Calibration complete. Selected method: ${this.selectedMethod}`);
@@ -332,263 +314,44 @@ export class Scheduler {
   }
 
   /**
-   * Run the SRCLA decision cycle and execute on-chain
+   * Run one SRCLA decision cycle: collect the finalized origin, run it
+   * through the decide() kernel via DecisionDriver, and log the result.
+   *
+   * This replaced a hardcoded heuristic (highest lower-bound forecast, 5%
+   * idle threshold, 80% target, 10% divest, 100 USDC drift threshold) that
+   * never called the paper-conformant decide() kernel in src/policy at all.
+   * DecisionDriver contains no allocation logic itself — it collects, calls
+   * decide(), and persists — so this method stays a thin wrapper around it.
    */
   private async runController(): Promise<void> {
+    if (!this.decisionDriver) {
+      console.log('[Scheduler] No decision driver configured; skipping cycle');
+      return;
+    }
     try {
-      console.log('[Scheduler] Running SRCLA decision cycle...');
-
-      // Collect fresh snapshot
-      const snapshot = await this.collector.collect();
-      if (!snapshot) {
-        console.log('[Scheduler] No snapshot available, skipping decision cycle');
+      const out = await this.decisionDriver.runCycle();
+      if (out === null) {
+        console.log('[Scheduler] No finalized origin available');
         return;
       }
+      console.log(`[Scheduler] decision ${out.decisionHash} action=${out.action} reasons=${out.reasons.join('; ')}`);
 
-      // Get regime tracker for cold-start eligibility checks
-      const regimeTracker = this.getRegimeTracker();
-
-      // Apply cold-start constraints to each market before computing forecasts
-      // Per paper §9.4: ineligible markets get coldStartCapacityFactor (50%) applied
-      const eligibleMarkets = snapshot.strategies.map(strategy => {
-        const isEligible = regimeTracker?.isEligible(strategy.address) ?? true;
-        const effectiveCap = strategy.effectiveCap ?? strategy.totalAssets;
-        return this.applyColdStartConstraints(
-          { marketId: strategy.address, effectiveCap },
-          isEligible
+      if (out.action === 'rebalance' && out.plan) {
+        // KeeperExecutor (src/execution/keeper-executor.ts) does not yet
+        // expose a PlanDraft-shaped, Merkle-proof-staged execution entry
+        // point — that is Task 14's "real headers and domain-bound proof
+        // path". Its existing executeAction() takes a single ad-hoc
+        // {action, adapter, amount} decision from the old heuristic, not a
+        // PlanDraft, so calling it here would be wrong, not merely early.
+        // Until Task 14 lands, a produced plan is logged, not submitted.
+        console.log(
+          `[Scheduler] plan ${out.plan.planId} ready with ${out.plan.actions.length} action(s) ` +
+          `(reserve=${out.reserve.requiredBase}) - execution wiring pending Task 14`
         );
-      });
-
-      // Log any markets with cold-start constraints applied
-      const coldStartApplied = eligibleMarkets.filter(m => m.coldStartApplied);
-      if (coldStartApplied.length > 0) {
-        console.log(`[Scheduler] Cold-start constraints applied to ${coldStartApplied.length} markets:`);
-        for (const market of coldStartApplied) {
-          console.log(`  - ${market.marketId}: capacity reduced to ${market.effectiveCap}`);
-        }
-      }
-
-      // Update market histories and compute forecasts
-      const forecasts: ForecastResult[] = [];
-      for (const strategy of snapshot.strategies) {
-        // Find the eligible market data (with cold-start adjustments)
-        const eligibleMarket = eligibleMarkets.find(m => m.marketId === strategy.address);
-        const effectiveCap = eligibleMarket?.effectiveCap ?? strategy.effectiveCap ?? strategy.totalAssets;
-
-        // Update history
-        const history = this.marketHistories.get(strategy.address) ?? [];
-        history.push(strategy.supplyRate);
-        // Keep last 30 days of history
-        if (history.length > 30) {
-          history.shift();
-        }
-        this.marketHistories.set(strategy.address, history);
-
-        // Compute forecast using the selected method
-        if (this.forecaster) {
-          const forecast = this.forecaster.forecast(history, this.config.forecastHorizonSeconds);
-          forecasts.push({
-            ...forecast,
-            marketId: strategy.address,
-            method: this.selectedMethod,
-            config: this.selectedConfig,
-            // Include effectiveCap with cold-start adjustments for decision-making
-            effectiveCap,
-          });
-        }
-      }
-
-      // Rank markets by lower-bound forecast
-      const rankedMarkets = forecasts
-        .sort((a, b) => (b.lowerReturn > a.lowerReturn ? 1 : -1))
-        .map((f, i) => ({ ...f, rank: i + 1 }));
-
-      if (rankedMarkets.length > 0) {
-        console.log('[Scheduler] Market rankings by lower-bound forecast:');
-        for (const market of rankedMarkets) {
-          console.log(`  #${market.rank}: ${market.marketId} - lower bound: ${market.lowerReturn}`);
-        }
-
-        // Log top market for SRCLA decision
-        const topMarket = rankedMarkets[0]!;
-        console.log(`[SRCLA] Selected market: ${topMarket.marketId} (rank #${topMarket.rank})`);
-      }
-
-      // Generate action decision based on forecasts
-      // In production, this would use the full SrclaController
-      const decision = await this.generateDecision(snapshot, forecasts);
-
-      if (decision.action !== 'hold' && this.keeperExecutor) {
-        console.log(`[Scheduler] Executing decision: ${decision.action} ${decision.amount} to ${decision.targetAdapter}`);
-
-        // Execute the decision (convert to KeeperActionDecision format)
-        const result = await this.keeperExecutor.executeAction({
-          action: decision.action,
-          adapter: decision.targetAdapter,
-          amount: decision.amount,
-          reason: decision.reason,
-        });
-
-        if (result.success) {
-          console.log(`[Scheduler] Decision executed successfully`);
-          if (result.txHashes.length > 0) {
-            console.log(`[Scheduler] TX: ${result.txHashes.join(', ')}`);
-          }
-        } else {
-          console.error(`[Scheduler] Decision execution failed: ${result.errors.join(', ')}`);
-        }
-
-        // Persist decision to database
-        await this.persistDecision(snapshot, forecasts, decision, result);
-      } else if (decision.action === 'hold') {
-        console.log('[Scheduler] No action needed - holding current allocation');
-      } else {
-        console.log('[Scheduler] Keeper executor not available - decision not executed');
       }
     } catch (error) {
       console.error('[Scheduler] Controller error:', error);
     }
-  }
-
-  /**
-   * Generate a decision based on forecasts and current state
-   * This is a simplified version - in production, use the full SrclaController
-   */
-  private async generateDecision(
-    snapshot: Awaited<ReturnType<SnapshotCollector['collect']>>,
-    forecasts: ForecastResult[]
-  ): Promise<{ action: 'deploy' | 'divest' | 'harvest' | 'hold'; amount: bigint; targetAdapter: string | null; reason: string }> {
-    if (!snapshot) {
-      return {
-        action: 'hold',
-        amount: 0n,
-        targetAdapter: null,
-        reason: 'NO_SNAPSHOT_AVAILABLE',
-      };
-    }
-
-    const { idleBase } = snapshot.vault;
-    const vaultAssets = snapshot.vault.totalAssets;
-    const strategies = snapshot.strategies;
-
-    // Calculate current allocation
-    const currentAllocation = new Map<string, bigint>(
-      strategies.map((s) => [s.address, s.totalAssets])
-    );
-
-    // Find best market
-    const bestMarket = forecasts.length > 0
-      ? forecasts.reduce((best, f) => f.lowerReturn > best.lowerReturn ? f : best, forecasts[0]!)
-      : null;
-
-    // Find worst market
-    const worstMarket = forecasts.length > 0
-      ? forecasts.reduce((worst, f) => f.lowerReturn < worst.lowerReturn ? f : worst, forecasts[0]!)
-      : null;
-
-    // Decision thresholds
-    const DRIFT_THRESHOLD = 100_000_000n; // 100 USDC minimum
-    const MAX_IDLE = vaultAssets * 500n / 10000n; // Max 5% idle
-
-    // Check if rebalancing needed
-    if (!bestMarket || !worstMarket) {
-      return {
-        action: 'hold',
-        amount: 0n,
-        targetAdapter: null,
-        reason: 'NO_MARKETS_AVAILABLE',
-      };
-    }
-
-    // Check if idle is too high
-    if (idleBase > MAX_IDLE) {
-      // Deploy idle to best market
-      return {
-        action: 'deploy',
-        amount: idleBase - MAX_IDLE,
-        targetAdapter: bestMarket.marketId,
-        reason: `IDLE_EXCEEDS_MAX: ${idleBase} > ${MAX_IDLE}`,
-      };
-    }
-
-    // Check for significant drift
-    const bestCurrentAllocation = currentAllocation.get(bestMarket.marketId) ?? 0n;
-    const worstCurrentAllocation = currentAllocation.get(worstMarket.marketId) ?? 0n;
-
-    // Simple logic: if best market has capacity and we're not already heavily allocated
-    const targetAllocation = vaultAssets * 8000n / 10000n; // 80% target
-    if (bestCurrentAllocation < targetAllocation && idleBase >= DRIFT_THRESHOLD) {
-      const remainingCapacity = targetAllocation - bestCurrentAllocation;
-      const deployAmount = idleBase < remainingCapacity ? idleBase : remainingCapacity;
-      if (deployAmount >= DRIFT_THRESHOLD) {
-        return {
-          action: 'deploy',
-          amount: deployAmount,
-          targetAdapter: bestMarket.marketId,
-          reason: `DRIFT_CORRECTION: deploying to ${bestMarket.marketId}`,
-        };
-      }
-    }
-
-    // Check if we should divest from underperforming market
-    if (worstCurrentAllocation > 0n) {
-      const divestedAmount = worstCurrentAllocation * 1000n / 10000n; // Divest 10%
-      if (divestedAmount >= DRIFT_THRESHOLD) {
-        return {
-          action: 'divest',
-          amount: divestedAmount,
-          targetAdapter: worstMarket.marketId,
-          reason: `UNDERPERFORMANCE: divesting from ${worstMarket.marketId}`,
-        };
-      }
-    }
-
-    return {
-      action: 'hold',
-      amount: 0n,
-      targetAdapter: null,
-      reason: 'ALLOCATION_WITHIN_TOLERANCE',
-    };
-  }
-
-  /**
-   * Apply cold-start constraints to a market snapshot.
-   * Reduces effective capacity for markets that haven't completed cold-start.
-   *
-   * Per paper §9.4 and RegimeTracker.isEligible():
-   * - Ineligible markets get coldStartCapacityFactor (50%) applied to effective capacity
-   * - coldStartReserveFactor (150%) applied to reserve requirement
-   *
-   * @param market - Market snapshot with marketId and effectiveCap
-   * @param isEligible - Whether the market is eligible per RegimeTracker.isEligible()
-   * @returns Modified market with adjusted effectiveCap and coldStartApplied flag
-   */
-  applyColdStartConstraints(
-    market: { marketId: string; effectiveCap: bigint },
-    isEligible: boolean
-  ): { marketId: string; effectiveCap: bigint; coldStartApplied: boolean } {
-    if (isEligible) {
-      return { ...market, coldStartApplied: false };
-    }
-
-    // Apply 50% capacity reduction for ineligible (cold-start) markets
-    const reducedCap = (market.effectiveCap * BigInt(Math.round(this.coldStartCapacityFactor * 100))) / 100n;
-    return {
-      ...market,
-      effectiveCap: reducedCap,
-      coldStartApplied: true,
-    };
-  }
-
-  /**
-   * Get the RegimeTracker from WithdrawalTracker.
-   * Returns null if WithdrawalTracker doesn't expose it.
-   */
-  getRegimeTracker(): RegimeTracker | null {
-    // WithdrawalTracker may expose regimeTracker via a getter
-    // Check if withdrawalTracker has the property
-    const wt = this.withdrawalTracker as unknown as { regimeTracker?: RegimeTracker };
-    return wt.regimeTracker ?? null;
   }
 
   /**
@@ -635,53 +398,4 @@ export class Scheduler {
       };
     }
   }
-
-  /**
-   * Persist decision and execution result to database
-   */
-  private async persistDecision(
-    snapshot: Awaited<ReturnType<SnapshotCollector['collect']>>,
-    forecasts: ForecastResult[],
-    decision: { action: 'deploy' | 'divest' | 'harvest' | 'hold'; amount: bigint; targetAdapter: string | null; reason: string },
-    _execution: { success: boolean; txHashes: string[]; errors: string[] }
-  ): Promise<void> {
-    try {
-      const decisionHash = `0x${Buffer.from(
-        JSON.stringify({ timestamp: Date.now(), ...decision })
-      ).toString('hex').slice(0, 64).padEnd(64, '0')}`;
-
-      await this.prisma.decision.create({
-        data: {
-          decisionHash,
-          policyVersion: 'v1',
-          snapshotHash: snapshot!.blockHash,
-          blockNumber: BigInt(snapshot!.blockNumber),
-          timestamp: new Date(),
-          admissions: ['MARKET_ADMITTED'] as unknown as object,
-          forecasts: forecasts.map((f) => ({
-            marketId: f.marketId,
-            meanReturn: f.meanReturn.toString(),
-            lowerReturn: f.lowerReturn.toString(),
-            method: f.method,
-          })) as unknown as object,
-          reserveBase: snapshot!.vault.totalAssets.toString(),
-          allocation: Object.fromEntries(
-            snapshot!.strategies.map((s) => [s.address, s.totalAssets.toString()])
-          ) as unknown as object,
-          actionDecision: {
-            action: decision.action,
-            amount: decision.amount.toString(),
-            targetAdapter: decision.targetAdapter,
-            reason: decision.reason,
-          } as unknown as object,
-        },
-      });
-
-      console.log(`[Scheduler] Decision persisted: ${decisionHash}`);
-    } catch (error) {
-      console.error('[Scheduler] Failed to persist decision:', error);
-    }
-  }
 }
-
-// Note: ActionDecision is defined as inline type in generateDecision return type

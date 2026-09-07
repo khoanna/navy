@@ -59,6 +59,21 @@ export const SrclaConfigSchema = z.object({
   // Execution (§9.5)
   divestFailureStrategy: z.enum(['stop', 'continue']).default('stop'),
   deployFailureStrategy: z.enum(['stop', 'recover_idle']).default('recover_idle'),
+
+  // Gas/price oracle placeholders (Task 13 - see task-13-report.md).
+  // GasObservation (policy/types.ts) needs l2BaseFeeWei, l1BaseFeeWei,
+  // l1BlobBaseFeeWei, ethUsdE8 and usdcUsdE8. Only l2BaseFeeWei is sourced
+  // live from chain (ChainClient.getGasPrice(), wired in src/index.ts) --
+  // this service has no L1-base-fee, L1-blob-base-fee, ETH/USD or USDC/USD
+  // oracle wired yet. These four are deliberately NAMED, CONFIGURABLE
+  // placeholders rather than values baked into the code: a wrong ETH price
+  // silently mis-scales every cost term in policy/steps/cost.ts, and this
+  // plan has already found three separate unit/scale bugs of exactly that
+  // kind. Replace with a real oracle before citing any cost-gate result.
+  placeholderL1BaseFeeWei: z.bigint().default(8_000_000_000n), // ~8 gwei on L1 - NOT read from chain
+  placeholderL1BlobBaseFeeWei: z.bigint().default(10_000_000n), // ~0.01 gwei-equivalent - NOT read from chain
+  placeholderEthUsdE8: z.bigint().default(350_000_000_000n), // $3,500.00, 8 decimals - NOT read from an oracle
+  placeholderUsdcUsdE8: z.bigint().default(100_000_000n), // $1.00, 8 decimals - assumed peg, NOT read from an oracle
 });
 
 export const ConfigSchema = z.object({
@@ -120,7 +135,7 @@ export function loadConfig(): Config {
     collectorEnabled: process.env.COLLECTOR_ENABLED !== 'false',
     collectorIntervalMs: parseInt(process.env.COLLECTOR_INTERVAL_MS ?? '900000', 10),
     controllerEnabled: process.env.CONTROLLER_ENABLED !== 'false',
-    controllerIntervalMs: parseInt(process.env.CONTROLLOR_INTERVAL_MS ?? '3600000', 10),
+    controllerIntervalMs: parseInt(process.env.CONTROLLER_INTERVAL_MS ?? '3600000', 10),
     dependencyGroups: parseDependencyGroupsEnv(),
     srcla: parseSrclaConfig(),
   };
@@ -174,6 +189,12 @@ function parseSrclaConfig(): SrclaConfig {
     // Execution
     divestFailureStrategy: (process.env.SRCLA_DIVEST_FAILURE_STRATEGY as 'stop' | 'continue') ?? 'stop',
     deployFailureStrategy: (process.env.SRCLA_DEPLOY_FAILURE_STRATEGY as 'stop' | 'recover_idle') ?? 'recover_idle',
+
+    // Gas/price oracle placeholders (Task 13) - see SrclaConfigSchema comment.
+    placeholderL1BaseFeeWei: BigInt(process.env.SRCLA_PLACEHOLDER_L1_BASE_FEE_WEI ?? '8000000000'),
+    placeholderL1BlobBaseFeeWei: BigInt(process.env.SRCLA_PLACEHOLDER_L1_BLOB_BASE_FEE_WEI ?? '10000000'),
+    placeholderEthUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_ETH_USD_E8 ?? '350000000000'),
+    placeholderUsdcUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_USDC_USD_E8 ?? '100000000'),
   };
 }
 

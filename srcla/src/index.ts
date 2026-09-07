@@ -3,6 +3,10 @@ import { ChainClient } from './chain/client.js';
 import { SnapshotCollector } from './collector/snapshot-collector.js';
 import { buildServer, startServer } from './http/server.js';
 import { Scheduler } from './runtime/scheduler.js';
+import { DecisionDriver, buildRawOriginFromCollector, persistDecisionOutput } from './runtime/decision-driver.js';
+import { loadBootstrapArtifact } from './policy/artifact.js';
+import { DEFAULT_DECIDE_OPTS, type DecideOpts } from './policy/decide.js';
+import type { GasObservation } from './policy/types.js';
 import { PrismaClient } from '@prisma/client';
 import { WEEKLY_MS } from './forecast/calibration.js';
 
@@ -71,6 +75,51 @@ async function main(): Promise<void> {
     artifactHash: '5ed517d128bab909',
     chainId: config.chainId,
   }, config.vaultAddress);
+
+  // Wire the decision kernel (Task 13): DecisionDriver replaces the old
+  // hardcoded scheduler heuristic with decide() (src/policy/decide.ts).
+  //
+  // KNOWN GAP inherited from policy/artifact.ts: the Phase 1 bootstrap
+  // artifact ships pinnedConfigDigests: {} (empty), so until a later task
+  // populates it from chain, every market is admission-rejected
+  // (CONFIG_DIGEST_UNPINNED) and the kernel holds. That is correct-by-design
+  // for a placeholder artifact -- see policy/artifact.ts's comment.
+  const artifact = loadBootstrapArtifact();
+  const decideOpts: DecideOpts = {
+    ...DEFAULT_DECIDE_OPTS,
+    plan: {
+      ...DEFAULT_DECIDE_OPTS.plan,
+      // DEFAULT_DECIDE_OPTS.plan.vaultAddress/chainId/assetAddress are
+      // placeholder constants (decide.ts keeps them as a generic default for
+      // unit tests). Wire the real deployed values for the running service.
+      chainId: config.chainId,
+      vaultAddress: config.vaultAddress,
+      assetAddress: config.usdcAddress,
+    },
+  };
+
+  const decisionDriver = new DecisionDriver({
+    artifact,
+    opts: decideOpts,
+    loadOrigin: async () => {
+      const gas: GasObservation = {
+        // REAL: read live off the configured L2 RPC.
+        l2BaseFeeWei: await chainClient.getGasPrice(),
+        // PLACEHOLDERS pending a real oracle - see config.ts's
+        // SrclaConfigSchema comment on these four fields.
+        l1BaseFeeWei: config.srcla.placeholderL1BaseFeeWei,
+        l1BlobBaseFeeWei: config.srcla.placeholderL1BlobBaseFeeWei,
+        ethUsdE8: config.srcla.placeholderEthUsdE8,
+        usdcUsdE8: config.srcla.placeholderUsdcUsdE8,
+      };
+      // chainConfigDigests is empty: no per-venue/vault configuration-digest
+      // oracle is wired yet either. buildRawOriginFromCollector falls back
+      // to each market's live on-chain configDigest when a key is absent.
+      return buildRawOriginFromCollector(collector, prisma, gas, {});
+    },
+    persist: (out, input) => persistDecisionOutput(prisma, artifact, out, input),
+  });
+  scheduler.setDecisionDriver(decisionDriver);
 
   // Build HTTP server with scheduler for trigger endpoint
   const server = await buildServer({

@@ -1,8 +1,11 @@
 /**
- * Keeper Executor - Bridge between SRCLA Controller and PlanExecutor
+ * Keeper Executor - Bridge between the SRCLA decision kernel and PlanExecutor
  *
- * Implements the PlanExecutor interface expected by SrclaController
- * and wraps the real PlanExecutor with proper Merkle proof handling.
+ * Wraps the real PlanExecutor with proper Merkle proof handling. Task 13
+ * wired the scheduler to call decide() (src/policy/decide.ts) via
+ * DecisionDriver (src/runtime/decision-driver.ts); Task 14 adds the
+ * PlanDraft-shaped, domain-bound execution entry point this file needs to
+ * consume that decision's plan directly.
  */
 
 import { ethers } from 'ethers';
@@ -32,7 +35,7 @@ export interface KeeperActionDecision {
 }
 
 /**
- * Execution result compatible with SrclaController
+ * Result of executing a KeeperActionDecision.
  */
 export interface KeeperExecutionResult {
   success: boolean;
