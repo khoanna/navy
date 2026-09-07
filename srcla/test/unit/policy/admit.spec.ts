@@ -3,6 +3,27 @@ import type { DecisionInput, MarketObservation, PolicyArtifact } from '../../../
 
 const WAD = 10n ** 18n;
 
+const ALL_CODES = [
+  'PAUSED',
+  'CONFIG_DIGEST_UNPINNED',
+  'REGIME_MIN_HISTORY',
+  'NO_SYNC_LIQUIDITY',
+  'CAP_ZERO',
+  'KINK_EXCEEDED',
+  'DEPENDENCY_UNREGISTERED',
+];
+
+function otherCodes(exclude: string): string[] {
+  return ALL_CODES.filter((c) => c !== exclude);
+}
+
+function expectOnlyCodeFails(reasons: { code: string; passed: boolean }[], code: string) {
+  expect(reasons.some((x) => x.code === code && !x.passed)).toBe(true);
+  for (const other of otherCodes(code)) {
+    expect(reasons.some((x) => x.code === other && !x.passed)).toBe(false);
+  }
+}
+
 function market(over: Partial<MarketObservation> = {}): MarketObservation {
   return {
     marketId: 'aave', adapter: '0xa', protocol: 'aave',
@@ -15,6 +36,13 @@ function market(over: Partial<MarketObservation> = {}): MarketObservation {
   };
 }
 
+function labelsFor(marketId: string, regimeId: string, count: number) {
+  return Array.from({ length: count }, () => ({
+    marketId, regimeId, originSeconds: 1, horizonSeconds: 604_800 as const,
+    horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
+  }));
+}
+
 function input(markets: MarketObservation[], labelCount = 40): DecisionInput {
   return {
     origin: { blockNumber: 1, blockHash: '0xb', timestampSeconds: 1_000_000, finalized: true },
@@ -25,10 +53,7 @@ function input(markets: MarketObservation[], labelCount = 40): DecisionInput {
     },
     markets, dependencyGroups: [], withdrawals: [],
     gas: { l2BaseFeeWei: 1n, l1BaseFeeWei: 1n, l1BlobBaseFeeWei: 1n, ethUsdE8: 350_000_000_000n, usdcUsdE8: 100_000_000n },
-    history: Array.from({ length: labelCount }, () => ({
-      marketId: 'aave', regimeId: 'r1', originSeconds: 1, horizonSeconds: 604_800 as const,
-      horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
-    })),
+    history: labelsFor('aave', 'r1', labelCount),
     lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
   };
 }
@@ -55,7 +80,7 @@ describe('admit', () => {
     expect(r.eligible).toEqual(['aave']);
   });
 
-  // Each of the six rules below is exercised in isolation: the fixture is a
+  // Each of the seven rules below is exercised in isolation: the fixture is a
   // "healthy market" (as in the first test) with exactly one field pushed to
   // violate that rule, so every other rule still passes. If a rule were
   // accidentally deleted from RULES, exactly its own test would go red.
@@ -63,77 +88,96 @@ describe('admit', () => {
   it('rejects a paused market on PAUSED alone', () => {
     const r = admit(input([market({ paused: true })]), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'PAUSED' && !x.passed)).toBe(true);
-    for (const code of ['CONFIG_DIGEST_UNPINNED', 'REGIME_MIN_HISTORY', 'NO_SYNC_LIQUIDITY', 'CAP_ZERO', 'KINK_EXCEEDED']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'PAUSED');
   });
 
   it('rejects a market with insufficient post-regime history on REGIME_MIN_HISTORY alone', () => {
     const r = admit(input([market()], 5), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'REGIME_MIN_HISTORY' && !x.passed)).toBe(true);
-    for (const code of ['PAUSED', 'CONFIG_DIGEST_UNPINNED', 'NO_SYNC_LIQUIDITY', 'CAP_ZERO', 'KINK_EXCEEDED']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'REGIME_MIN_HISTORY');
   });
 
   it('counts only labels under the market\'s current regime toward REGIME_MIN_HISTORY', () => {
     // 40 labels exist but they're all tagged with a superseded regime ('r0'),
     // while the market is currently in 'r1' — none of them should count.
     const base = input([market()], 0);
-    base.history = Array.from({ length: 40 }, () => ({
-      marketId: 'aave', regimeId: 'r0', originSeconds: 1, horizonSeconds: 604_800 as const,
-      horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
-    }));
+    base.history = labelsFor('aave', 'r0', 40);
     const r = admit(base, artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'REGIME_MIN_HISTORY' && !x.passed)).toBe(true);
+    expectOnlyCodeFails(r.reasons, 'REGIME_MIN_HISTORY');
   });
 
   it('rejects a market whose config digest is not the pinned one on CONFIG_DIGEST_UNPINNED alone', () => {
     const r = admit(input([market({ configDigest: '0xchanged' })]), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'CONFIG_DIGEST_UNPINNED' && !x.passed)).toBe(true);
-    for (const code of ['PAUSED', 'REGIME_MIN_HISTORY', 'NO_SYNC_LIQUIDITY', 'CAP_ZERO', 'KINK_EXCEEDED']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'CONFIG_DIGEST_UNPINNED');
   });
 
   it('rejects a market with no pinned digest registered on CONFIG_DIGEST_UNPINNED alone', () => {
-    const r = admit(
-      input([market({ marketId: 'unregistered' })]),
-      artifact
-    );
+    // marketId 'unregistered' has no entry in artifact.pinnedConfigDigests.
+    // Give it its own matching history so REGIME_MIN_HISTORY doesn't also
+    // fire and mask which rule is actually being tested.
+    const base = input([market({ marketId: 'unregistered' })], 0);
+    base.history = labelsFor('unregistered', 'r1', 40);
+    const r = admit(base, artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.marketId === 'unregistered' && x.code === 'CONFIG_DIGEST_UNPINNED' && !x.passed)).toBe(true);
+    expect(
+      r.reasons.some((x) => x.marketId === 'unregistered' && x.code === 'CONFIG_DIGEST_UNPINNED' && !x.passed)
+    ).toBe(true);
+    for (const other of otherCodes('CONFIG_DIGEST_UNPINNED')) {
+      expect(r.reasons.some((x) => x.marketId === 'unregistered' && x.code === other && !x.passed)).toBe(false);
+    }
   });
 
-  it('rejects a market with no synchronous exit capacity on NO_SYNC_LIQUIDITY alone', () => {
+  it('rejects a market with no synchronous exit capacity (existing position) on NO_SYNC_LIQUIDITY alone', () => {
     const r = admit(input([market({ maxWithdrawableBase: 0n, positionBase: 500n })]), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'NO_SYNC_LIQUIDITY' && !x.passed)).toBe(true);
-    for (const code of ['PAUSED', 'CONFIG_DIGEST_UNPINNED', 'REGIME_MIN_HISTORY', 'CAP_ZERO', 'KINK_EXCEEDED']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'NO_SYNC_LIQUIDITY');
   });
 
-  it('rejects a market whose cap is zero on CAP_ZERO alone', () => {
+  it('rejects a market with no protocol cash to enter at zero position on NO_SYNC_LIQUIDITY alone', () => {
+    const r = admit(input([market({ positionBase: 0n, cash: 0n })]), artifact);
+    expect(r.eligible).toEqual([]);
+    expectOnlyCodeFails(r.reasons, 'NO_SYNC_LIQUIDITY');
+  });
+
+  it('rejects a market whose fractional cap is zero on CAP_ZERO alone', () => {
     const r = admit(input([market({ capBps: 0 })]), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'CAP_ZERO' && !x.passed)).toBe(true);
-    for (const code of ['PAUSED', 'CONFIG_DIGEST_UNPINNED', 'REGIME_MIN_HISTORY', 'NO_SYNC_LIQUIDITY', 'KINK_EXCEEDED']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'CAP_ZERO');
+  });
+
+  it('rejects a market whose absolute cap is zero on CAP_ZERO alone', () => {
+    const r = admit(input([market({ absoluteCapBase: 0n })]), artifact);
+    expect(r.eligible).toEqual([]);
+    expectOnlyCodeFails(r.reasons, 'CAP_ZERO');
+  });
+
+  it('rejects a market with zero deployable headroom on CAP_ZERO alone', () => {
+    // Keep an existing position with non-zero maxWithdrawableBase so
+    // NO_SYNC_LIQUIDITY doesn't also fire.
+    const r = admit(input([market({ maxDeployableBase: 0n, positionBase: 500n })]), artifact);
+    expect(r.eligible).toEqual([]);
+    expectOnlyCodeFails(r.reasons, 'CAP_ZERO');
   });
 
   it('rejects a market past its interest-rate kink on KINK_EXCEEDED alone', () => {
     const r = admit(input([market({ utilizationWad: (WAD * 995n) / 1000n })]), artifact);
     expect(r.eligible).toEqual([]);
-    expect(r.reasons.some((x) => x.code === 'KINK_EXCEEDED' && !x.passed)).toBe(true);
-    for (const code of ['PAUSED', 'CONFIG_DIGEST_UNPINNED', 'REGIME_MIN_HISTORY', 'NO_SYNC_LIQUIDITY', 'CAP_ZERO']) {
-      expect(r.reasons.some((x) => x.code === code && !x.passed)).toBe(false);
-    }
+    expectOnlyCodeFails(r.reasons, 'KINK_EXCEEDED');
+  });
+
+  it('rejects a market whose dependency group is not registered on DEPENDENCY_UNREGISTERED alone', () => {
+    const r = admit(input([market({ dependencyGroupIds: ['ghost'] })]), artifact);
+    expect(r.eligible).toEqual([]);
+    expectOnlyCodeFails(r.reasons, 'DEPENDENCY_UNREGISTERED');
+  });
+
+  it('admits a market whose declared dependency group IS registered', () => {
+    const base = input([market({ dependencyGroupIds: ['g1'] })]);
+    base.dependencyGroups = [{ id: 'g1', capBps: 5000, absoluteCapBase: 10n ** 12n, members: ['aave'] }];
+    const r = admit(base, artifact);
+    expect(r.eligible).toEqual(['aave']);
   });
 
   it('is deterministic and returns markets in sorted order', () => {
@@ -141,13 +185,7 @@ describe('admit', () => {
     // matching history too, otherwise it would fail REGIME_MIN_HISTORY and
     // this test would prove nothing about ordering.
     const base = input([market({ marketId: 'zz', adapter: '0xz' }), market()]);
-    base.history = [
-      ...base.history,
-      ...Array.from({ length: 40 }, () => ({
-        marketId: 'zz', regimeId: 'r1', originSeconds: 1, horizonSeconds: 604_800 as const,
-        horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
-      })),
-    ];
+    base.history = [...base.history, ...labelsFor('zz', 'r1', 40)];
     const r = admit(base, {
       ...artifact,
       pinnedConfigDigests: { aave: '0xdigest', zz: '0xdigest' },

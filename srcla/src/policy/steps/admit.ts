@@ -35,8 +35,17 @@ const RULES: Rule[] = [
   {
     code: 'NO_SYNC_LIQUIDITY',
     check: (m) => {
+      // At zero position there is nothing to withdraw yet, so the gate is
+      // whether the protocol has room to accept a deposit (cash > 0); once a
+      // position exists, maxWithdrawableBase (= min(position, cash)) is the
+      // operative synchronous-exit figure. maxWithdrawableBase is always 0 at
+      // zero position, so gating on it unconditionally would make first entry
+      // into any venue permanently impossible — the branch is intentional.
       const ok = m.positionBase === 0n ? m.cash > 0n : m.maxWithdrawableBase > 0n;
-      return { passed: ok, detail: `maxWithdrawable=${m.maxWithdrawableBase} position=${m.positionBase}` };
+      return {
+        passed: ok,
+        detail: `cash=${m.cash} maxWithdrawable=${m.maxWithdrawableBase} position=${m.positionBase}`,
+      };
     },
   },
   {
@@ -51,6 +60,24 @@ const RULES: Rule[] = [
     check: (m) => {
       const ok = m.utilizationWad <= MAX_ADMISSIBLE_UTILIZATION_WAD;
       return { passed: ok, detail: `utilization=${m.utilizationWad}` };
+    },
+  },
+  {
+    code: 'DEPENDENCY_UNREGISTERED',
+    // §6.2 — every dependency group the market claims membership of must be
+    // a group the vault actually has configured. A market referencing a
+    // group the vault doesn't know about is a configuration error, not a
+    // pool the allocator can safely reason about jointly with its peers.
+    check: (m, input) => {
+      const registered = new Set(input.dependencyGroups.map((g) => g.id));
+      const missing = m.dependencyGroupIds.filter((id) => !registered.has(id));
+      const ok = missing.length === 0;
+      return {
+        passed: ok,
+        detail: ok
+          ? `dependency groups registered: [${m.dependencyGroupIds.join(', ')}]`
+          : `unregistered dependency groups: [${missing.join(', ')}]`,
+      };
     },
   },
 ];
