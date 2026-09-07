@@ -8,7 +8,7 @@ import {
   type CalibrationConfig,
 } from '../forecast/calibration.js';
 import { KeeperExecutor, createKeeperExecutor } from '../execution/keeper-executor.js';
-import type { DecisionDriver } from './decision-driver.js';
+import { assertExecutionAllowed, ExecutionBlockedError, type DecisionDriver, type PricingGuardStatus } from './decision-driver.js';
 
 export interface SchedulerConfig {
   collectorEnabled: boolean;
@@ -29,6 +29,15 @@ export interface SchedulerConfig {
   chainId: number;
   /** Enable execution (default: true) */
   executionEnabled?: boolean;
+  /**
+   * Task 13 Finding 1: whether any GasObservation price input feeding the
+   * decision kernel is a placeholder (config.ts's computePlaceholderPriceStatus).
+   * Required (not optional / not defaulted here) so every construction site
+   * must consciously supply it rather than the scheduler silently assuming
+   * "safe to execute". runController() refuses to hand a produced plan to
+   * any executor while placeholderPricesInUse is true.
+   */
+  pricingGuard: PricingGuardStatus;
 }
 
 /**
@@ -294,11 +303,7 @@ export class Scheduler {
    * Initialize and start the controller
    */
   private async startController(): Promise<void> {
-    // Create the SRCLA controller
-    // Note: In production, you would inject the actual components
-    // Here we create a minimal controller for execution
-    console.log('[Scheduler] Controller initialization skipped - using direct execution mode');
-    console.log('[Scheduler] Decisions will be executed via KeeperExecutor when controller runs');
+    console.log('[Scheduler] Controller starting - decision cycles run through DecisionDriver / decide()');
 
     // Run immediately
     await this.runController();
@@ -337,6 +342,24 @@ export class Scheduler {
       console.log(`[Scheduler] decision ${out.decisionHash} action=${out.action} reasons=${out.reasons.join('; ')}`);
 
       if (out.action === 'rebalance' && out.plan) {
+        // Finding-1 execution guard (Task 13): assertExecutionAllowed is the
+        // sanctioned gate for handing a produced plan to any executor. It
+        // throws ExecutionBlockedError while placeholderPricesInUse is true
+        // (no real ETH/USD, USDC/USD, L1-base-fee or L1-blob-base-fee
+        // oracle wired — see config.ts's computePlaceholderPriceStatus).
+        // Deciding, persisting and logging already happened above via
+        // decisionDriver.runCycle() and are unaffected by this — only
+        // execution is blocked.
+        try {
+          assertExecutionAllowed(this.config.pricingGuard);
+        } catch (error) {
+          if (error instanceof ExecutionBlockedError) {
+            console.warn(`[Scheduler] plan ${out.plan.planId}: ${error.message}`);
+            return;
+          }
+          throw error;
+        }
+
         // KeeperExecutor (src/execution/keeper-executor.ts) does not yet
         // expose a PlanDraft-shaped, Merkle-proof-staged execution entry
         // point — that is Task 14's "real headers and domain-bound proof
@@ -344,6 +367,9 @@ export class Scheduler {
         // {action, adapter, amount} decision from the old heuristic, not a
         // PlanDraft, so calling it here would be wrong, not merely early.
         // Until Task 14 lands, a produced plan is logged, not submitted.
+        // TASK 14 NOTE: any call to an executor belongs in THIS branch,
+        // after assertExecutionAllowed(this.pricingGuard) above — do not
+        // move plan execution outside of it or re-check the guard yourself.
         console.log(
           `[Scheduler] plan ${out.plan.planId} ready with ${out.plan.actions.length} action(s) ` +
           `(reserve=${out.reserve.requiredBase}) - execution wiring pending Task 14`

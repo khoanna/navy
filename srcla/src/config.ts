@@ -8,6 +8,20 @@ const DependencyGroupSchema = z.object({
 });
 
 /**
+ * Env vars backing the four GasObservation price placeholders (Task 13).
+ * The keys are the SrclaConfig field names; the values are their env vars.
+ * Declared once here so the schema default, computePlaceholderPriceStatus,
+ * and parseSrclaConfig cannot list a different set of fields from each
+ * other.
+ */
+const PLACEHOLDER_PRICE_ENV_VARS: Record<string, string> = {
+  l1BaseFeeWei: 'SRCLA_PLACEHOLDER_L1_BASE_FEE_WEI',
+  l1BlobBaseFeeWei: 'SRCLA_PLACEHOLDER_L1_BLOB_BASE_FEE_WEI',
+  ethUsdE8: 'SRCLA_PLACEHOLDER_ETH_USD_E8',
+  usdcUsdE8: 'SRCLA_PLACEHOLDER_USDC_USD_E8',
+};
+
+/**
  * SRCLA Extended Configuration Schema
  *
  * Includes all new parameters for:
@@ -74,6 +88,20 @@ export const SrclaConfigSchema = z.object({
   placeholderL1BlobBaseFeeWei: z.bigint().default(10_000_000n), // ~0.01 gwei-equivalent - NOT read from chain
   placeholderEthUsdE8: z.bigint().default(350_000_000_000n), // $3,500.00, 8 decimals - NOT read from an oracle
   placeholderUsdcUsdE8: z.bigint().default(100_000_000n), // $1.00, 8 decimals - assumed peg, NOT read from an oracle
+
+  // Derived from the four fields above (see computePlaceholderPriceStatus) -
+  // NOT independently settable, and NOT a second hand-maintained flag: it is
+  // recomputed from which SRCLA_PLACEHOLDER_* env vars were actually set
+  // every time parseSrclaConfig() runs, so it cannot drift out of sync with
+  // them. This is the single source of truth the Task-13 execution guard
+  // (src/runtime/decision-driver.ts's assertExecutionAllowed) reads to
+  // refuse handing a produced plan to any executor.
+  // Defaults here are the fail-safe (execution-blocked) state and are only
+  // ever reached if `srcla` itself were entirely absent from ConfigSchema's
+  // input; loadConfig() always supplies both via parseSrclaConfig() /
+  // computePlaceholderPriceStatus(), which is the real source of truth.
+  placeholderPricesInUse: z.boolean().default(true),
+  placeholderPriceFields: z.array(z.string()).default(Object.keys(PLACEHOLDER_PRICE_ENV_VARS)),
 });
 
 export const ConfigSchema = z.object({
@@ -113,6 +141,35 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type DependencyGroup = z.infer<typeof DependencyGroupSchema>;
 export type SrclaConfig = z.infer<typeof SrclaConfigSchema>;
+
+function isEnvSet(name: string, env: NodeJS.ProcessEnv): boolean {
+  const v = env[name];
+  return v !== undefined && v.trim() !== '';
+}
+
+/**
+ * Derives which GasObservation price inputs are still running on their
+ * hardcoded fallback (the operator never set the corresponding
+ * SRCLA_PLACEHOLDER_* env var) and whether ANY of them are. Exported and
+ * pure (takes `env` explicitly, defaulting to `process.env`) so it is unit
+ * testable without booting the service.
+ *
+ * This is the single source of truth for "is this service's pricing real":
+ * `placeholderPricesInUse` is derived here, not maintained as a separate
+ * flag anywhere else, so it cannot drift out of sync with the four
+ * placeholder fields it is computed from.
+ */
+export function computePlaceholderPriceStatus(
+  env: NodeJS.ProcessEnv = process.env
+): { placeholderPricesInUse: boolean; placeholderPriceFields: string[] } {
+  const placeholderPriceFields = Object.entries(PLACEHOLDER_PRICE_ENV_VARS)
+    .filter(([, envVar]) => !isEnvSet(envVar, env))
+    .map(([field]) => field);
+  return {
+    placeholderPricesInUse: placeholderPriceFields.length > 0,
+    placeholderPriceFields,
+  };
+}
 
 let cachedConfig: Config | null = null;
 
@@ -195,6 +252,9 @@ function parseSrclaConfig(): SrclaConfig {
     placeholderL1BlobBaseFeeWei: BigInt(process.env.SRCLA_PLACEHOLDER_L1_BLOB_BASE_FEE_WEI ?? '10000000'),
     placeholderEthUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_ETH_USD_E8 ?? '350000000000'),
     placeholderUsdcUsdE8: BigInt(process.env.SRCLA_PLACEHOLDER_USDC_USD_E8 ?? '100000000'),
+
+    // Derived, not hand-maintained - see computePlaceholderPriceStatus.
+    ...computePlaceholderPriceStatus(),
   };
 }
 

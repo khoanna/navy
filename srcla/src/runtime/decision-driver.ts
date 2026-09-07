@@ -50,6 +50,52 @@ export class DecisionDriver {
   }
 }
 
+/**
+ * Shape of `config.srcla`'s derived placeholder-price status
+ * (`computePlaceholderPriceStatus` in src/config.ts). Repeated as a
+ * structural type here, rather than imported, so this module does not have
+ * to depend on config.ts — any caller (production wiring, a test, a future
+ * evaluation harness) can satisfy it with a plain object.
+ */
+export interface PricingGuardStatus {
+  placeholderPricesInUse: boolean;
+  placeholderPriceFields: string[];
+}
+
+/**
+ * Thrown by assertExecutionAllowed. Deciding, persisting and logging a
+ * DecisionOutput are never gated by this — only handing a produced plan to
+ * an executor is.
+ */
+export class ExecutionBlockedError extends Error {
+  constructor(public readonly placeholderPriceFields: string[]) {
+    super(
+      `Execution blocked: placeholder price input(s) in use: ${placeholderPriceFields.join(', ')}. ` +
+      'These are named, configurable fallbacks (SRCLA_PLACEHOLDER_* in config.ts / .env.example), not ' +
+      'real oracle readings -- acting on a plan priced with them would move real funds on a fabricated ' +
+      'ETH price / L1 fee. Wire real values for these before any produced plan may be handed to an ' +
+      'executor. This does not affect deciding, persisting or logging decisions.'
+    );
+    this.name = 'ExecutionBlockedError';
+  }
+}
+
+/**
+ * The sanctioned execution gate (Task 13, Finding 1). ANY code path that is
+ * about to hand a produced PlanDraft to an executor -- KeeperExecutor et al,
+ * wired by Task 14 -- MUST call this first and let it throw uncaught (or
+ * catch ExecutionBlockedError specifically, e.g. to log and skip that
+ * cycle) rather than re-deriving or re-checking placeholderPricesInUse
+ * itself. That keeps there being exactly one place this rule can be
+ * satisfied or missed, instead of every future call site needing to
+ * remember to check it independently.
+ */
+export function assertExecutionAllowed(guard: PricingGuardStatus): void {
+  if (guard.placeholderPricesInUse) {
+    throw new ExecutionBlockedError(guard.placeholderPriceFields);
+  }
+}
+
 const PROTOCOL_BY_NAME: Record<string, MarketObservation['protocol']> = {
   aave: 'aave',
   compound: 'compound',
