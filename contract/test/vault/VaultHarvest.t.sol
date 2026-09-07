@@ -682,6 +682,25 @@ contract AtomicHarvestTest is Test {
         vault.harvest(address(adapter), address(comp), type(uint256).max, compRouteId, 0, HARVEST_DEADLINE);
     }
 
+    function test_atomicHarvest_onlyAllocator() public {
+        vm.prank(nonAllocator);
+        vm.expectRevert();
+        vault.harvest(address(adapter), address(comp), type(uint256).max, compRouteId, 0, HARVEST_DEADLINE);
+    }
+
+    function test_atomicHarvest_revertsWhenExecutorNotSet() public {
+        // Deploy a fresh vault that never had setRewardExecutor called. The
+        // executor check runs before adapter registration is even
+        // consulted, so no adapter needs to be registered against this vault.
+        NavyVaultSRCLA newVault = new NavyVaultSRCLA(IERC20(address(usdc)));
+        newVault.grantRole(newVault.DEFAULT_ADMIN_ROLE(), address(this));
+        newVault.grantRole(newVault.ALLOCATOR_ROLE(), allocator);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.RewardExecutorNotSet.selector);
+        newVault.harvest(address(adapter), address(comp), type(uint256).max, compRouteId, 0, HARVEST_DEADLINE);
+    }
+
     function test_atomicHarvest_revertsForZeroClaim() public {
         adapter.setClaimableReward(address(comp), 0);
 

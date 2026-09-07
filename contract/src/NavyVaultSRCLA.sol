@@ -196,10 +196,6 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     error TokenNotAdmitted();
     error PlanExpired();
 
-    // ---- Events ----
-
-    event ActionExecuted(uint256 indexed planId, uint32 indexed actionIndex, ActionKind indexed kind);
-
     // ---- ExecutionPlan Accessors ----
     // Note: activePlanId, activePlanDecisionHash, activePlanExpiresAt,
     // activePlanNextActionIndex, activePlanActionCount, activePlanMerkleRoot
