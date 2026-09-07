@@ -11,14 +11,14 @@ import { VaultApyService, computeAggregateApy, clearApyCache } from './vault-apy
 
 const COMET = '0xb125E6687d4313864e53df431d5425969c15Eb2F';
 const AAVE_POOL = '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
-const MOONWELL_COMPTROLLER = '0xfBb21d0380beE3312B33c4353c8936a0F13EF26C';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const M_USDC = '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22';
+const IRM_MOONWELL = '0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C';
 
-// Anvil deployment (2026-08-30): DeploySimpleAnvil.s.sol
-const COMPOUND_ADAPTER = '0xb4DE08Ae7d977FC220d963D0823123C88f0069c8';
-const AAVE_ADAPTER = '0x401D5D9a4Fa8B46197cA52e681E0f1f52402bdDA';
-const MOONWELL_ADAPTER = '0x30FDC180f5dBD86955beEebd1D1D5596bF745BfD';
+// Fresh Anvil deployment (2026-09-01): DeploySimpleAnvil.s.sol — matches KNOWN_ADAPTERS
+const COMPOUND_ADAPTER = '0x2709697528EEC08d91d5Fd7f7018A0f43ebad972';
+const AAVE_ADAPTER = '0xE7826c7322DBa57E32890B029B932a8a6084EfB2';
+const MOONWELL_ADAPTER = '0x22c830fBcf48aeDE04b9f6FAa735f28Bb2E2e005';
 
 // Constant for zero address (ethers requires valid address format for address fields)
 const ZERO_ADDR = ethers.ZeroAddress;
@@ -42,7 +42,11 @@ function abiResult(signature: string, args: unknown[]): string {
     'getUtilization()': 'function getUtilization() returns (uint256)',
     'getSupplyRate(uint256)': 'function getSupplyRate(uint256) returns (uint256)',
     'getReserveData(address)': 'function getReserveData(address asset) view returns (uint256 configuration, uint128 liquidityIndex, uint128 currentLiquidityRate, uint128 variableBorrowIndex, uint128 currentVariableBorrowRate, uint128 currentStableBorrowRate, uint40 lastUpdateTimestamp, uint16 usageAsCollateralEnabled, address stableBorrowToken, address aTokenAddress, address stableDebtTokenAddress, address interestRateStrategyAddress, uint128 accruedToTreasury, uint128 unbacked, uint128 isolationModeTotalDebt)',
-    'getMarketData(address)': 'function getMarketData(address mToken) view returns (address underlying, uint256 supplyRate, uint256 borrowRate, uint256 totalBorrows, uint256 totalReserves, uint256 supplyCap, uint256 borrowCap, uint256 underlyingPrice, uint256 collateralFactor, bool isListed, bool isTransferPaused, bool mintGuardianPaused, bool borrowGuardianPaused)',
+    'getCash()': 'function getCash() view returns (uint256)',
+    'totalBorrows()': 'function totalBorrows() view returns (uint256)',
+    'totalReserves()': 'function totalReserves() view returns (uint256)',
+    'reserveFactorMantissa()': 'function reserveFactorMantissa() view returns (uint256)',
+    'getSupplyRate(uint256,uint256,uint256,uint256)': 'function getSupplyRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa) view returns (uint256)',
   };
   const fullSig = abiMap[signature] || `function ${fnName}() returns (uint256)`;
   const iface = new ethers.Interface([fullSig]);
@@ -145,10 +149,20 @@ describe('VaultApyService — Compound III', () => {
         return abiResult('totalAssets()', [0n]);
       }
       // Moonwell - return 0
-      if (to === MOONWELL_COMPTROLLER.toLowerCase() && data.startsWith(ethers.id('getMarketData(address)').slice(0, 10))) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (to === MOONWELL_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -188,10 +202,20 @@ describe('VaultApyService — Compound III', () => {
         return abiResult('totalAssets()', [0n]);
       }
       // Moonwell - return 0
-      if (to === MOONWELL_COMPTROLLER.toLowerCase() && data.startsWith(ethers.id('getMarketData(address)').slice(0, 10))) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (to === MOONWELL_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -245,10 +269,20 @@ describe('VaultApyService — Aave V3', () => {
         return abiResult('totalAssets()', [0n]);
       }
       // Moonwell - return 0
-      if (to === MOONWELL_COMPTROLLER.toLowerCase() && data.startsWith(ethers.id('getMarketData(address)').slice(0, 10))) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (to === MOONWELL_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [0n]);
@@ -275,11 +309,20 @@ describe('VaultApyService — Moonwell', () => {
 
     const provider = makeMockProvider(12345678, (to, data) => {
       // Moonwell
-      if (to === MOONWELL_COMPTROLLER.toLowerCase() && data.startsWith(ethers.id('getMarketData(address)').slice(0, 10))) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, supplyRateWad, 0n, 0n, 0n, 0n, 0n, 0n, 0n,
-          false, false, false, false,
-        ]);
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [tvl]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [supplyRateWad]);
       }
       if (to === MOONWELL_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [tvl]);
@@ -352,10 +395,21 @@ describe('VaultApyService — response format', () => {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
           ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
-      if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      // Moonwell
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (to === COMPOUND_ADAPTER.toLowerCase() && data === abiEncode('totalAssets()', [])) {
         return abiResult('totalAssets()', [bigTvl]);
@@ -390,10 +444,21 @@ describe('VaultApyService — response format', () => {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
           ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
-      if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      // Moonwell
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (data === abiEncode('totalAssets()', [])) return abiResult('totalAssets()', [0n]);
       throw new Error(`Unexpected call to ${to}`);
@@ -441,10 +506,21 @@ describe('VaultApyService — caching', () => {
         return abiResult('getReserveData(address)', [0n, 0n, 0n, 0n, 0n, 0n,
           ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, 0n, 0n, 0n]);
       }
-      if (to === MOONWELL_COMPTROLLER.toLowerCase()) {
-        return abiResult('getMarketData(address)', [
-          ZERO_ADDR, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, false, false, false, false,
-        ]);
+      // Moonwell
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('getCash()').slice(0, 10))) {
+        return abiResult('getCash()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalBorrows()').slice(0, 10))) {
+        return abiResult('totalBorrows()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('totalReserves()').slice(0, 10))) {
+        return abiResult('totalReserves()', [0n]);
+      }
+      if (to === M_USDC.toLowerCase() && data.startsWith(ethers.id('reserveFactorMantissa()').slice(0, 10))) {
+        return abiResult('reserveFactorMantissa()', [0n]);
+      }
+      if (to === IRM_MOONWELL.toLowerCase() && data.startsWith(ethers.id('getSupplyRate(uint256,uint256,uint256,uint256)').slice(0, 10))) {
+        return abiResult('getSupplyRate(uint256,uint256,uint256,uint256)', [0n]);
       }
       if (data === abiEncode('totalAssets()', [])) return abiResult('totalAssets()', [0n]);
       throw new Error(`Unexpected call to ${to}`);
