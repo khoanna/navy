@@ -72,3 +72,59 @@ describe('simulateCurves', () => {
     expect(a[0]!.points).toEqual(b[0]!.points);
   });
 });
+
+/**
+ * Unit-mismatch guard (all three protocols).
+ *
+ * points[0] comes straight from the observation (annualized WAD); points[1]
+ * comes from the protocol simulator at one quantum of deposit. Each fixture's
+ * `supplyRateWad` below is set to what that protocol's own default-config
+ * model computes at this fixture's 80% utilization and zero deposit — i.e.
+ * the "observed current rate" and "the model's own opinion of the current
+ * rate" agree by construction. A one-quantum deposit into an 800,000 USDC
+ * market can only move the rate a hair, so points[0] and points[1] must sit
+ * within a tight relative tolerance of each other. A scale bug (per-second
+ * vs annualized, or an un-annualized value slamming into an oracle bound)
+ * blows this apart by many orders of magnitude — this is exactly the class
+ * of bug found in Task 5 review (Compound's un-annualized rate, then
+ * Moonwell's oracle clamp comparing per-second against annualized bounds).
+ */
+describe('simulateCurves — curve continuity across protocols (unit-mismatch guard)', () => {
+  const cash = 800_000_000_000n;
+  const borrows = 3_200_000_000_000n;
+
+  function marketFor(
+    protocol: MarketObservation['protocol'],
+    marketId: string,
+    supplyRateWad: bigint
+  ): MarketObservation {
+    return {
+      marketId, adapter: '0x' + marketId, protocol,
+      cash, borrows, reserves: 0n,
+      supplyRateWad, utilizationWad: (WAD * 80n) / 100n,
+      positionBase: 0n, maxDeployableBase: 100_000_000_000n, maxWithdrawableBase: 800_000_000_000n,
+      configDigest: '0xd', regimeId: 'r1', paused: false,
+      capBps: 5000, absoluteCapBase: 10n ** 13n, maxLossBps: 50, dependencyGroupIds: [],
+    };
+  }
+
+  // DEFAULT_AAVE_CONFIG at exactly optimalUtilization (80%) is an exact 4%:
+  // baseRate(0) + variableRateSlope1(4%) * (util/optimal)^2 = 0 + 4% * 1 = 4%.
+  const aaveMarket = marketFor('aave', 'aave', (WAD * 4n) / 100n);
+  // DEFAULT_COMPOUND_CONFIG / DEFAULT_MOONWELL_CONFIG at 80% utilization
+  // (= kink) annualize to ~3.0000256% (baseRate 3% + a negligible kink term);
+  // verified numerically in task-5-report.md.
+  const compoundMarket80 = marketFor('compound', 'compound', 30_000_025_579_932_000n);
+  const moonwellMarket = marketFor('moonwell', 'moonwell', 30_000_025_579_932_000n);
+
+  it.each([
+    ['aave', aaveMarket],
+    ['compound', compoundMarket80],
+    ['moonwell', moonwellMarket],
+  ] as const)('%s: points[1] stays within 1%% of points[0] for a one-quantum deposit', (_name, market) => {
+    const [c] = simulateCurves(input([market]), [market.marketId], QUANTUM, 2);
+    const p0 = c!.points[0]!;
+    const p1 = c!.points[1]!;
+    expect(p0 - p1 <= p0 / 100n).toBe(true);
+  });
+});

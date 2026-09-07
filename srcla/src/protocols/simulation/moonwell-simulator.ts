@@ -18,7 +18,7 @@
  * @module protocols/simulation
  */
 
-import { WAD, RAY, utilization as calcUtil } from '../math.js';
+import { WAD, RAY, SECONDS_PER_YEAR, utilization as calcUtil } from '../math.js';
 import { calculateRateFromUtilization } from './compound-simulator.js';
 import {
   CompoundSimulatorConfig,
@@ -69,7 +69,12 @@ export class MoonwellSimulator implements ISimulator {
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Moonwell configuration parameters
-   * @returns Annualized supply rate (WAD)
+   * @returns Supply rate per second (WAD scale) — this delegates to Compound's
+   *   `calculateRateFromUtilization`, which divides the annual config rates by
+   *   `SECONDS_PER_YEAR` internally (see compound-simulator.ts). Callers MUST
+   *   multiply by `SECONDS_PER_YEAR` before comparing against anything on the
+   *   WAD-annualized scale, such as the `minRate`/`maxRate` oracle bounds below.
+   *   (This docstring previously said "Annualized" — that was the bug.)
    */
   calculateRateFromUtilization(
     util: bigint,
@@ -145,8 +150,16 @@ export class MoonwellSimulator implements ISimulator {
     const newCash = cash + depositAmount;
     const utilizationAfter = this.calculateUtilization(newCash, borrows);
 
-    // Calculate unbounded post-deposit rate using kinked linear model
-    const unboundedRate = this.calculateRateFromUtilization(utilizationAfter, moonwellConfig);
+    // Calculate unbounded post-deposit rate using kinked linear model.
+    // calculateRateFromUtilization returns a WAD-**per-second** rate (it
+    // delegates to Compound's model, which divides by SECONDS_PER_YEAR
+    // internally). Annualize it BEFORE clamping — the [minRate, maxRate]
+    // Apollo oracle bounds below are WAD-**annualized** — otherwise the
+    // clamp compares a ~1e8-1e9 per-second number against ~1e16-1e17
+    // annualized bounds and saturates to minRate for every input,
+    // making the curve information-free regardless of utilization.
+    const unboundedRatePerSec = this.calculateRateFromUtilization(utilizationAfter, moonwellConfig);
+    const unboundedRate = unboundedRatePerSec * SECONDS_PER_YEAR;
 
     // Apply Apollo oracle bounds for Moonwell
     const minRate = (moonwellConfig as { minRate?: bigint }).minRate ?? (1n * WAD) / 100n;
@@ -165,8 +178,11 @@ export class MoonwellSimulator implements ISimulator {
     // the base utilization threshold (use 80% as reasonable optimal for penalty)
     const optimalUtilization = (80n * RAY) / 100n;
 
-    // Calculate rate before deposit
-    const rateBefore = this.calculateRateFromUtilization(utilizationBefore, moonwellConfig);
+    // Calculate rate before deposit — annualized and oracle-bounded the same
+    // way as postDepositRate above, so the ratePenalty comparison below is
+    // apples-to-apples (both WAD-annualized, both post-clamp).
+    const rateBeforePerSec = this.calculateRateFromUtilization(utilizationBefore, moonwellConfig);
+    const rateBefore = this.clampRate(rateBeforePerSec * SECONDS_PER_YEAR, minRate, maxRate);
 
     // Calculate capacity remaining after deposit (floor at 0)
     const capacityRemaining = effectiveCapacity > depositAmount
