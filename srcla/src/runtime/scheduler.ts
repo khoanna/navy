@@ -97,7 +97,7 @@ export class Scheduler {
     // Initialize keeper executor if execution is enabled
     if (this.config.executionEnabled !== false) {
       try {
-        this.keeperExecutor = createKeeperExecutor();
+        this.keeperExecutor = createKeeperExecutor(this.config.pricingGuard);
         console.log(`[Scheduler] Keeper executor initialized for ${this.keeperExecutor.getAddress()}`);
 
         // Check keeper permissions
@@ -360,20 +360,35 @@ export class Scheduler {
           throw error;
         }
 
-        // KeeperExecutor (src/execution/keeper-executor.ts) does not yet
-        // expose a PlanDraft-shaped, Merkle-proof-staged execution entry
-        // point — that is Task 14's "real headers and domain-bound proof
-        // path". Its existing executeAction() takes a single ad-hoc
-        // {action, adapter, amount} decision from the old heuristic, not a
-        // PlanDraft, so calling it here would be wrong, not merely early.
-        // Until Task 14 lands, a produced plan is logged, not submitted.
-        // TASK 14 NOTE: any call to an executor belongs in THIS branch,
-        // after assertExecutionAllowed(this.pricingGuard) above — do not
-        // move plan execution outside of it or re-check the guard yourself.
+        // TASK 14: the sanctioned call site. KeeperExecutor.executePlanDraft
+        // (src/execution/keeper-executor.ts) is the only place a produced
+        // plan is handed to the vault — it independently re-asserts
+        // assertExecutionAllowed as its own first statement, so this call
+        // cannot submit a transaction even if the guard above were ever
+        // removed or this branch reached some other way. Do not move plan
+        // execution outside of this branch, and do not call any other
+        // executor method for plan submission.
         console.log(
           `[Scheduler] plan ${out.plan.planId} ready with ${out.plan.actions.length} action(s) ` +
-          `(reserve=${out.reserve.requiredBase}) - execution wiring pending Task 14`
+          `(reserve=${out.reserve.requiredBase}) - submitting`
         );
+
+        if (!this.keeperExecutor) {
+          console.warn(`[Scheduler] plan ${out.plan.planId}: no keeper executor configured; skipping execution`);
+          return;
+        }
+
+        const result = await this.keeperExecutor.executePlanDraft(out.plan);
+        if (result.success) {
+          console.log(
+            `[Scheduler] plan ${result.planId ?? out.plan.planId} executed: ${result.txHashes.length} tx(s) ` +
+            `[${result.txHashes.join(', ')}]`
+          );
+        } else {
+          console.error(
+            `[Scheduler] plan ${result.planId ?? out.plan.planId} execution failed: ${result.errors.join('; ')}`
+          );
+        }
       }
     } catch (error) {
       console.error('[Scheduler] Controller error:', error);

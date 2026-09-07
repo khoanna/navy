@@ -167,6 +167,74 @@ export enum ActionKindCode {
 }
 
 /**
+ * `VaultTypes.PlanHeader`, field order/types read from
+ * contract/src/libraries/VaultTypes.sol (mirrors src/policy/steps/plan.ts's
+ * HEADER_TUPLE).
+ */
+export interface PlanHeaderInput {
+  planId: bigint;
+  policyVersion: bigint;
+  createdAt: bigint;
+  expiresAt: bigint;
+  actionCount: bigint;
+  snapshotBlockNumber: bigint;
+  snapshotHash: string;
+  decisionHash: string;
+  configurationDigest: string;
+  reserve: bigint;
+  minFinalAssets: bigint;
+  maxRecognizedLoss: bigint;
+  turnoverLimit: bigint;
+}
+
+/**
+ * The `Action` struct consumed by `executeNextActionWithProof` (NOT the
+ * older `executeAction` positional args).
+ */
+export interface PlanActionInput {
+  planId: bigint;
+  index: number;
+  kind: number;
+  adapter: string;
+  amount: bigint;
+  minOut: bigint;
+  dataHash: string;
+}
+
+/**
+ * Narrow surface `KeeperExecutor` depends on. Declared as an interface
+ * (rather than depending on the concrete `PlanExecutor` class directly) so
+ * tests can inject a fully mocked implementation and exercise
+ * `KeeperExecutor.executePlanDraft`'s submit/cancel/execute-loop orchestration
+ * without any RPC connection.
+ */
+export interface IPlanExecutor {
+  submitPlan(header: PlanHeaderInput, merkleRoot: string): Promise<ExecutionResult>;
+  executeNextActionWithProof(proof: string[], action: PlanActionInput): Promise<ExecutionResult>;
+  cancelPlan(): Promise<ExecutionResult>;
+  getActivePlanId(): Promise<string>;
+  getConfigurationDigest(): Promise<string>;
+  harvest(
+    adapter: string,
+    token: string,
+    maxClaim: bigint,
+    routeId: string,
+    minOut: bigint,
+    deadline: bigint
+  ): Promise<ExecutionResult & { usdcReceived?: bigint }>;
+  emergencyExit(adapter: string): Promise<ExecutionResult>;
+  hasAllocatorRole(address: string): Promise<boolean>;
+  hasAdminRole(address: string): Promise<boolean>;
+  getPlanState(): Promise<{
+    activePlanId: string;
+    merkleRoot: string;
+    nextActionIndex: bigint;
+    actionCount: bigint;
+    expiresAt: bigint;
+  }>;
+}
+
+/**
  * Execute individual actions and full plans
  *
  * Handles:
@@ -176,7 +244,7 @@ export enum ActionKindCode {
  * - Emergency exits via emergencyExit()
  * - Error handling and recovery
  */
-export class PlanExecutor {
+export class PlanExecutor implements IPlanExecutor {
   private wallet: ethers.Wallet;
   private vaultAddress: string;
   private iface: ethers.Interface;
@@ -409,6 +477,63 @@ export class PlanExecutor {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
+    }
+  }
+
+  /**
+   * §9.5 — the only fund-moving path for a staged deploy/divest action.
+   * Unlike executeAction (which the vault still exposes but this task stops
+   * calling for plan actions), executeNextActionWithProof rechecks the
+   * configuration digest, enforces the plan's risk limits, accounts
+   * turnover, completes the plan and activates the dynamic reserve.
+   * @param proof Merkle proof for the leaf `hashPlanAction(planDomain(header), action)`
+   *   (src/policy/steps/plan.ts) — NOT the old domain-less executeAction leaf.
+   * @param action The `Action` struct matching the leaf that was proved.
+   */
+  async executeNextActionWithProof(proof: string[], action: PlanActionInput): Promise<ExecutionResult> {
+    try {
+      const data = this.iface.encodeFunctionData('executeNextActionWithProof', [
+        proof,
+        [action.planId, action.index, action.kind, action.adapter, action.amount, action.minOut, action.dataHash],
+      ]);
+
+      const tx = await this.wallet.sendTransaction({
+        to: this.vaultAddress,
+        data,
+        gasLimit: this.config.gasLimit ?? 500_000n,
+      });
+
+      const receipt = await tx.wait(this.config.confirmations);
+      return {
+        success: true,
+        txHash: receipt?.hash ?? '',
+        gasUsed: receipt?.gasUsed,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Read the vault's current active plan id. Zero (ethers.ZeroHash) means no
+   * plan is active. Used by KeeperExecutor.executePlanDraft to detect and
+   * clear a wedged plan before submitting a new one.
+   */
+  async getActivePlanId(): Promise<string> {
+    const provider = this.wallet.provider as ethers.JsonRpcProvider;
+    try {
+      const data = await provider.call({
+        to: this.vaultAddress,
+        data: this.iface.encodeFunctionData('activePlanId'),
+      });
+      if (data === '0x') return ethers.ZeroHash;
+      const [id] = ethers.AbiCoder.defaultAbiCoder().decode(['bytes32'], data);
+      return id as string;
+    } catch {
+      return ethers.ZeroHash;
     }
   }
 

@@ -123,7 +123,20 @@ describe('Scheduler execution guard (Task 13, Finding 1)', () => {
     expect(result.triggered).toBe(true);
     expect(runCycle).toHaveBeenCalledTimes(1);
 
-    expect(warnSpy).not.toHaveBeenCalled();
+    // This test never calls scheduler.start() (it stubs collector/prisma and
+    // drives runController() straight via trigger()), so no KeeperExecutor
+    // is ever constructed -- baseConfig also sets executionEnabled: false.
+    // Task 14 wired an actual executePlanDraft() call past the guard, which
+    // now warns distinctly ("no keeper executor configured") rather than
+    // silently no-op-logging "wiring pending Task 14" the way the pre-Task-14
+    // stub did. That warning is orthogonal to the guard this test targets --
+    // it must not be the guard's "Execution blocked" warning, and the guard
+    // must still have let the plan reach the "ready with" log.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warning = String(warnSpy.mock.calls[0]![0]);
+    expect(warning).not.toContain('Execution blocked');
+    expect(warning).toContain('no keeper executor configured');
+
     const allLogs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(allLogs.some((line: string) => line.includes('ready with'))).toBe(true);
   });
