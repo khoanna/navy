@@ -1,0 +1,155 @@
+import type { DecisionInput, ReserveResult, WithdrawalObservation } from '../types.js';
+
+export interface StressScenario {
+  name: string;
+  /** Demand as a fraction of total assets, in basis points. */
+  demandBps: number;
+  /** Haircut applied to each venue's executable exit under this scenario, in bps. */
+  liquidityHaircutBps: number;
+}
+
+/**
+ * Registered stress set (paper §8.1). The report's demand set was 5/10/25/50% of
+ * TVL with a conservative variant assuming supplied cash has been borrowed out;
+ * the haircut encodes that variant.
+ */
+export const STRESS_SCENARIOS: readonly StressScenario[] = [
+  { name: 'w5', demandBps: 500, liquidityHaircutBps: 0 },
+  { name: 'w10', demandBps: 1000, liquidityHaircutBps: 1000 },
+  { name: 'w25', demandBps: 2500, liquidityHaircutBps: 2500 },
+  { name: 'w50', demandBps: 5000, liquidityHaircutBps: 5000 },
+] as const;
+
+/** Q_beta(W_H): the beta-quantile of rolling H-second withdrawal demand. */
+export function demandQuantileBase(
+  withdrawals: WithdrawalObservation[],
+  originSeconds: number,
+  horizonSeconds: number,
+  quantile: number
+): bigint {
+  if (withdrawals.length === 0) return 0n;
+
+  const sorted = [...withdrawals].sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+  const totals: bigint[] = [];
+
+  for (const anchor of sorted) {
+    if (anchor.timestampSeconds > originSeconds) continue;
+    const windowStart = anchor.timestampSeconds - horizonSeconds;
+    let sum = 0n;
+    for (const w of sorted) {
+      if (w.timestampSeconds > anchor.timestampSeconds) break;
+      if (w.timestampSeconds > windowStart) sum += w.assetsBase;
+    }
+    totals.push(sum);
+  }
+
+  if (totals.length === 0) return 0n;
+  totals.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const idx = Math.min(totals.length - 1, Math.floor(quantile * totals.length));
+  return totals[idx]!;
+}
+
+/**
+ * P3 — I_req(x) = max( floor,
+ *                       Q_beta(W_H) - sum_i min(x_i, e_i^cons),
+ *                       max_s { D_s - E_s(x) } )                         (paper §8.1)
+ *
+ * Both the demand term and the stress term are netted against executable venue
+ * exits. Holding idle USDC against demand that deeply liquid venues can already
+ * absorb is pure cash drag — that is the entire point of amendment P3, and why
+ * this function's result must move when `target` moves.
+ *
+ * `scenarioFeasible` reports the SEPARATE per-scenario constraint the paper
+ * states directly (§8.1):
+ *
+ *     w_0 * V_t + sum_i min(x_i, e_{i,s}) >= D_s     for every scenario s
+ *
+ * `w_0 * V_t` is the idle cash left over AFTER the candidate allocation, i.e.
+ * `totalAssetsBase - sum_i x_i` (the raw candidate amounts, not haircut/capped —
+ * that capping only happens on the *exit* side, `e_{i,s}`). This is NOT the
+ * same quantity as `totalAssetsBase - E_s(x)`: `E_s(x) <= sum_i x_i` whenever a
+ * venue's stressed exit is capacity-constrained below its target, so substituting
+ * `E_s(x)` for `sum_i x_i` overstates idle cash and can vacuously report every
+ * scenario feasible. Concretely, with this registered scenario set demand never
+ * exceeds 50% of total assets (`demandBps` tops out at 5000), so a feasibility
+ * test built on `shortfall <= totalAssetsBase - exitsS` reduces to
+ * `demandS <= totalAssetsBase`, which is unconditionally true — no candidate
+ * could ever be flagged infeasible, silently defeating the "reject before
+ * comparing returns" gate the next task's optimiser relies on.
+ */
+export function requiredReserve(
+  input: DecisionInput,
+  target: Map<string, bigint>,
+  opts: { quantile: number; horizonSeconds: number }
+): ReserveResult {
+  const { totalAssetsBase, adminReserveBase, minIdleBps } = input.vault;
+
+  const bpsFloor = (totalAssetsBase * BigInt(minIdleBps)) / 10_000n;
+  const floorBase = adminReserveBase > bpsFloor ? adminReserveBase : bpsFloor;
+
+  /** e_i^cons for the candidate target, optionally haircut for a stress scenario. */
+  const executable = (haircutBps: number): bigint => {
+    let sum = 0n;
+    for (const m of input.markets) {
+      const x = target.get(m.marketId) ?? 0n;
+      const capacity = m.maxWithdrawableBase < x ? m.maxWithdrawableBase : x;
+      sum += (capacity * BigInt(10_000 - haircutBps)) / 10_000n;
+    }
+    return sum;
+  };
+
+  /** sum_i x_i over markets this decision actually knows about — the capital the
+   *  candidate takes out of idle, independent of any venue's exit capacity. */
+  let allocatedBase = 0n;
+  for (const m of input.markets) {
+    allocatedBase += target.get(m.marketId) ?? 0n;
+  }
+  // Guard: an over-allocated (invalid) candidate must not underflow idle to a
+  // negative bigint that would silently poison the max() below.
+  const idleAfterAllocationBase = totalAssetsBase > allocatedBase ? totalAssetsBase - allocatedBase : 0n;
+
+  const demand = demandQuantileBase(
+    input.withdrawals,
+    input.origin.timestampSeconds,
+    opts.horizonSeconds,
+    opts.quantile
+  );
+  const exec0 = executable(0);
+  // Guard: demand netted against executable exits can go negative when a
+  // venue can absorb more than currently observed demand.
+  const netDemand = demand > exec0 ? demand - exec0 : 0n;
+
+  let stressShortfall = 0n;
+  const scenarioFeasible: ReserveResult['scenarioFeasible'] = [];
+
+  for (const s of STRESS_SCENARIOS) {
+    const demandS = (totalAssetsBase * BigInt(s.demandBps)) / 10_000n;
+    const exitsS = executable(s.liquidityHaircutBps);
+    // Guard: D_s - E_s(x) can go negative when the stressed exit alone covers
+    // stressed demand.
+    const shortfall = demandS > exitsS ? demandS - exitsS : 0n;
+    if (shortfall > stressShortfall) stressShortfall = shortfall;
+
+    // Paper §8.1: w_0*V_t + sum_i min(x_i, e_{i,s}) >= D_s. w_0*V_t is idle
+    // AFTER the candidate allocation (guarded above), not total assets minus
+    // the exit value — see the function-level note for why that substitution
+    // is wrong.
+    scenarioFeasible.push({
+      scenario: s.name,
+      feasible: idleAfterAllocationBase + exitsS >= demandS,
+      shortfallBase: shortfall,
+    });
+  }
+
+  let requiredBase = floorBase;
+  if (netDemand > requiredBase) requiredBase = netDemand;
+  if (stressShortfall > requiredBase) requiredBase = stressShortfall;
+
+  return {
+    requiredBase,
+    floorBase,
+    netDemandQuantileBase: netDemand,
+    stressShortfallBase: stressShortfall,
+    scenarioFeasible,
+  };
+}
