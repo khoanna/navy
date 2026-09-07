@@ -5,6 +5,23 @@ const WAD = 10n ** 18n;
 const WEI_PER_ETH = 10n ** 18n;
 
 /**
+ * Base has posted L2 transaction data via EIP-4844 blobs since the Ecotone
+ * upgrade, not via L1 calldata - so the L1 data term below is priced off
+ * `gas.l1BlobBaseFeeWei`, never `gas.l1BaseFeeWei`. `l1BaseFeeWei` stays on
+ * `GasObservation` (kept for a future non-blob or fallback consumer) but
+ * this cost model does not read it - that omission is intentional, not an
+ * oversight; see the FINDING A note this was fixed against.
+ *
+ * BLOB_GAS_PER_BYTE approximates BLOB_GAS_PER_BLOB (131,072 = 2^17) divided
+ * by the usable bytes in one blob (4096 field elements * 31 usable
+ * bytes/element = 126,976), which is ~1.03 - rounded down to 1 for integer
+ * bigint math. That is a ~3% conservative-but-negligible undercount, and
+ * immaterial next to the bps-of-notional terms (impact, slippageMev), which
+ * dominate C_move on this chain.
+ */
+const BLOB_GAS_PER_BYTE = 1n;
+
+/**
  * §9.1 - C_move has exactly these eleven components, in the paper's own
  * order. Kept as a single source of truth so a caller can walk `terms` in
  * the order the formula lists them and see which component dominated.
@@ -48,8 +65,10 @@ function weiToUsdcBase(wei: bigint, ethUsdE8: bigint, usdcUsdE8: bigint): bigint
  * §9.1 - the eleven-term movement cost, computed entirely from `input.gas`
  * (the decision origin's own gas/oracle observation) and the proposed
  * `moves`. Both the L2 execution term and the L1 data-availability term are
- * derived from live fee observations - Base posts calldata to L1, so the
- * L1 term is real cost on this chain, not a rounding nicety (constraint 3).
+ * derived from live fee observations - Base posts data to L1 via EIP-4844
+ * blobs (see BLOB_GAS_PER_BYTE above), so the L1 term is a real, distinct
+ * cost on this chain, not a rounding nicety (constraint 3) - just a much
+ * smaller one post-Ecotone than the pre-blob calldata model implied.
  */
 export function movementCostBase(
   input: DecisionInput,
@@ -65,11 +84,16 @@ export function movementCostBase(
   const harvestCount = BigInt(moves.filter((m) => m.kind === 'harvest').length);
 
   const l2Wei = n * p.gasPerAction * gas.l2BaseFeeWei;
-  // Base posts transaction calldata to L1 for data availability; ~16 gas per
-  // non-zero byte is the standard (pre-EIP-4844-blob) calldata cost model,
-  // applied to L1's own base fee - this is a genuine second fee market, not
-  // a scaled-up copy of the L2 term.
-  const l1Wei = n * p.l1BytesPerAction * 16n * gas.l1BaseFeeWei;
+  // Data-availability cost, priced via the blob base fee (see
+  // BLOB_GAS_PER_BYTE above) - a genuine second fee market on Base, not a
+  // scaled-up copy of the L2 term. `p.l1BytesPerAction` should be sized to
+  // one `executeAction` call (contract/src/NavyVaultSRCLA.sol): a 4-byte
+  // selector + 7 x 32-byte fixed args (planId, actionIndex, kind, adapter,
+  // amount, minOut, dataHash) + a dynamic bytes32[] proof (32-byte offset +
+  // 32-byte length + up to ~3 x 32-byte siblings for the <=8-leaf plans the
+  // <=3-market universe produces) = 4 + 224 + 64 + 96 = 388 bytes, not the
+  // multi-KB a whole plan submission would carry.
+  const l1Wei = n * p.l1BytesPerAction * BLOB_GAS_PER_BYTE * gas.l1BlobBaseFeeWei;
   const exitWei = divestCount * p.gasPerAction * gas.l2BaseFeeWei;
   const entryWei = deployCount * p.gasPerAction * gas.l2BaseFeeWei;
   const claimWei = harvestCount * p.gasPerAction * gas.l2BaseFeeWei;

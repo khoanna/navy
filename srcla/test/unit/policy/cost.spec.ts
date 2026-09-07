@@ -27,8 +27,20 @@ function input(markets: MarketObservation[], lastActionSeconds: number | null = 
     markets, dependencyGroups: [], withdrawals: [],
     gas: {
       l2BaseFeeWei: 5_000_000n,          // 0.005 gwei, typical Base
-      l1BaseFeeWei: 8_000_000_000n,      // 8 gwei on L1
-      l1BlobBaseFeeWei: 1n,
+      l1BaseFeeWei: 8_000_000_000n,      // 8 gwei on L1 - NOT read by cost.ts
+                                          // post-blob-migration fix; kept
+                                          // here only because GasObservation
+                                          // still carries the field.
+      l1BlobBaseFeeWei: 10_000_000n,     // ~0.01 gwei-equivalent; matches
+                                          // the order of magnitude measured
+                                          // on a pinned Base fork
+                                          // (10,141,036 wei - SRCLA-REPORT.md
+                                          // §5). NOT the EIP-4844 protocol
+                                          // floor of 1 wei, which would
+                                          // collapse this term to zero and
+                                          // violate "L1 data cost must be
+                                          // non-zero" (task-9-brief.md
+                                          // constraint 3).
       ethUsdE8: 350_000_000_000n,        // $3,500
       usdcUsdE8: 100_000_000n,           // $1.00
     },
@@ -56,7 +68,10 @@ const PARAMS = {
   failureRateBps: 50,
   bufferBps: 100,
   gasPerAction: 250_000n,
-  l1BytesPerAction: 2_000n,
+  // Sized to one `executeAction` call (see cost.ts's derivation comment),
+  // not a whole plan submission - 2,000 was far too high (task-9-brief.md
+  // FINDING A) and is what made the old calldata-priced L1 term dominate.
+  l1BytesPerAction: 400n,
 };
 
 describe('movementCostBase', () => {
@@ -101,6 +116,51 @@ describe('movementCostBase', () => {
     const small = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q, kind: 'deploy' }], PARAMS);
     const large = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q * 100n, kind: 'deploy' }], PARAMS);
     expect(large.terms['slippageMev']!).toBeGreaterThan(small.terms['slippageMev']!);
+  });
+});
+
+// FINDING B (task-9-brief.md addendum) - a durable anchor pinning total
+// pure-execution cost to the empirical order of magnitude measured on a
+// live Base fork. Without this, a mis-scaled gas/data term (e.g. the
+// pre-EIP-4844 calldata model this replaced, which overstated execution
+// cost ~259x) passes every structural test above while quietly changing
+// which rebalances the gate lets through.
+//
+// Only the seven directly gas-derived terms are anchored - l2, l1Data,
+// exit, entry, claim, approveReset, swap. `impact` and `slippageMev` are
+// bps-of-notional modelling assumptions, not measured gas, and are
+// deliberately excluded (they would swamp the bound at any real notional
+// regardless of whether the gas model is correct). `failure` and `buffer`
+// are excluded too - they are haircuts multiplicatively derived FROM the
+// seven gas terms, not independent measurements, so anchoring the raw
+// seven is the more direct test of the gas model itself.
+describe('movementCostBase - pure-execution cost anchor', () => {
+  const PURE_EXECUTION_TERMS = ['l2', 'l1Data', 'exit', 'entry', 'claim', 'approveReset', 'swap'] as const;
+
+  function pureExecutionTotal(terms: Record<string, bigint>): bigint {
+    return PURE_EXECUTION_TERMS.reduce((s, k) => s + terms[k]!, 0n);
+  }
+
+  it('anchors a three-action rebalance to the measured Base order of magnitude (< $0.10, > $0)', () => {
+    // SRCLA-REPORT.md §1 finding 7 / §5: a full three-VENUE (six-action:
+    // three withdraws + three deposits) rebalance on a pinned Base fork
+    // measured ~$0.0105 total. This fixture is half that shape - one
+    // divest + two deploys, three actions - under this file's shared
+    // "realistic Base" gas fixture (0.005 gwei L2, ~0.01 gwei-equivalent
+    // blob fee, $3,500 ETH). $0.10 leaves an order of magnitude of
+    // headroom above the measured figure while still catching a
+    // several-hundred-x scaling defect.
+    const i = input([market('a'), market('b'), market('c')]);
+    const moves = [
+      { adapter: '0xa', amountBase: Q, kind: 'divest' as const },
+      { adapter: '0xb', amountBase: Q, kind: 'deploy' as const },
+      { adapter: '0xc', amountBase: Q, kind: 'deploy' as const },
+    ];
+    const { terms } = movementCostBase(i, moves, PARAMS);
+    const total = pureExecutionTotal(terms);
+
+    expect(total).toBeGreaterThan(0n);
+    expect(total).toBeLessThan(100_000n); // $0.10 in USDC base units (6dp)
   });
 });
 
