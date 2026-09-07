@@ -188,6 +188,12 @@ export function buildPlan(
   if (opts.snapshotHash === ethers.ZeroHash) {
     throw new Error('snapshotHash must be non-zero: NavyVaultSRCLA.submitPlan reverts InvalidPlan on a zero snapshot hash');
   }
+  if (decisionHash === ethers.ZeroHash) {
+    throw new Error('decisionHash must be non-zero: NavyVaultSRCLA.submitPlan reverts InvalidPlan on a zero decision hash');
+  }
+  if (opts.expirySeconds <= 0) {
+    throw new Error('expirySeconds must be positive: submitPlan reverts InvalidPlan when expiresAt <= createdAt');
+  }
 
   const divests: ActionDraft[] = [];
   const deploys: ActionDraft[] = [];
@@ -208,8 +214,22 @@ export function buildPlan(
   if (ordered.length === 0) return null;
 
   const planId = BigInt(decisionHash) & ((1n << 255n) - 1n);
+  if (planId === 0n) {
+    // Astronomically unlikely (requires the low 255 bits of decisionHash to
+    // be all zero) but one line to guard, versus an unexplained on-chain
+    // InvalidPlan revert if it ever happened.
+    throw new Error('planId derived from decisionHash is zero: submitPlan reverts InvalidPlan on a zero plan id');
+  }
   const createdAt = BigInt(input.origin.timestampSeconds);
   const turnover = ordered.reduce((sum, a) => sum + a.amountBase, 0n);
+  const maxRecognizedLoss = (turnover * BigInt(opts.maxLossBps)) / 10_000n;
+  const minFinalAssets = input.vault.totalAssetsBase - maxRecognizedLoss;
+  if (minFinalAssets < 0n) {
+    throw new Error(
+      `minFinalAssets would be negative (totalAssetsBase=${input.vault.totalAssetsBase} < maxRecognizedLoss=${maxRecognizedLoss}): ` +
+        'turnover is too large relative to vault assets for maxLossBps'
+    );
+  }
 
   const header: PlanDraft['header'] = {
     planId,
@@ -223,8 +243,8 @@ export function buildPlan(
     configurationDigest: input.vault.configurationDigest,
     reserve: reserveBase,
     // Worst case the plan may end at: current assets less the allowed loss.
-    minFinalAssets: input.vault.totalAssetsBase - (turnover * BigInt(opts.maxLossBps)) / 10_000n,
-    maxRecognizedLoss: (turnover * BigInt(opts.maxLossBps)) / 10_000n,
+    minFinalAssets,
+    maxRecognizedLoss,
     turnoverLimit: opts.turnoverLimitBase,
   };
 
