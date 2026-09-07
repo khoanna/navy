@@ -11,13 +11,22 @@
  *    cancelled first, and the plan stopping on the first failed action —
  *    all exercised via an injected mock IPlanExecutor so nothing here opens
  *    a network connection.
+ *  - Task 15 review, Finding 1: the per-action loop now routes through
+ *    runSubmissionLoop's §10.3 discipline. The "submission loop wiring"
+ *    describe block below proves each stage (verifyChain, simulate, submit,
+ *    reconcile) actually gates later actions, and that the injected
+ *    executionLock is acquired/released around the whole call — asserting
+ *    directly on that mock, not just on the returned KeeperExecutionResult.
  */
 import { ethers } from 'ethers';
 import { jest } from '@jest/globals';
-import { KeeperExecutor } from '../../../src/execution/keeper-executor.js';
+import { KeeperExecutor, type KeeperExecutionLock } from '../../../src/execution/keeper-executor.js';
 import { ActionKindCode, type ExecutionResult, type IPlanExecutor } from '../../../src/execution/executor.js';
 import { ExecutionBlockedError } from '../../../src/runtime/decision-driver.js';
 import type { PlanDraft } from '../../../src/policy/types.js';
+
+/** Matches draft()'s header.configurationDigest default below, so the wired-in verifyChain step (which compares live vs. plan configurationDigest) passes by default in tests that don't care about it. */
+const DEFAULT_CONFIG_DIGEST = '0x' + 'cd'.repeat(32);
 
 const ALLOWED_GUARD = { placeholderPricesInUse: false, placeholderPriceFields: [] };
 const BLOCKED_GUARD = { placeholderPricesInUse: true, placeholderPriceFields: ['ethUsdE8'] };
@@ -61,10 +70,20 @@ function draft(over: Partial<PlanDraft['header']> = {}): PlanDraft {
   };
 }
 
+/** A working, non-instrumented executionLock for tests that don't care about lock behavior — see mockExecutionLock() below for one that records calls. */
+function workingLock(): KeeperExecutionLock {
+  return {
+    acquireLock: async () => true,
+    persistIntent: async () => {},
+    releaseLock: async () => {},
+  };
+}
+
 /** Builds a keeper against no real network — the JsonRpcProvider is lazy and never connects unless a preflight/mocked-executor path reaches an RPC call. */
 function keeper(
   pricingGuard: { placeholderPricesInUse: boolean; placeholderPriceFields: string[] } = ALLOWED_GUARD,
-  executorOverride?: IPlanExecutor
+  executorOverride?: IPlanExecutor,
+  executionLock: KeeperExecutionLock = workingLock()
 ): KeeperExecutor {
   return new KeeperExecutor(
     {
@@ -73,6 +92,7 @@ function keeper(
       rpcUrl: 'http://127.0.0.1:8545',
       chainId: 8453,
       pricingGuard,
+      executionLock,
     },
     executorOverride
   );
@@ -85,16 +105,53 @@ function fail(error: string): ExecutionResult {
   return { success: false, error };
 }
 
-/** A mock IPlanExecutor recording calls, for asserting orchestration order. */
+/**
+ * A mock KeeperExecutionLock recording every call (with its planId/index
+ * arguments) so a test can assert directly on acquire/persist/release —
+ * Task 15 review, Finding 1's "assert on the injected deps" requirement.
+ */
+function mockExecutionLock() {
+  const calls: string[] = [];
+  const lock: KeeperExecutionLock = {
+    acquireLock: jest.fn<(planId: string) => Promise<boolean>>().mockImplementation(async (planId) => {
+      calls.push(`lock:${planId}`);
+      return true;
+    }),
+    persistIntent: jest.fn<(planId: string, index: number) => Promise<void>>().mockImplementation(async (planId, index) => {
+      calls.push(`persist:${planId}:${index}`);
+    }),
+    releaseLock: jest.fn<(planId: string) => Promise<void>>().mockImplementation(async (planId) => {
+      calls.push(`unlock:${planId}`);
+    }),
+  };
+  return { lock, calls };
+}
+
+/**
+ * A mock IPlanExecutor recording calls, for asserting orchestration order.
+ * `nextActionIndex` advances only when executeNextActionWithProof actually
+ * reports success, mirroring the vault's real plan cursor — this is what
+ * lets the wired-in simulate/reconcile steps (which read getPlanState) tell
+ * a real advance from a receipt that merely claims one.
+ */
 function mockExecutor(
   overrides: Partial<{
     activePlanId: string;
+    configurationDigest: string;
     cancelPlan: () => Promise<ExecutionResult>;
     submitPlan: () => Promise<ExecutionResult>;
     executeNextActionWithProof: (index: number) => Promise<ExecutionResult>;
+    getPlanState: () => Promise<{
+      activePlanId: string;
+      merkleRoot: string;
+      nextActionIndex: bigint;
+      actionCount: bigint;
+      expiresAt: bigint;
+    }>;
   }> = {}
 ) {
   const calls: string[] = [];
+  let nextActionIndex = 0n;
   const executor: IPlanExecutor = {
     getActivePlanId: jest.fn<() => Promise<string>>().mockImplementation(async () => {
       calls.push('getActivePlanId');
@@ -112,11 +169,15 @@ function mockExecutor(
       .fn<(proof: string[], action: { index: number }) => Promise<ExecutionResult>>()
       .mockImplementation(async (_proof, action) => {
         calls.push(`execute:${action.index}`);
-        return overrides.executeNextActionWithProof
-          ? overrides.executeNextActionWithProof(action.index)
+        const result = overrides.executeNextActionWithProof
+          ? await overrides.executeNextActionWithProof(action.index)
           : ok(`0xaction${action.index}`);
+        if (result.success) nextActionIndex = BigInt(action.index) + 1n;
+        return result;
       }),
-    getConfigurationDigest: jest.fn<() => Promise<string>>().mockResolvedValue(ethers.ZeroHash),
+    getConfigurationDigest: jest
+      .fn<() => Promise<string>>()
+      .mockImplementation(async () => overrides.configurationDigest ?? DEFAULT_CONFIG_DIGEST),
     harvest: jest
       .fn<
         (
@@ -132,19 +193,25 @@ function mockExecutor(
     emergencyExit: jest.fn<(adapter: string) => Promise<ExecutionResult>>().mockResolvedValue(ok('0xemergency')),
     hasAllocatorRole: jest.fn<(address: string) => Promise<boolean>>().mockResolvedValue(true),
     hasAdminRole: jest.fn<(address: string) => Promise<boolean>>().mockResolvedValue(true),
-    getPlanState: jest.fn<() => Promise<{
-      activePlanId: string;
-      merkleRoot: string;
-      nextActionIndex: bigint;
-      actionCount: bigint;
-      expiresAt: bigint;
-    }>>().mockResolvedValue({
-      activePlanId: ethers.ZeroHash,
-      merkleRoot: ethers.ZeroHash,
-      nextActionIndex: 0n,
-      actionCount: 0n,
-      expiresAt: 0n,
-    }),
+    getPlanState: jest
+      .fn<() => Promise<{
+        activePlanId: string;
+        merkleRoot: string;
+        nextActionIndex: bigint;
+        actionCount: bigint;
+        expiresAt: bigint;
+      }>>()
+      .mockImplementation(async () =>
+        overrides.getPlanState
+          ? overrides.getPlanState()
+          : {
+              activePlanId: ethers.ZeroHash,
+              merkleRoot: ethers.ZeroHash,
+              nextActionIndex,
+              actionCount: 0n,
+              expiresAt: 0n,
+            }
+      ),
   };
   return { executor, calls };
 }
@@ -356,6 +423,131 @@ describe('KeeperExecutor.executePlanDraft', () => {
       const failure = await keeper(ALLOWED_GUARD, failExecutor).executePlanDraft(draft());
       expect(failure.planId).toBe('0x2a');
     });
+  });
+});
+
+/** A 2-action draft, for tests that need to prove a later action was never attempted. */
+function twoActionDraft(): PlanDraft {
+  const d = draft({ actionCount: 2n });
+  d.actions = [
+    { ...d.actions[0]!, index: 0 },
+    { ...d.actions[0]!, index: 1 },
+  ];
+  return d;
+}
+
+describe('KeeperExecutor.executePlanDraft — §10.3 submission loop wiring (Task 15 review, Finding 1)', () => {
+  it('acquires the lock once, persists intent once per action, and releases it once on a successful plan', async () => {
+    const { executor } = mockExecutor();
+    const { lock } = mockExecutionLock();
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(true);
+    expect(lock.acquireLock).toHaveBeenCalledTimes(1);
+    expect(lock.acquireLock).toHaveBeenCalledWith('0x2a');
+    expect(lock.persistIntent).toHaveBeenCalledTimes(2);
+    expect(lock.persistIntent).toHaveBeenNthCalledWith(1, '0x2a', 0);
+    expect(lock.persistIntent).toHaveBeenNthCalledWith(2, '0x2a', 1);
+    expect(lock.releaseLock).toHaveBeenCalledTimes(1);
+    expect(lock.releaseLock).toHaveBeenCalledWith('0x2a');
+  });
+
+  it('releases the lock and never attempts the second action when a submitted action fails', async () => {
+    const { executor, calls } = mockExecutor({
+      executeNextActionWithProof: async (index) => (index === 0 ? fail('divest reverted') : ok('0xnever')),
+    });
+    const { lock } = mockExecutionLock();
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(false);
+    // The real proof the plan stopped: action 1's executor call never
+    // happened -- not merely that the summary says "failed".
+    expect(calls).not.toContain('execute:1');
+    expect(lock.persistIntent).toHaveBeenCalledTimes(1);
+    expect(lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lock and never submits any action when verifyChain finds a stale configuration digest', async () => {
+    const { executor, calls } = mockExecutor({ configurationDigest: '0x' + 'ff'.repeat(32) });
+    const { lock } = mockExecutionLock();
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/configuration digest/i);
+    // verifyChain runs before submit for action 0 -- this proves the loop
+    // gates submission, not just that the overall result reports failure.
+    expect(calls).not.toContain('execute:0');
+    expect(lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lock and never submits any action when simulate finds the plan cursor already past this action', async () => {
+    const { executor, calls } = mockExecutor({
+      getPlanState: async () => ({
+        activePlanId: ethers.ZeroHash,
+        merkleRoot: ethers.ZeroHash,
+        nextActionIndex: 1n, // action 0 is no longer the pending one
+        actionCount: 0n,
+        expiresAt: 0n,
+      }),
+    });
+    const { lock } = mockExecutionLock();
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/pending plan state/i);
+    expect(calls).not.toContain('execute:0');
+    expect(lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lock, halts the plan, and never attempts the second action when reconcile finds the receipt did not move the chain', async () => {
+    // executeNextActionWithProof reports success for action 0, but the very
+    // next plan-state read (reconcile's) still shows nextActionIndex 0 --
+    // exactly the receipt-vs-chain-state divergence §10.3's reconcile step
+    // exists to catch. Isolated from simulate's own (overlapping)
+    // pending-state check by call order: the 1st getPlanState call is
+    // simulate(0) (must see 0, matching reality), the 2nd is reconcile(0)
+    // (pinned to a stale 0, the injected divergence), and any call after
+    // that reports the true state (1) -- so if reconcile's stop is the only
+    // thing keeping this test red, a version of executePlanDraft that
+    // dropped reconcile's check would let action 1 run to completion
+    // (simulate(1) and reconcile(1) both see the true, advanced state) and
+    // the whole plan would report success.
+    let getPlanStateCalls = 0;
+    const { executor, calls } = mockExecutor({
+      getPlanState: async () => {
+        getPlanStateCalls++;
+        const nextActionIndex = getPlanStateCalls <= 2 ? 0n : 1n;
+        return { activePlanId: ethers.ZeroHash, merkleRoot: ethers.ZeroHash, nextActionIndex, actionCount: 0n, expiresAt: 0n };
+      },
+    });
+    const { lock } = mockExecutionLock();
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/did not advance/i);
+    expect(calls).toEqual(['getActivePlanId', 'submitPlan', 'execute:0']);
+    expect(calls).not.toContain('execute:1');
+    expect(lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never persists, submits, or calls releaseLock when the lock could not be acquired', async () => {
+    const { executor, calls } = mockExecutor();
+    const lock: KeeperExecutionLock = {
+      acquireLock: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      persistIntent: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      releaseLock: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    };
+    const r = await keeper(ALLOWED_GUARD, executor, lock).executePlanDraft(twoActionDraft());
+
+    expect(r.success).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/lock/i);
+    expect(calls).not.toContain('execute:0');
+    // acquireLock returning false is the one case runSubmissionLoop returns
+    // before ever entering its try/finally (see submission-loop.spec.ts's
+    // own "refuses to start when the lock is held" test) -- there is
+    // nothing to release, so releaseLock correctly is NOT called here.
+    expect(lock.persistIntent).not.toHaveBeenCalled();
+    expect(lock.releaseLock).not.toHaveBeenCalled();
   });
 });
 

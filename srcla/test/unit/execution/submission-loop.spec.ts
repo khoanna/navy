@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { runSubmissionLoop } from '../../../src/execution/submission-loop.js';
 import type { PlanDraft } from '../../../src/policy/types.js';
 
@@ -16,16 +17,26 @@ function draft(n: number): PlanDraft {
   };
 }
 
+/**
+ * Every dependency is a jest.fn wrapping its default behavior, so a test can
+ * inspect not just call ORDER (via the shared `calls` log) but the exact
+ * planId/index ARGUMENTS each dependency actually received, and how many
+ * times it was called — Task 15 review Findings 2 and 3: a mock that only
+ * records "persist happened" without recording what it was called with
+ * would pass even for a hardcoded, swapped, or dropped planId/index, and
+ * without a call-count assertion a duplicated persist or a double release
+ * is undetectable.
+ */
 function deps(over: Partial<Parameters<typeof runSubmissionLoop>[1]> = {}) {
   const calls: string[] = [];
   const base = {
-    acquireLock: async () => { calls.push('lock'); return true; },
-    persistIntent: async (_p: string, i: number) => { calls.push(`persist:${i}`); },
-    verifyChain: async () => { calls.push('verify'); return { ok: true as const }; },
-    simulate: async (_p: string, i: number) => { calls.push(`sim:${i}`); return { ok: true as const }; },
-    submit: async (_p: string, i: number) => { calls.push(`submit:${i}`); return { ok: true as const, txHash: `0x${i}` }; },
-    reconcile: async (_p: string, i: number) => { calls.push(`recon:${i}`); return { ok: true as const }; },
-    releaseLock: async () => { calls.push('unlock'); },
+    acquireLock: jest.fn(async (_planId: string) => { calls.push('lock'); return true; }),
+    persistIntent: jest.fn(async (_planId: string, i: number) => { calls.push(`persist:${i}`); }),
+    verifyChain: jest.fn(async () => { calls.push('verify'); return { ok: true as const }; }),
+    simulate: jest.fn(async (_planId: string, i: number) => { calls.push(`sim:${i}`); return { ok: true as const }; }),
+    submit: jest.fn(async (_planId: string, i: number) => { calls.push(`submit:${i}`); return { ok: true as const, txHash: `0x${i}` }; }),
+    reconcile: jest.fn(async (_planId: string, i: number) => { calls.push(`recon:${i}`); return { ok: true as const }; }),
+    releaseLock: jest.fn(async (_planId: string) => { calls.push('unlock'); }),
     ...over,
   };
   return { deps: base, calls };
@@ -123,5 +134,54 @@ describe('runSubmissionLoop', () => {
     // And the exception must have stopped the loop before it reached the
     // never-called submit/reconcile steps for action 0.
     expect(calls).not.toContain('submit:0');
+  });
+
+  // Task 15 review, Finding 2: the fixtures above only proved ordering —
+  // every mock ignored its planId/index arguments, so a hardcoded, swapped,
+  // or dropped planId or index would have passed all of them.
+  it('passes the plan\'s planId and each action\'s index to persistIntent, simulate, submit, and reconcile', async () => {
+    const { deps: d } = deps();
+    await runSubmissionLoop(draft(2), d);
+
+    expect(d.acquireLock).toHaveBeenCalledWith('0x2a');
+    expect(d.releaseLock).toHaveBeenCalledWith('0x2a');
+    // verifyChain takes no arguments at all -- confirms nothing is silently
+    // threading a planId/index through it that the type doesn't allow.
+    expect(d.verifyChain).toHaveBeenCalledWith();
+
+    expect(d.persistIntent).toHaveBeenNthCalledWith(1, '0x2a', 0);
+    expect(d.persistIntent).toHaveBeenNthCalledWith(2, '0x2a', 1);
+    expect(d.simulate).toHaveBeenNthCalledWith(1, '0x2a', 0);
+    expect(d.simulate).toHaveBeenNthCalledWith(2, '0x2a', 1);
+    expect(d.submit).toHaveBeenNthCalledWith(1, '0x2a', 0);
+    expect(d.submit).toHaveBeenNthCalledWith(2, '0x2a', 1);
+    expect(d.reconcile).toHaveBeenNthCalledWith(1, '0x2a', 0);
+    expect(d.reconcile).toHaveBeenNthCalledWith(2, '0x2a', 1);
+  });
+
+  // Task 15 review, Finding 3: no fixture asserted exact call counts for
+  // persistIntent/releaseLock, so a duplicated persist or a double release
+  // was undetectable.
+  it('calls persistIntent exactly once per action and releaseLock exactly once, on a full successful run', async () => {
+    const { deps: d } = deps();
+    await runSubmissionLoop(draft(3), d);
+    expect(d.persistIntent).toHaveBeenCalledTimes(3);
+    expect(d.releaseLock).toHaveBeenCalledTimes(1);
+    expect(d.acquireLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls persistIntent only for attempted actions, and releaseLock exactly once, when the plan stops early', async () => {
+    const { deps: d } = deps({
+      submit: jest.fn(async (_p: string, i: number) =>
+        i === 1 ? { ok: false as const, error: 'revert' } : { ok: true as const, txHash: `0x${i}` }
+      ),
+    });
+    await runSubmissionLoop(draft(3), d);
+    // Actions 0 and 1 were attempted (persisted before their submit ran);
+    // action 2 was never reached, so persistIntent must not have run a
+    // third time, and releaseLock must still have run exactly once (not
+    // zero, not twice).
+    expect(d.persistIntent).toHaveBeenCalledTimes(2);
+    expect(d.releaseLock).toHaveBeenCalledTimes(1);
   });
 });

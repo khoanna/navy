@@ -7,7 +7,7 @@ import {
   getSelectedMethod,
   type CalibrationConfig,
 } from '../forecast/calibration.js';
-import { KeeperExecutor, createKeeperExecutor } from '../execution/keeper-executor.js';
+import { KeeperExecutor, createKeeperExecutor, type KeeperExecutionLock } from '../execution/keeper-executor.js';
 import { assertExecutionAllowed, ExecutionBlockedError, type DecisionDriver, type PricingGuardStatus } from './decision-driver.js';
 
 export interface SchedulerConfig {
@@ -38,6 +38,16 @@ export interface SchedulerConfig {
    * any executor while placeholderPricesInUse is true.
    */
   pricingGuard: PricingGuardStatus;
+  /**
+   * Task 15 review, Finding 1: threaded straight through to
+   * createKeeperExecutor / KeeperExecutorConfig.executionLock. Required
+   * (not defaulted) for the same reason as pricingGuard — this package has
+   * no database, so exactly one composition root decides what durable
+   * lock/persist/release implementation backs live execution (or
+   * consciously supplies UNCONFIGURED_EXECUTION_LOCK when execution is
+   * disabled).
+   */
+  executionLock: KeeperExecutionLock;
 }
 
 /**
@@ -97,7 +107,7 @@ export class Scheduler {
     // Initialize keeper executor if execution is enabled
     if (this.config.executionEnabled !== false) {
       try {
-        this.keeperExecutor = createKeeperExecutor(this.config.pricingGuard);
+        this.keeperExecutor = createKeeperExecutor(this.config.pricingGuard, this.config.executionLock);
         console.log(`[Scheduler] Keeper executor initialized for ${this.keeperExecutor.getAddress()}`);
 
         // Check keeper permissions

@@ -35,6 +35,15 @@ const baseConfig: Omit<SchedulerConfig, 'pricingGuard'> = {
   artifactHash: 'test-artifact',
   chainId: 8453,
   executionEnabled: false,
+  // executionEnabled: false above means Scheduler.start() never constructs
+  // a KeeperExecutor in these tests (see the "no keeper executor
+  // configured" assertions below) -- this lock is never invoked, it exists
+  // only to satisfy SchedulerConfig's required field.
+  executionLock: {
+    acquireLock: async () => true,
+    persistIntent: async () => {},
+    releaseLock: async () => {},
+  },
 };
 
 /** A DecisionOutput that would rebalance -- only the fields runController reads are populated. */

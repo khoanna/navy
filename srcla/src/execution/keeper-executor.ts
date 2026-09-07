@@ -18,6 +18,22 @@
  * maxRecognizedLoss/turnoverLimit to zero, which NavyVaultSRCLA.submitPlan
  * rejects with InvalidPlan — so no plan built by the old code path could
  * ever have executed.
+ *
+ * Task 15 review, Finding 1: the per-action loop inside executePlanDraft
+ * now delegates to runSubmissionLoop (src/execution/submission-loop.ts),
+ * §10.3's disciplined submit-one/reconcile/advance-or-stop orchestration.
+ * Only that loop moved — submitPlan, the stale-plan cancel and the
+ * structural preflight all stay exactly where they were. The chain-facing
+ * SubmissionDeps (verifyChain, simulate, submit, reconcile) are built here
+ * from IPlanExecutor methods that already existed (getConfigurationDigest,
+ * getPlanState, executeNextActionWithProof) — no new chain surface was
+ * added, and every one of them still goes through the same injectable
+ * `executor` field the existing tests already mock, so nothing here can
+ * reach a real network from a unit test. acquireLock/persistIntent/
+ * releaseLock have no such existing home — this package has no database —
+ * so they are a REQUIRED constructor dependency (KeeperExecutionLock,
+ * below), never defaulted to a no-op that would look like protection
+ * without providing any.
  */
 
 import { ethers } from 'ethers';
@@ -28,9 +44,11 @@ import {
   type ExecutorConfig,
   type ExecutionResult,
   type IPlanExecutor,
+  type PlanActionInput,
 } from './executor.js';
 import type { PlanDraft } from '../policy/types.js';
 import { assertExecutionAllowed, type PricingGuardStatus } from '../runtime/decision-driver.js';
+import { runSubmissionLoop, type SubmissionDeps } from './submission-loop.js';
 
 /**
  * Action decision from SRCLA controller (legacy ad-hoc shape, still used by
@@ -55,6 +73,56 @@ export interface KeeperExecutionResult {
 }
 
 /**
+ * §10.3's durable execution lock: one active executor, and intent persisted
+ * before signing. This package has no database, so these three operations
+ * cannot be implemented here — they are the caller's durable storage,
+ * supplied as a REQUIRED KeeperExecutorConfig field (see
+ * KeeperExecutorConfig.executionLock) rather than defaulted to a no-op. A
+ * silent no-op lock is worse than no lock at all: it looks like protection
+ * while providing none.
+ */
+export interface KeeperExecutionLock {
+  acquireLock: (planId: string) => Promise<boolean>;
+  persistIntent: (planId: string, index: number) => Promise<void>;
+  releaseLock: (planId: string) => Promise<void>;
+}
+
+/**
+ * A deliberately non-functional KeeperExecutionLock: every method rejects
+ * with an explicit, actionable error instead of silently succeeding.
+ * KeeperExecutorConfig.executionLock is required precisely so no caller can
+ * construct a KeeperExecutor without consciously deciding what to pass —
+ * this export exists only for a caller that has not yet wired a real
+ * durable lock (e.g. because live keeper execution is disabled) to satisfy
+ * that requirement without hand-rolling the same "fail loudly" stub. It
+ * must NEVER be wired into a path that actually calls executePlanDraft
+ * against a real chain: acquiring it will throw, not silently succeed, so
+ * doing so simply prevents execution rather than running it unprotected.
+ * Do NOT replace this with a Prisma-backed implementation here — that is a
+ * caller decision (a database is not a dependency of this package).
+ */
+export const UNCONFIGURED_EXECUTION_LOCK: KeeperExecutionLock = {
+  acquireLock: async () => {
+    throw new Error(
+      'KeeperExecutor.executionLock is not configured: a durable acquireLock implementation ' +
+        'must be supplied before executePlanDraft can run (see KeeperExecutorConfig.executionLock).'
+    );
+  },
+  persistIntent: async () => {
+    throw new Error(
+      'KeeperExecutor.executionLock is not configured: a durable persistIntent implementation ' +
+        'must be supplied before executePlanDraft can run (see KeeperExecutorConfig.executionLock).'
+    );
+  },
+  releaseLock: async () => {
+    throw new Error(
+      'KeeperExecutor.executionLock is not configured: a durable releaseLock implementation ' +
+        'must be supplied before executePlanDraft can run (see KeeperExecutorConfig.executionLock).'
+    );
+  },
+};
+
+/**
  * Keeper executor configuration
  */
 export interface KeeperExecutorConfig {
@@ -77,6 +145,14 @@ export interface KeeperExecutorConfig {
    * regardless of who calls it or what Scheduler itself already checked.
    */
   pricingGuard: PricingGuardStatus;
+  /**
+   * Task 15 review, Finding 1: required, not defaulted. See
+   * KeeperExecutionLock — this package has no database, so the caller must
+   * consciously supply acquireLock/persistIntent/releaseLock (or the
+   * exported UNCONFIGURED_EXECUTION_LOCK sentinel, which fails loudly
+   * rather than no-op'ing, when live execution is not yet enabled).
+   */
+  executionLock: KeeperExecutionLock;
 }
 
 /**
@@ -88,6 +164,7 @@ export class KeeperExecutor {
   private config: ExecutorConfig;
   private vaultAddress: string;
   private pricingGuard: PricingGuardStatus;
+  private executionLock: KeeperExecutionLock;
 
   /**
    * @param executorOverride Test-only injection point for a mocked
@@ -100,6 +177,7 @@ export class KeeperExecutor {
     this.wallet = new ethers.Wallet(config.keeperPrivateKey, provider);
     this.vaultAddress = config.vaultAddress;
     this.pricingGuard = config.pricingGuard;
+    this.executionLock = config.executionLock;
 
     // Merge executor config
     this.config = {
@@ -215,26 +293,118 @@ export class KeeperExecutor {
     }
 
     const txHashes: string[] = submit.txHash ? [submit.txHash] : [];
-    for (const a of draft.actions) {
-      const r = await this.executor.executeNextActionWithProof(a.proof, {
-        planId: draft.header.planId,
-        index: a.index,
-        kind: a.kind,
-        adapter: a.adapter,
-        amount: a.amountBase,
-        minOut: a.minOutBase,
-        dataHash: a.dataHash,
-      });
-      if (r.txHash) txHashes.push(r.txHash);
-      if (!r.success) {
-        // §9.5 — a failed action (divest in particular) stops the plan.
-        return {
-          success: false,
-          txHashes,
-          errors: [`action ${a.index} (kind=${a.kind}) failed: ${r.error}`],
-          planId: draft.planId,
-        };
-      }
+
+    const toActionInput = (a: PlanDraft['actions'][number]): PlanActionInput => ({
+      planId: draft.header.planId,
+      index: a.index,
+      kind: a.kind,
+      adapter: a.adapter,
+      amount: a.amountBase,
+      minOut: a.minOutBase,
+      dataHash: a.dataHash,
+    });
+
+    // §10.3 — the per-action submission discipline (Task 15 review, Finding
+    // 1): lock, persist intent before signing, verify chain/configuration,
+    // simulate against pending state, submit exactly one action, reconcile,
+    // then advance or stop. runSubmissionLoop (submission-loop.ts) is the
+    // pure orchestration; every effect below is wired to a method this class
+    // already had, through the same injectable `executor` the tests mock —
+    // nothing here opens a new network path.
+    const deps: SubmissionDeps = {
+      acquireLock: this.executionLock.acquireLock,
+      persistIntent: this.executionLock.persistIntent,
+      releaseLock: this.executionLock.releaseLock,
+
+      // "verifies... live configuration[...] chain identity" (§10.3.3): a
+      // real read of the vault's current configuration digest. An
+      // unreachable chain/contract surfaces as a thrown error here (caught
+      // below); a configuration that changed since this plan was decided
+      // surfaces as a digest mismatch. Both stop the plan before any
+      // signature is produced.
+      verifyChain: async () => {
+        try {
+          const digest = await this.executor.getConfigurationDigest();
+          if (digest !== draft.header.configurationDigest) {
+            return {
+              ok: false,
+              error: `configuration digest changed since decision: on-chain ${digest} != plan ${draft.header.configurationDigest}`,
+            };
+          }
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `chain/configuration read failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          };
+        }
+      },
+
+      // "simulates the next action against pending state" (§10.3.4): a real
+      // re-read of the vault's live plan cursor. If this action is no
+      // longer the next one pending on-chain — a prior partial run, a
+      // racing executor, or an already-advanced plan — this fails before
+      // signing rather than after a wasted (or worse, wrongly-ordered) tx.
+      simulate: async (_planId, index) => {
+        try {
+          const state = await this.executor.getPlanState();
+          if (state.nextActionIndex !== BigInt(index)) {
+            return {
+              ok: false,
+              error: `pending plan state has nextActionIndex ${state.nextActionIndex}, expected ${index}`,
+            };
+          }
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `pending-state read failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          };
+        }
+      },
+
+      // Exactly one action submitted per iteration — no batching. This is
+      // the only fund-moving call in the loop.
+      submit: async (_planId, index) => {
+        const action = draft.actions[index];
+        if (!action) return { ok: false, error: `no action at index ${index} in this plan` };
+        const r = await this.executor.executeNextActionWithProof(action.proof, toActionInput(action));
+        if (r.txHash) txHashes.push(r.txHash);
+        if (!r.success) return { ok: false, error: r.error ?? `action ${index} failed` };
+        return { ok: true, txHash: r.txHash ?? '' };
+      },
+
+      // "reconciles receipt, events, and balance deltas... re-reads all
+      // affected chain state" (§10.3.6-7): confirms the vault's plan cursor
+      // actually advanced past this action. A receipt that claimed success
+      // with no matching on-chain state change is exactly the divergence
+      // this step exists to catch — per the design brief, a divergence here
+      // is as fatal as a failed submission and halts the remaining plan.
+      reconcile: async (_planId, index) => {
+        try {
+          const state = await this.executor.getPlanState();
+          if (state.nextActionIndex <= BigInt(index)) {
+            return {
+              ok: false,
+              error: `plan state did not advance past action ${index}: nextActionIndex is still ${state.nextActionIndex}`,
+            };
+          }
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `reconciliation read failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          };
+        }
+      },
+    };
+
+    const loop = await runSubmissionLoop(draft, deps);
+    if (loop.errors.length > 0) {
+      // §9.5 — a failed or divergent action (a failed divest in particular)
+      // stops the plan; later actions were never submitted (see
+      // runSubmissionLoop).
+      return { success: false, txHashes, errors: loop.errors, planId: draft.planId };
     }
 
     return { success: true, txHashes, errors: [], planId: draft.planId };
@@ -388,8 +558,16 @@ export class KeeperExecutor {
  *   (Scheduler already carries this in its own SchedulerConfig) rather than
  *   re-derived here, so there is exactly one place `placeholderPricesInUse`
  *   is computed (config.ts's computePlaceholderPriceStatus).
+ * @param executionLock Task 15 review, Finding 1 / KeeperExecutorConfig
+ *   .executionLock — required, not defaulted, for the same reason as
+ *   pricingGuard: exactly one place decides what durable lock/persist/
+ *   release backs execution, and every caller must consciously supply it
+ *   (UNCONFIGURED_EXECUTION_LOCK if none is wired yet).
  */
-export function createKeeperExecutor(pricingGuard: PricingGuardStatus): KeeperExecutor {
+export function createKeeperExecutor(
+  pricingGuard: PricingGuardStatus,
+  executionLock: KeeperExecutionLock
+): KeeperExecutor {
   const privateKey = process.env.KEEPER_PRIVATE_KEY;
   if (!privateKey) {
     throw new Error('KEEPER_PRIVATE_KEY not configured');
@@ -413,5 +591,6 @@ export function createKeeperExecutor(pricingGuard: PricingGuardStatus): KeeperEx
     rpcUrl,
     chainId,
     pricingGuard,
+    executionLock,
   });
 }

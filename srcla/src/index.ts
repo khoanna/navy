@@ -3,6 +3,7 @@ import { ChainClient } from './chain/client.js';
 import { SnapshotCollector } from './collector/snapshot-collector.js';
 import { buildServer, startServer } from './http/server.js';
 import { Scheduler } from './runtime/scheduler.js';
+import { UNCONFIGURED_EXECUTION_LOCK } from './execution/keeper-executor.js';
 import { DecisionDriver, buildRawOriginFromCollector, persistDecisionOutput } from './runtime/decision-driver.js';
 import { loadBootstrapArtifact } from './policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS, type DecideOpts } from './policy/decide.js';
@@ -82,6 +83,14 @@ async function main(): Promise<void> {
       placeholderPricesInUse: config.srcla.placeholderPricesInUse,
       placeholderPriceFields: config.srcla.placeholderPriceFields,
     },
+    // Task 15 review, Finding 1: KeeperExecutor.executePlanDraft now routes
+    // its per-action loop through runSubmissionLoop's §10.3 discipline,
+    // which requires a durable execution lock this package cannot provide
+    // (no database here). UNCONFIGURED_EXECUTION_LOCK fails loudly on first
+    // use rather than silently no-op'ing, so live execution simply cannot
+    // proceed until a real lock/persist/release implementation replaces
+    // this — that wiring is intentionally deferred, not done here.
+    executionLock: UNCONFIGURED_EXECUTION_LOCK,
   }, config.vaultAddress);
 
   if (config.srcla.placeholderPricesInUse) {
