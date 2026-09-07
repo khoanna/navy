@@ -56,17 +56,32 @@ model MarketSnapshot {
 
   // Raw protocol state in native integer units (paper §10.1).
   // Compound III
-  cometSupplyBase  String?
-  cometBorrowBase  String?
+  cometSupplyBase  String?  // BigInt as string
+  cometBorrowBase  String?  // BigInt as string
   // Aave V3
-  aaveVirtualBalBase String?
-  aaveDebtBase       String?
-  aaveDeficitBase    String?
+  aaveVirtualBalBase String? // BigInt as string
+  aaveDebtBase       String? // BigInt as string
+  aaveDeficitBase    String? // BigInt as string
   aaveReserveFactorBps Int?
   // Moonwell
-  mwExchangeRate   String?
+  mwExchangeRate   String?  // BigInt as string
   // Provenance
   qualityFlags     String?
+
+  // Per-snapshot IRM parameters (paper §6.3-6.5) — the live registered
+  // rate-strategy inputs, captured alongside the state they governed, so a
+  // historical snapshot can be re-simulated with the parameters that were
+  // actually in force rather than today's DefaultConfigs. Kinked-linear
+  // shape (Compound/Moonwell) mirrors MarketObservation.irmParams in
+  // src/policy/types.ts; optimal/max utilization are Aave V3's quadratic
+  // model (src/protocols/simulation/types.ts AaveSimulatorConfig). NOT YET
+  // POPULATED — no producer wired in this task; forward provisioning only.
+  irmBaseRateWad         String? // BigInt as string
+  irmKinkRay             String? // BigInt as string
+  irmSlopeLowWad         String? // BigInt as string
+  irmSlopeHighWad        String? // BigInt as string
+  irmOptimalUtilizationRay String? // BigInt as string
+  irmMaxUtilizationRay   String? // BigInt as string
 
   // Configuration
   capBps           Int
