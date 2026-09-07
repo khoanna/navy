@@ -54,6 +54,20 @@ model MarketSnapshot {
   borrowsBase      String
   reservesBase     String
 
+  // Raw protocol state in native integer units (paper §10.1).
+  // Compound III
+  cometSupplyBase  String?
+  cometBorrowBase  String?
+  // Aave V3
+  aaveVirtualBalBase String?
+  aaveDebtBase       String?
+  aaveDeficitBase    String?
+  aaveReserveFactorBps Int?
+  // Moonwell
+  mwExchangeRate   String?
+  // Provenance
+  qualityFlags     String?
+
   // Configuration
   capBps           Int
   paused           Boolean
@@ -108,6 +122,12 @@ model ForecastLabel {
   horizonSeconds   Int
   realizedReturnE18 String  // BigInt as string
   availableAt      DateTime
+
+  // Provenance (paper §10.2) — reconstructable label lineage.
+  horizonEndsAt      DateTime?
+  regimeId           String?
+  realizedReturnWad  String?
+  realizedMinCashBase String?
 
   @@index([marketId, availableAt])
   @@index([availableAt])
@@ -232,4 +252,83 @@ model EvaluationRun {
   completedAt  DateTime?
 
   @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Decision provenance (paper §10.2) — candidates, stress rows,
+// enumeration regret, rejection reasons, and submission receipts,
+// so any decision is reconstructible from stored evidence.
+// ─────────────────────────────────────────────────────────────
+
+model CandidateAllocation {
+  id           String   @id @default(cuid())
+  decisionHash String
+  marketId     String
+  amountBase   String
+  lowerBoundWad String
+  exitableBps  Int
+  createdAt    DateTime @default(now())
+
+  @@index([decisionHash])
+}
+
+model StressCalculation {
+  id            String   @id @default(cuid())
+  decisionHash  String
+  scenario      String
+  demandBase    String
+  exitsBase     String
+  shortfallBase String
+  feasible      Boolean
+  createdAt     DateTime @default(now())
+
+  @@index([decisionHash])
+}
+
+model EnumerationResult {
+  id           String   @id @default(cuid())
+  decisionHash String   @unique
+  enumerated   Int
+  regretBps    String
+  passed       Boolean
+  createdAt    DateTime @default(now())
+}
+
+model RejectionReason {
+  id           String   @id @default(cuid())
+  decisionHash String
+  marketId     String
+  code         String
+  passed       Boolean
+  detail       String
+  createdAt    DateTime @default(now())
+
+  @@index([decisionHash])
+}
+
+model SubmissionReceipt {
+  id            String   @id @default(cuid())
+  planId        String
+  actionIndex   Int
+  txHash        String?
+  sender        String
+  nonce         Int
+  status        String
+  balanceDeltas String?
+  error         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([planId, actionIndex])
+  @@index([txHash])
+}
+
+model Incident {
+  id         String   @id @default(cuid())
+  kind       String
+  marketId   String?
+  detail     String
+  detectedAt DateTime @default(now())
+
+  @@index([kind])
 }
