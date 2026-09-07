@@ -53,6 +53,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         uint16 maxLossBps;
         AdapterState state;
         uint256 lastSyncIdleBase;
+        /// @notice Minimum share of the resulting position the adapter must be
+        /// able to return synchronously, in basis points. Zero disables the
+        /// check. Paper §6.1 as amended by P5.
+        uint16 liquidityFloorBps;
     }
 
     /// @notice Action for execution plans
@@ -162,6 +166,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     error AdapterNotEmpty();
     error AdapterCapExceeded();
     error AdapterLossExceeded();
+    error AdapterLiquidityFloorBreached();
     error DependencyGroupCapExceeded();
     error DuplicateDependencyGroupMember();
     error TooManyDependencyGroups();
@@ -338,7 +343,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             absoluteCap: type(uint256).max,
             maxLossBps: maxLossBps,
             state: AdapterState.Active,
-            lastSyncIdleBase: 0
+            lastSyncIdleBase: 0,
+            liquidityFloorBps: 0
         });
 
         _activeAdapters.push(adapter);
@@ -349,20 +355,25 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         emit AdapterRegistered(adapter, name, capBps, maxLossBps);
     }
 
-    /// @notice Configure the percentage, absolute-USDC, and per-adapter loss limits.
-    function setAdapterRisk(address adapter, uint16 capBps, uint256 absoluteCap, uint16 maxLossBps)
-        external
-        onlyRole(ADMIN_ROLE)
-    {
+    /// @notice Configure the percentage, absolute-USDC, per-adapter loss, and
+    /// structural liquidity-floor limits.
+    function setAdapterRisk(
+        address adapter,
+        uint16 capBps,
+        uint256 absoluteCap,
+        uint16 maxLossBps,
+        uint16 liquidityFloorBps
+    ) external onlyRole(ADMIN_ROLE) {
         if (!registeredAdapters[adapter]) revert AdapterNotFound();
-        if (capBps > 10_000 || maxLossBps > 10_000) revert AdapterConfigInvalid();
+        if (capBps > 10_000 || maxLossBps > 10_000 || liquidityFloorBps > 10_000) revert AdapterConfigInvalid();
 
         AdapterConfig storage config = adapters[adapter];
         config.capBps = capBps;
         config.absoluteCap = absoluteCap;
         config.maxLossBps = maxLossBps;
+        config.liquidityFloorBps = liquidityFloorBps;
 
-        emit AdapterRiskSet(adapter, capBps, absoluteCap, maxLossBps);
+        emit AdapterRiskSet(adapter, capBps, absoluteCap, maxLossBps, liquidityFloorBps);
     }
 
     /// @notice Configure a bounded, ordered dependency group.
@@ -727,6 +738,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
                     config.maxLossBps,
                     config.state,
                     config.lastSyncIdleBase,
+                    config.liquidityFloorBps,
                     IStrategyAdapter(adapter).configurationDigest()
                 )
             );
@@ -802,6 +814,15 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
 
         uint256 actualStrategyAssets = currentStrategyAssets + credited;
         _enforceExposureCaps(adapter, actualStrategyAssets, nav);
+
+        uint16 floorBps = adapters[adapter].liquidityFloorBps;
+        if (floorBps != 0) {
+            uint256 required = Math.mulDiv(actualStrategyAssets, floorBps, 10_000);
+            if (IStrategyAdapter(adapter).maxWithdrawable() < required) {
+                revert AdapterLiquidityFloorBreached();
+            }
+        }
+
         strategyAssets[adapter] = actualStrategyAssets;
     }
 

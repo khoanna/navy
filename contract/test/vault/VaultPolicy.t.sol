@@ -62,6 +62,14 @@ contract PolicyAdapter {
     uint256 public deployableAssets = type(uint256).max;
     uint256 public creditBonus;
 
+    /// @dev Once a test has explicitly pinned withdrawableAssets (via
+    /// setWithdrawable/setMaxWithdrawable), deposit() stops auto-crediting it
+    /// so the pinned value is what the vault observes immediately after
+    /// depositing — the scenario the liquidity-floor guard exists to check
+    /// (a venue that takes a deposit without returning matching exit
+    /// capacity). Tests that never pin it keep the old auto-credit behaviour.
+    bool private _withdrawablePinned;
+
     constructor(address vault_, address asset_, bytes32 configurationDigest_) {
         vault = vault_;
         asset = asset_;
@@ -75,6 +83,13 @@ contract PolicyAdapter {
 
     function setWithdrawable(uint256 amount) external {
         withdrawableAssets = amount;
+        _withdrawablePinned = true;
+    }
+
+    /// @dev Alias matching the paper-brief naming; same pinning semantics as setWithdrawable.
+    function setMaxWithdrawable(uint256 amount) external {
+        withdrawableAssets = amount;
+        _withdrawablePinned = true;
     }
 
     function setShortfallOnNextWithdraw(uint256 amount) external {
@@ -100,7 +115,9 @@ contract PolicyAdapter {
     function deposit(uint256 assets) external onlyVault returns (uint256 credited) {
         credited = assets + creditBonus;
         reportedAssets += credited;
-        withdrawableAssets += assets;
+        if (!_withdrawablePinned) {
+            withdrawableAssets += assets;
+        }
     }
 
     function withdraw(uint256 assets) external onlyVault returns (uint256 returnedAssets) {
@@ -158,6 +175,10 @@ contract VaultPolicyTest is Test {
 
     address internal allocator = address(0xA110CA7E);
     address internal alice = address(0xA11CE);
+
+    /// @dev Counter for helper-generated plan IDs, kept well clear of the
+    /// hand-picked IDs (1-30) used by the tests above.
+    uint256 private _nextHelperPlanId = 900;
 
     function setUp() public {
         usdc = new PolicyUSDC();
@@ -229,9 +250,18 @@ contract VaultPolicyTest is Test {
         vault.submitPlan(header, leaf);
     }
 
+    /// @dev Funds the vault with exactly `amount` of idle assets, then submits
+    /// and executes a one-action Deploy plan moving all of it into `adapter`.
+    /// A single-leaf tree's root IS the leaf, so the proof is empty.
+    function _executePlanWithSingleDeploy(address adapter, uint256 amount) internal {
+        _deposit(amount);
+        uint256 planId = ++_nextHelperPlanId;
+        _submitAndExecute(_action(planId, NavyVaultSRCLA.ActionKind.Deploy, adapter, amount), 0);
+    }
+
     function test_adapterAbsoluteCapRejectsDeploymentBeforeFundsMove() public {
         _deposit(1_000e6);
-        vault.setAdapterRisk(address(adapterA), 10_000, 400e6, 2_000);
+        vault.setAdapterRisk(address(adapterA), 10_000, 400e6, 2_000, 0);
 
         NavyVaultSRCLA.Action memory action = _action(1, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 401e6);
         _submit(action, 0);
@@ -246,7 +276,7 @@ contract VaultPolicyTest is Test {
 
     function test_adapterPercentageCapRejectsDeploymentBeforeFundsMove() public {
         _deposit(1_000e6);
-        vault.setAdapterRisk(address(adapterA), 40_00, type(uint256).max, 2_000);
+        vault.setAdapterRisk(address(adapterA), 40_00, type(uint256).max, 2_000, 0);
 
         NavyVaultSRCLA.Action memory action = _action(18, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 401e6);
         _submit(action, 0);
@@ -273,7 +303,7 @@ contract VaultPolicyTest is Test {
 
     function test_actualCreditedPositionCannotExceedAdapterCap() public {
         _deposit(1_000e6);
-        vault.setAdapterRisk(address(adapterA), 10_000, 400e6, 2_000);
+        vault.setAdapterRisk(address(adapterA), 10_000, 400e6, 2_000, 0);
         adapterA.setCreditBonus(1e6);
 
         NavyVaultSRCLA.Action memory action = _action(20, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 400e6);
@@ -370,7 +400,7 @@ contract VaultPolicyTest is Test {
 
     function test_configurationDigestCommitsToRiskValuesAndOrderedGroupMembership() public {
         bytes32 initialDigest = vault.currentConfigurationDigest();
-        vault.setAdapterRisk(address(adapterA), 9_000, 700e6, 1_500);
+        vault.setAdapterRisk(address(adapterA), 9_000, 700e6, 1_500, 0);
         vault.setAdminReserve(25e6);
         vault.setMaxSynchronousLossBps(250);
 
@@ -614,5 +644,50 @@ contract VaultPolicyTest is Test {
         vault.setAdminReserve(0);
         vault.setMinIdleBps(10_000);                  // 100% of assets
         assertEq(vault.requiredIdle(), assets, "bps floor must win when larger");
+    }
+
+    /// @dev Paper §6.1 as amended by P5. The vault must refuse to deploy into a
+    ///      venue that cannot demonstrate it could return the resulting position.
+    ///      A venue quoting a high rate on almost no free cash is the case this
+    ///      exists for.
+    ///
+    /// Unlike the other two tests below, this one cannot go through
+    /// `_executePlanWithSingleDeploy` wholesale: `vm.expectRevert` only
+    /// guards the literal next external call, and that helper's funding step
+    /// (mint/approve/deposit) makes several successful calls before the
+    /// execute call that is actually supposed to revert — the same reason
+    /// every other revert test in this file submits the plan first and wraps
+    /// only the final `executeNextActionWithProof` in `expectRevert`.
+    function test_deployRevertsWhenLiquidityFloorBreached() public {
+        // Require the adapter to be able to return 100% of the resulting position.
+        vault.setAdapterRisk(address(adapterA), 10_000, type(uint256).max, 50, 10_000);
+
+        // Adapter reports it can only withdraw a tenth of what we are about to deploy.
+        adapterA.setMaxWithdrawable(100e6);
+
+        _deposit(1_000e6);
+        NavyVaultSRCLA.Action memory action =
+            _action(++_nextHelperPlanId, NavyVaultSRCLA.ActionKind.Deploy, address(adapterA), 1_000e6);
+        _submit(action, 0);
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.AdapterLiquidityFloorBreached.selector);
+        vault.executeNextActionWithProof(new bytes32[](0), action);
+
+        assertEq(vault.strategyAssets(address(adapterA)), 0, "reverted deploy must not credit the position");
+    }
+
+    function test_deploySucceedsWhenLiquidityFloorSatisfied() public {
+        vault.setAdapterRisk(address(adapterA), 10_000, type(uint256).max, 50, 5_000); // 50%
+        adapterA.setMaxWithdrawable(600e6); // > 50% of 1,000e6
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        assertEq(vault.strategyAssets(address(adapterA)), 1_000e6);
+    }
+
+    function test_liquidityFloorOfZeroDisablesTheCheck() public {
+        vault.setAdapterRisk(address(adapterA), 10_000, type(uint256).max, 50, 0);
+        adapterA.setMaxWithdrawable(0);
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        assertEq(vault.strategyAssets(address(adapterA)), 1_000e6);
     }
 }

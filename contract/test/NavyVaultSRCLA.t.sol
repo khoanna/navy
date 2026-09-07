@@ -384,7 +384,7 @@ contract NavyVaultSRCLACoreTest is Test {
         bytes32 beforeDigest = vault.currentConfigurationDigest();
 
         vm.prank(admin);
-        vault.setAdapterRisk(address(adapter), 4_000, 250e6, 75);
+        vault.setAdapterRisk(address(adapter), 4_000, 250e6, 75, 0);
 
         assertTrue(beforeDigest != vault.currentConfigurationDigest(), "adapter risk must be plan-bound");
     }

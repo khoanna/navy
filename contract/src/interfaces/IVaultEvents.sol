@@ -11,7 +11,9 @@ interface IVaultEvents {
         uint8 state // 0=Active, 1=Disabled, 2=Impaired, 3=Removed
     );
 
-    event AdapterRiskSet(address indexed adapter, uint16 capBps, uint256 absoluteCap, uint16 maxLossBps);
+    event AdapterRiskSet(
+        address indexed adapter, uint16 capBps, uint256 absoluteCap, uint16 maxLossBps, uint16 liquidityFloorBps
+    );
 
     event DependencyGroupSet(bytes32 indexed groupId, uint16 capBps, uint256 absoluteCap, address[] members);
 
