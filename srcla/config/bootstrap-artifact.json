@@ -1,0 +1,15 @@
+{
+  "_provisional": "PHASE 1 BOOTSTRAP ONLY. Not calibrated. Replaced by the Phase 4 grid sweep before any registered evaluation. Do not cite results produced with this artifact.",
+  "policyVersion": 5,
+  "horizonSeconds": 604800,
+  "coverageTarget": 0.95,
+  "method": "ew-residual",
+  "methodParams": { "decay": 0.9 },
+  "residualQuantileWadByMarket": {},
+  "portfolioResidualQuantileWad": "-2000000000000000",
+  "minObservations": 30,
+  "availabilityLagSeconds": 900,
+  "noTradeBandK": 1.0,
+  "pinnedConfigDigests": {},
+  "configDigest": "bootstrap"
+}

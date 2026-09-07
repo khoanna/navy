@@ -120,6 +120,13 @@ export interface PolicyArtifact {
   configDigest: string;
   /** Paper §6.2 — market id -> pinned configuration digest at registration. */
   pinnedConfigDigests: Record<string, string>;
+  /**
+   * Present only on a provisional (not calibrated) artifact, e.g. the Phase 1
+   * bootstrap in `config/bootstrap-artifact.json`. When set, callers must
+   * treat any result produced with this artifact as non-citable. A real
+   * artifact from the Phase 4 grid sweep omits this field entirely.
+   */
+  _provisional?: string;
 }
 
 export interface AdmissionResult {
