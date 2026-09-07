@@ -51,3 +51,28 @@ export function computeSnapshotHash(snapshot: {
 }): string {
   return hashData({ ...snapshot, timestamp: snapshot.timestamp.toISOString() });
 }
+
+/**
+ * §10.2 - the decision content hash covers code commit, policy version, model
+ * artifact, configuration digest, snapshot, candidates, target, reserve, costs
+ * and reasons. The v1 helper above (`computeDecisionHash`) is retained only
+ * for reading legacy rows that were hashed with it; every new decision uses
+ * this v2 shape via `policy/decide.ts#decide`.
+ */
+export function computeDecisionHashV2(parts: {
+  codeCommit: string;
+  policyVersion: number;
+  artifactHash: string;
+  configDigest: string;
+  snapshotHash: string;
+  originSeconds: number;
+  admissionReasons: unknown;
+  lowerBounds: unknown;
+  reserve: unknown;
+  target: unknown;
+  enumeration: unknown;
+  costs: unknown;
+  reasons: unknown;
+}): string {
+  return hashData(parts);
+}
