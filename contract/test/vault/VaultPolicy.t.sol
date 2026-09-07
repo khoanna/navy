@@ -576,4 +576,43 @@ contract VaultPolicyTest is Test {
         assertEq(vault.strategyAssets(address(adapterA)), 100e6);
         assertEq(vault.strategyAssets(address(adapterB)), 100e6);
     }
+
+    /// @dev minIdleBps was dead configuration: settable, digest-covered, never read.
+    function test_requiredIdleHonoursMinIdleBps() public {
+        // The brief's test body never deposits, leaving totalAssets() == 0 and
+        // making both the pre-fix and post-fix requiredIdle() equal (0) — the
+        // vm.assume(assets > 0) guard would just skip the test rather than
+        // ever observing the fix. Deposit first so the floor has something to bind on.
+        _deposit(1_000_000e6);
+
+        // adminReserve and dynamicReserve both zero, so only the bps floor can bind.
+        vault.setAdminReserve(0);
+        vault.setMinIdleBps(500); // 5%
+
+        uint256 assets = vault.totalAssets();
+        vm.assume(assets > 0);
+
+        assertEq(
+            vault.requiredIdle(),
+            (assets * 500) / 10_000,
+            "requiredIdle must honour the percentage floor"
+        );
+    }
+
+    function test_requiredIdleTakesTheLargerOfFloorAndAdminReserve() public {
+        // Same reasoning as above: deposit first so assets > 10_000 and the
+        // comparison below is actually exercised instead of skipped.
+        _deposit(1_000_000e6);
+
+        uint256 assets = vault.totalAssets();
+        vm.assume(assets > 10_000);
+
+        vault.setMinIdleBps(100);                     // 1% of assets
+        vault.setAdminReserve(assets);                // absolute, strictly larger
+        assertEq(vault.requiredIdle(), assets, "admin reserve must win when larger");
+
+        vault.setAdminReserve(0);
+        vault.setMinIdleBps(10_000);                  // 100% of assets
+        assertEq(vault.requiredIdle(), assets, "bps floor must win when larger");
+    }
 }

@@ -900,6 +900,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     function requiredIdle() public view returns (uint256 reserve) {
         reserve = Math.max(adminReserve, dynamicReserve);
         reserve = Math.max(reserve, activePlanReserve);
+        // Paper §8.1: the administrator's percentage idle floor is
+        // non-bypassable. It was previously declared and never read.
+        reserve = Math.max(reserve, Math.mulDiv(totalAssets(), minIdleBps, 10_000));
     }
 
     function _ensureIdle(uint256 assets) internal {
