@@ -667,8 +667,48 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         }
     }
 
-    /// @notice Emergency exit all funds from an adapter
-    function emergencyExit(address adapter) external onlyRole(ADMIN_ROLE) {
+    /// @notice Emergency exit: pull an adapter's entire vault-owned position
+    ///         back to the vault, immediately and outside any plan.
+    /// @dev Paper 4's authority table grants the ALLOCATOR "divest, deploy,
+    ///      harvest, and perform adapter-to-vault emergency exits", and paper
+    ///      9.1 requires a market that becomes ineligible to invoke a bounded
+    ///      safety unwind that bypasses the economic gate. This was
+    ///      `onlyRole(ADMIN_ROLE)`, so the party that DECIDES an unwind is
+    ///      needed could not perform one: srcla's KeeperExecutor holds only
+    ///      the allocator key (paper 4: "The SRCLA runtime stores only the
+    ///      allocator private key") and calls exactly this selector
+    ///      (srcla/src/execution/executor.ts), which reverted every time.
+    ///
+    ///      Blast radius of the widening. The authority added to an allocator
+    ///      key is precisely "move an allowlisted adapter's position to the
+    ///      vault, in full, now":
+    ///        - the destination is the vault and only the vault. The adapter's
+    ///          own `withdraw` sends there and `_divest` measures the VAULT's
+    ///          balance delta, so no recipient is caller-chosen;
+    ///        - no calldata, route, token, path or amount is caller-chosen -
+    ///          the amount is the adapter's whole accounted position;
+    ///        - `_divest`'s admin-set `maxLossBps` bound still applies, so
+    ///          this is not a lever for accepting an unbounded loss;
+    ///        - idle only ever RISES, so no idle floor, reserve, exposure cap
+    ///          or dependency-group cap can be breached and no limit is
+    ///          lowered;
+    ///        - no adapter is added or admitted, no share is issued, and
+    ///          nothing reaches the caller's own balance.
+    ///      It also adds no reachable state: an allocator already reaches the
+    ///      same end state under paper 4's "execute bounded staged plans" via
+    ///      `submitPlan` + an EmergencyExit/Divest action, in a header it
+    ///      writes itself. What changes is latency and transaction count -
+    ///      which is the entire point of an incident lever. Everything in
+    ///      paper 4's Forbidden column (add adapters, lower limits, arbitrary
+    ///      calldata or recipients, transfer assets to itself) remains
+    ///      ADMIN_ROLE-gated and unreachable from here.
+    ///
+    ///      Deliberately NOT gated on `paused`: a paused vault is exactly the
+    ///      condition under which an unwind is wanted.
+    function emergencyExit(address adapter) external {
+        if (!hasRole(ALLOCATOR_ROLE, msg.sender) && !hasRole(ADMIN_ROLE, msg.sender)) {
+            revert AccessControlUnauthorizedAccount(msg.sender, ALLOCATOR_ROLE);
+        }
         if (!registeredAdapters[adapter]) revert AdapterNotFound();
 
         uint256 strategyBalance = strategyAssets[adapter];
