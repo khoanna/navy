@@ -25,11 +25,13 @@ import {
   frozenEqualWeightTarget,
 } from '../../../src/evaluation/kernel/registry.js';
 import {
+  buildDecisionInput,
   deriveCompletedLabels,
   labelsAvailableAt,
   calibrateResidualQuantiles,
   type HarnessConfig,
 } from '../../../src/evaluation/kernel/decision-input.js';
+import { createInitialState } from '../../../src/evaluation/replay/state.js';
 import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../../../src/policy/decide.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../../../src/evaluation/dataset.js';
@@ -650,5 +652,51 @@ describe('buildHindsightRates', () => {
     // Origin day 0 sees days 0..7 -> mean of 0..7 = 3.5% (integer WAD math).
     const expected = [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n].reduce((s, d) => s + (WAD * d) / 100n, 0n) / 8n;
     expect(rates.get('0:aave-usdc')).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDecisionInput: the two headroom fields are NOT the same quantity
+// ---------------------------------------------------------------------------
+
+describe('buildDecisionInput headroom fields', () => {
+  const snapshot = () => makeDataset(1).snapshots[0]!;
+  const state = () => {
+    const s = createInitialState(TIER);
+    s.strategyBalances = new Map([['aave-usdc', 2_000_000_000n]]);
+    return s;
+  };
+
+  it('reports the venue exit capacity, not the current position\'s exit', () => {
+    const input = buildDecisionInput(state(), snapshot(), [], [], harnessConfig(), {
+      timestampSeconds: null,
+      turnoverWindowBase: 0n,
+    });
+    const aave = input.markets.find((m) => m.marketId === 'aave-usdc')!;
+    const moonwell = input.markets.find((m) => m.marketId === 'moonwell-usdc')!;
+
+    // 400,000 USDC of venue cash, whatever the vault currently holds there.
+    expect(aave.maxWithdrawableBase).toBe(400_000_000_000n);
+    // And it is NOT min(position, cash): the vault holds only 2,000 USDC here,
+    // and a venue with a zero position must not report a zero exit capacity —
+    // exitableFraction(x, 0) = 0 would zero the objective for every candidate.
+    expect(aave.maxWithdrawableBase).not.toBe(aave.positionBase);
+    expect(moonwell.positionBase).toBe(0n);
+    expect(moonwell.maxWithdrawableBase).toBeGreaterThan(0n);
+  });
+
+  it('does not equate deployable headroom with exit capacity', () => {
+    const input = buildDecisionInput(state(), snapshot(), [], [], harnessConfig(), {
+      timestampSeconds: null,
+      turnoverWindowBase: 0n,
+    });
+    const aave = input.markets.find((m) => m.marketId === 'aave-usdc')!;
+
+    // Supply headroom is NOT observed, so the registered absolute cap governs.
+    // Setting it to venue cash instead would make maxDeployable == maxWithdrawable
+    // for every venue, and P4's phi could then never be anything but 1 — H7
+    // would be an ablation that removes nothing by construction.
+    expect(aave.maxDeployableBase).toBe(harnessConfig().defaultMarket.absoluteCapBase);
+    expect(aave.maxDeployableBase).not.toBe(aave.maxWithdrawableBase);
   });
 });

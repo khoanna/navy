@@ -376,8 +376,12 @@ export class EvaluationRunner {
     for (const result of srclaResults) {
       const rate = result.withdrawalSuccessRate;
       if (rate === null) {
+        // "Never measured" is a DIFFERENT fact from "a catastrophic failure
+        // was observed", and conflating them made this line redundant with
+        // the flag below — a mutation of either one still failed the gate,
+        // so neither was actually load-bearing. `withdrawalRateMeasured` is
+        // now the single thing that fails the gate for an unmeasured rate.
         withdrawalRateMeasured = false;
-        noCatastrophicFailures = false;
         continue;
       }
       if (rate < minWithdrawalRate) {

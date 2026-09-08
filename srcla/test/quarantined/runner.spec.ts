@@ -356,6 +356,25 @@ describe('Release Gates', () => {
         expect(results.releaseGates.performanceGate.passed).toBe(true);
       }
     });
+
+    it('FAILS the safety gate when the withdrawal rate was never measured', async () => {
+      const runner = new EvaluationRunner(createTestManifest());
+      const results = await runner.run(createTestDataset(), new Map(), new CoverageTracker());
+
+      // This runner attempts no redemption, so every SRCLA result reports a
+      // null (unmeasured) rate. NEW-14: the gate used to pass because the
+      // property had never been tested, on a hardcoded 1.0.
+      const srcla = results.results.filter((r) => r.policyId === 'srcla');
+      expect(srcla.length).toBeGreaterThan(0);
+      expect(srcla.every((r) => r.withdrawalSuccessRate === null)).toBe(true);
+
+      expect(results.releaseGates.safetyGate.passed).toBe(false);
+      expect(results.releaseGates.safetyGate.details).toContain('NOT MEASURED');
+      expect(results.releaseGates.overall).toBe(false);
+      // And it is the UNMEASURED rate that fails it, not a drawdown: no
+      // catastrophic failure was observed on this dataset.
+      expect(results.releaseGates.safetyGate.noCatastrophicFailures).toBe(true);
+    });
   });
 });
 
