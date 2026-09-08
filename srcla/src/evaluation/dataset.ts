@@ -4,6 +4,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { MarketSnapshot } from '../domain/snapshots.js';
 import type { WithdrawalObservation } from '../policy/types.js';
+import { REGISTERED_ERAS, assertNotSealed, type EraTag } from './eras.js';
 
 export interface TimeOrderedSnapshot {
   index: number;
@@ -192,4 +193,35 @@ export function createSyntheticDataset(
   }
 
   return { manifestId, snapshots, labels: [] };
+}
+
+/**
+ * Load exactly one registered era, THROUGH the sealing guard.
+ *
+ * `purpose` is not decoration: `assertNotSealed` puts it in the error, so a
+ * stack trace names what tried to read sealed data. Every fitting path --
+ * the grid sweep, the artifact freeze, the `k` sweep -- must come through
+ * here rather than calling `loadDataset` with hand-written dates, because a
+ * date range is a value someone can get wrong quietly and an era tag is not.
+ *
+ * `allowSealed` exists for exactly one caller: the registered evaluation
+ * itself, which is the moment the held-out data is legitimately opened. It
+ * takes the same `purpose` string so the intent is recorded at the call site.
+ */
+export async function loadEra(
+  prisma: PrismaClient,
+  tag: EraTag,
+  purpose: string,
+  opts: { allowSealed?: boolean } = {},
+): Promise<EvaluationDataset> {
+  if (opts.allowSealed !== true) assertNotSealed(tag, purpose);
+
+  const era = REGISTERED_ERAS[tag];
+  const start = new Date(era.startSeconds * 1000);
+  // Held-out B's registered end is an open sentinel; clamp to now, since no
+  // data exists past the present and a far-future bound would make an empty
+  // result look like a collection failure.
+  const end = new Date(Math.min(era.endSeconds, Math.floor(Date.now() / 1000)) * 1000);
+
+  return loadDataset(prisma, `era:${tag}`, start, end);
 }

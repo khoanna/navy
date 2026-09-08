@@ -81,6 +81,22 @@ export function loadBootstrapArtifact(): PolicyArtifact {
 }
 
 /**
+ * Load a REGISTERED (calibrated) artifact — the one `scripts/freeze-artifact.ts`
+ * writes from the grid sweep over the calibration era.
+ *
+ * It must NOT carry `_provisional`; see `parseArtifact`. Unlike the bootstrap
+ * this is not cached, because a run may legitimately load more than one
+ * registered artifact (held-out A and held-out B are separate runs against
+ * the same one, but a re-registration produces a different file).
+ */
+export function loadRegisteredArtifact(path: string): PolicyArtifact {
+  return parseArtifact(
+    JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>,
+    { requireProvisional: false },
+  );
+}
+
+/**
  * The validation half of `loadBootstrapArtifact`, split out so it can be
  * exercised against a MALFORMED artifact. While this lived inline, the file
  * it reads was the only input any test could give it, and a mutant that
@@ -92,11 +108,34 @@ export function loadBootstrapArtifact(): PolicyArtifact {
  * cited against (§7.3); a field that quietly defaults is a field the hash
  * cannot testify to.
  */
-export function parseArtifact(raw: Record<string, unknown>): PolicyArtifact {
-  const provisional = need(raw['_provisional'] as string | undefined, '_provisional');
-  if (typeof provisional !== 'string' || provisional.trim() === '') {
-    throw new Error("bootstrap-artifact.json field '_provisional' must be a non-empty string");
+export function parseArtifact(
+  raw: Record<string, unknown>,
+  opts: { requireProvisional?: boolean } = {},
+): PolicyArtifact {
+  const requireProvisional = opts.requireProvisional ?? true;
+
+  // A PROVISIONAL artifact must SAY SO, and a REGISTERED one must not.
+  //
+  // `_provisional` is what `kernel/gates.ts` reads to block the "Calibrated
+  // artifact" check, so its presence is the difference between a citable
+  // result and a non-citable one. A bootstrap that could omit the field would
+  // silently pass that gate; a registered artifact that could carry it would
+  // silently fail. Both directions are enforced.
+  const rawProvisional = raw['_provisional'] as string | undefined;
+  if (requireProvisional) {
+    const provisional = need(rawProvisional, '_provisional');
+    if (typeof provisional !== 'string' || provisional.trim() === '') {
+      throw new Error("bootstrap-artifact.json field '_provisional' must be a non-empty string");
+    }
+  } else if (rawProvisional !== undefined) {
+    throw new Error(
+      "a REGISTERED artifact must not carry '_provisional'. It is the flag §11.5's " +
+        "'Calibrated artifact' check blocks on, so an artifact produced by the grid sweep " +
+        'that still declares itself provisional would fail the gate it was built to pass. ' +
+        'Remove the field, or load this file as a bootstrap artifact.',
+    );
   }
+  const provisional = rawProvisional;
 
   const quantileMap = (field: string): Record<string, bigint> => {
     const out: Record<string, bigint> = {};
@@ -127,7 +166,7 @@ export function parseArtifact(raw: Record<string, unknown>): PolicyArtifact {
     noTradeBandK: need(raw['noTradeBandK'], 'noTradeBandK') as number,
     pinnedConfigDigests: need(raw['pinnedConfigDigests'], 'pinnedConfigDigests') as Record<string, string>,
     configDigest: need(raw['configDigest'], 'configDigest') as string,
-    _provisional: provisional,
+    ...(provisional !== undefined ? { _provisional: provisional } : {}),
   };
 
   return { ...body, artifactHash: computeArtifactHash(body) };

@@ -1,7 +1,10 @@
 import { RollingForecast } from '../../../src/forecast/rolling.js';
 import { EWResidualForecast } from '../../../src/forecast/ew-residual.js';
 import { DirectARXForecast } from '../../../src/forecast/direct-arx.js';
-import { selectBestMethod } from '../../../src/forecast/select.js';
+// select.ts held a DEAD DUPLICATE of these; calibration.ts carries the live
+// copy that runtime/scheduler.ts actually drives. Pointing here keeps the
+// coverage on the code that runs.
+import { selectBestMethod } from '../../../src/forecast/calibration.js';
 import { WAD } from '../../../src/protocols/math.js';
 
 function makeHistory(n: number, baseReturn: bigint): bigint[] {

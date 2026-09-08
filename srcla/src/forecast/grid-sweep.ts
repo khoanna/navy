@@ -1,0 +1,366 @@
+/**
+ * The registered forecast grid (paper §7.2, §7.3; amendment P1).
+ *
+ * WHAT THIS REPLACES. `src/forecast/select.ts` declared a 3x3 grid and then
+ * defeated it in four ways, each recorded as a defect in the design's gap
+ * catalogue:
+ *
+ *   F1  `HORIZON_GRID` declared 3 horizons x 3 coverages; `calibrateAllMethods`
+ *       took a single horizon and never traversed it.
+ *   F2  All nine candidates used q = 5% REGARDLESS of the coverage target, so
+ *       99% was never actually evaluated and the reported coverage was an
+ *       accident of the data rather than a target that had been solved for.
+ *   F3  The selection metrics were fabricated: `rmse = mae * 1.2`, and
+ *       `sharpness = pinballLoss = loss`, collapsing §7.3's multi-term loss
+ *       into one scalar wearing three names.
+ *   F4  Labels were next single observations, not H-period realised returns,
+ *       with no availability lag.
+ *
+ * It was also imported by nothing, and used `require()` inside an ESM module,
+ * so it would have thrown if it ever had been. It is deleted rather than
+ * repaired: two grids is how the evaluated one and the deployed one drift
+ * apart, which is the structural defect this whole phase exists to close.
+ *
+ * P1 is the substantive change. The quantile is SOLVED per venue to achieve
+ * the registered coverage target, rather than fixed at 5% and reported after
+ * the fact. The report's evidence for needing this: no candidate reached 95%
+ * (best 94.44%) while per-venue coverage was Compound 100%, Moonwell 94.87%,
+ * Aave 88.46% -- a pooled fifth percentile cannot serve a smooth series and a
+ * volatile one at once.
+ *
+ * F4 is closed elsewhere and relied on here: labels arrive as
+ * `CompletedLabel`s from `evaluation/kernel/decision-input.ts`, which derives
+ * H-period realised returns behind an availability lag.
+ *
+ * PURE: no I/O, no Date.now(), no randomness.
+ * UNITS: returns and residuals are WAD over the horizon (not annualized).
+ */
+import type { CompletedLabel } from '../policy/types.js';
+
+const WAD = 10n ** 18n;
+
+export type ForecastMethod = 'rolling' | 'ew-residual' | 'direct-arx';
+
+/** §7.2's registered horizons, in seconds. */
+export const REGISTERED_HORIZONS = [86_400, 604_800, 1_209_600] as const;
+/** §7.2's registered coverage targets. */
+export const REGISTERED_COVERAGES = [0.9, 0.95, 0.99] as const;
+
+export type RegisteredHorizon = (typeof REGISTERED_HORIZONS)[number];
+export type RegisteredCoverage = (typeof REGISTERED_COVERAGES)[number];
+
+export interface GridPoint {
+  method: ForecastMethod;
+  methodParams: Record<string, number>;
+  horizonSeconds: RegisteredHorizon;
+  coverageTarget: RegisteredCoverage;
+}
+
+/**
+ * Method parameters swept alongside the horizon and coverage.
+ *
+ * Registered here rather than passed in, because a grid whose extent depends
+ * on a caller is not a registered grid.
+ */
+export const METHOD_PARAMS: Readonly<Record<ForecastMethod, Array<Record<string, number>>>> =
+  Object.freeze({
+    // Trailing mean over the last `windowObservations` completed labels.
+    rolling: [{ windowObservations: 24 }, { windowObservations: 72 }, { windowObservations: 168 }],
+    // Exponentially weighted mean; smaller decay forgets faster.
+    'ew-residual': [{ decay: 0.9 }, { decay: 0.97 }, { decay: 0.99 }],
+    // AR(1) on the label series: mu = mean + phi * (last - mean).
+    'direct-arx': [{ phi: 0.3 }, { phi: 0.6 }, { phi: 0.9 }],
+  });
+
+/**
+ * The full registered grid: 3 methods x their parameters x 3 horizons x 3
+ * coverage targets.
+ */
+export function registeredGrid(): GridPoint[] {
+  const out: GridPoint[] = [];
+  for (const method of ['rolling', 'ew-residual', 'direct-arx'] as const) {
+    for (const methodParams of METHOD_PARAMS[method]) {
+      for (const horizonSeconds of REGISTERED_HORIZONS) {
+        for (const coverageTarget of REGISTERED_COVERAGES) {
+          out.push({ method, methodParams, horizonSeconds, coverageTarget });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Solve the residual quantile to ACHIEVE `coverageTarget` (P1).
+ *
+ * Coverage here is `P(residual >= q)`: the share of outcomes the lower bound
+ * `mu + q` actually held for. Sorting ascending and taking index
+ * `floor((1 - target) * n)` leaves `n - idx >= target * n` residuals at or
+ * above it, so the target is met on the calibration sample by construction
+ * rather than hoped for.
+ *
+ * Clamped at `<= 0`. A positive shrink would raise the lower bound above the
+ * mean forecast, which is the one direction a conservative bound must never
+ * move; `steps/forecast.ts#lowerBoundAt` refuses one for the same reason.
+ */
+export function solveQuantileForCoverage(residuals: readonly bigint[], coverageTarget: number): bigint {
+  if (residuals.length === 0) {
+    throw new Error('solveQuantileForCoverage: no residuals; a quantile cannot be invented');
+  }
+  if (coverageTarget <= 0 || coverageTarget >= 1) {
+    throw new Error(`coverageTarget must be in (0,1), got ${coverageTarget}`);
+  }
+  const sorted = [...residuals].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const idx = Math.min(sorted.length - 1, Math.floor((1 - coverageTarget) * sorted.length));
+  const q = sorted[idx]!;
+  return q > 0n ? 0n : q;
+}
+
+/** Achieved coverage of the bound `mu + q` on a residual sample. */
+export function achievedCoverage(residuals: readonly bigint[], q: bigint): number {
+  if (residuals.length === 0) return 0;
+  return residuals.filter((r) => r >= q).length / residuals.length;
+}
+
+/**
+ * One-step-ahead mean forecast for a venue's label series.
+ *
+ * `history` is that venue's completed labels in availability order; the
+ * forecast is for the next one. Every method returns a WAD horizon return.
+ */
+export function meanForecast(
+  method: ForecastMethod,
+  params: Record<string, number>,
+  history: readonly bigint[],
+): bigint {
+  if (history.length === 0) return 0n;
+
+  if (method === 'rolling') {
+    const window = Math.max(1, Math.round(params.windowObservations ?? 24));
+    const slice = history.slice(-window);
+    return slice.reduce((a, b) => a + b, 0n) / BigInt(slice.length);
+  }
+
+  if (method === 'ew-residual') {
+    const decay = params.decay ?? 0.97;
+    // Weights in integer arithmetic at WAD scale, so the sweep is
+    // deterministic across platforms rather than depending on float
+    // accumulation order.
+    let weightedSum = 0n;
+    let weightTotal = 0n;
+    for (let i = history.length - 1, age = 0; i >= 0 && age < 512; i--, age++) {
+      const w = BigInt(Math.round(Math.pow(decay, age) * 1e9));
+      if (w === 0n) break;
+      weightedSum += history[i]! * w;
+      weightTotal += w;
+    }
+    if (weightTotal === 0n) return history[history.length - 1]!;
+    return weightedSum / weightTotal;
+  }
+
+  // direct-arx: AR(1) pull of the latest observation toward the sample mean.
+  const phi = BigInt(Math.round((params.phi ?? 0.6) * 1e9));
+  const mean = history.reduce((a, b) => a + b, 0n) / BigInt(history.length);
+  const last = history[history.length - 1]!;
+  return mean + ((last - mean) * phi) / 1_000_000_000n;
+}
+
+export interface SelectionLoss {
+  /** §7.3 terms, each reported so the total is auditable. */
+  pointError: number;
+  coverageDeviation: number;
+  exceedanceShortfall: number;
+  sharpness: number;
+  downsideRate: number;
+  /** Weighted total; lower is better. */
+  total: number;
+  /** Diagnostics. */
+  observations: number;
+  achievedCoverage: number;
+}
+
+/**
+ * §7.3's weights.
+ *
+ * Registered here, in one place, rather than inlined at the summation. They
+ * are stated so a reader can see what the selection actually optimises --
+ * `select.ts` had a single scalar and three names for it.
+ */
+export const LOSS_WEIGHTS = Object.freeze({
+  pointError: 1.0,
+  /** Missing the registered coverage target is the primary failure. */
+  coverageDeviation: 10.0,
+  /** How badly the bound was breached when it was breached. */
+  exceedanceShortfall: 5.0,
+  /** A bound far below the mean is safe and useless; penalised mildly. */
+  sharpness: 0.5,
+  downsideRate: 1.0,
+});
+
+export interface FitPoint {
+  /** Per-venue solved quantiles. */
+  quantileWadByMarket: Record<string, bigint>;
+  loss: SelectionLoss;
+  /** Per-venue achieved coverage, the P1 diagnostic. */
+  coverageByMarket: Record<string, number>;
+}
+
+/**
+ * Walk the labels for one grid point, producing per-venue residuals.
+ *
+ * Strictly causal: the forecast for label `i` uses labels `0..i-1` of that
+ * venue only, in availability order. The labels themselves already carry the
+ * availability lag, so this is the second of two barriers, not the only one.
+ */
+export function residualsFor(
+  point: GridPoint,
+  labels: readonly CompletedLabel[],
+  minObservations: number,
+): Record<string, bigint[]> {
+  const byMarket = new Map<string, bigint[]>();
+  for (const l of labels) {
+    if (l.horizonSeconds !== point.horizonSeconds) continue;
+    const list = byMarket.get(l.marketId) ?? [];
+    list.push(l.realizedReturnWad);
+    byMarket.set(l.marketId, list);
+  }
+
+  const out: Record<string, bigint[]> = {};
+  for (const [marketId, series] of byMarket) {
+    const residuals: bigint[] = [];
+    for (let i = minObservations; i < series.length; i++) {
+      const mu = meanForecast(point.method, point.methodParams, series.slice(0, i));
+      residuals.push(series[i]! - mu);
+    }
+    if (residuals.length > 0) out[marketId] = residuals;
+  }
+  return out;
+}
+
+/** Fit and score one grid point on the calibration labels. */
+export function fitPoint(
+  point: GridPoint,
+  labels: readonly CompletedLabel[],
+  minObservations: number,
+): FitPoint | null {
+  const residualsByMarket = residualsFor(point, labels, minObservations);
+  const markets = Object.keys(residualsByMarket).sort();
+  if (markets.length === 0) return null;
+
+  const quantileWadByMarket: Record<string, bigint> = {};
+  const coverageByMarket: Record<string, number> = {};
+
+  let pointErrorSum = 0;
+  let exceedanceSum = 0;
+  let sharpnessSum = 0;
+  let downside = 0;
+  let n = 0;
+  let coveredTotal = 0;
+
+  for (const marketId of markets) {
+    const residuals = residualsByMarket[marketId]!;
+    // P1: solved PER VENUE. A pooled quantile cannot serve a smooth series
+    // and a volatile one simultaneously -- the report measured Compound at
+    // 100% and Aave at 88.46% under one pooled bound.
+    const q = solveQuantileForCoverage(residuals, point.coverageTarget);
+    quantileWadByMarket[marketId] = q;
+    coverageByMarket[marketId] = achievedCoverage(residuals, q);
+
+    for (const r of residuals) {
+      const rf = Number(r) / Number(WAD);
+      pointErrorSum += Math.abs(rf);
+      if (r < q) exceedanceSum += Number(q - r) / Number(WAD);
+      sharpnessSum += Number(q < 0n ? -q : q) / Number(WAD);
+      if (r < 0n) downside += 1;
+      n += 1;
+      if (r >= q) coveredTotal += 1;
+    }
+  }
+
+  if (n === 0) return null;
+
+  const coverage = coveredTotal / n;
+  const loss: SelectionLoss = {
+    pointError: pointErrorSum / n,
+    coverageDeviation: Math.abs(coverage - point.coverageTarget),
+    exceedanceShortfall: exceedanceSum / n,
+    sharpness: sharpnessSum / n,
+    downsideRate: downside / n,
+    total: 0,
+    observations: n,
+    achievedCoverage: coverage,
+  };
+  loss.total =
+    LOSS_WEIGHTS.pointError * loss.pointError +
+    LOSS_WEIGHTS.coverageDeviation * loss.coverageDeviation +
+    LOSS_WEIGHTS.exceedanceShortfall * loss.exceedanceShortfall +
+    LOSS_WEIGHTS.sharpness * loss.sharpness +
+    LOSS_WEIGHTS.downsideRate * loss.downsideRate;
+
+  return { quantileWadByMarket, loss, coverageByMarket };
+}
+
+export interface SweepRow extends FitPoint {
+  point: GridPoint;
+}
+
+/** Fit every grid point. Points with too little data are DROPPED, not scored. */
+export function sweep(
+  labels: readonly CompletedLabel[],
+  grid: readonly GridPoint[],
+  minObservations: number,
+): SweepRow[] {
+  const rows: SweepRow[] = [];
+  for (const point of grid) {
+    const fit = fitPoint(point, labels, minObservations);
+    if (fit !== null) rows.push({ point, ...fit });
+  }
+  return rows;
+}
+
+export interface Selection {
+  row: SweepRow;
+  runnerUp: SweepRow | null;
+  /** Loss margin over the runner-up; near zero means the choice is arbitrary. */
+  margin: number;
+  reason: string;
+}
+
+/**
+ * Pick the minimum-loss point.
+ *
+ * Returns the runner-up and the margin as well, so the choice is auditable: a
+ * margin near zero says the grid could not distinguish two candidates, which
+ * is a fact about the data and belongs in the report rather than being hidden
+ * behind a bare winner.
+ */
+export function selectPoint(rows: readonly SweepRow[]): Selection {
+  if (rows.length === 0) {
+    throw new Error(
+      'selectPoint: the sweep produced no scored grid point. Every candidate had fewer than ' +
+        'minObservations labels — collect more calibration data rather than lowering the bar.',
+    );
+  }
+  const sorted = [...rows].sort((a, b) => a.loss.total - b.loss.total);
+  const best = sorted[0]!;
+  const runnerUp = sorted[1] ?? null;
+  const margin = runnerUp === null ? Number.POSITIVE_INFINITY : runnerUp.loss.total - best.loss.total;
+
+  const describe = (r: SweepRow): string =>
+    `${r.point.method}(${JSON.stringify(r.point.methodParams)}) ` +
+    `H=${r.point.horizonSeconds / 86_400}d cov=${r.point.coverageTarget}`;
+
+  return {
+    row: best,
+    runnerUp,
+    margin,
+    reason:
+      `selected ${describe(best)} with loss ${best.loss.total.toFixed(8)} ` +
+      `(achieved coverage ${(best.loss.achievedCoverage * 100).toFixed(2)}% on ` +
+      `${best.loss.observations} residuals)` +
+      (runnerUp === null
+        ? '; no runner-up, the grid produced one scorable point'
+        : `; runner-up ${describe(runnerUp)} at ${runnerUp.loss.total.toFixed(8)}, ` +
+          `margin ${margin.toExponential(3)}`),
+  };
+}
