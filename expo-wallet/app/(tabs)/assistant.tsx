@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { JsonRpcProvider } from 'ethers';
 
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
@@ -24,6 +25,10 @@ import { streamAgentChat } from '@/lib/agent/agentClient';
 import { TransferClient } from '@/lib/transfer/transferClient';
 import { VaultClient } from '@/lib/vault/vaultClient';
 import { sharesToRedeem } from '@/lib/vault/withdrawShares';
+import { makeProposalBroadcaster } from '@/lib/vault/broadcaster';
+import { preflightProposalGas, sendProposals } from '@/lib/vault/proposals';
+import { GasShortfallError } from '@/lib/vault/gas';
+import { describeFarmingActionError } from '@/lib/vault/actionError';
 import { mapSendError } from '@/lib/wallet/sendErrors';
 import { mapError } from '@/lib/ui/mapError';
 import { short } from '@/lib/wallet/identicon';
@@ -47,7 +52,7 @@ import { ConversationList } from '@/features/assistant/ConversationList';
 export default function Assistant() {
   const { session, authedFetch } = useNavySession();
   const token = session?.tokens.accessToken;
-  const { signTypedData, sendTransaction } = useMobileSigner();
+  const { address: myAddress, signTypedData, sendTransaction } = useMobileSigner();
   const toast = useToast();
 
   const [state, dispatch] = useReducer(chatReducer, undefined, initialChat);
@@ -130,27 +135,45 @@ export default function Assistant() {
     [signTypedData, sendTransaction, authedFetch, send, toast],
   );
 
+  // Paper 2.1: farming has no relayer. The assistant proposes UNSIGNED legs;
+  // the user signs and pays for each one here. Both foreseeable pre-broadcast
+  // failures (no ETH for gas; the backend's USDC / maxRedeem refusals) are
+  // surfaced explicitly rather than as an on-chain revert.
   const onConfirmFarming = useCallback(
     (result: any) => async () => {
-      const vault = new VaultClient(getEnv().navyApiUrl, authedFetch!, signTypedData);
+      const vault = new VaultClient(getEnv().navyApiUrl, authedFetch!);
+      const provider = new JsonRpcProvider(getEnv().baseRpc);
       try {
+        let legs;
         if (result.display.action === 'farming_deposit') {
-          await vault.deposit(result.amountBase);
+          legs = await vault.buildDeposit(result.amountBase);
         } else {
           // The agent proposes a USDC withdraw amount; the vault redeems shares.
           // Read the position and convert (all / ≥value → all shares; else proportional).
           const position = await vault.getPosition();
           const shares = sharesToRedeem(result.amount, position);
-          await vault.redeemShares(shares);
+          legs = await vault.buildRedeem(shares);
         }
+
+        const [ethBalanceWei, feeData] = await Promise.all([
+          myAddress ? provider.getBalance(myAddress).catch(() => 0n) : Promise.resolve(0n),
+          provider.getFeeData().catch(() => ({ maxFeePerGas: null, gasPrice: null })),
+        ]);
+        const preflight = preflightProposalGas(legs, {
+          ethBalanceWei,
+          gasPriceWei: feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n,
+        });
+        if (!preflight.ok) throw new GasShortfallError(preflight.shortfallWei);
+
+        await sendProposals(makeProposalBroadcaster(sendTransaction, provider), legs);
       } catch (e) {
-        const { title, detail } = mapSendError(e);
+        const { title, detail } = describeFarmingActionError(e) ?? mapSendError(e);
         // Immediate, actionable signal; the card also shows its Failed state on rethrow.
         toast(`${title} — ${detail}`, 'error');
         throw e;
       }
     },
-    [authedFetch, signTypedData, toast],
+    [authedFetch, sendTransaction, myAddress, toast],
   );
 
   // Guard: no session / no authed fetch → prompt to sign in.
@@ -402,7 +425,6 @@ function ToolRender({
         <FarmingConfirmCard
           result={result}
           authedFetch={authedFetch}
-          signTypedData={signTypedData}
           onConfirm={onConfirmFarming(result)}
         />
       );

@@ -1,50 +1,55 @@
 /**
  * VaultClient — client for the pooled ERC-4626 vault (NavyVaultSRCLA).
  *
- * All routes require a valid Navy JWT; walletAddress is extracted from req.user.
- * Routes through `authedFetch` so an expired access token is transparently
- * refreshed + retried on 401.
+ * All routes require a valid Navy JWT; walletAddress is taken from the token,
+ * never from a parameter. Routes through `authedFetch` so an expired access
+ * token is transparently refreshed + retried on 401.
  *
- * Flows (both gasless — relayer pays gas):
+ * SRCLA paper §2.1: "Farming has no backend relayer, EIP-3009 deposit flow,
+ * sponsored gas, or relayed redemption." So this client no longer signs typed
+ * data or submits anything — it asks the backend for UNSIGNED transactions and
+ * the caller broadcasts them from the user's own wallet, paying their own gas:
  *
- * Deposit (EIP-3009 ReceiveWithAuthorization):
- *   1. POST /vault/deposit/authorization → typed data
- *   2. Sign typed data with Privy embedded wallet
- *   3. POST /vault/deposit/submit → relayer calls USDC.receiveWithAuthorization + vault.deposit
+ *   1. POST /vault/transactions/deposit  → [approve?, deposit]
+ *   2. the user signs and broadcasts each leg in order (see `proposals.ts`)
  *
- * Redeem (EIP-2612 Permit):
- *   1. POST /vault/redeem/permit → typed data
- *   2. Sign typed data with Privy embedded wallet
- *   3. POST /vault/redeem/submit → relayer calls vault.redeem with the permit
+ * Redeem is the same with a single `redeem` leg.
+ *
+ * The backend refuses a proposal it can already see will revert (short USDC
+ * balance, redeem beyond synchronous liquidity) and returns a structured
+ * `reason`. `VaultRequestError.reason` carries it through so the UI can say
+ * *by how much* the user is short instead of "400 Bad Request".
  */
 
-import type { Eip712TypedData } from '@/lib/pay/navyPayClient';
+import { readVaultReason, type VaultFailureReason } from './failures';
+import type { TransactionProposal } from './proposals';
 import type {
-  DepositAuthorizationResponse,
-  DepositSubmitResponse,
-  RedeemPermitResponse,
-  RedeemSubmitResponse,
   VaultPosition,
   VaultApysResponse,
   AdapterApy,
   StrategyAllocation,
   HarvestsResponse,
   HarvestRecord,
+  VaultTransactionsResponse,
 } from './types';
 
-/**
- * Client for the pooled vault's 2-step deposit/redeem flow.
- *
- * Mirrors `TransferClient` and `NavyPayClient`: every call routes through the
- * session's `authedFetch` so an expired access token is transparently
- * refreshed + retried on 401.  The `signTypedData` callback is the Privy
- * embedded-wallet signer (`useMobileSigner`).
- */
+/** A non-2xx response from the vault BFF, with the backend's machine-readable reason attached. */
+export class VaultRequestError extends Error {
+  readonly status: number;
+  readonly reason: VaultFailureReason | null;
+
+  constructor(message: string, status: number, reason: VaultFailureReason | null) {
+    super(message);
+    this.name = 'VaultRequestError';
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
 export class VaultClient {
   constructor(
     private readonly baseUrl: string,
     private readonly authedFetch: (url: string, init?: RequestInit) => Promise<Response>,
-    private readonly signTypedData: (typedData: Eip712TypedData) => Promise<string>,
   ) {}
 
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -54,8 +59,10 @@ export class VaultClient {
     });
     if (!res.ok) {
       let detail = '';
+      let reason: VaultFailureReason | null = null;
       try {
         const body = await res.json();
+        reason = readVaultReason(body);
         detail = body && (body.message || body.error) ? `: ${body.message ?? body.error}` : '';
       } catch {
         try {
@@ -63,51 +70,52 @@ export class VaultClient {
           if (t) detail = `: ${t}`;
         } catch { /* ignore */ }
       }
-      throw new Error(`vault ${path} failed (${res.status})${detail}`);
+      throw new VaultRequestError(
+        `vault ${path} failed (${res.status})${detail}`,
+        res.status,
+        reason,
+      );
     }
     return (await res.json()) as T;
   }
 
-  /**
-   * Deposit `amountBase` USDC (6-decimal base units).
-   * Calls authorization → signs typed data → submits.
-   */
-  async deposit(amountBase: string): Promise<DepositSubmitResponse> {
-    // Step 1: Get EIP-3009 typed data
-    const auth = await this.json<DepositAuthorizationResponse>('/vault/deposit/authorization', {
+  private async transactions(path: string, body: object): Promise<TransactionProposal[]> {
+    const res = await this.json<VaultTransactionsResponse>(path, {
       method: 'POST',
-      body: JSON.stringify({ amountBase }),
+      body: JSON.stringify(body),
     });
-
-    // Step 2: Sign with Privy embedded wallet
-    const signature = await this.signTypedData(auth.typedData);
-
-    // Step 3: Submit — relayer pays gas
-    return this.json<DepositSubmitResponse>('/vault/deposit/submit', {
-      method: 'POST',
-      body: JSON.stringify({ id: auth.id, signature }),
-    });
+    return res.transactions ?? [];
   }
 
   /**
-   * Redeem `sharesBase` vault shares (base units).
-   * Calls permit → signs typed data → submits.
+   * Unsigned legs to deposit `assetsBase` USDC (6-decimal base units): an ERC-20
+   * `approve` when the current allowance is short, then `deposit`.
+   *
+   * @throws VaultRequestError with `reason.code === 'INSUFFICIENT_USDC_BALANCE'`
+   *         when the wallet cannot fund the deposit.
    */
-  async redeemShares(sharesBase: string): Promise<RedeemSubmitResponse> {
-    // Step 1: Get EIP-2612 permit typed data
-    const permit = await this.json<RedeemPermitResponse>('/vault/redeem/permit', {
-      method: 'POST',
-      body: JSON.stringify({ sharesBase }),
-    });
+  buildDeposit(assetsBase: string): Promise<TransactionProposal[]> {
+    return this.transactions('/vault/transactions/deposit', { assetsBase });
+  }
 
-    // Step 2: Sign with Privy embedded wallet
-    const signature = await this.signTypedData(permit.typedData);
+  /**
+   * Unsigned leg to redeem `sharesBase` vault shares (12-decimal base units).
+   *
+   * @throws VaultRequestError with `reason.code === 'EXCEEDS_MAX_REDEEM'` when
+   *         the vault cannot pay out that many shares synchronously.
+   */
+  buildRedeem(sharesBase: string): Promise<TransactionProposal[]> {
+    return this.transactions('/vault/transactions/redeem', { sharesBase });
+  }
 
-    // Step 3: Submit — relayer pays gas
-    return this.json<RedeemSubmitResponse>('/vault/redeem/submit', {
-      method: 'POST',
-      body: JSON.stringify({ id: permit.id, signature }),
-    });
+  /** Unsigned leg to withdraw `assetsBase` USDC (6-decimal base units). */
+  buildWithdraw(assetsBase: string): Promise<TransactionProposal[]> {
+    return this.transactions('/vault/transactions/withdraw', { assetsBase });
+  }
+
+  /** Unsigned standalone ERC-20 `approve` granting the vault an allowance. */
+  buildApprove(amountBase: string): Promise<TransactionProposal[]> {
+    return this.transactions('/vault/transactions/approve', { amountBase });
   }
 
   /** Get user's vault position. */
@@ -150,6 +158,5 @@ export type {
   StrategyAllocation,
   HarvestsResponse,
   HarvestRecord,
-  DepositSubmitResponse,
-  RedeemSubmitResponse,
+  TransactionProposal,
 };

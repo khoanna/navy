@@ -1,12 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import { View, StyleSheet, TextInput } from 'react-native';
-import { parseUnits } from 'ethers';
+import { JsonRpcProvider, parseUnits } from 'ethers';
 
 import { getEnv } from '@/lib/config/env';
 import { useNavySession } from '@/lib/auth/SessionContext';
 import { useMobileSigner } from '@/lib/wallet/useMobileSigner';
 import { VaultClient } from '@/lib/vault/vaultClient';
-import type { VaultPosition, VaultApy, StrategyAllocation, HarvestsResponse } from '@/lib/vault/types';
+import type { VaultPosition, VaultApy, StrategyAllocation, HarvestsResponse, TransactionProposal } from '@/lib/vault/types';
+import { makeProposalBroadcaster } from '@/lib/vault/broadcaster';
+import { preflightDepositGas, preflightProposalGas, sendProposals } from '@/lib/vault/proposals';
+import { GasShortfallError, weiToEthCeil } from '@/lib/vault/gas';
+import { describeFarmingActionError } from '@/lib/vault/actionError';
+import { sharesBaseToDisplay } from '@/lib/vault/amounts';
 import { usdcBaseToDisplay } from '@/lib/wallet/balances';
 import { useAsync } from '@/lib/ui/useAsync';
 import { mapSendError, MappedError } from '@/lib/wallet/sendErrors';
@@ -44,16 +49,27 @@ function apyBpsToPct(apyBps: number): string {
   return (apyBps / 100).toFixed(2);
 }
 
+/** Chain facts the gas precheck needs. ETH balance and gas price are both wei. */
+interface GasContext {
+  ethBalanceWei: bigint;
+  gasPriceWei: bigint;
+}
+
 export default function Farming() {
   const { session, authedFetch } = useNavySession();
-  const { signTypedData } = useMobileSigner();
+  // Paper 2.1: farming has no relayer. The user signs and PAYS FOR every leg,
+  // so this screen needs a transaction sender, not a typed-data signer.
+  const { address, sendTransaction } = useMobileSigner();
   const toast = useToast();
   const token = session?.tokens.accessToken;
 
   const vault = useMemo(
-    () => (authedFetch ? new VaultClient(getEnv().navyApiUrl, authedFetch, signTypedData) : null),
-    [authedFetch, signTypedData],
+    () => (authedFetch ? new VaultClient(getEnv().navyApiUrl, authedFetch) : null),
+    [authedFetch],
   );
+
+  // One provider for the whole screen: gas reads and receipt waits.
+  const provider = useMemo(() => new JsonRpcProvider(getEnv().baseRpc), []);
 
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,16 +83,22 @@ export default function Farming() {
     error,
     staleError,
     retry,
-  } = useAsync<{ pos: VaultPosition; apys: VaultApy[] } | null>(
+  } = useAsync<{ pos: VaultPosition; apys: VaultApy[]; gas: GasContext } | null>(
     async () => {
       if (!vault || !token) return null;
-      const [pos, apyResponse] = await Promise.all([
+      const [pos, apyResponse, ethBalanceWei, feeData] = await Promise.all([
         vault.getPosition(),
         vault.getApys().catch(() => ({ adapters: [] })),
+        // Own-gas reads: a failure here must not blank the screen, so both
+        // degrade to 0 — `preflightProposalGas` reports gasPriceWei 0 as
+        // "unknown" and declines to block the flow on our own read failure.
+        address ? provider.getBalance(address).catch(() => 0n) : Promise.resolve(0n),
+        provider.getFeeData().catch(() => ({ maxFeePerGas: null, gasPrice: null })),
       ]);
-      return { pos, apys: apyResponse.adapters };
+      const gasPriceWei = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
+      return { pos, apys: apyResponse.adapters, gas: { ethBalanceWei, gasPriceWei } };
     },
-    { deps: [token, vault] },
+    { deps: [token, vault, address, provider] },
   );
 
   const { data: strategy } = useAsync<StrategyAllocation>(
@@ -91,6 +113,7 @@ export default function Farming() {
 
   const pos = data?.pos ?? null;
   const apys = data?.apys ?? [];
+  const gas: GasContext = data?.gas ?? { ethBalanceWei: 0n, gasPriceWei: 0n };
 
   // Headline APR: the best (highest) apyBps currently in the vault, if any.
   const bestApyBps = apys.reduce<number>((max, a) => (a.apyBps > max ? a.apyBps : max), 0);
@@ -103,11 +126,32 @@ export default function Farming() {
       await fn();
       await retry();
     } catch (e) {
-      setActionError(mapSendError(e));
+      // Prefer the explicit, quantified reasons (ETH for gas; the backend's
+      // USDC / maxRedeem refusals) over the generic chain-error mapper.
+      setActionError(describeFarmingActionError(e) ?? mapSendError(e));
       setLastAction(() => action);
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * Ask `be` for the unsigned legs, refuse up-front if the wallet cannot pay
+   * the gas, then sign and broadcast each leg in order from the embedded
+   * wallet. Returns the hash of the final leg.
+   *
+   * The gas precheck is the point of this whole path: without it the user pays
+   * for a transaction that cannot succeed and sees only an opaque revert.
+   */
+  const runProposals = async (legs: TransactionProposal[]): Promise<string> => {
+    if (legs.length === 0) throw new Error('Nothing to do');
+
+    const preflight = preflightProposalGas(legs, gas);
+    if (!preflight.ok) throw new GasShortfallError(preflight.shortfallWei);
+
+    const broadcaster = makeProposalBroadcaster(sendTransaction, provider);
+    const hashes = await sendProposals(broadcaster, legs);
+    return hashes[hashes.length - 1] ?? '';
   };
 
   const deposit = () =>
@@ -117,9 +161,11 @@ export default function Farming() {
         toast('Enter a valid USDC amount.', 'error');
         throw new Error('Invalid amount');
       }
-      const r = await vault!.deposit(base);
+      // `be` refuses here if the USDC balance is short — before any gas is spent.
+      const legs = await vault!.buildDeposit(base);
+      const hash = await runProposals(legs);
       setAmount('');
-      toast(`Deposited — Tx ${r.txHash.slice(0, 16)}…`, 'success');
+      toast(`Deposited — Tx ${hash.slice(0, 16)}…`, 'success');
     }, deposit);
 
   // Redeem the full share balance back to the user's wallet.
@@ -129,12 +175,19 @@ export default function Farming() {
         toast('Nothing to withdraw.', 'error');
         throw new Error('No position');
       }
-      const r = await vault!.redeemShares(pos.sharesBase);
-      toast(`Withdrawn — Tx ${r.txHash.slice(0, 16)}…`, 'success');
+      // `be` refuses here if the vault cannot pay out that many shares synchronously.
+      const legs = await vault!.buildRedeem(pos.sharesBase);
+      const hash = await runProposals(legs);
+      toast(`Withdrawn — Tx ${hash.slice(0, 16)}…`, 'success');
     }, withdrawAll);
 
   const current = pos ? Number(usdcBaseToDisplay(pos.assetsBase)) : 0;
   const hasPosition = pos ? BigInt(pos.sharesBase || '0') > 0n : false;
+
+  // Proactive gas warning: budgeted worst case (approve + one vault call).
+  // `unknown` (gas price unreadable) stays silent rather than crying wolf.
+  const gasPreview = preflightDepositGas(gas);
+  const gasShortfallWei = !gasPreview.unknown && !gasPreview.ok ? gasPreview.shortfallWei : null;
 
   return (
     <Screen scroll tabSafe onRefresh={retry} refreshing={refreshing}>
@@ -144,7 +197,7 @@ export default function Farming() {
           Earn
         </Text>
         <Text variant="caption" dim>
-          Navy vault · Sepolia
+          Navy vault · Base
           {bestApyBps > 0 ? `  ·  ${apyBpsToPct(bestApyBps)}% APY` : ''}
         </Text>
       </View>
@@ -186,10 +239,24 @@ export default function Farming() {
             </View>
             {hasPosition && pos && (
               <Text variant="caption" color="rgba(255,255,255,0.82)">
-                {usdcBaseToDisplay(pos.sharesBase)} shares
+                {sharesBaseToDisplay(pos.sharesBase)} shares
               </Text>
             )}
           </Gradient>
+
+          {/* You pay your own Base gas now (paper 2.1) — say so BEFORE they try. */}
+          {gasShortfallWei !== null && (
+            <Card glass compact style={styles.gasCard}>
+              <Text variant="label" upper color={colors.danger}>
+                You need ETH on Base for gas
+              </Text>
+              <Text variant="caption" color={colors.text}>
+                Farming transactions are signed and paid for by you — Navy does not
+                relay them. Add about {weiToEthCeil(gasShortfallWei)} ETH on Base to
+                cover the approve + deposit fees.
+              </Text>
+            </Card>
+          )}
 
           {/* Deposit input */}
           <Card glass compact style={styles.depositCard}>
@@ -242,8 +309,9 @@ export default function Farming() {
             <View style={styles.emptyInner}>
               <GlowIcon name="sprout" color={colors.aqua} size={72} />
               <Text dim center style={styles.emptyBody}>
-                Deposit USDC into the Navy vault to start earning. You sign a
-                gasless authorization — Navy relays it and holds no keys.
+                Deposit USDC into the Navy vault to start earning. You sign and
+                broadcast each transaction yourself and pay the Base network fee —
+                Navy holds no keys and never moves your funds.
               </Text>
             </View>
           )}
@@ -256,8 +324,8 @@ export default function Farming() {
             <Text variant="caption" color={colors.text}>
               Your USDC joins a shared, rebalancing vault that supplies to the
               best-yielding adapter. You hold vault shares; withdraw returns your
-              principal plus yield to your wallet. Deposits and withdrawals are
-              gasless — you sign, Navy relays.
+              principal plus yield to your wallet. You sign and pay the Base
+              network fee for each step, so keep a little ETH on Base.
             </Text>
           </Card>
 
@@ -271,7 +339,7 @@ export default function Farming() {
                     Navy vault
                   </Text>
                   <Text variant="caption" color={colors.textDim}>
-                    {usdcBaseToDisplay(pos.sharesBase)} shares
+                    {sharesBaseToDisplay(pos.sharesBase)} shares
                   </Text>
                 </View>
                 <Text variant="bodyStrong" numeric color={colors.textHi}>
@@ -287,9 +355,9 @@ export default function Farming() {
           {/* Harvest history */}
           <HarvestHistoryList harvests={harvests} />
 
-          {/* Devnet note */}
+          {/* Network note */}
           <View style={styles.noteRow}>
-            <Pill label="Sepolia" />
+            <Pill label="Base" />
             <Text variant="caption" muted style={styles.noteText}>
               Deposits mint vault shares; withdraw redeems them back to USDC in
               your wallet.
@@ -342,6 +410,11 @@ const styles = StyleSheet.create({
   },
   heroUnit: {
     marginLeft: 6,
+  },
+  gasCard: {
+    marginTop: space.lg,
+    gap: space.sm,
+    borderColor: colors.danger,
   },
   depositCard: {
     marginTop: space.lg,

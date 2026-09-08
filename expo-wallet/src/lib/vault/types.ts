@@ -1,43 +1,21 @@
 /**
  * Shared types for the pooled ERC-4626 vault client.
- * Mirrors the backend types in be/src/vault/vault-deposit.service.ts and
- * be/src/vault/vault-apy.service.ts.
+ *
+ * Paper §2.1 removed the relayer from farming: there is no EIP-3009 deposit
+ * authorization and no EIP-2612 redeem permit any more. The backend returns
+ * UNSIGNED transactions the user signs and pays for. Mirrors
+ * `be/src/vault/vault.types.ts` and `be/src/vault/vault-apy.service.ts`.
  */
 
-import type { Eip712TypedData } from '@/lib/pay/navyPayClient';
-
 // ---------------------------------------------------------------------------
-// Deposit (EIP-3009 ReceiveWithAuthorization)
+// Unsigned transaction proposals (POST /vault/transactions/*)
 // ---------------------------------------------------------------------------
 
-export interface DepositAuthorizationResponse {
-  id: string;
-  typedData: Eip712TypedData;
-  amountBase: string;
-  expiresAt: string; // ISO date string
-}
+export type { TransactionProposal } from './proposals';
 
-export interface DepositSubmitResponse {
-  txHash: string;
-  status: 'confirming';
-  sharesBase: string;
-}
-
-// ---------------------------------------------------------------------------
-// Redeem (EIP-2612 Permit)
-// ---------------------------------------------------------------------------
-
-export interface RedeemPermitResponse {
-  id: string;
-  typedData: Eip712TypedData;
-  sharesBase: string;
-  expiresAt: string; // ISO date string
-}
-
-export interface RedeemSubmitResponse {
-  txHash: string;
-  status: 'confirming';
-  assetsBase: string;
+/** Envelope every `POST /vault/transactions/*` route returns. */
+export interface VaultTransactionsResponse {
+  transactions: import('./proposals').TransactionProposal[];
 }
 
 // ---------------------------------------------------------------------------
@@ -45,8 +23,10 @@ export interface RedeemSubmitResponse {
 // ---------------------------------------------------------------------------
 
 export interface VaultPosition {
-  sharesBase: string; // vault shares, base units (string BigInt)
+  sharesBase: string; // vault shares, 12-decimal base units (string BigInt)
   assetsBase: string; // current USDC value of those shares, 6-decimal base units
+  maxWithdrawBase?: string; // USDC withdrawable synchronously, 6 dp
+  maxRedeemBase?: string; // shares redeemable synchronously, 12 dp
 }
 
 // ---------------------------------------------------------------------------

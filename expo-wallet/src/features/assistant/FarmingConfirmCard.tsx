@@ -22,12 +22,10 @@ type Phase = 'idle' | 'sending' | 'done' | 'error';
 export function FarmingConfirmCard({
   result,
   authedFetch,
-  signTypedData,
   onConfirm,
 }: {
   result: any;
   authedFetch: (url: string, init?: RequestInit) => Promise<Response>;
-  signTypedData: (typedData: any) => Promise<string>;
   onConfirm: () => Promise<void>;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -38,12 +36,12 @@ export function FarmingConfirmCard({
   useEffect(() => {
     if (result?.display?.action !== 'farming_deposit') return;
     let cancelled = false;
-    const vault = new VaultClient('', authedFetch, signTypedData);
+    const vault = new VaultClient('', authedFetch);
     vault.getApys().then((res) => {
       if (!cancelled) setApyData(res);
     }).catch(() => { /* non-critical */ });
     return () => { cancelled = true; };
-  }, [result, authedFetch, signTypedData]);
+  }, [result, authedFetch]);
 
   const action: string = result?.display?.action ?? '';
   const isWithdraw = action === 'farming_withdraw';
@@ -140,7 +138,7 @@ export function FarmingConfirmCard({
       )}
 
       <Text variant="caption" muted center style={styles.reassure}>
-        you sign — the assistant never moves funds
+        you sign and pay the Base network fee — the assistant never moves funds
       </Text>
     </Card>
   );

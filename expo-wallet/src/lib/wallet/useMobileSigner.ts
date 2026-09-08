@@ -51,13 +51,34 @@ export function useMobileSigner() {
     return signature as string;
   };
 
-  const sendTransaction = async ({ to, valueWei }: { to: string; valueWei: string }): Promise<string> => {
+  /**
+   * Broadcast a transaction from the embedded wallet. The user pays the gas.
+   *
+   * `data` carries contract calldata — paper §2.1 removed the farming relayer,
+   * so the vault `approve` / `deposit` / `redeem` legs are sent from here.
+   * `valueWei` defaults to 0 for a pure contract call.
+   */
+  const sendTransaction = async ({
+    to,
+    valueWei,
+    data,
+  }: {
+    to: string;
+    valueWei?: string;
+    data?: string;
+  }): Promise<string> => {
     if (!wallet) throw new Error('No embedded Ethereum wallet available');
     const provider = await wallet.getProvider();
-    const valueHex = '0x' + BigInt(valueWei).toString(16);
+    const valueHex = '0x' + BigInt(valueWei ?? '0').toString(16);
+    const tx: { from: string; to: string; value: string; data?: string } = {
+      from: wallet.address,
+      to,
+      value: valueHex,
+    };
+    if (data && data !== '0x') tx.data = data;
     const txHash = await provider.request({
       method: 'eth_sendTransaction',
-      params: [{ from: wallet.address, to, value: valueHex }],
+      params: [tx],
     });
     return txHash as string;
   };
