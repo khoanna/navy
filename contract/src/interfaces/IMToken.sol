@@ -45,9 +45,6 @@ interface IMToken {
 /// @dev Moonwell Comptroller interface
 interface IMComptroller {
     function markets(address market) external view returns (bool isListed, uint256 collateralFactorMantissa);
-    function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
-    function enterMarkets(address[] memory markets) external returns (uint256[] memory);
-    function exitMarket(address market) external returns (uint256);
     function claimReward(uint8 rewardType, address holder, address[] memory realms, bool verbose) external;
     function claimReward(address holder, address[] memory mTokens) external;
     function rewardDistributor() external view returns (address);
@@ -85,10 +82,6 @@ interface IMultiRewardDistributor {
 /// @dev Moonwell Interest Rate Model
 interface IMInterestRateModel {
     function getSupplyRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa)
-        external
-        view
-        returns (uint256);
-    function getBorrowRate(uint256 cash, uint256 borrows, uint256 reserves, uint256 reserveFactorMantissa)
         external
         view
         returns (uint256);

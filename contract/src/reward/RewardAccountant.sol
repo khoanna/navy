@@ -84,10 +84,8 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
 
     error InvalidToken();
     error InvalidFeed();
-    error IncompleteRound(uint80 roundId, uint80 answeredInRound);
     error SequencerDown(uint256 timestamp, uint256 gracePeriod);
     error Unauthorized();
-    error CacheStale();
     error MaterialCacheRequired();
     error ArrayLengthMismatch();
     error InvalidUsdcFeedMaxAge();

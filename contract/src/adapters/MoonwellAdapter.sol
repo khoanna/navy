@@ -15,7 +15,6 @@ contract MoonwellAdapter is IStrategyAdapter {
 
     uint256 private constant SECONDS_PER_YEAR = 365 days;
     uint256 private constant MANTISSA = 1e18;
-    uint256 private constant MTOKEN_MANTISSA = 1e8; // mToken has 8 decimals
     uint256 private constant BORROW_RATE_MAX_MANTISSA = 0.0005e16;
 
     address public immutable vault;
