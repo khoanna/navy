@@ -92,7 +92,7 @@ const VAULT_ABI = [
   // VaultTypes.PlanHeader: planId, policyVersion, createdAt, expiresAt, actionCount, snapshotBlockNumber, snapshotHash, decisionHash, configurationDigest, reserve, minFinalAssets, maxRecognizedLoss, turnoverLimit
   'function submitPlan((uint256 planId, uint64 policyVersion, uint64 createdAt, uint64 expiresAt, uint32 actionCount, uint256 snapshotBlockNumber, bytes32 snapshotHash, bytes32 decisionHash, bytes32 configurationDigest, uint256 reserve, uint256 minFinalAssets, uint256 maxRecognizedLoss, uint256 turnoverLimit) header, bytes32 merkleRoot)',
   'function executeNextActionWithProof(bytes32[] calldata merkleProof, (uint256 planId, uint32 index, uint8 kind, address adapter, uint256 amount, uint256 minOut, bytes32 dataHash) calldata action)',
-  'function executeHarvestAction((address adapter, address token, uint256 maxClaim, bytes32 routeId, uint256 minOut, uint256 deadline) memory request)',
+  'function executeHarvestAction(bytes32[] calldata merkleProof, (uint256 planId, uint32 index, uint8 kind, address adapter, uint256 amount, uint256 minOut, bytes32 dataHash) calldata action, (address adapter, address token, uint256 maxClaim, bytes32 routeId, uint256 minOut, uint256 deadline) calldata request)',
   'function cancelPlan()',
 
   // Harvest (ALLOCATOR_ROLE required)
@@ -115,7 +115,6 @@ const VAULT_ABI = [
   'event PlanSubmitted(bytes32 indexed planId, bytes32 merkleRoot)',
   'event PlanCompleted(bytes32 indexed planId)',
   'event PlanCancelled(bytes32 indexed planId)',
-  'event ActionExecuted(uint256 indexed planId, uint32 indexed actionIndex, uint8 indexed kind)',
   'event Harvested(address indexed adapter, uint256 usdcReceived)',
   'event EmergencyExit(address indexed adapter, uint256 amount)',
   'event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)',

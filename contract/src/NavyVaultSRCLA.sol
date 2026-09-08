@@ -691,19 +691,55 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     }
 
     /// @notice Execute a Harvest action within an active plan with the HarvestRequest
-    /// @dev Disabled: this previously sourced its expected Action from the
-    ///      now-deleted `_planActions` mapping via `_getExpectedAction`. That
-    ///      mapping was never populated by `submitPlan` (which only ever
-    ///      stores a Merkle root, not the actions themselves), so this path
-    ///      was already unreachable in practice before its source of truth
-    ///      was deleted. A later task rewrites this to source its action
-    ///      from a Merkle proof, matching `executeNextActionWithProof`; until
-    ///      then it reverts unconditionally rather than silently succeeding
-    ///      against zeroed-out expected-action data.
-    /// @param request The harvest request to execute
-    function executeHarvestAction(VaultTypes.HarvestRequest memory request) external onlyRole(ALLOCATOR_ROLE) {
-        request;
-        revert InvalidPlan();
+    /// @dev Mirrors `executeNextActionWithProof`'s checks (plan active, not
+    ///      expired, configuration digest unchanged, sequential index, plan id,
+    ///      Merkle proof) so the committed action arrives the same way every
+    ///      other plan action does, then additionally binds `request` to the
+    ///      committed `action.dataHash` via `_executeHarvestWithRequest` before
+    ///      advancing the plan and enforcing its risk limits.
+    /// @param merkleProof The Merkle proof for the committed action
+    /// @param action The committed action (must be a Harvest action)
+    /// @param request The harvest request the action's dataHash commits to
+    function executeHarvestAction(
+        bytes32[] calldata merkleProof,
+        Action calldata action,
+        VaultTypes.HarvestRequest calldata request
+    ) external onlyRole(ALLOCATOR_ROLE) {
+        if (activePlanId == bytes32(0)) revert PlanNotActive();
+        if (block.timestamp > activePlanExpiresAt) revert PlanExecutionExpired();
+        if (currentConfigurationDigest() != activePlanConfigurationDigest) revert InvalidConfigurationDigest();
+
+        uint256 nextIndex = activePlanNextActionIndex;
+        if (nextIndex >= activePlanActionCount) revert InvalidActionIndex();
+
+        // Enforce sequential action execution to prevent out-of-order execution
+        if (action.index != nextIndex) revert InvalidActionIndex();
+        if (action.planId != uint256(activePlanId)) revert InvalidPlan();
+
+        // Build the action leaf and verify Merkle proof
+        bytes32 actionLeaf = hashPlanAction(activePlanDomain, action);
+        if (!MerkleTree.verifyProof(actionLeaf, merkleProof, activePlanMerkleRoot)) {
+            revert InvalidMerkleProof();
+        }
+
+        // Binds `request` to the committed `action.dataHash` (InvalidDataHash on mismatch).
+        _executeHarvestWithRequest(action, request);
+        activePlanTurnover += action.amount;
+        _enforceActivePlanRiskLimits(false);
+
+        activePlanNextActionIndex = uint64(nextIndex + 1);
+
+        if (activePlanNextActionIndex >= activePlanActionCount) {
+            _enforceActivePlanRiskLimits(true);
+            dynamicReserve = activePlanReserve;
+            emit DynamicReserveSet(activePlanReserve);
+            usedPlanIds[activePlanId] = true;
+            bytes32 completedPlanId = activePlanId;
+            _clearActivePlan();
+            emit PlanCompleted(completedPlanId);
+        } else {
+            emit PlanActionExecuted(activePlanId, nextIndex, keccak256(abi.encode(action.kind)), action.amount);
+        }
     }
 
     /// @notice Execute harvest with a specific HarvestRequest

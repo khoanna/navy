@@ -572,6 +572,130 @@ contract VaultHarvestTest is Test {
         // Note: executeHarvestAction may have issues, testing direct harvest first
     }
 
+    /// @dev Builds a single-Harvest-action plan header for `planId`, matching
+    ///      the shape `test_harvestViaPlanExecution` above already submits
+    ///      successfully.
+    function _harvestPlanHeader(uint256 planId) internal view returns (VaultTypes.PlanHeader memory) {
+        return VaultTypes.PlanHeader({
+            planId: planId,
+            policyVersion: 1,
+            createdAt: uint64(block.timestamp),
+            expiresAt: uint64(block.timestamp + 3600),
+            actionCount: 1,
+            snapshotBlockNumber: block.number,
+            snapshotHash: keccak256(abi.encode("snapshot", planId)),
+            decisionHash: keccak256(abi.encode("decision", planId)),
+            configurationDigest: vault.currentConfigurationDigest(),
+            reserve: 0,
+            minFinalAssets: 0,
+            maxRecognizedLoss: type(uint256).max,
+            turnoverLimit: type(uint256).max
+        });
+    }
+
+    /// @dev Submits a plan containing exactly `action` as its only (index 0)
+    ///      action. Submission only — the caller executes separately so that
+    ///      a `vm.expectRevert` set up around the execute call lands on the
+    ///      right transaction.
+    function _submitSingleActionPlan(NavyVaultSRCLA.Action memory action) internal {
+        VaultTypes.PlanHeader memory header = _harvestPlanHeader(action.planId);
+        bytes32 leaf = vault.hashPlanAction(vault.planDomain(header), action);
+        vm.prank(allocator);
+        vault.submitPlan(header, leaf);
+    }
+
+    /// @dev Harvest-in-plan was unreachable: it read _planActions, which only
+    ///      the deleted legacy executePlan ever wrote.
+    function test_harvestActionExecutesViaMerkleProof() public {
+        uint256 planId = 777;
+
+        VaultTypes.HarvestRequest memory request = VaultTypes.HarvestRequest({
+            adapter: address(adapter),
+            token: address(comp),
+            maxClaim: type(uint256).max,
+            routeId: compRouteId,
+            minOut: 1,
+            deadline: block.timestamp + 1 hours
+        });
+
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
+            planId: planId,
+            index: 0,
+            kind: NavyVaultSRCLA.ActionKind.Harvest,
+            adapter: address(adapter),
+            amount: 0,
+            minOut: 1,
+            dataHash: keccak256(abi.encode(request))
+        });
+
+        _submitSingleActionPlan(action);
+
+        uint256 recognizedBefore = vault.recognizedRewards();
+        uint256 compClaimableBefore = adapter.claimableReward(address(comp));
+        assertGt(compClaimableBefore, 0, "fixture must have COMP claimable to harvest");
+
+        vm.prank(allocator);
+        vault.executeHarvestAction(new bytes32[](0), action, request);
+
+        assertGt(vault.recognizedRewards(), recognizedBefore, "harvest must credit recognized rewards");
+        assertEq(adapter.claimableReward(address(comp)), 0, "harvest must actually claim the COMP reward");
+        assertEq(vault.activePlanId(), bytes32(0), "single-action plan must complete");
+    }
+
+    /// @dev dataHash commits to `request`; a caller substituting a different,
+    ///      economically-meaningful request (bigger maxClaim, worse minOut, a
+    ///      different — more valuable — reward token, and a longer deadline)
+    ///      against the same committed action must be rejected, not silently
+    ///      executed against the substituted terms.
+    function test_harvestActionRejectsARequestThatDoesNotMatchTheCommitment() public {
+        uint256 planId = 778;
+
+        VaultTypes.HarvestRequest memory committedRequest = VaultTypes.HarvestRequest({
+            adapter: address(adapter),
+            token: address(comp),
+            maxClaim: 5e18,
+            routeId: compRouteId,
+            minOut: 5e6,
+            deadline: block.timestamp + 1 hours
+        });
+
+        NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
+            planId: planId,
+            index: 0,
+            kind: NavyVaultSRCLA.ActionKind.Harvest,
+            adapter: address(adapter),
+            amount: 0,
+            minOut: 5e6,
+            dataHash: keccak256(abi.encode(committedRequest))
+        });
+
+        _submitSingleActionPlan(action);
+
+        // Substituted request: a different (more valuable) token, a larger
+        // maxClaim, a worse (lower) minOut, and a longer deadline — every
+        // field that matters economically differs from what was committed.
+        VaultTypes.HarvestRequest memory substitutedRequest = VaultTypes.HarvestRequest({
+            adapter: address(adapter),
+            token: address(well),
+            maxClaim: type(uint256).max,
+            routeId: wellRouteId,
+            minOut: 0,
+            deadline: block.timestamp + 30 days
+        });
+
+        uint256 recognizedBefore = vault.recognizedRewards();
+
+        vm.prank(allocator);
+        vm.expectRevert(NavyVaultSRCLA.InvalidDataHash.selector);
+        vault.executeHarvestAction(new bytes32[](0), action, substitutedRequest);
+
+        // The rejected call must not have advanced the plan or claimed anything.
+        assertEq(vault.recognizedRewards(), recognizedBefore, "rejected harvest must not credit rewards");
+        assertEq(adapter.claimableReward(address(well)), 20e18, "rejected harvest must not claim WELL");
+        assertEq(vault.activePlanNextActionIndex(), 0, "rejected harvest must not advance the plan");
+        assertTrue(vault.activePlanId() != bytes32(0), "plan must remain active after the rejected call");
+    }
+
 }
 
 // =============================================================================
