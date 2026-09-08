@@ -576,6 +576,45 @@ describe('buildWithdrawalSchedule', () => {
     expect(demanded).toBeLessThan(TIER);
   });
 
+  it('sizes the registered schedule against LIVE NAV, not the initial tier', () => {
+    // The defect this replaces: a fixed 5% of the tier every 7 days demands
+    // 190% of the vault over a 267-day era. The cohort's shares are exhausted
+    // after 20 of 38 redemptions and the remaining 18 fail for want of SHARES,
+    // not liquidity -- which reported an identical 52.6% withdrawal-success
+    // rate for all fifteen policies at all four tiers, including the all-cash
+    // baseline that cannot fail a redemption for liquidity reasons, and left
+    // the last ~90 days of the era running on an empty vault.
+    const s = buildWithdrawalSchedule(makeDataset(30), TIER, {
+      redemptionBps: 500,
+      cadenceSeconds: 7 * 86_400,
+    });
+    expect(s.source).toBe('registered-schedule');
+    for (const r of s.requests) expect(r.navFractionBps).toBe(500);
+  });
+
+  it('cannot demand more than the vault holds, however long the window', () => {
+    // A NAV fraction is self-limiting by construction: each request takes 5%
+    // of what remains, so cumulative demand converges instead of growing
+    // linearly with the number of redemptions.
+    const long = buildWithdrawalSchedule(makeDataset(300), TIER, {
+      redemptionBps: 500,
+      cadenceSeconds: 7 * 86_400,
+    });
+    expect(long.requests.length).toBeGreaterThan(38);
+
+    let nav = TIER;
+    let demanded = 0n;
+    for (const r of long.requests) {
+      const sized = (nav * BigInt(r.navFractionBps!)) / 10_000n;
+      demanded += sized;
+      nav -= sized;
+    }
+    // Under the OLD fixed-fraction rule this would be 42 x 5% = 210% of the
+    // tier. Under a NAV fraction it stays below the vault, always.
+    expect(demanded).toBeLessThan(TIER);
+    expect(nav).toBeGreaterThan(0n);
+  });
+
   it('demands the same total from a daily and an hourly view of one window', () => {
     // The invariant the snapshot-counted version broke: the schedule
     // describes user behaviour over TIME and must not change because the

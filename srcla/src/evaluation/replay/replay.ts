@@ -31,6 +31,22 @@ export interface WithdrawalRequest {
   snapshotIndex: number;
   /** USDC base units requested. */
   assetsBase: bigint;
+  /**
+   * When set, the request is a fraction of the vault's NAV AT EXECUTION TIME
+   * (bps), and `assetsBase` is only the value it resolved to for reporting.
+   *
+   * A registered schedule MUST use this rather than a fixed fraction of the
+   * initial tier. A fixed 5% of tier every 7 days demands 190% of the vault
+   * over a 267-day era: the cohort's shares are exhausted after 20 of 38
+   * redemptions and the remaining 18 fail for want of SHARES, not liquidity.
+   * That produced an identical 52.6% withdrawal-success rate for all fifteen
+   * policies at all four tiers -- including the all-cash baseline, which
+   * cannot fail a redemption for liquidity reasons -- and drained the vault
+   * two thirds of the way through, so the last ~90 days were evaluated on an
+   * empty vault. A NAV fraction is self-limiting and does not silently scale
+   * with the length of the window.
+   */
+  navFractionBps?: number;
 }
 
 export interface WithdrawalOutcome {
@@ -220,8 +236,18 @@ export function runReplay(config: ReplayConfig): ReplayResult {
 
     // Attempt this snapshot's redemptions against real liquidity.
     for (const request of requestsByIndex.get(i) ?? []) {
+      // A NAV-fraction request is sized HERE, against the vault as it stands,
+      // so the demand series cannot outrun the vault it is drawn on.
+      const sized: WithdrawalRequest =
+        request.navFractionBps === undefined
+          ? request
+          : {
+              ...request,
+              assetsBase:
+                (vault.getState().totalAssets * BigInt(request.navFractionBps)) / 10_000n,
+            };
       withdrawalOutcomes.push(
-        executeRedemption(vault, cohortId, request, i, snapshot, {
+        executeRedemption(vault, cohortId, sized, i, snapshot, {
           gasPriceWei,
           ethUsdE8,
           charge,

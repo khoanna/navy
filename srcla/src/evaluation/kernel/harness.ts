@@ -259,7 +259,18 @@ export function buildWithdrawalSchedule(
     let nextAt = firstSeconds + cadenceSeconds;
     for (let i = 0; i < dataset.snapshots.length; i++) {
       if (seconds(dataset.snapshots[i]!) >= nextAt) {
-        requests.push({ snapshotIndex: i, assetsBase: (tier * redemptionBps) / 10_000n });
+        requests.push({
+          snapshotIndex: i,
+          // Reporting value only; the replay re-sizes against live NAV.
+          assetsBase: (tier * redemptionBps) / 10_000n,
+          // A FRACTION OF NAV, not of the initial tier. See
+          // WithdrawalRequest.navFractionBps: a fixed fraction of the tier
+          // demands 190% of the vault over a 267-day era, exhausts the
+          // cohort's shares two thirds of the way through, and makes every
+          // policy report the same withdrawal-success rate because the
+          // failures are share exhaustion rather than illiquidity.
+          navFractionBps: Number(redemptionBps),
+        });
         nextAt += cadenceSeconds;
       }
     }
