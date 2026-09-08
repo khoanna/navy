@@ -46,4 +46,6 @@ interface IVaultEvents {
 
     event Pause();
     event Unpause();
+
+    event WithdrawalOrderSet(address[] order);
 }

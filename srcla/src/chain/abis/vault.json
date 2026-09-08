@@ -52,6 +52,19 @@
     },
     {
       "type": "function",
+      "name": "DOMAIN_SEPARATOR",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "MAX_ADAPTERS",
       "inputs": [],
       "outputs": [
@@ -273,6 +286,25 @@
     },
     {
       "type": "function",
+      "name": "adapterRecognizedLoss",
+      "inputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "adapters",
       "inputs": [
         {
@@ -304,6 +336,16 @@
         },
         {
           "name": "lastSyncIdleBase",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "liquidityFloorBps",
+          "type": "uint16",
+          "internalType": "uint16"
+        },
+        {
+          "name": "accountingCap",
           "type": "uint256",
           "internalType": "uint256"
         }
@@ -513,6 +555,49 @@
     },
     {
       "type": "function",
+      "name": "eip712Domain",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "fields",
+          "type": "bytes1",
+          "internalType": "bytes1"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "version",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "salt",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "extensions",
+          "type": "uint256[]",
+          "internalType": "uint256[]"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "emergencyExit",
       "inputs": [
         {
@@ -528,6 +613,53 @@
       "type": "function",
       "name": "executeHarvestAction",
       "inputs": [
+        {
+          "name": "merkleProof",
+          "type": "bytes32[]",
+          "internalType": "bytes32[]"
+        },
+        {
+          "name": "action",
+          "type": "tuple",
+          "internalType": "struct NavyVaultSRCLA.Action",
+          "components": [
+            {
+              "name": "planId",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "index",
+              "type": "uint32",
+              "internalType": "uint32"
+            },
+            {
+              "name": "kind",
+              "type": "uint8",
+              "internalType": "enum NavyVaultSRCLA.ActionKind"
+            },
+            {
+              "name": "adapter",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "amount",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "minOut",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "dataHash",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ]
+        },
         {
           "name": "request",
           "type": "tuple",
@@ -566,13 +698,6 @@
           ]
         }
       ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "executeNextAction",
-      "inputs": [],
       "outputs": [],
       "stateMutability": "nonpayable"
     },
@@ -630,115 +755,6 @@
       ],
       "outputs": [],
       "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "executePlan",
-      "inputs": [
-        {
-          "name": "planId",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        },
-        {
-          "name": "decisionHash",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        },
-        {
-          "name": "expiresAt",
-          "type": "uint64",
-          "internalType": "uint64"
-        },
-        {
-          "name": "actions",
-          "type": "tuple[]",
-          "internalType": "struct NavyVaultSRCLA.Action[]",
-          "components": [
-            {
-              "name": "planId",
-              "type": "uint256",
-              "internalType": "uint256"
-            },
-            {
-              "name": "index",
-              "type": "uint32",
-              "internalType": "uint32"
-            },
-            {
-              "name": "kind",
-              "type": "uint8",
-              "internalType": "enum NavyVaultSRCLA.ActionKind"
-            },
-            {
-              "name": "adapter",
-              "type": "address",
-              "internalType": "address"
-            },
-            {
-              "name": "amount",
-              "type": "uint256",
-              "internalType": "uint256"
-            },
-            {
-              "name": "minOut",
-              "type": "uint256",
-              "internalType": "uint256"
-            },
-            {
-              "name": "dataHash",
-              "type": "bytes32",
-              "internalType": "bytes32"
-            }
-          ]
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "getActivePlanAction",
-      "inputs": [
-        {
-          "name": "index",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "planId",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "actionIndex",
-          "type": "uint32",
-          "internalType": "uint32"
-        },
-        {
-          "name": "kind",
-          "type": "uint8",
-          "internalType": "enum NavyVaultSRCLA.ActionKind"
-        },
-        {
-          "name": "adapter",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "amount",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "minOut",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -804,35 +820,6 @@
         }
       ],
       "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "harvest",
-      "inputs": [
-        {
-          "name": "adapter",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "routeId",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        },
-        {
-          "name": "minOut",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "totalUsdcReceived",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
       "stateMutability": "nonpayable"
     },
     {
@@ -1156,6 +1143,25 @@
     },
     {
       "type": "function",
+      "name": "nonces",
+      "inputs": [
+        {
+          "name": "owner",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "pause",
       "inputs": [],
       "outputs": [],
@@ -1173,6 +1179,49 @@
         }
       ],
       "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "permit",
+      "inputs": [
+        {
+          "name": "owner",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "spender",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "value",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "deadline",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "v",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "r",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "s",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
     },
     {
       "type": "function",
@@ -1335,6 +1384,24 @@
         }
       ],
       "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "recognizeLoss",
+      "inputs": [
+        {
+          "name": "adapter",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
     },
     {
       "type": "function",
@@ -1534,6 +1601,24 @@
     },
     {
       "type": "function",
+      "name": "setAdapterAccountingCap",
+      "inputs": [
+        {
+          "name": "adapter",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "cap",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "setAdapterRisk",
       "inputs": [
         {
@@ -1553,6 +1638,11 @@
         },
         {
           "name": "maxLossBps",
+          "type": "uint16",
+          "internalType": "uint16"
+        },
+        {
+          "name": "liquidityFloorBps",
           "type": "uint16",
           "internalType": "uint16"
         }
@@ -1974,6 +2064,25 @@
     },
     {
       "type": "event",
+      "name": "AdapterAccountingCapSet",
+      "inputs": [
+        {
+          "name": "adapter",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "cap",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "AdapterRegistered",
       "inputs": [
         {
@@ -2027,6 +2136,12 @@
         },
         {
           "name": "maxLossBps",
+          "type": "uint16",
+          "indexed": false,
+          "internalType": "uint16"
+        },
+        {
+          "name": "liquidityFloorBps",
           "type": "uint16",
           "indexed": false,
           "internalType": "uint16"
@@ -2168,6 +2283,12 @@
     },
     {
       "type": "event",
+      "name": "EIP712DomainChanged",
+      "inputs": [],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "EmergencyExit",
       "inputs": [
         {
@@ -2197,6 +2318,25 @@
         },
         {
           "name": "usdcReceived",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "LossRecognized",
+      "inputs": [
+        {
+          "name": "adapter",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
@@ -2513,6 +2653,19 @@
       "anonymous": false
     },
     {
+      "type": "event",
+      "name": "WithdrawalOrderSet",
+      "inputs": [
+        {
+          "name": "order",
+          "type": "address[]",
+          "indexed": false,
+          "internalType": "address[]"
+        }
+      ],
+      "anonymous": false
+    },
+    {
       "type": "error",
       "name": "AccessControlBadConfirmation",
       "inputs": []
@@ -2551,6 +2704,11 @@
     {
       "type": "error",
       "name": "AdapterConfigInvalid",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "AdapterLiquidityFloorBreached",
       "inputs": []
     },
     {
@@ -2612,6 +2770,33 @@
       "type": "error",
       "name": "DuplicateDependencyGroupMember",
       "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ECDSAInvalidSignature",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ECDSAInvalidSignatureLength",
+      "inputs": [
+        {
+          "name": "length",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "ECDSAInvalidSignatureS",
+      "inputs": [
+        {
+          "name": "s",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ]
     },
     {
       "type": "error",
@@ -2694,6 +2879,33 @@
       "inputs": [
         {
           "name": "spender",
+          "type": "address",
+          "internalType": "address"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "ERC2612ExpiredSignature",
+      "inputs": [
+        {
+          "name": "deadline",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "ERC2612InvalidSigner",
+      "inputs": [
+        {
+          "name": "signer",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "owner",
           "type": "address",
           "internalType": "address"
         }
@@ -2820,6 +3032,22 @@
     },
     {
       "type": "error",
+      "name": "InvalidAccountNonce",
+      "inputs": [
+        {
+          "name": "account",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "currentNonce",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
+    },
+    {
+      "type": "error",
       "name": "InvalidActionIndex",
       "inputs": []
     },
@@ -2850,6 +3078,11 @@
     },
     {
       "type": "error",
+      "name": "InvalidShortString",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "InvalidSwapOutput",
       "inputs": []
     },
@@ -2871,6 +3104,11 @@
     {
       "type": "error",
       "name": "PlanExecutionExpired",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "PlanExpired",
       "inputs": []
     },
     {
@@ -2913,6 +3151,17 @@
       "type": "error",
       "name": "SlippageExceeded",
       "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "StringTooLong",
+      "inputs": [
+        {
+          "name": "str",
+          "type": "string",
+          "internalType": "string"
+        }
+      ]
     },
     {
       "type": "error",

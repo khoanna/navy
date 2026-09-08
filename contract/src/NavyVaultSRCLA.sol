@@ -152,6 +152,13 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     /// @notice List of active adapters
     address[] private _activeAdapters;
 
+    /// @notice Admin-fixed order in which _ensureIdle divests strategies.
+    /// Paper §5.2 requires this order to be deterministic; the registry order
+    /// (_activeAdapters) is not, because _removeAdapter uses swap-and-pop.
+    /// Empty means "no order configured" — _ensureIdle then falls back to
+    /// registry order, matching pre-existing behaviour exactly.
+    address[] private _withdrawalOrder;
+
     /// @notice Tracked strategy assets per adapter
     mapping(address => uint256) public strategyAssets;
 
@@ -210,6 +217,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     error InvalidDataHash();
     error TokenNotAdmitted();
     error PlanExpired();
+    error HarvestRequiresExecuteHarvestAction();
 
     // ---- ExecutionPlan Accessors ----
     // Note: activePlanId, activePlanDecisionHash, activePlanExpiresAt,
@@ -328,7 +336,8 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     }
 
     /// @dev Source strategy liquidity before OpenZeppelin burns shares and
-    /// transfers assets. The adapter order is the bounded registry order.
+    /// transfers assets. Adapter order is the admin-configured withdrawal
+    /// order when set (Paper §5.2), else the bounded registry order.
     function _withdraw(address caller, address receiver, address owner_, uint256 assets, uint256 shares)
         internal
         override
@@ -507,6 +516,39 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     function setMinIdleBps(uint256 bps) external onlyRole(ADMIN_ROLE) {
         if (bps > 10_000) revert AdapterConfigInvalid();
         minIdleBps = bps;
+    }
+
+    /// @notice Fix the order in which strategies are divested to satisfy a
+    /// withdrawal. Paper §5.2 requires this order to be deterministic; the
+    /// registry order is not, because _removeAdapter uses swap-and-pop.
+    /// An empty `order` clears the configuration and reverts _ensureIdle to
+    /// iterating the registry order. A configured order need not list every
+    /// registered adapter — any adapter left out is still drained by
+    /// _ensureIdle after the configured prefix, in registry order, so a
+    /// partial order can never make a withdrawal fail while liquidity exists
+    /// elsewhere; it only leaves that remainder non-deterministic, same as an
+    /// unconfigured vault today. A listed adapter that is later moved to
+    /// AdapterState.Removed is silently skipped at drain time by the same
+    /// per-adapter state filter _ensureIdle has always applied — the order is
+    /// not re-validated against live state here, only against registration.
+    function setWithdrawalOrder(address[] calldata order) external onlyRole(ADMIN_ROLE) {
+        for (uint256 i = 0; i < order.length; i++) {
+            if (!registeredAdapters[order[i]]) revert AdapterNotFound();
+            for (uint256 j = 0; j < i; j++) {
+                if (order[j] == order[i]) revert DuplicateDependencyGroupMember();
+            }
+        }
+        delete _withdrawalOrder;
+        for (uint256 i = 0; i < order.length; i++) {
+            _withdrawalOrder.push(order[i]);
+        }
+        emit WithdrawalOrderSet(order);
+    }
+
+    /// @notice The admin-configured deterministic divestment order. Empty
+    /// means none is configured and _ensureIdle falls back to registry order.
+    function withdrawalOrder() external view returns (address[] memory) {
+        return _withdrawalOrder;
     }
 
     /// @notice Pause deposits and mints
@@ -715,6 +757,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         // Enforce sequential action execution to prevent out-of-order execution
         if (action.index != nextIndex) revert InvalidActionIndex();
         if (action.planId != uint256(activePlanId)) revert InvalidPlan();
+        if (action.kind != ActionKind.Harvest) revert InvalidPlan();
 
         // Build the action leaf and verify Merkle proof
         bytes32 actionLeaf = hashPlanAction(activePlanDomain, action);
@@ -950,11 +993,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         } else if (action.kind == ActionKind.Divest) {
             _divest(action.adapter, action.amount, action.minOut);
         } else if (action.kind == ActionKind.Harvest) {
-            // Harvest actions must go through executeHarvestAction for atomic execution.
-            // Validate conditions here to preserve plan-flow reverts for paused/invalid adapter.
-            if (paused) revert DepositPaused();
-            if (!registeredAdapters[action.adapter]) revert AdapterNotFound();
-            _requireActiveAdapter(action.adapter);
+            // A Harvest action carries a dataHash committing to a HarvestRequest
+            // that only executeHarvestAction's caller supplies. Routing it
+            // through here (e.g. via executeNextActionWithProof) has no request
+            // to execute against, so it must fail loudly rather than silently
+            // advancing the plan/turnover without claiming anything.
+            revert HarvestRequiresExecuteHarvestAction();
         } else if (action.kind == ActionKind.EmergencyExit) {
             uint256 balance = strategyAssets[action.adapter];
             if (balance > 0) {
@@ -1017,33 +1061,32 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         reserve = Math.max(reserve, Math.mulDiv(totalAssets(), minIdleBps, 10_000));
     }
 
+    /// @dev Paper §5.2: divestment order must be deterministic. When an admin
+    /// order is configured, drain it first, then any registered-but-unlisted
+    /// adapter afterwards in registry order (so a partial order can never
+    /// starve a withdrawal that liquidity elsewhere could satisfy — only that
+    /// unlisted remainder stays as non-deterministic as an unconfigured vault
+    /// is today). When no order is configured, behaviour is unchanged:
+    /// registry order, exactly as before this function existed.
     function _ensureIdle(uint256 assets) internal {
         uint256 idle = IERC20(asset()).balanceOf(address(this));
         if (idle >= assets) return;
 
         uint256 totalStrategyDebited;
         uint256 totalReceived;
+
+        uint256 orderCount = _withdrawalOrder.length;
+        for (uint256 i = 0; i < orderCount && idle < assets; i++) {
+            (idle, totalStrategyDebited, totalReceived) =
+                _drainAdapterForIdle(_withdrawalOrder[i], assets, idle, totalStrategyDebited, totalReceived);
+        }
+
         uint256 count = _activeAdapters.length;
         for (uint256 i = 0; i < count && idle < assets; i++) {
             address adapter = _activeAdapters[i];
-            AdapterState state = adapters[adapter].state;
-            if (state != AdapterState.Active && state != AdapterState.Disabled) continue;
-
-            uint256 available;
-            try IStrategyAdapter(adapter).maxWithdrawable() returns (uint256 value) {
-                available = Math.min(value, strategyAssets[adapter]);
-            } catch {
-                continue;
-            }
-            uint256 needed = assets - idle;
-            uint256 pull = Math.min(needed, available);
-            if (pull == 0) continue;
-
-            uint256 strategyDebited;
-            uint256 received;
-            (idle, strategyDebited, received) = _pullSynchronousLiquidity(adapter, pull, idle);
-            totalStrategyDebited += strategyDebited;
-            totalReceived += received;
+            if (orderCount != 0 && _isInWithdrawalOrder(adapter)) continue;
+            (idle, totalStrategyDebited, totalReceived) =
+                _drainAdapterForIdle(adapter, assets, idle, totalStrategyDebited, totalReceived);
         }
 
         if (idle < assets) revert InsufficientIdle();
@@ -1054,6 +1097,51 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             }
             recognizedLosses += aggregateLoss;
         }
+    }
+
+    /// @dev One adapter's contribution to _ensureIdle. Carries every check
+    /// the pre-order-list implementation had: only Active/Disabled adapters
+    /// are drained (this is what makes a stale — since-Removed — entry in
+    /// _withdrawalOrder a no-op rather than a revert), a failed
+    /// maxWithdrawable() read is tolerated by skipping the adapter, and the
+    /// pull is clamped to min(maxWithdrawable(), strategyAssets).
+    function _drainAdapterForIdle(
+        address adapter,
+        uint256 assets,
+        uint256 idle,
+        uint256 totalStrategyDebited,
+        uint256 totalReceived
+    ) internal returns (uint256, uint256, uint256) {
+        AdapterState state = adapters[adapter].state;
+        if (state != AdapterState.Active && state != AdapterState.Disabled) {
+            return (idle, totalStrategyDebited, totalReceived);
+        }
+
+        uint256 available;
+        try IStrategyAdapter(adapter).maxWithdrawable() returns (uint256 value) {
+            available = Math.min(value, strategyAssets[adapter]);
+        } catch {
+            return (idle, totalStrategyDebited, totalReceived);
+        }
+        uint256 needed = assets - idle;
+        uint256 pull = Math.min(needed, available);
+        if (pull == 0) return (idle, totalStrategyDebited, totalReceived);
+
+        uint256 strategyDebited;
+        uint256 received;
+        (idle, strategyDebited, received) = _pullSynchronousLiquidity(adapter, pull, idle);
+        totalStrategyDebited += strategyDebited;
+        totalReceived += received;
+        return (idle, totalStrategyDebited, totalReceived);
+    }
+
+    /// @dev Bounded by MAX_ADAPTERS (16); a linear scan here is cheap.
+    function _isInWithdrawalOrder(address adapter) internal view returns (bool) {
+        uint256 orderCount = _withdrawalOrder.length;
+        for (uint256 i = 0; i < orderCount; i++) {
+            if (_withdrawalOrder[i] == adapter) return true;
+        }
+        return false;
     }
 
     function _pullSynchronousLiquidity(address adapter, uint256 pull, uint256 idleBefore)

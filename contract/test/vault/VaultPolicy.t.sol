@@ -607,6 +607,100 @@ contract VaultPolicyTest is Test {
         assertEq(vault.strategyAssets(address(adapterB)), 100e6);
     }
 
+    /// @dev Paper §5.2 requires a deterministic divest order. Registry order
+    ///      is mutated by _removeAdapter's swap-and-pop, so it is not one.
+    ///
+    /// The brief's original fixture called
+    /// `vault.withdraw(300e6, address(this), address(this))` with no
+    /// `vm.prank` — the shares from `_executePlanWithSingleDeploy` are minted
+    /// to `alice` (via `_deposit`), so the test contract itself owns zero
+    /// shares and that call would simply burn-underflow-revert for the wrong
+    /// reason. Fixed to withdraw as `alice`, matching every other withdraw
+    /// test in this file.
+    function test_withdrawalDrainsAdaptersInTheConfiguredOrder() public {
+        _executePlanWithSingleDeploy(address(adapterA), 500e6);
+        _executePlanWithSingleDeploy(address(adapterB), 500e6);
+
+        address[] memory order = new address[](2);
+        order[0] = address(adapterB);
+        order[1] = address(adapterA);
+        vault.setWithdrawalOrder(order);
+
+        // Withdraw less than one adapter holds: only the first in order is touched.
+        vm.prank(alice);
+        vault.withdraw(300e6, alice, alice);
+
+        assertEq(vault.strategyAssets(address(adapterA)), 500e6, "second in order untouched");
+        assertLt(vault.strategyAssets(address(adapterB)), 500e6, "first in order drained");
+        assertEq(usdc.balanceOf(alice), 300e6, "withdrawal must still pay out in full");
+    }
+
+    function test_setWithdrawalOrderRejectsAnUnregisteredAdapter() public {
+        address[] memory order = new address[](1);
+        order[0] = address(0xDEAD);
+        vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
+        vault.setWithdrawalOrder(order);
+    }
+
+    function test_setWithdrawalOrderRejectsDuplicates() public {
+        address[] memory order = new address[](2);
+        order[0] = address(adapterA);
+        order[1] = address(adapterA);
+        vm.expectRevert(NavyVaultSRCLA.DuplicateDependencyGroupMember.selector);
+        vault.setWithdrawalOrder(order);
+    }
+
+    /// @dev An adapter can be listed in the withdrawal order and later moved
+    ///      to AdapterState.Removed (setWithdrawalOrder only validates
+    ///      registration at set time; setAdapterState is a separate call).
+    ///      _ensureIdle must skip the stale entry via its pre-existing
+    ///      state filter rather than let it sink the whole withdrawal.
+    ///      adapterB is left unfunded so it is legal to remove (removal
+    ///      requires strategyAssets == 0).
+    function test_withdrawalOrderSkipsAnAdapterRemovedAfterConfiguration() public {
+        _executePlanWithSingleDeploy(address(adapterA), 500e6);
+        // adapterB never receives a deploy, so strategyAssets(adapterB) == 0.
+
+        address[] memory order = new address[](2);
+        order[0] = address(adapterB);
+        order[1] = address(adapterA);
+        vault.setWithdrawalOrder(order);
+
+        vault.setAdapterState(address(adapterB), uint8(NavyVaultSRCLA.AdapterState.Removed));
+
+        vm.prank(alice);
+        vault.withdraw(300e6, alice, alice);
+
+        assertEq(usdc.balanceOf(alice), 300e6, "withdrawal must succeed by skipping the stale (Removed) entry");
+        assertEq(
+            vault.strategyAssets(address(adapterA)),
+            200e6,
+            "adapterA, second in the configured order, must still be drained once adapterB is skipped"
+        );
+    }
+
+    /// @dev A configured order need not list every registered adapter. The
+    ///      unlisted remainder must still be drained (in registry order)
+    ///      after the configured prefix — the alternative (never draining an
+    ///      unlisted adapter) would fail a withdrawal that liquidity
+    ///      elsewhere could actually satisfy. adapterB is deliberately left
+    ///      out of the order.
+    function test_partialWithdrawalOrderFallsThroughToUnlistedAdaptersInRegistryOrder() public {
+        _executePlanWithSingleDeploy(address(adapterA), 200e6);
+        _executePlanWithSingleDeploy(address(adapterB), 200e6);
+
+        address[] memory order = new address[](1);
+        order[0] = address(adapterA);
+        vault.setWithdrawalOrder(order);
+
+        vm.prank(alice);
+        vault.withdraw(300e6, alice, alice);
+
+        assertEq(vault.strategyAssets(address(adapterA)), 0, "listed adapter must be exhausted first");
+        assertEq(vault.strategyAssets(address(adapterB)), 100e6, "unlisted adapter must supply the remainder");
+        assertEq(usdc.balanceOf(alice), 300e6, "withdrawal must fully succeed via the unlisted fallback");
+    }
+
     /// @dev minIdleBps was dead configuration: settable, digest-covered, never read.
     function test_requiredIdleHonoursMinIdleBps() public {
         // The brief's test body never deposits, leaving totalAssets() == 0 and
