@@ -34,55 +34,62 @@ const REAL_PRICE_ENV_VARS: Record<string, string> = {
 /**
  * SRCLA Extended Configuration Schema
  *
- * Includes all new parameters for:
- * - Post-deposit simulation (§6.3-§6.5)
- * - Dynamic reserve (§8.1)
- * - Cost gate (§9.1)
- * - Regime tracking (§6.2, §7.3)
- * - Reward processing (§9.2-§9.4)
- * - Exhaustive enumeration (§8.2)
+ * SCOPE, AND WHY IT IS THIS SMALL. This object holds only the parameters
+ * some code actually reads. It is NOT the home of the registered policy
+ * parameters.
+ *
+ * The parameters the decision kernel runs on live in exactly two places,
+ * both of which are hashed into a decision's provenance:
+ *   - `policy/decide.ts`'s `DEFAULT_DECIDE_OPTS` (quantumBase,
+ *     reserveQuantile, reserveHorizonSeconds, the eleven cost terms,
+ *     safetyUnwindMaxBps, ...), each with a comment recording whether it is
+ *     calibrated or a registered default; and
+ *   - the policy artifact (`config/bootstrap-artifact.json`, replaced by the
+ *     Phase 4 sweep) for horizon, coverage target, method, and the
+ *     calibrated quantiles.
+ * `admission/cold-start.ts`, `regime/`, `reserve/` and
+ * `protocols/simulation/` likewise carry their own DEFAULT_* constants.
+ *
+ * An ambient env var must NOT be reintroduced as a second source for any of
+ * those: a parameter set from the environment is not in the hashed artifact,
+ * so §10.2's "reconstructable" claim would be false for any run that used
+ * one. The 2026-09-08 cleanup deleted twenty such fields
+ * (SRCLA_SIMULATION_ENABLED, SRCLA_UTILIZATION_DELTA, SRCLA_COMPOUND_K,
+ * SRCLA_RESERVE_QUANTILE, SRCLA_RESERVE_HORIZON_HOURS,
+ * SRCLA_RESERVE_STRESS_BUFFER_BPS, SRCLA_REGIME_VOLATILITY_THRESHOLD,
+ * SRCLA_REGIME_CAPACITY_THRESHOLD, SRCLA_COLD_START_PERIOD_DAYS,
+ * SRCLA_COLD_START_CAPACITY_FACTOR, SRCLA_COLD_START_RESERVE_FACTOR,
+ * SRCLA_HARVEST_MIN_VALUE, SRCLA_HARVEST_OBSERVATION_PERIOD,
+ * SRCLA_HARVEST_VALUE_HAIRCUT_BPS, SRCLA_PRICE_STALENESS_SECONDS,
+ * SRCLA_ALLOCATION_QUANTUM, SRCLA_MAX_REGRET_BPS,
+ * SRCLA_MIN_FORECAST_COVERAGE, SRCLA_DIVEST_FAILURE_STRATEGY,
+ * SRCLA_DEPLOY_FAILURE_STRATEGY): every one was parsed into a field that no
+ * code path read, so setting it changed nothing while looking as though it
+ * would. Two were also outright misleading -- SRCLA_ALLOCATION_QUANTUM's
+ * 1 USDC disagreed with the live `quantumBase` of 1,000 USDC, and
+ * SRCLA_DIVEST_FAILURE_STRATEGY offered a 'continue' that §9.5 forbids
+ * ("a failed divestment stops the plan", which is what keeper-executor and
+ * the vault actually do).
+ *
+ * What remains:
+ * - Cost gate / reserve floor (§9.1, §8.1) -- read by
+ *   `evaluation/proposal-evaluator.ts`, which reviews an externally supplied
+ *   rebalance proposal (POST /v1/proposals/review). That path is not the
+ *   decision kernel and has no artifact, so it is configured here.
+ * - The four gas/price placeholders and their derived status flag, read by
+ *   src/index.ts to build GasObservation and to arm the execution guard.
  */
 export const SrclaConfigSchema = z.object({
-  // Simulation (§6.3-§6.5)
-  simulationEnabled: z.boolean().default(true),
-  utilizationDelta: z.number().default(0.05), // 5% max utilization change per deposit
-  compoundK: z.number().default(5), // Compound rate curve steepness
-
-  // Reserve (§8.1)
+  // Reserve floor (§8.1) -- proposal-review path only.
   reserveFloorBps: z.number().default(500), // 5% floor reserve
-  reserveQuantile: z.number().default(0.95), // 95th percentile withdrawal
-  reserveHorizonHours: z.number().default(24), // 24-hour withdrawal horizon
-  reserveStressBufferBps: z.number().default(200), // 2% stress buffer
 
-  // Cost Gate (§9.1)
-  costGateMinThreshold: z.bigint().default(1n), // 1 USDC minimum threshold
+  // Cost Gate (§9.1) -- proposal-review path only.
+  // NOTE: costGateMinThreshold's default is 1 BASE UNIT (1e-6 USDC), not
+  // 1 USDC as an older comment here claimed.
+  costGateMinThreshold: z.bigint().default(1n),
   costGateSlippageBps: z.number().default(50), // 0.5% slippage
   costGateMevBps: z.number().default(10), // 0.1% MEV impact
   costGateGasLimit: z.bigint().default(200_000n), // Gas limit for cost estimation
-
-  // Regime (§6.2, §7.3)
-  regimeVolatilityThreshold: z.number().default(0.02), // 2% rate volatility
-  regimeCapacityThreshold: z.number().default(0.8), // 80% capacity threshold
-  coldStartPeriodDays: z.number().default(7), // 7-day cold start
-  coldStartCapacityFactor: z.number().default(0.5), // 50% capacity during cold start
-  coldStartReserveFactor: z.number().default(1.5), // 150% reserve during cold start
-
-  // Rewards (§9.2-§9.4)
-  harvestMinValue: z.bigint().default(10_000_000n), // 10 USDC minimum harvest value
-  harvestObservationPeriod: z.number().default(3600), // 1-hour observation period
-  harvestValueHaircutBps: z.number().default(100), // 1% haircut for valuation
-  priceStalenessSeconds: z.number().default(86400), // 24-hour price staleness
-
-  // Enumeration (§8.2)
-  allocationQuantum: z.bigint().default(1_000_000n), // 1 USDC quantum
-  maxRegretBps: z.number().default(100), // 1% maximum regret threshold
-
-  // Forecast
-  minForecastCoverage: z.number().default(0.95), // 95% minimum coverage
-
-  // Execution (§9.5)
-  divestFailureStrategy: z.enum(['stop', 'continue']).default('stop'),
-  deployFailureStrategy: z.enum(['stop', 'recover_idle']).default('recover_idle'),
 
   // Gas/price oracle placeholders (Task 13 - see task-13-report.md).
   // GasObservation (policy/types.ts) needs l2BaseFeeWei, l1BaseFeeWei,
@@ -224,46 +231,13 @@ export function loadConfig(): Config {
  */
 function parseSrclaConfig(): SrclaConfig {
   return {
-    // Simulation
-    simulationEnabled: process.env.SRCLA_SIMULATION_ENABLED !== 'false',
-    utilizationDelta: parseFloat(process.env.SRCLA_UTILIZATION_DELTA ?? '0.05'),
-    compoundK: parseFloat(process.env.SRCLA_COMPOUND_K ?? '5'),
-
-    // Reserve
+    // Reserve floor + cost gate (proposal-review path -- see the schema's
+    // scope comment before adding anything else here).
     reserveFloorBps: parseInt(process.env.SRCLA_RESERVE_FLOOR_BPS ?? '500', 10),
-    reserveQuantile: parseFloat(process.env.SRCLA_RESERVE_QUANTILE ?? '0.95'),
-    reserveHorizonHours: parseInt(process.env.SRCLA_RESERVE_HORIZON_HOURS ?? '24', 10),
-    reserveStressBufferBps: parseInt(process.env.SRCLA_RESERVE_STRESS_BUFFER_BPS ?? '200', 10),
-
-    // Cost Gate
     costGateMinThreshold: BigInt(process.env.SRCLA_COST_GATE_MIN_THRESHOLD ?? '1'),
     costGateSlippageBps: parseInt(process.env.SRCLA_COST_GATE_SLIPPAGE_BPS ?? '50', 10),
     costGateMevBps: parseInt(process.env.SRCLA_COST_GATE_MEV_BPS ?? '10', 10),
     costGateGasLimit: BigInt(process.env.SRCLA_COST_GATE_GAS_LIMIT ?? '200000'),
-
-    // Regime
-    regimeVolatilityThreshold: parseFloat(process.env.SRCLA_REGIME_VOLATILITY_THRESHOLD ?? '0.02'),
-    regimeCapacityThreshold: parseFloat(process.env.SRCLA_REGIME_CAPACITY_THRESHOLD ?? '0.8'),
-    coldStartPeriodDays: parseInt(process.env.SRCLA_COLD_START_PERIOD_DAYS ?? '7', 10),
-    coldStartCapacityFactor: parseFloat(process.env.SRCLA_COLD_START_CAPACITY_FACTOR ?? '0.5'),
-    coldStartReserveFactor: parseFloat(process.env.SRCLA_COLD_START_RESERVE_FACTOR ?? '1.5'),
-
-    // Rewards
-    harvestMinValue: BigInt(process.env.SRCLA_HARVEST_MIN_VALUE ?? '10000000'),
-    harvestObservationPeriod: parseInt(process.env.SRCLA_HARVEST_OBSERVATION_PERIOD ?? '3600', 10),
-    harvestValueHaircutBps: parseInt(process.env.SRCLA_HARVEST_VALUE_HAIRCUT_BPS ?? '100', 10),
-    priceStalenessSeconds: parseInt(process.env.SRCLA_PRICE_STALENESS_SECONDS ?? '86400', 10),
-
-    // Enumeration
-    allocationQuantum: BigInt(process.env.SRCLA_ALLOCATION_QUANTUM ?? '1000000'),
-    maxRegretBps: parseInt(process.env.SRCLA_MAX_REGRET_BPS ?? '100', 10),
-
-    // Forecast
-    minForecastCoverage: parseFloat(process.env.SRCLA_MIN_FORECAST_COVERAGE ?? '0.95'),
-
-    // Execution
-    divestFailureStrategy: (process.env.SRCLA_DIVEST_FAILURE_STRATEGY as 'stop' | 'continue') ?? 'stop',
-    deployFailureStrategy: (process.env.SRCLA_DEPLOY_FAILURE_STRATEGY as 'stop' | 'recover_idle') ?? 'recover_idle',
 
     // Gas/price oracle placeholders (Task 13) - see SrclaConfigSchema comment.
     // Reads the SRCLA_REAL_* env vars (see REAL_PRICE_ENV_VARS) and falls
