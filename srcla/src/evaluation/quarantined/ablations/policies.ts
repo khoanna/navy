@@ -7,6 +7,9 @@
 import type { BaselinePolicy } from '../baselines/types.js';
 import type { AblationPolicy } from './types.js';
 
+import { assertQuarantineOptIn } from '../guard.js';
+assertQuarantineOptIn('evaluation/quarantined/ablations/policies.ts');
+
 /**
  * H1: Disable forecast — use rolling mean of observed rates instead of
  * forward-looking prediction intervals. Falls back to the best recent rate.

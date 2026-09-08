@@ -1,0 +1,179 @@
+#!/usr/bin/env tsx
+/**
+ * The registered evaluation entry point (paper §11, Appendix C).
+ *
+ * Runs B0-B5, B2u, SRCLA and H1-H7 over a frozen dataset by calling
+ * `src/policy/decide.ts` once per origin per policy, with a different
+ * `PolicyAblations` setting per row. There is no second policy implementation
+ * anywhere on this path.
+ *
+ * It FAILS rather than substituting anything. The script this replaces
+ * (`scripts/quarantined/run-evaluation.ts`) silently swapped in a synthetic
+ * manifest when the real one would not load, a fabricated 180-day
+ * single-venue 5%-APY dataset when the database was unavailable, and
+ * `Math.random()` noise for the realized returns the forecast gate is
+ * calibrated against — so a run with Postgres down emitted a
+ * complete-looking, non-reproducible report. None of those paths exist here.
+ *
+ * Usage:
+ *   DATABASE_URL=... tsx scripts/run-registered-evaluation.ts \
+ *     --start 2026-06-01 --end 2026-08-23 [--tiers 10000,100000] [--out file.json]
+ *
+ * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
+ */
+import { writeFileSync } from 'fs';
+import { PrismaClient } from '@prisma/client';
+import { loadDataset } from '../src/evaluation/dataset.js';
+import { loadBootstrapArtifact } from '../src/policy/artifact.js';
+import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
+import {
+  runRegisteredEvaluation,
+  REGISTERED_TIERS,
+  type RegisteredEvaluationResult,
+} from '../src/evaluation/kernel/harness.js';
+import type { HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
+import { NOT_OBSERVED } from '../src/evaluation/kernel/decision-input.js';
+
+function arg(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+function required(name: string): string {
+  const v = arg(name);
+  if (v === undefined || v === '') {
+    throw new Error(`--${name} is required. This script does not substitute a default window.`);
+  }
+  return v;
+}
+
+/**
+ * NOT OBSERVED. Every field here is a registered constant, because srcla
+ * persists no gas/oracle snapshot and no dependency-group registry. See
+ * `NOT_OBSERVED` in decision-input.ts; the same caveat the live service
+ * documents on `config.srcla.placeholder*` applies to the cost terms these
+ * feed.
+ */
+function harnessConfig(): HarnessConfig {
+  return {
+    vault: {
+      adminReserveBase: 0n,
+      // §8.1's admin floor: 5% of NAV, matching the vault's configured
+      // minIdleBps in the deploy scripts.
+      minIdleBps: 500,
+      configurationDigest: '0x' + '00'.repeat(32),
+    },
+    markets: {},
+    defaultMarket: {
+      capBps: 5_000,
+      absoluteCapBase: 10n ** 15n,
+      maxLossBps: 50,
+      dependencyGroupIds: [],
+    },
+    // EMPTY, deliberately: the collector emits no dependency-group data, so
+    // H5 (remove shared-dependency caps) has nothing to remove and the
+    // harness will report it INERT rather than emit a number for it.
+    dependencyGroups: [],
+    gas: {
+      l2BaseFeeWei: 30_000_000n, // 0.03 gwei, Base
+      l1BaseFeeWei: 8_000_000_000n,
+      l1BlobBaseFeeWei: 10_000_000n,
+      ethUsdE8: 350_000_000_000n,
+      usdcUsdE8: 100_000_000n,
+    },
+    horizonSeconds: 604_800,
+    availabilityLagSeconds: 900,
+  };
+}
+
+function summarize(out: RegisteredEvaluationResult): Record<string, unknown> {
+  return {
+    provisionalArtifact: out.provisional,
+    artifactHash: out.artifact.artifactHash,
+    withdrawalSource: out.withdrawalSource,
+    missingPolicyIds: out.missingPolicyIds,
+    missingTiers: out.missingTiers.map((t) => t.toString()),
+    notObserved: [...NOT_OBSERVED],
+    results: out.results.map((r) => ({
+      policyId: r.policy.id,
+      paperSection: r.policy.section,
+      paperDefinition: r.policy.paperDefinition,
+      deployable: r.policy.deployable,
+      disable: r.policy.disable,
+      tier: r.tier.toString(),
+      realizedNetApy: r.replay.realizedNetApy,
+      totalCostsBase: r.replay.totalCosts.toString(),
+      totalTurnoverBase: r.replay.totalTurnover.toString(),
+      rebalances: r.rebalances,
+      withdrawalsAttempted: r.replay.withdrawals.length,
+      withdrawalSuccessRate: r.replay.withdrawalSuccessRate,
+      minStressedLiquidCoverage: r.replay.minStressedLiquidCoverage,
+      inertVsSrcla: r.inertVsSrcla,
+    })),
+  };
+}
+
+async function main(): Promise<void> {
+  const startDate = new Date(required('start'));
+  const endDate = new Date(required('end'));
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    throw new Error('--start and --end must be parseable dates');
+  }
+
+  const tiers = arg('tiers')
+    ? arg('tiers')!
+        .split(',')
+        .map((t) => BigInt(t.trim()) * 1_000_000n)
+    : REGISTERED_TIERS;
+
+  const prisma = new PrismaClient();
+  try {
+    const dataset = await loadDataset(prisma, arg('manifest') ?? 'registered', startDate, endDate);
+    if (dataset.snapshots.length === 0) {
+      // No synthetic fallback: an empty window is a failed run, not a run
+      // over invented data.
+      throw new Error(
+        `No snapshots between ${startDate.toISOString()} and ${endDate.toISOString()}. ` +
+          `Collect a dataset first; this script will not substitute synthetic data.`
+      );
+    }
+
+    const out = runRegisteredEvaluation({
+      dataset,
+      config: harnessConfig(),
+      artifact: loadBootstrapArtifact(),
+      tiers,
+      decideOpts: DEFAULT_DECIDE_OPTS,
+    });
+
+    const summary = summarize(out);
+    const file = arg('out');
+    if (file !== undefined) {
+      writeFileSync(file, JSON.stringify(summary, null, 2));
+      console.log(`[evaluation] wrote ${file}`);
+    } else {
+      console.log(JSON.stringify(summary, null, 2));
+    }
+
+    if (out.provisional) {
+      console.error(
+        '[evaluation] WARNING: the artifact is PROVISIONAL (config/bootstrap-artifact.json says ' +
+          'it is not calibrated). Results are not citable.'
+      );
+    }
+    const inert = out.results.filter((r) => r.inertVsSrcla).map((r) => r.policy.id);
+    if (inert.length > 0) {
+      console.error(
+        `[evaluation] WARNING: these policies made byte-identical decisions to SRCLA and removed ` +
+          `nothing on this dataset: ${[...new Set(inert)].join(', ')}`
+      );
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error('[evaluation] FAILED:', err);
+  process.exit(1);
+});

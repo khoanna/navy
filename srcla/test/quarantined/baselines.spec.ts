@@ -1,11 +1,11 @@
-import { b0Policy } from '../../src/evaluation/baselines/policies.js';
-import { b1Policy } from '../../src/evaluation/baselines/b1-highest-rate.js';
-import { b2Policy } from '../../src/evaluation/baselines/b2-capacity.js';
-import { b3Policy } from '../../src/evaluation/baselines/b3-capacity-cost.js';
-import { b4Policy } from '../../src/evaluation/baselines/b4-fixed-robust.js';
-import { b5Policy } from '../../src/evaluation/baselines/b5-hindsight.js';
+import { b0Policy } from '../../src/evaluation/quarantined/baselines/policies.js';
+import { b1Policy } from '../../src/evaluation/quarantined/baselines/b1-highest-rate.js';
+import { b2Policy } from '../../src/evaluation/quarantined/baselines/b2-capacity.js';
+import { b3Policy } from '../../src/evaluation/quarantined/baselines/b3-capacity-cost.js';
+import { b4Policy } from '../../src/evaluation/quarantined/baselines/b4-fixed-robust.js';
+import { b5Policy } from '../../src/evaluation/quarantined/baselines/b5-hindsight.js';
 import { createSyntheticDataset } from '../../src/evaluation/dataset.js';
-import { ALL_BASELINES, BASELINE_INFO } from '../../src/evaluation/baselines/index.js';
+import { ALL_BASELINES, BASELINE_INFO } from '../../src/evaluation/quarantined/baselines/index.js';
 
 function mockSnapshot(rateBps: number, paused = false, capBps = 5000, marketId = 'compound') {
   const dataset = createSyntheticDataset('test', 1, new Date('2025-01-01'));

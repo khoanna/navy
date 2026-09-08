@@ -15,30 +15,45 @@
 import { PrismaClient } from '@prisma/client';
 import { readFileSync } from 'fs';
 import { join as pathJoin } from 'path';
-import { thawEvaluationManifest } from '../src/evaluation/manifest/manifest.js';
-import type { ManifestConfig } from '../src/evaluation/manifest/types.js';
-import { loadDataset, splitDataset, createSyntheticDataset, type EvaluationDataset } from '../src/evaluation/dataset.js';
-import { runReplay } from '../src/evaluation/replay/replay.js';
-import { b0Policy } from '../src/evaluation/baselines/policies.js';
-import { b1Policy } from '../src/evaluation/baselines/b1-highest-rate.js';
-import { b2Policy } from '../src/evaluation/baselines/b2-capacity.js';
-import { b3Policy } from '../src/evaluation/baselines/b3-capacity-cost.js';
-import { b4Policy } from '../src/evaluation/baselines/b4-fixed-robust.js';
-import { b5Policy } from '../src/evaluation/baselines/b5-hindsight.js';
-import { h1Ablation, h2Ablation, h3Ablation, h4Ablation, h5Ablation } from '../src/evaluation/ablations/policies.js';
-import { calculateReturnMetrics } from '../src/evaluation/metrics/returns.js';
-import { calculateRiskMetrics } from '../src/evaluation/metrics/risk.js';
-import { calculateForecastMetrics, type ForecastMetrics } from '../src/evaluation/metrics/forecast.js';
-import { welchTTest, bootstrapCI } from '../src/evaluation/metrics/statistics.js';
-import { evaluateReleaseGate } from '../src/evaluation/report/release-gate.js';
-import { formatReportMarkdown } from '../src/evaluation/report/report.js';
-import { createSRCLAPolicy } from '../src/evaluation/srcla-policy.js';
-import { calibrateForecastMethods, validateCoverage } from '../src/evaluation/forecast/calibration.js';
-import type { BaselinePolicy } from '../src/evaluation/baselines/types.js';
-import type { VaultState } from '../src/evaluation/replay/state.js';
-import type { TimeOrderedSnapshot } from '../src/evaluation/dataset.js';
-import type { BaselineAction } from '../src/evaluation/replay/replay.js';
-import { WAD } from '../src/protocols/math.js';
+import { thawEvaluationManifest } from '../../src/evaluation/manifest/manifest.js';
+import type { ManifestConfig } from '../../src/evaluation/manifest/types.js';
+import { loadDataset, splitDataset, createSyntheticDataset, type EvaluationDataset } from '../../src/evaluation/dataset.js';
+import { runReplay } from '../../src/evaluation/replay/replay.js';
+import { b0Policy } from '../../src/evaluation/quarantined/baselines/policies.js';
+import { b1Policy } from '../../src/evaluation/quarantined/baselines/b1-highest-rate.js';
+import { b2Policy } from '../../src/evaluation/quarantined/baselines/b2-capacity.js';
+import { b3Policy } from '../../src/evaluation/quarantined/baselines/b3-capacity-cost.js';
+import { b4Policy } from '../../src/evaluation/quarantined/baselines/b4-fixed-robust.js';
+import { b5Policy } from '../../src/evaluation/quarantined/baselines/b5-hindsight.js';
+import { h1Ablation, h2Ablation, h3Ablation, h4Ablation, h5Ablation } from '../../src/evaluation/quarantined/ablations/policies.js';
+import { calculateReturnMetrics } from '../../src/evaluation/metrics/returns.js';
+import { calculateRiskMetrics } from '../../src/evaluation/metrics/risk.js';
+import { calculateForecastMetrics, type ForecastMetrics } from '../../src/evaluation/metrics/forecast.js';
+import { welchTTest, bootstrapCI } from '../../src/evaluation/metrics/statistics.js';
+import { evaluateReleaseGate } from '../../src/evaluation/report/release-gate.js';
+import { formatReportMarkdown } from '../../src/evaluation/report/report.js';
+import { createSRCLAPolicy } from '../../src/evaluation/quarantined/srcla-policy.js';
+import { calibrateForecastMethods, validateCoverage } from '../../src/evaluation/forecast/calibration.js';
+import type { BaselinePolicy } from '../../src/evaluation/quarantined/baselines/types.js';
+import type { VaultState } from '../../src/evaluation/replay/state.js';
+import type { TimeOrderedSnapshot } from '../../src/evaluation/dataset.js';
+import type { BaselineAction } from '../../src/evaluation/replay/replay.js';
+import { WAD } from '../../src/protocols/math.js';
+
+// QUARANTINED. This script drives the reimplementations under
+// src/evaluation/quarantined/, not src/policy/decide.ts — see that
+// directory's README.md. It also fabricates inputs (a synthetic manifest, a
+// synthetic dataset, and Math.random() realized returns for the forecast
+// gate). Kept only to reproduce previously published numbers.
+if (process.env.SRCLA_ALLOW_QUARANTINED_HARNESS !== '1') {
+  throw new Error(
+    'scripts/quarantined/run-evaluation.ts is QUARANTINED: it does not call src/policy/decide.ts ' +
+      'and it silently substitutes synthetic data. Use `pnpm evaluation:run` ' +
+      '(scripts/run-registered-evaluation.ts). To run it anyway, set ' +
+      'SRCLA_ALLOW_QUARANTINED_HARNESS=1.'
+  );
+}
+
 
 const POLICY_MAP: Record<string, BaselinePolicy> = {
   b0: b0Policy,

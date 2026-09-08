@@ -10,16 +10,19 @@
  * - Generates reproducible content hash
  */
 import { createHash } from 'crypto';
-import { runReplay, type PolicyFn, type ReplayResult } from '../replay/replay.js';
-import { calculateReturnMetrics } from '../metrics/returns.js';
-import { calculateRiskMetrics } from '../metrics/risk.js';
-import type { ForecastMetrics } from '../metrics/forecast.js';
-import { computeSharpeFromSnapshots } from '../metrics/statistics.js';
-import { CoverageTracker } from '../coverage-tracker.js';
+import { runReplay, type PolicyFn, type ReplayResult } from '../../replay/replay.js';
+import { calculateReturnMetrics } from '../../metrics/returns.js';
+import { calculateRiskMetrics } from '../../metrics/risk.js';
+import type { ForecastMetrics } from '../../metrics/forecast.js';
+import { computeSharpeFromSnapshots } from '../../metrics/statistics.js';
+import { CoverageTracker } from '../../coverage-tracker.js';
 import { createSRCLAPolicy } from '../srcla-policy.js';
-import { getDeployableBaselines, type EvaluationManifest } from '../manifest/manifest.js';
-import type { EvaluationDataset } from '../dataset.js';
-import type { BaselineConfig, AblationConfig } from '../manifest/manifest.js';
+import { getDeployableBaselines, type EvaluationManifest } from '../../manifest/manifest.js';
+import type { EvaluationDataset } from '../../dataset.js';
+import type { BaselineConfig, AblationConfig } from '../../manifest/manifest.js';
+
+import { assertQuarantineOptIn } from '../guard.js';
+assertQuarantineOptIn('evaluation/quarantined/runner/runner.ts');
 
 // ============================================================================
 // Policy Types

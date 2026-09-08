@@ -14,6 +14,9 @@ import { b3Policy } from './b3-capacity-cost.js';
 import { b4Policy } from './b4-fixed-robust.js';
 import { b5Policy } from './b5-hindsight.js';
 
+import { assertQuarantineOptIn } from '../guard.js';
+assertQuarantineOptIn('evaluation/quarantined/baselines');
+
 export { b0Policy } from './policies.js';
 export { b1Policy } from './b1-highest-rate.js';
 export { b2Policy } from './b2-capacity.js';

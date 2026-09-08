@@ -26,11 +26,14 @@
  * - Lexical tie-break favors "rolling" when losses are equal
  */
 import type { BaselinePolicy } from './baselines/types.js';
-import type { VaultState } from './replay/state.js';
-import type { TimeOrderedSnapshot } from './dataset.js';
-import type { BaselineAction } from './replay/replay.js';
-import { WAD, RAY } from '../protocols/math.js';
-import { GreedyAllocator } from '../optimizer/greedy-allocator.js';
+import type { VaultState } from '../replay/state.js';
+import type { TimeOrderedSnapshot } from '../dataset.js';
+import type { BaselineAction } from '../replay/replay.js';
+import { WAD, RAY } from '../../protocols/math.js';
+import { GreedyAllocator } from '../../optimizer/greedy-allocator.js';
+
+import { assertQuarantineOptIn } from './guard.js';
+assertQuarantineOptIn('evaluation/quarantined/srcla-policy.ts');
 
 export interface SRCLAPolicyConfig {
   /** Forecast lower bound coverage target (0.95 = 95%) */

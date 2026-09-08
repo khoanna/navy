@@ -6,7 +6,7 @@
  * Uses marketId (adapter address) as stable key instead of hardcoded strings.
  */
 import type { BaselinePolicy } from './types.js';
-import type { BaselineAction } from '../replay/replay.js';
+import type { BaselineAction } from '../../replay/replay.js';
 
 export const b4Policy: BaselinePolicy = (state, snapshot): BaselineAction[] => {
   const actions: BaselineAction[] = [];

@@ -8,9 +8,9 @@
  * which market will perform best ahead of time.
  */
 import type { BaselinePolicy } from './types.js';
-import type { BaselineAction } from '../replay/replay.js';
-import type { TimeOrderedSnapshot } from '../dataset.js';
-import type { VaultState } from '../replay/state.js';
+import type { BaselineAction } from '../../replay/replay.js';
+import type { TimeOrderedSnapshot } from '../../dataset.js';
+import type { VaultState } from '../../replay/state.js';
 
 export const b5Policy: BaselinePolicy = (
   state: VaultState,

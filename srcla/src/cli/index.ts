@@ -5,7 +5,6 @@
  */
 import { loadConfig } from '../config.js';
 import { CollectorOrchestrator, type OrchestratorConfig } from '../collector/orchestrator.js';
-import { runEvaluation, type EvaluationConfig } from '../evaluation/runner/integration.js';
 import { RegimeTracker } from '../regime/regime-tracker.js';
 import { RegimeRepository } from '../regime/repository.js';
 import { getPrisma, closePrisma, isConnected } from '../db/client.js';
@@ -91,6 +90,14 @@ async function runCollect(_args: Record<string, string>): Promise<void> {
 async function runEvaluate(args: Record<string, string>): Promise<void> {
   console.log('[CLI] Starting evaluation...');
 
+  // DYNAMIC import: `evaluation/quarantined/runner/integration.ts` throws at
+  // module scope unless the operator opts in (see quarantined/guard.ts). A
+  // static import would make every other CLI command — `collect`, `regime`,
+  // `health` — fail to load too. This command is the only caller, and it is
+  // the caller that should fail.
+  const { runEvaluation } = await import('../evaluation/quarantined/runner/integration.js');
+  type EvaluationConfig = Parameters<typeof runEvaluation>[0];
+
   const startDate = args.start ? new Date(args.start) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const endDate = args.end ? new Date(args.end) : new Date();
 
@@ -120,7 +127,7 @@ async function runEvaluate(args: Record<string, string>): Promise<void> {
     if (result.baselines) {
       console.log('\nBaselines:');
       for (const [key, baseline] of Object.entries(result.baselines)) {
-        console.log(`  ${key}: ${(baseline.realizedNetApy * 100).toFixed(2)}% APY`);
+        console.log(`  ${key}: ${((baseline as { realizedNetApy: number }).realizedNetApy * 100).toFixed(2)}% APY`);
       }
     }
 

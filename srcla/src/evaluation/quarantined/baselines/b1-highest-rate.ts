@@ -5,7 +5,7 @@
  * Ignores capacity and uncertainty.
  */
 import type { BaselinePolicy } from './types.js';
-import type { BaselineAction } from '../replay/replay.js';
+import type { BaselineAction } from '../../replay/replay.js';
 
 export const b1Policy: BaselinePolicy = (state, snapshot): BaselineAction[] => {
   const actions: BaselineAction[] = [];

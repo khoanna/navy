@@ -7,7 +7,7 @@
  * - Policy comparison
  * - Content hash generation
  */
-import { EvaluationRunner, createEvaluationRunner, runQuickEvaluation, type Policy } from '../../src/evaluation/runner/runner.js';
+import { EvaluationRunner, createEvaluationRunner, runQuickEvaluation, type Policy } from '../../src/evaluation/quarantined/runner/runner.js';
 import { createEvaluationManifest, freezeEvaluationManifest, type EvaluationManifest } from '../../src/evaluation/manifest/manifest.js';
 import { CoverageTracker } from '../../src/evaluation/coverage-tracker.js';
 import { createSyntheticDataset, type EvaluationDataset } from '../../src/evaluation/dataset.js';
@@ -169,7 +169,10 @@ describe('EvaluationRunner', () => {
         expect(typeof result.realizedGrossApy).toBe('number');
         expect(typeof result.totalCost).toBe('bigint');
         expect(typeof result.rebalanceCount).toBe('number');
-        expect(typeof result.withdrawalSuccessRate).toBe('number');
+        // NULL, not a number: this quarantined runner attempts no redemption, and
+        // an unmeasured rate is now reported as null rather than a flattering 1.
+        // The 1 it used to return fed a >= 0.99 safety gate.
+        expect(result.withdrawalSuccessRate).toBeNull();
         expect(typeof result.maxDrawdown).toBe('number');
         expect(typeof result.sharpeRatio).toBe('number');
 
@@ -177,9 +180,12 @@ describe('EvaluationRunner', () => {
         expect(result.realizedNetApy).toBeGreaterThanOrEqual(-1);
         expect(result.realizedNetApy).toBeLessThan(10);
 
-        // Withdrawal success rate should be between 0 and 1
-        expect(result.withdrawalSuccessRate).toBeGreaterThanOrEqual(0);
-        expect(result.withdrawalSuccessRate).toBeLessThanOrEqual(1);
+        // Withdrawal success rate is null here (see above); when it IS
+        // measured it is a fraction in [0, 1].
+        if (result.withdrawalSuccessRate !== null) {
+          expect(result.withdrawalSuccessRate).toBeGreaterThanOrEqual(0);
+          expect(result.withdrawalSuccessRate).toBeLessThanOrEqual(1);
+        }
 
         // Max drawdown should be between 0 and 1
         expect(result.maxDrawdown).toBeGreaterThanOrEqual(0);

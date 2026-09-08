@@ -1,9 +1,9 @@
 /**
  * Baseline types
  */
-import type { VaultState } from '../replay/state.js';
-import type { TimeOrderedSnapshot } from '../dataset.js';
-import type { BaselineAction } from '../replay/replay.js';
+import type { VaultState } from '../../replay/state.js';
+import type { TimeOrderedSnapshot } from '../../dataset.js';
+import type { BaselineAction } from '../../replay/replay.js';
 
 export type BaselinePolicy = (
   state: VaultState,

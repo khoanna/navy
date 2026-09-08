@@ -3,7 +3,10 @@
  */
 import { createHash } from 'crypto';
 import type { ManifestConfig } from '../manifest/types.js';
-import type { BaselineResult } from '../baselines/types.js';
+// Type-only import from the quarantined tree: erased at runtime, so it does
+// NOT trip the quarantine guard (which lives in baselines/index.ts, not in
+// types.ts). Only the shape of a baseline result is borrowed here.
+import type { BaselineResult } from '../quarantined/baselines/types.js';
 import type { ForecastMetrics } from '../metrics/forecast.js';
 import type { RiskMetrics } from '../metrics/risk.js';
 import type { ReleaseGateResult } from './release-gate.js';

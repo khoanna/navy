@@ -9,7 +9,7 @@ import {
   h4Ablation,
   h5Policy,
   h5Ablation,
-} from '../../src/evaluation/ablations/policies.js';
+} from '../../src/evaluation/quarantined/ablations/policies.js';
 import { createSyntheticDataset } from '../../src/evaluation/dataset.js';
 
 function mockSnapshot(

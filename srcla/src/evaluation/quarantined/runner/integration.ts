@@ -11,9 +11,12 @@
  * 7. Evaluates release gates
  * 8. Saves results to database
  */
-import { getPrisma } from '../../db/client.js';
-import { SnapshotRepository } from '../../db/repositories/snapshot-repository.js';
-import { EvaluationRepository } from '../../db/repositories/evaluation-repository.js';
+import { getPrisma } from '../../../db/client.js';
+import { SnapshotRepository } from '../../../db/repositories/snapshot-repository.js';
+import { EvaluationRepository } from '../../../db/repositories/evaluation-repository.js';
+
+import { assertQuarantineOptIn } from '../guard.js';
+assertQuarantineOptIn('evaluation/quarantined/runner/integration.ts');
 
 export interface EvaluationConfig {
   startDate: Date;
