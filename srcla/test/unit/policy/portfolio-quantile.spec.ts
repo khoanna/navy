@@ -59,6 +59,11 @@ function artifact(over: Partial<PolicyArtifact> = {}): PolicyArtifact {
     methodParams: {},
     residualQuantileWadByMarket: {},
     portfolioResidualQuantileWad: -1n * 10n ** 13n,
+    // §7.2's second target made an identity, so these cases isolate the
+    // PORTFOLIO quantile's effect on the ranking rather than mixing in a
+    // cash haircut on phi.
+    cashResidualQuantileWadByMarket: {},
+    cashLowerBoundQuantileWad: 0n,
     minObservations: 3,
     availabilityLagSeconds: 900,
     noTradeBandK: 1,

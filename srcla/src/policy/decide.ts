@@ -212,6 +212,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
 
     const unwindReserve = requiredReserve(
       input,
+      artifact,
       unwindTarget,
       reserveOptsFrom(opts.disable ?? {}, {
         reserveQuantile: opts.reserveQuantile,
@@ -305,6 +306,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   // so the reported reserve cannot disagree with the one the search obeyed.
   const reserve = requiredReserve(
     input,
+    artifact,
     target,
     reserveOptsFrom(disable, {
       reserveQuantile: opts.reserveQuantile,

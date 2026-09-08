@@ -386,9 +386,14 @@ export class SnapshotCollector {
     address: string,
     blockNumber: number
   ): Promise<StrategySnapshot> {
-    const [totalAssets, maxWithdraw, configDigest, supplyRate] = await Promise.all([
+    const [totalAssets, maxWithdraw, maxDeploy, configDigest, supplyRate] = await Promise.all([
       this.readUint(ADAPTER_IFACE, address, 'totalAssets', [], blockNumber),
       this.readUint(ADAPTER_IFACE, address, 'maxWithdrawable', [], blockNumber),
+      // Deployable headroom is a DIFFERENT quantity from withdrawable exit
+      // capacity: `maxWithdrawable()` is min(position, cash) and is 0 for a
+      // venue the vault has not entered, so reusing it as headroom made
+      // admit.ts's CAP_ZERO reject every empty venue (audit NEW-11).
+      this.readUint(ADAPTER_IFACE, address, 'maxDeployable', [], blockNumber),
       this.readBytes32(ADAPTER_IFACE, address, 'configurationDigest', [], blockNumber),
       // WAD-scaled annualized supply rate; every adapter implements this
       // (CompoundAdapter.sol:98, AaveV3Adapter.sol:96, MoonwellAdapter.sol:136).
@@ -405,6 +410,7 @@ export class SnapshotCollector {
       name,
       totalAssets,
       maxWithdrawable: maxWithdraw,
+      maxDeployable: maxDeploy,
       supplyRate,
       utilization: venueState.utilizationWad,
       cash: venueState.cash,

@@ -42,6 +42,7 @@ function labelsFor(marketId: string, regimeId: string, count: number) {
   return Array.from({ length: count }, () => ({
     marketId, regimeId, originSeconds: 1, horizonSeconds: 604_800 as const,
     horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
+    originCashBase: 1n,
   }));
 }
 
@@ -69,6 +70,8 @@ const artifact: PolicyArtifact = {
   methodParams: {},
   residualQuantileWadByMarket: {},
   portfolioResidualQuantileWad: 0n,
+  cashResidualQuantileWadByMarket: {},
+  cashLowerBoundQuantileWad: 0n,
   minObservations: 30,
   availabilityLagSeconds: 0,
   noTradeBandK: 1,

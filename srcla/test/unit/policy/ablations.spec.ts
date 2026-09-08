@@ -59,6 +59,7 @@ function history(marketId: string) {
     availableAtSeconds: 3,
     realizedReturnWad: WAD,
     realizedMinCashBase: 1n,
+    originCashBase: 1n,
   }));
 }
 
@@ -97,6 +98,10 @@ function artifact(over: Partial<PolicyArtifact> = {}): PolicyArtifact {
     residualQuantileWadByMarket: { aa: 0n, bb: 0n },
     pinnedConfigDigests: { aa: '0xd', bb: '0xd' },
     portfolioResidualQuantileWad: -1_000_000n,
+    // §7.2's second forecast target, made an identity here so these cases
+    // isolate the rule under test rather than a cash haircut on phi.
+    cashResidualQuantileWadByMarket: {},
+    cashLowerBoundQuantileWad: 0n,
     noTradeBandK: 0,
     ...over,
   };
@@ -128,14 +133,14 @@ describe('reserve: P3 netting switch (baseline B3)', () => {
   const base = () => input({ markets: [market('aa', { maxWithdrawableBase: 5_000_000_000n })], withdrawals: withdrawn });
 
   it('nets the withdrawal quantile against executable exits by default', () => {
-    const r = requiredReserve(base(), target, { quantile: 0.95, horizonSeconds: 86_400 });
+    const r = requiredReserve(base(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400 });
     // Q_beta = 3,000 USDC, exec0 = min(5,000, 5,000) = 5,000 USDC -> netted to 0.
     expect(r.netDemandQuantileBase).toBe(0n);
   });
 
   it('uses the RAW quantile when netting is disabled, raising the required reserve', () => {
-    const netted = requiredReserve(base(), target, { quantile: 0.95, horizonSeconds: 86_400 });
-    const raw = requiredReserve(base(), target, { quantile: 0.95, horizonSeconds: 86_400, netting: false });
+    const netted = requiredReserve(base(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400 });
+    const raw = requiredReserve(base(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400, netting: false });
 
     expect(raw.netDemandQuantileBase).toBe(3_000_000_000n);
     // Non-vacuity: the two branches must actually disagree, and the raw one
@@ -145,8 +150,8 @@ describe('reserve: P3 netting switch (baseline B3)', () => {
   });
 
   it('leaves the stress term netted even when the demand term is not', () => {
-    const raw = requiredReserve(base(), target, { quantile: 0.95, horizonSeconds: 86_400, netting: false });
-    const netted = requiredReserve(base(), target, { quantile: 0.95, horizonSeconds: 86_400 });
+    const raw = requiredReserve(base(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400, netting: false });
+    const netted = requiredReserve(base(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400 });
     expect(raw.stressShortfallBase).toBe(netted.stressShortfallBase);
     expect(raw.stressShortfallBase).toBeGreaterThan(0n);
   });
@@ -167,8 +172,8 @@ describe('reserve: H4 floor-only switch', () => {
   };
 
   it('reduces the requirement to the floor and empties the scenario list', () => {
-    const full = requiredReserve(withFloor(), target, { quantile: 0.95, horizonSeconds: 86_400 });
-    const h4 = requiredReserve(withFloor(), target, { quantile: 0.95, horizonSeconds: 86_400, floorOnly: true });
+    const full = requiredReserve(withFloor(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400 });
+    const h4 = requiredReserve(withFloor(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400, floorOnly: true });
 
     expect(h4.requiredBase).toBe(h4.floorBase);
     expect(h4.floorBase).toBe(200_000_000n);
@@ -184,7 +189,7 @@ describe('reserve: H4 floor-only switch', () => {
   });
 
   it('keeps the admin floor — it is not the same as removing the reserve', () => {
-    const h4 = requiredReserve(withFloor(), target, { quantile: 0.95, horizonSeconds: 86_400, floorOnly: true });
+    const h4 = requiredReserve(withFloor(), artifact(), target, { quantile: 0.95, horizonSeconds: 86_400, floorOnly: true });
     expect(h4.requiredBase).toBeGreaterThan(0n);
   });
 });

@@ -220,11 +220,16 @@ export async function buildRawOriginFromCollector(
     supplyRateWad: s.supplyRate,
     utilizationWad: s.utilization,
     positionBase: s.totalAssets,
-    // StrategySnapshot (src/collector/types.ts) exposes only one
-    // same-transaction headroom figure (maxWithdrawable) — until the
-    // collector distinguishes deployable vs withdrawable headroom, this
-    // reads that on-chain value.
-    maxDeployableBase: s.maxWithdrawable,
+    // The adapter's own `maxDeployable()`, NOT `maxWithdrawable()`. The two
+    // are different quantities: `maxWithdrawable()` is
+    // min(our position, venue cash) and is therefore 0 for a venue the vault
+    // has not entered, so reusing it here made `admit.ts`'s CAP_ZERO rule
+    // (`maxDeployableBase > 0`) reject every empty venue and
+    // `effectiveCapBase`'s `positionBase + maxDeployableBase` headroom cap
+    // it to zero — the deployable half of readiness audit NEW-11's
+    // cold-start deadlock. `maxDeployable()` is position-independent and
+    // reports the venue's real supply headroom (2^256-1 where uncapped).
+    maxDeployableBase: s.maxDeployable,
     // NOT `s.maxWithdrawable`: the adapter's `maxWithdrawable()` is
     // `min(ourBalance, protocolCash)`, so it is 0 for a venue the vault has
     // not entered — and `exitableFraction(x, 0) = 0` then zeroes the
@@ -279,6 +284,15 @@ export async function buildRawOriginFromCollector(
     realizedReturnWad: BigInt(r.realizedReturnWad ?? r.realizedReturnE18),
     // Task-13 correction 6: `realizedMinCashBase` is optional.
     realizedMinCashBase: BigInt(r.realizedMinCashBase ?? '0'),
+    // §7.2's second target needs the ORIGIN's withdrawable cash as the
+    // denominator of a scale-free residual, and `ForecastLabel` has no such
+    // column (prisma/schema.prisma). Adding one is a schema migration, which
+    // is out of scope here, so this reports `null` — which
+    // `calibrateCashResidualQuantiles` SKIPS rather than reading as a zero
+    // residual. The artifact's registered (strictly negative) fallback
+    // quantile governs instead, so the missing input degrades
+    // conservatively. See fix-e-policy-report.md.
+    originCashBase: null,
   }));
 
   const withdrawals = (

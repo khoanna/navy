@@ -155,6 +155,7 @@ describe('buildRawOriginFromCollector', () => {
           name: 'Moonwell',
           totalAssets: 3_000_000_000n,
           maxWithdrawable: 2_700_000_000n,
+          maxDeployable: 9_000_000_000n,
           supplyRate: 33_000_000_000_000_000n,
           utilization: 777_777_777_777_777_777n,
           cash: 300_000_000n,
@@ -173,6 +174,38 @@ describe('buildRawOriginFromCollector', () => {
     expect(out!.markets[0]!.cash).toBe(300_000_000n);
     expect(out!.markets[0]!.supplyRateWad).toBe(33_000_000_000_000_000n);
     expect(out!.markets[0]!.utilizationWad).toBe(777_777_777_777_777_777n);
+  });
+
+  it('reads deployable headroom from maxDeployable, not maxWithdrawable', async () => {
+    // The deployable half of the cold-start deadlock (audit NEW-11): the
+    // adapter's `maxWithdrawable()` is min(position, cash) and is 0 for a
+    // venue the vault has not entered, so reusing it as headroom made
+    // `admit.ts`'s CAP_ZERO reject every empty venue.
+    const snap: CollectedSnapshot = {
+      ...fakeSnapshot(),
+      strategies: [
+        {
+          address: '0x' + 'bb'.repeat(20),
+          name: 'Aave',
+          totalAssets: 0n,
+          maxWithdrawable: 0n,
+          maxDeployable: 12_000_000_000n,
+          supplyRate: 41_000_000_000_000_000n,
+          utilization: 500_000_000_000_000_000n,
+          cash: 400_000_000n,
+          borrows: 400_000_000n,
+          reserves: 0n,
+          paused: false,
+          configDigest: '0x' + 'd4'.repeat(32),
+        },
+      ],
+    };
+
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {}, CHURN);
+    expect(out!.markets[0]!.maxDeployableBase).toBe(12_000_000_000n);
+    // ...and the empty venue still reports a positive deployable headroom.
+    expect(out!.markets[0]!.positionBase).toBe(0n);
+    expect(out!.markets[0]!.maxDeployableBase).toBeGreaterThan(0n);
   });
 });
 

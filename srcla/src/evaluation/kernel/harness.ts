@@ -25,6 +25,7 @@ import {
   deriveCompletedLabels,
   labelsAvailableAt,
   calibrateResidualQuantiles,
+  calibrateCashResidualQuantiles,
   type HarnessConfig,
 } from './decision-input.js';
 import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
@@ -279,6 +280,16 @@ export function prepareArtifact(
     ...base,
     pinnedConfigDigests,
     residualQuantileWadByMarket: calibrateResidualQuantiles(
+      calibrationLabels,
+      base.coverageTarget,
+      base.minObservations,
+    ),
+    // §7.2's SECOND registered target, calibrated on the SAME split, with
+    // the same coverage target and the same minimum-observation rule as the
+    // first. It supplies e_i^cons in §8.1 and phi_i in §8.2; before this it
+    // was never registered, calibrated or applied anywhere (audit NEW-11)
+    // and both consumers read the spot cash instead.
+    cashResidualQuantileWadByMarket: calibrateCashResidualQuantiles(
       calibrationLabels,
       base.coverageTarget,
       base.minObservations,

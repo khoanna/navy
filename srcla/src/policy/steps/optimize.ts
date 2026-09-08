@@ -1,5 +1,5 @@
 import { rateAt } from './simulate.js';
-import { lowerBoundAt, exitableFraction } from './forecast.js';
+import { lowerBoundAt, exitableFraction, withdrawableLowerBoundBase } from './forecast.js';
 import { requiredReserve } from './reserve.js';
 import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
@@ -238,7 +238,9 @@ export function portfolioLowerBound(
         ? lowerBoundAt(c, artifact, c.marketId, x, artifact.horizonSeconds)
         : pointForecastAt(c, x, artifact.horizonSeconds);
 
-    const phi = disable.exitableWeight ? 1 : exitableFraction(x, m.maxWithdrawableBase);
+    // §7.2's second forecast target supplies phi's denominator, not the spot
+    // `maxWithdrawableBase` reading (audit NEW-11).
+    const phi = disable.exitableWeight ? 1 : exitableFraction(x, withdrawableLowerBoundBase(m, artifact));
     mu += (perVenue * x * BigInt(Math.round(phi * 1_000_000))) / (WAD * 1_000_000n);
   }
 
@@ -320,7 +322,7 @@ export function optimize(
     }
 
     if (!disable.reserve) {
-      const r = requiredReserve(input, candidate, reserveOptsFrom(disable, opts));
+      const r = requiredReserve(input, artifact, candidate, reserveOptsFrom(disable, opts));
       // Guard: deployed can equal totalAssetsBase exactly (idle 0), never
       // exceed it (checked above), so this subtraction cannot underflow.
       if (totalAssetsBase - deployed < r.requiredBase) return false;

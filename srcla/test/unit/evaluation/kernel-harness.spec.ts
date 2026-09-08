@@ -133,6 +133,10 @@ function testArtifact(over: Partial<PolicyArtifact> = {}): PolicyArtifact {
     // negligible (see its derivation note) and would make H2 inert here for
     // a reason that has nothing to do with the switch.
     portfolioResidualQuantileWad: -2n * 10n ** 14n,
+    // §7.2's second forecast target, made an identity here so these cases
+    // isolate the rule under test rather than a cash haircut on phi.
+    cashResidualQuantileWadByMarket: {},
+    cashLowerBoundQuantileWad: 0n,
     noTradeBandK: 0,
     ...over,
   };
@@ -582,6 +586,7 @@ describe('calibrateResidualQuantiles', () => {
     availableAtSeconds: HORIZON,
     realizedReturnWad: r,
     realizedMinCashBase: 0n,
+    originCashBase: 0n,
   });
 
   it('returns a non-positive quantile', () => {
@@ -632,6 +637,36 @@ describe('prepareArtifact', () => {
     );
     expect(withHeldOut.residualQuantileWadByMarket).not.toEqual(
       withEverything.residualQuantileWadByMarket,
+    );
+  });
+
+  // §7.2's SECOND registered target (audit NEW-11): before this it was never
+  // registered, calibrated or applied — `realizedMinCashBase` existed as a
+  // label column with no consumer anywhere in src.
+  it('calibrates the second (withdrawable-cash) target on the same split', () => {
+    // Cash must MOVE for a residual to exist at all.
+    const ds = makeDataset(20, undefined, (venue, day) =>
+      venue === 'aave-usdc' ? { cashBase: BigInt(1_000_000 - day * 20_000) * 1_000_000n } : {},
+    );
+    const labels = deriveCompletedLabels(ds.snapshots, HORIZON, 0);
+    const a = prepareArtifact({ ...testArtifact(), minObservations: 1 }, ds, labels, 1.0);
+    expect(a.cashResidualQuantileWadByMarket['aave-usdc']).toBeLessThan(0n);
+  });
+
+  it('gives the second target the same calibration/held-out split as the first', () => {
+    // The drain happens only in the HELD-OUT half, so a calibration that
+    // ignored the split would see it and produce the same quantile as one
+    // trained on everything.
+    const ds = makeDataset(20, undefined, (venue, day) =>
+      venue === 'aave-usdc'
+        ? { cashBase: (day >= 15 ? 100_000n : 1_000_000n) * 1_000_000n }
+        : {},
+    );
+    const labels = deriveCompletedLabels(ds.snapshots, HORIZON, 0);
+    const withHeldOut = prepareArtifact({ ...testArtifact(), minObservations: 1 }, ds, labels, 0.5);
+    const withEverything = prepareArtifact({ ...testArtifact(), minObservations: 1 }, ds, labels, 1.0);
+    expect(withHeldOut.cashResidualQuantileWadByMarket).not.toEqual(
+      withEverything.cashResidualQuantileWadByMarket,
     );
   });
 });

@@ -262,6 +262,10 @@ export function deriveCompletedLabels(
         availableAtSeconds: endSeconds + availabilityLagSeconds,
         realizedReturnWad: (rateSum / observations) * BigInt(horizonSeconds) / SECONDS_PER_YEAR,
         realizedMinCashBase: minCash,
+        // §7.2's second target needs a denominator to be scale-free. The
+        // origin's own observed cash is that denominator, and it is
+        // available here by construction — `m` IS the origin observation.
+        originCashBase: m.cashBase,
       });
     }
   }
@@ -306,6 +310,60 @@ export function calibrateResidualQuantiles(
     const residuals = returns.map((r) => r - mean).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const idx = Math.min(residuals.length - 1, Math.floor((1 - coverageTarget) * residuals.length));
     const q = residuals[idx]!;
+    out[marketId] = q > 0n ? 0n : q;
+  }
+  return out;
+}
+
+/**
+ * §7.2's SECOND registered target, calibrated with THE SAME MACHINERY as the
+ * first: the empirical `1 - coverage` lower quantile of each venue's
+ * withdrawable-cash residuals, on the CALIBRATION labels only.
+ *
+ * The residual is RELATIVE, not absolute:
+ *
+ *     r = (realizedMinCash - originCash) * WAD / originCash
+ *
+ * so it transfers across venues and vault sizes. It is <= 0 by construction
+ * whenever the minimum over the horizon is at or below the origin's cash, and
+ * is clamped at <= 0 for the same reason `calibrateResidualQuantiles` clamps:
+ * `withdrawableLowerBoundBase` refuses a positive quantile, because a
+ * "conservative" exit larger than the observed one is the one direction this
+ * quantity must never move.
+ *
+ * A label with no `originCashBase` is SKIPPED, not counted as a zero
+ * residual: the live `ForecastLabel` table cannot supply that denominator,
+ * and folding those rows in as zeros would drag every calibrated quantile
+ * toward "the cash will still all be there", which is precisely the spot
+ * reading this target replaces.
+ *
+ * A venue with fewer than `minObservations` usable labels gets NO ENTRY at
+ * all rather than a `0n` entry. That difference matters here in a way it
+ * does not for the return quantile: `cashQuantileFor` falls back to the most
+ * conservative calibrated peer and then to the artifact's registered
+ * negative scalar, so an absent entry is conservative while a `0n` entry
+ * would be the most optimistic value available.
+ */
+export function calibrateCashResidualQuantiles(
+  labels: CompletedLabel[],
+  coverageTarget: number,
+  minObservations: number,
+): Record<string, bigint> {
+  const byMarket = new Map<string, bigint[]>();
+  for (const l of labels) {
+    if (l.originCashBase === null || l.originCashBase <= 0n) continue;
+    const residual = ((l.realizedMinCashBase - l.originCashBase) * WAD) / l.originCashBase;
+    const list = byMarket.get(l.marketId) ?? [];
+    list.push(residual);
+    byMarket.set(l.marketId, list);
+  }
+
+  const out: Record<string, bigint> = {};
+  for (const [marketId, residuals] of byMarket) {
+    if (residuals.length < minObservations) continue;
+    const sorted = [...residuals].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const idx = Math.min(sorted.length - 1, Math.floor((1 - coverageTarget) * sorted.length));
+    const q = sorted[idx]!;
     out[marketId] = q > 0n ? 0n : q;
   }
   return out;

@@ -359,6 +359,7 @@ function stubCompound(chain: FakeChain): FakeChain {
   chain
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'totalAssets', [], [1_000_000_000n])
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'maxWithdrawable', [], [900_000_000n])
+    .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'maxDeployable', [], [115792089237316195423570985008687907853269984665640564039457584007913129639935n])
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'configurationDigest', [], [COMPOUND_DIGEST])
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'supplyRatePerYear', [], [52_000_000_000_000_000n])
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'comet', [], [COMET])
@@ -374,6 +375,7 @@ function stubAave(chain: FakeChain, configWord = aaveConfigWord({ active: true }
   chain
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'totalAssets', [], [2_000_000_000n])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'maxWithdrawable', [], [1_800_000_000n])
+    .on(ADAPTER_IFACE, AAVE_ADAPTER, 'maxDeployable', [], [5_000_000_000_000n])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'configurationDigest', [], [AAVE_DIGEST])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'supplyRatePerYear', [], [41_000_000_000_000_000n])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'aToken', [], [ATOKEN])
@@ -389,6 +391,7 @@ function stubMoonwell(chain: FakeChain, mintPaused = false): FakeChain {
   chain
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'totalAssets', [], [3_000_000_000n])
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'maxWithdrawable', [], [2_700_000_000n])
+    .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'maxDeployable', [], [7_000_000_000_000n])
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'configurationDigest', [], [MOONWELL_DIGEST])
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'supplyRatePerYear', [], [33_000_000_000_000_000n])
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'mToken', [], [MTOKEN])
@@ -528,6 +531,25 @@ describe('SnapshotCollector.collect — per-venue market state', () => {
       expect(s.utilization).toBeGreaterThan(0n);
       expect(s.cash).toBeGreaterThan(0n);
       expect(s.borrows).toBeGreaterThan(0n);
+    }
+  });
+
+  it('reads deployable headroom separately from withdrawable exit capacity', async () => {
+    // `maxWithdrawable()` is min(our position, venue cash) and is 0 for a
+    // venue the vault has not entered; `maxDeployable()` is
+    // position-independent. Conflating them is the deployable half of audit
+    // NEW-11's cold-start deadlock, and it was invisible while nothing read
+    // maxDeployable at all.
+    const snap = await new SnapshotCollector(fullChain().asChainClient(), FULL_CONFIG).collect();
+    const byName = new Map(snap!.strategies.map((s) => [s.name, s]));
+
+    // Compound III's base supply is uncapped when not paused.
+    expect(byName.get('Compound')!.maxDeployable).toBe(2n ** 256n - 1n);
+    expect(byName.get('Aave')!.maxDeployable).toBe(5_000_000_000_000n);
+    expect(byName.get('Moonwell')!.maxDeployable).toBe(7_000_000_000_000n);
+
+    for (const s of snap!.strategies) {
+      expect(s.maxDeployable).not.toBe(s.maxWithdrawable);
     }
   });
 });

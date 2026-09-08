@@ -1,5 +1,6 @@
 import { requiredReserve, demandQuantileBase, STRESS_SCENARIOS } from '../../../src/policy/steps/reserve.js';
-import type { DecisionInput, MarketObservation } from '../../../src/policy/types.js';
+import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
+import type { DecisionInput, MarketObservation, PolicyArtifact } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
 
@@ -31,6 +32,21 @@ function input(markets: MarketObservation[], withdrawals: Array<{ timestampSecon
 
 const OPTS = { quantile: 0.95, horizonSeconds: 86_400 };
 
+/**
+ * §7.2's second forecast target with a ZERO relative quantile, i.e.
+ * `e_i^cons == spot cash`. Every pre-existing expectation below isolates the
+ * P3 reserve arithmetic, so the cash forecast is deliberately made an
+ * identity here rather than left to the bootstrap's -10% default, which
+ * would shift every number for reasons that have nothing to do with the
+ * formula under test. The forecast's own effect is exercised separately in
+ * 'e_i^cons is the forecast bound, not the spot cash' below.
+ */
+const NO_CASH_HAIRCUT: PolicyArtifact = {
+  ...loadBootstrapArtifact(),
+  cashResidualQuantileWadByMarket: {},
+  cashLowerBoundQuantileWad: 0n,
+};
+
 describe('demandQuantileBase', () => {
   it('is zero with no observed withdrawals', () => {
     expect(demandQuantileBase([], 1_000_000, 86_400, 0.95)).toBe(0n);
@@ -47,7 +63,7 @@ describe('demandQuantileBase', () => {
 
 describe('requiredReserve (P3)', () => {
   it('never falls below the admin floor', () => {
-    const r = requiredReserve(input([market()]), new Map([['aave', 0n]]), OPTS);
+    const r = requiredReserve(input([market()]), NO_CASH_HAIRCUT, new Map([['aave', 0n]]), OPTS);
     expect(r.requiredBase).toBeGreaterThanOrEqual(10_000_000_000n);
     expect(r.floorBase).toBe(10_000_000_000n);
   });
@@ -66,7 +82,7 @@ describe('requiredReserve (P3)', () => {
   it('never falls below the dynamic reserve activated by a prior plan', () => {
     const i = input([market()]);
     i.vault.dynamicReserveBase = 80_000_000_000n; // > adminReserveBase (10B) and > the bps floor
-    const r = requiredReserve(i, new Map([['aave', 0n]]), OPTS);
+    const r = requiredReserve(i, NO_CASH_HAIRCUT, new Map([['aave', 0n]]), OPTS);
     expect(r.floorBase).toBe(80_000_000_000n);
     expect(r.requiredBase).toBeGreaterThanOrEqual(80_000_000_000n);
   });
@@ -74,19 +90,17 @@ describe('requiredReserve (P3)', () => {
   it('the dynamic reserve floor still yields to a higher admin floor or demand/stress term', () => {
     const i = input([market()]);
     i.vault.dynamicReserveBase = 5_000_000_000n; // < adminReserveBase (10B)
-    const r = requiredReserve(i, new Map([['aave', 0n]]), OPTS);
+    const r = requiredReserve(i, NO_CASH_HAIRCUT, new Map([['aave', 0n]]), OPTS);
     expect(r.floorBase).toBe(10_000_000_000n); // admin floor still wins
   });
 
   it('nets demand against executable venue exits, so deep liquidity lowers the reserve', () => {
     const w = [{ timestampSeconds: 999_000, assetsBase: 50_000_000_000n }];
-    const liquid = requiredReserve(
-      input([market({ maxWithdrawableBase: 10n ** 12n })], w),
+    const liquid = requiredReserve(input([market({ maxWithdrawableBase: 10n ** 12n })], w), NO_CASH_HAIRCUT,
       new Map([['aave', 500_000_000_000n]]),
       OPTS
     );
-    const illiquid = requiredReserve(
-      input([market({ maxWithdrawableBase: 0n })], w),
+    const illiquid = requiredReserve(input([market({ maxWithdrawableBase: 0n })], w), NO_CASH_HAIRCUT,
       new Map([['aave', 500_000_000_000n]]),
       OPTS
     );
@@ -108,8 +122,8 @@ describe('requiredReserve (P3)', () => {
     // requiredBase came out identical for both -- see task-7-report.md).
     const w = [{ timestampSeconds: 999_000, assetsBase: 200_000_000_000n }];
     const m = market({ maxWithdrawableBase: 10n ** 12n });
-    const small = requiredReserve(input([m], w), new Map([['aave', 1_000_000n]]), OPTS);
-    const large = requiredReserve(input([m], w), new Map([['aave', 900_000_000_000n]]), OPTS);
+    const small = requiredReserve(input([m], w), NO_CASH_HAIRCUT, new Map([['aave', 1_000_000n]]), OPTS);
+    const large = requiredReserve(input([m], w), NO_CASH_HAIRCUT, new Map([['aave', 900_000_000_000n]]), OPTS);
     expect(small.requiredBase).not.toBe(large.requiredBase);
     // Concrete numbers, worked by hand in task-7-report.md:
     // small: netDemand ~= 199_999_000_000, stress dominates at w50 = 499_999_500_000
@@ -119,8 +133,7 @@ describe('requiredReserve (P3)', () => {
   });
 
   it('flags an infeasible scenario when stressed exits cannot meet demand', () => {
-    const r = requiredReserve(
-      input([market({ maxWithdrawableBase: 0n })]),
+    const r = requiredReserve(input([market({ maxWithdrawableBase: 0n })]), NO_CASH_HAIRCUT,
       new Map([['aave', 999_000_000_000n]]),
       OPTS
     );
@@ -131,8 +144,7 @@ describe('requiredReserve (P3)', () => {
     // Small allocation leaves most of totalAssetsBase idle, so even a fully
     // illiquid venue (exitsS = 0 at every scenario) is covered by idle cash
     // alone at every stress tier.
-    const r = requiredReserve(
-      input([market({ maxWithdrawableBase: 0n })]),
+    const r = requiredReserve(input([market({ maxWithdrawableBase: 0n })]), NO_CASH_HAIRCUT,
       new Map([['aave', 1_000_000n]]),
       OPTS
     );

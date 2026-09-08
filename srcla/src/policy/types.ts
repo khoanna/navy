@@ -68,7 +68,24 @@ export interface CompletedLabel {
   /** When the outcome became readable off-chain. */
   availableAtSeconds: number;
   realizedReturnWad: bigint;
+  /** §7.2's SECOND registered target: the minimum withdrawable venue cash
+   *  observed over [origin, origin+H], in USDC base units. */
   realizedMinCashBase: bigint;
+  /**
+   * The venue's withdrawable cash AT THE ORIGIN, in USDC base units — the
+   * denominator that turns `realizedMinCashBase` into a scale-free residual
+   * (`realizedMinCash / originCash - 1`). Without it the second target's
+   * residual would be an absolute number of USDC and could not transfer
+   * across vault sizes or venues.
+   *
+   * `null` when the label's source cannot supply it. That is the live
+   * `ForecastLabel` table today: it has no origin-cash column, and adding one
+   * is a schema migration. `calibrateCashResidualQuantiles` SKIPS null rows
+   * rather than treating them as a zero residual, and the artifact's
+   * registered fallback quantile (which is strictly negative) governs
+   * instead — so a missing input degrades conservatively, never optimistically.
+   */
+  originCashBase: bigint | null;
 }
 
 export interface WithdrawalObservation {
@@ -204,6 +221,36 @@ export interface PolicyArtifact {
   methodParams: Record<string, number>;
   /** P1: residual quantile per market id, all <= 0 in WAD. */
   residualQuantileWadByMarket: Record<string, bigint>;
+  /**
+   * §7.2's SECOND registered target, calibrated with the same machinery as
+   * the first: a lower prediction bound on the venue's WITHDRAWABLE CASH
+   * over the horizon. Per market id, all <= 0 in WAD, expressed as a
+   * RELATIVE shortfall against the origin's observed cash — so
+   * `lowerBound = spotCash * (WAD + q) / WAD`.
+   *
+   * It supplies `e_i^cons` in §8.1's reserve and the exitable fraction
+   * `phi_i` in §8.2's objective. Both consumers previously read the SPOT
+   * value `MarketObservation.maxWithdrawableBase` directly, so the second
+   * target existed in the paper and in the label column
+   * (`prisma/schema.prisma realizedMinCashBase`) but nowhere in the policy
+   * (readiness audit NEW-11).
+   *
+   * Relative rather than absolute because an absolute USDC quantile cannot
+   * transfer between venues or vault sizes.
+   */
+  cashResidualQuantileWadByMarket: Record<string, bigint>;
+  /**
+   * The registered fallback for the above, <= 0 in WAD, used for a venue
+   * with no calibrated entry AND no calibrated peer to borrow the most
+   * conservative value from.
+   *
+   * It is deliberately NOT zero. Zero would make an uncalibrated venue's
+   * predicted withdrawable cash equal its spot cash — i.e. exactly the
+   * pre-fix behaviour, reached silently through an absent calibration. The
+   * whole point of the second target is that absence must read as
+   * conservative, not as success.
+   */
+  cashLowerBoundQuantileWad: bigint;
   /**
    * P2 fallback: a frozen portfolio residual quantile, <= 0 in WAD, used
    * only when `residualPanel` is absent.

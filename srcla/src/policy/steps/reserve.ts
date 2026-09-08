@@ -1,4 +1,5 @@
-import type { DecisionInput, ReserveResult, WithdrawalObservation } from '../types.js';
+import { withdrawableLowerBoundBase } from './forecast.js';
+import type { DecisionInput, PolicyArtifact, ReserveResult, WithdrawalObservation } from '../types.js';
 
 export interface StressScenario {
   name: string;
@@ -115,8 +116,17 @@ export interface ReserveOpts {
   floorOnly?: boolean;
 }
 
+/**
+ * `artifact` is here for `e_i^cons`. §8.1 defines it as "the conservatively
+ * executable same-transaction exit for position x_i ... which is exactly
+ * what the SECOND registered forecast target from §7.2 predicts over the
+ * horizon" - so it is a calibrated lower bound on withdrawable cash, not the
+ * spot `MarketObservation.maxWithdrawableBase` this function used to read
+ * (readiness audit NEW-11).
+ */
 export function requiredReserve(
   input: DecisionInput,
+  artifact: PolicyArtifact,
   target: Map<string, bigint>,
   opts: ReserveOpts
 ): ReserveResult {
@@ -138,7 +148,12 @@ export function requiredReserve(
     let sum = 0n;
     for (const m of input.markets) {
       const x = target.get(m.marketId) ?? 0n;
-      const capacity = m.maxWithdrawableBase < x ? m.maxWithdrawableBase : x;
+      // §7.2's lower prediction bound on withdrawable cash over the horizon,
+      // NOT the origin's spot cash. The stress haircut is applied on top of
+      // it: the forecast bounds ordinary horizon variation, the haircut is
+      // the additional registered shock.
+      const exitable = withdrawableLowerBoundBase(m, artifact);
+      const capacity = exitable < x ? exitable : x;
       sum += (capacity * BigInt(10_000 - haircutBps)) / 10_000n;
     }
     return sum;

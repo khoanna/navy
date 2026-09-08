@@ -67,6 +67,7 @@ function input(): DecisionInput {
       availableAtSeconds: 3,
       realizedReturnWad: WAD,
       realizedMinCashBase: 1n,
+      originCashBase: 1n,
     })),
     lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
   };
@@ -104,6 +105,7 @@ function rebalanceHistory(marketId: string) {
     availableAtSeconds: 3,
     realizedReturnWad: WAD,
     realizedMinCashBase: 1n,
+    originCashBase: 1n,
   }));
 }
 
@@ -137,6 +139,10 @@ function rebalanceArtifact(): PolicyArtifact {
     // but the override keeps this fixture self-contained regardless of the
     // artifact file's contents.
     portfolioResidualQuantileWad: -1_000_000n,
+    // §7.2's second forecast target, made an identity here so these cases
+    // isolate the rule under test rather than a cash haircut on phi.
+    cashResidualQuantileWadByMarket: {},
+    cashLowerBoundQuantileWad: 0n,
   };
 }
 

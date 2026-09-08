@@ -129,7 +129,25 @@ export interface StrategySnapshot {
   address: string;
   name: string;
   totalAssets: bigint;
+  /** Adapter `maxWithdrawable()` = min(our position, venue cash). Zero for a
+   *  venue the vault has not entered - which is why it must NOT be reused as
+   *  deployable headroom. */
   maxWithdrawable: bigint;
+  /**
+   * Adapter `maxDeployable()`: live supply headroom, INDEPENDENT of the
+   * vault's current position. `2^256-1` where the protocol's base supply is
+   * genuinely uncapped (Compound III when not paused, Aave/Moonwell with no
+   * supply cap set), 0 when minting is paused or frozen.
+   *
+   * Previously not read at all: `runtime/decision-driver.ts` reused
+   * `maxWithdrawable` for `MarketObservation.maxDeployableBase`, which is
+   * `min(position, cash)` and therefore 0 for an empty venue - so
+   * `admit.ts`'s CAP_ZERO rule rejected any venue the vault had not already
+   * entered. That is the deployable half of the cold-start deadlock in
+   * readiness audit NEW-11; the exitable half (phi reading the same value)
+   * was fixed earlier by pointing `maxWithdrawableBase` at venue cash.
+   */
+  maxDeployable: bigint;
   /** Annualized supply rate, WAD (1e18) scaled — adapter `supplyRatePerYear()`. */
   supplyRate: bigint;
   /** Utilization, WAD (1e18) scaled. */

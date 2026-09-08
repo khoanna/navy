@@ -75,39 +75,60 @@ let cached: PolicyArtifact | null = null;
  */
 export function loadBootstrapArtifact(): PolicyArtifact {
   if (cached) return cached;
-
   const here = dirname(fileURLToPath(import.meta.url));
-  const raw = JSON.parse(readFileSync(join(here, '../../config/bootstrap-artifact.json'), 'utf8'));
+  cached = parseArtifact(JSON.parse(readFileSync(join(here, '../../config/bootstrap-artifact.json'), 'utf8')));
+  return cached;
+}
 
-  const provisional = need(raw._provisional as string | undefined, '_provisional');
+/**
+ * The validation half of `loadBootstrapArtifact`, split out so it can be
+ * exercised against a MALFORMED artifact. While this lived inline, the file
+ * it reads was the only input any test could give it, and a mutant that
+ * replaced a required field with a silent default survived the whole suite —
+ * the artifact happens to ship an empty map for that field, so "required"
+ * and "defaulted to empty" were indistinguishable from outside.
+ *
+ * Every field here is REQUIRED. An artifact is the frozen record a result is
+ * cited against (§7.3); a field that quietly defaults is a field the hash
+ * cannot testify to.
+ */
+export function parseArtifact(raw: Record<string, unknown>): PolicyArtifact {
+  const provisional = need(raw['_provisional'] as string | undefined, '_provisional');
   if (typeof provisional !== 'string' || provisional.trim() === '') {
     throw new Error("bootstrap-artifact.json field '_provisional' must be a non-empty string");
   }
 
-  const residualQuantileWadByMarket: Record<string, bigint> = {};
-  for (const [k, v] of Object.entries(need(raw.residualQuantileWadByMarket, 'residualQuantileWadByMarket') as Record<string, string>)) {
-    if (typeof v !== 'string' || v.trim() === '') {
-      throw new Error(`bootstrap-artifact.json residualQuantileWadByMarket['${k}'] must be a non-empty numeric string, got ${JSON.stringify(v)}`);
+  const quantileMap = (field: string): Record<string, bigint> => {
+    const out: Record<string, bigint> = {};
+    for (const [k, v] of Object.entries(need(raw[field], field) as Record<string, string>)) {
+      if (typeof v !== 'string' || v.trim() === '') {
+        throw new Error(`bootstrap-artifact.json ${field}['${k}'] must be a non-empty numeric string, got ${JSON.stringify(v)}`);
+      }
+      out[k] = BigInt(v);
     }
-    residualQuantileWadByMarket[k] = BigInt(v);
-  }
+    return out;
+  };
 
   const body: Omit<PolicyArtifact, 'artifactHash'> = {
-    policyVersion: need(raw.policyVersion, 'policyVersion'),
-    horizonSeconds: need(raw.horizonSeconds, 'horizonSeconds'),
-    coverageTarget: need(raw.coverageTarget, 'coverageTarget'),
-    method: need(raw.method, 'method'),
-    methodParams: need(raw.methodParams, 'methodParams'),
-    residualQuantileWadByMarket,
-    portfolioResidualQuantileWad: needBigInt(raw.portfolioResidualQuantileWad, 'portfolioResidualQuantileWad'),
-    minObservations: need(raw.minObservations, 'minObservations'),
-    availabilityLagSeconds: need(raw.availabilityLagSeconds, 'availabilityLagSeconds'),
-    noTradeBandK: need(raw.noTradeBandK, 'noTradeBandK'),
-    pinnedConfigDigests: need(raw.pinnedConfigDigests, 'pinnedConfigDigests'),
-    configDigest: need(raw.configDigest, 'configDigest'),
+    policyVersion: need(raw['policyVersion'], 'policyVersion') as number,
+    horizonSeconds: need(raw['horizonSeconds'], 'horizonSeconds') as PolicyArtifact['horizonSeconds'],
+    coverageTarget: need(raw['coverageTarget'], 'coverageTarget') as PolicyArtifact['coverageTarget'],
+    method: need(raw['method'], 'method') as PolicyArtifact['method'],
+    methodParams: need(raw['methodParams'], 'methodParams') as Record<string, number>,
+    residualQuantileWadByMarket: quantileMap('residualQuantileWadByMarket'),
+    portfolioResidualQuantileWad: needBigInt(raw['portfolioResidualQuantileWad'], 'portfolioResidualQuantileWad'),
+    // §7.2's second registered target. Required, not defaulted: a missing map
+    // would silently mean "no cash forecast" and send `e_i^cons` and phi back
+    // to the spot reading that audit NEW-11 is about.
+    cashResidualQuantileWadByMarket: quantileMap('cashResidualQuantileWadByMarket'),
+    cashLowerBoundQuantileWad: needBigInt(raw['cashLowerBoundQuantileWad'], 'cashLowerBoundQuantileWad'),
+    minObservations: need(raw['minObservations'], 'minObservations') as number,
+    availabilityLagSeconds: need(raw['availabilityLagSeconds'], 'availabilityLagSeconds') as number,
+    noTradeBandK: need(raw['noTradeBandK'], 'noTradeBandK') as number,
+    pinnedConfigDigests: need(raw['pinnedConfigDigests'], 'pinnedConfigDigests') as Record<string, string>,
+    configDigest: need(raw['configDigest'], 'configDigest') as string,
     _provisional: provisional,
   };
 
-  cached = { ...body, artifactHash: computeArtifactHash(body) };
-  return cached;
+  return { ...body, artifactHash: computeArtifactHash(body) };
 }

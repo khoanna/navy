@@ -24,6 +24,7 @@ function label(over: Partial<CompletedLabel>): CompletedLabel {
     availableAtSeconds: ORIGIN - 5_000,
     realizedReturnWad: 1n,
     realizedMinCashBase: 1n,
+    originCashBase: 1n,
     ...over,
   };
 }

@@ -295,7 +295,7 @@ export function frozenEqualWeightTarget(
   const admission = admit(input, artifact);
   if (admission.eligible.length === 0) return null;
 
-  const floor = requiredReserve(input, new Map(), { ...reserveOpts, floorOnly: true }).floorBase;
+  const floor = requiredReserve(input, artifact, new Map(), { ...reserveOpts, floorOnly: true }).floorBase;
   const deployable = input.vault.totalAssetsBase > floor ? input.vault.totalAssetsBase - floor : 0n;
   if (deployable === 0n) return null;
 
