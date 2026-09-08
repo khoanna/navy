@@ -1447,6 +1447,100 @@ contract RewardExecutorTest is Test {
         executor.approveRoute(routeId, route);
     }
 
+    /// @dev Rejecting zero closes the *safe* direction (a zero max age means
+    ///      "only a same-block update is fresh"). The dangerous direction is
+    ///      the upper one: without a ceiling an admin can set
+    ///      type(uint256).max and an indefinitely frozen feed passes every
+    ///      validation, reinstating the exact staleness defect these fields
+    ///      exist to close. Both max-age legs must be bounded above.
+    function test_approveRoute_rejectsUnboundedMaxRewardFeedAge() public {
+        IRewardExecutor.Route memory route = _boundedRoute();
+        route.maxRewardFeedAge = type(uint256).max;
+        _expectRouteRejected(keccak256("unbounded-reward-age"), route);
+    }
+
+    function test_approveRoute_rejectsUnboundedMaxUsdcFeedAge() public {
+        IRewardExecutor.Route memory route = _boundedRoute();
+        route.maxUsdcFeedAge = type(uint256).max;
+        _expectRouteRejected(keccak256("unbounded-usdc-age"), route);
+    }
+
+    /// @dev A plausible-looking typo (365 days) is just as dangerous as
+    ///      type(uint256).max and must be rejected by the same bound.
+    function test_approveRoute_rejectsAPlausibleButExcessiveMaxFeedAge() public {
+        IRewardExecutor.Route memory route = _boundedRoute();
+        route.maxRewardFeedAge = 365 days;
+        _expectRouteRejected(keccak256("year-long-reward-age"), route);
+    }
+
+    /// @dev The ceiling is inclusive and the rejection above is caused by the
+    ///      bound rather than by some unrelated validation: one second over
+    ///      MAX_FEED_AGE is refused, MAX_FEED_AGE itself is approved and
+    ///      stored.
+    function test_approveRoute_maxFeedAgeCeilingIsInclusive() public {
+        uint256 ceiling = executor.MAX_FEED_AGE();
+        assertGe(ceiling, 24 hours, "the ceiling must clear a 24h Chainlink heartbeat");
+
+        IRewardExecutor.Route memory tooOld = _boundedRoute();
+        tooOld.maxRewardFeedAge = ceiling + 1;
+        _expectRouteRejected(keccak256("ceiling-plus-one"), tooOld);
+
+        bytes32 routeId = keccak256("at-ceiling");
+        IRewardExecutor.Route memory atCeiling = _boundedRoute();
+        atCeiling.maxRewardFeedAge = ceiling;
+        atCeiling.maxUsdcFeedAge = ceiling;
+        atCeiling.routeDigest = executor.computeDigest(routeId, atCeiling);
+        vm.prank(admin);
+        executor.approveRoute(routeId, atCeiling);
+
+        // The auto-generated getter omits the three dynamic arrays, so it
+        // returns 14 words: inputToken, outputToken, rewardFeed, usdcFeed,
+        // maxRewardFeedAge, maxUsdcFeedAge, maxInput, minOutputBps,
+        // maxPriceImpactBps, maxDailyNotional, lowerBound, upperBound,
+        // activationBlockHash, routeDigest.
+        (,,,, uint256 storedRewardAge, uint256 storedUsdcAge,,,,,,,,) = executor.routes(routeId);
+        assertEq(storedRewardAge, ceiling, "a route at the ceiling must be stored");
+        assertEq(storedUsdcAge, ceiling);
+    }
+
+    /// @dev A COMP->USDC route with everything except the max-age fields set
+    ///      to values approveRoute accepts, so a rejection can only come from
+    ///      the max-age bound under test.
+    function _boundedRoute() internal view returns (IRewardExecutor.Route memory route) {
+        address[] memory path = new address[](2);
+        path[0] = address(comp);
+        path[1] = CANONICAL_USDC;
+        uint24[] memory fees = new uint24[](1);
+        fees[0] = 3000;
+
+        route = IRewardExecutor.Route({
+            inputToken: address(comp),
+            outputToken: CANONICAL_USDC,
+            path: path,
+            fees: fees,
+            pools: new address[](1),
+            rewardFeed: address(compFeed),
+            usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
+            maxInput: type(uint256).max,
+            minOutputBps: 9850,
+            maxPriceImpactBps: 200,
+            maxDailyNotional: 1_000_000_000_000,
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            activationBlockHash: blockhash(block.number - 1),
+            routeDigest: bytes32(0)
+        });
+    }
+
+    function _expectRouteRejected(bytes32 routeId, IRewardExecutor.Route memory route) internal {
+        route.routeDigest = executor.computeDigest(routeId, route);
+        vm.prank(admin);
+        vm.expectRevert(RewardExecutor.InvalidMaxFeedAge.selector);
+        executor.approveRoute(routeId, route);
+    }
+
     // ============================================
     // ORACLE MATH TESTS
     // ============================================

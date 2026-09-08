@@ -145,7 +145,7 @@ contract AnvilE2ETest is Script {
         console2.logAddress(address(moonwellAdapter));
 
         // Deploy Reward Infrastructure
-        RewardAccountant accountant = new RewardAccountant(deployer);
+        RewardAccountant accountant = new RewardAccountant(deployer, address(vault));
         RewardExecutor rewardExecutor = new RewardExecutor({
             _vault: address(vault),
             _admin: deployer,

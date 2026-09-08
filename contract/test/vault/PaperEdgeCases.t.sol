@@ -330,7 +330,7 @@ contract PaperEdgeCasesTest is Test {
     // 3. Stale Chainlink Oracle Reward Valuation & Deposit Shutdown (§9.2, §12)
     // ========================================================================
     function test_edgeCase_staleChainlinkOracleClosesDepositsAndMints() external {
-        accountant = new RewardAccountant(admin);
+        accountant = new RewardAccountant(admin, address(vault));
         rewardFeed = new MockChainlinkFeed(10 * 1e8);
         usdcFeed = new MockChainlinkFeed(1 * 1e8);
 

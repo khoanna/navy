@@ -22,6 +22,15 @@ contract RewardExecutor is AccessControl, IRewardExecutor {
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
+    /// @notice Ceiling on a route's configured Chainlink feed ages.
+    /// @dev The feeds this system consumes on Base publish on a 24h heartbeat
+    ///      (Chainlink's USDC/USD feed on Base: heartbeat 86400s, deviation
+    ///      threshold 0.3%). Two heartbeats leaves a route operable across a
+    ///      missed publication while still bounding staleness: without a
+    ///      ceiling an admin could set type(uint256).max and reinstate the
+    ///      unbounded-staleness defect the max-age fields exist to close.
+    uint256 public constant MAX_FEED_AGE = 48 hours;
+
     address public immutable vault;
     address public immutable admin;
     address public immutable canonicalUsdc;
@@ -176,10 +185,16 @@ contract RewardExecutor is AccessControl, IRewardExecutor {
         if (AggregatorV3Interface(route_.rewardFeed).decimals() > 18) revert FeedTokenMismatch();
         if (AggregatorV3Interface(route_.usdcFeed).decimals() > 18) revert FeedTokenMismatch();
 
-        // Paper 9.4: each route must fix a maximum feed age. An unbounded
-        // (zero) age is the exact staleness defect being fixed here, so it
-        // cannot be configured back in.
+        // Paper 9.4: each route must fix a maximum feed age, bounded on both
+        // sides. Zero means "only a same-block update is fresh", which is safe
+        // but unusable. The dangerous direction is the upper one: an
+        // unbounded age (type(uint256).max, or a plausible-looking typo such
+        // as 365 days) makes an indefinitely frozen feed pass validation,
+        // which is the exact staleness defect these fields exist to close.
         if (route_.maxRewardFeedAge == 0 || route_.maxUsdcFeedAge == 0) revert InvalidMaxFeedAge();
+        if (route_.maxRewardFeedAge > MAX_FEED_AGE || route_.maxUsdcFeedAge > MAX_FEED_AGE) {
+            revert InvalidMaxFeedAge();
+        }
 
         // Validate bounds
         if (route_.minOutputBps == 0 || route_.minOutputBps > 10000) revert InvalidMinOutBps();

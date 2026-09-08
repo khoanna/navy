@@ -177,6 +177,14 @@ contract InvariantMockRewardAccountant {
     bool public issuanceReady_ = true;
     bytes32 public configurationDigest_;
 
+    /// @dev The vault authorised for syncForShareAction. The vault reads this
+    ///      in maxDeposit/maxMint, so the mock must model it.
+    address public vault;
+
+    function setVault(address vault_) external {
+        vault = vault_;
+    }
+
     function setCachedRewardAssets(uint256 value) external {
         cachedRewardAssets_ = value % 1e12;
     }
@@ -483,6 +491,7 @@ contract NavyVaultInvariantTest is Test {
         // Create handler with reward accountant
         handler = new VaultHandler(usdc, vault, 3); // 3 adapters
         vault.setRewardAccountant(address(handler.accountant()));
+        handler.accountant().setVault(address(vault));
 
         // Register adapters
         uint256 adapterCount = handler.getAdapterCount();
@@ -648,6 +657,7 @@ contract NavyVaultHandlerInvariantTest is Test {
         // Create handler with reward accountant
         handler = new VaultHandler(usdc, vault, 3); // 3 adapters
         vault.setRewardAccountant(address(handler.accountant()));
+        handler.accountant().setVault(address(vault));
 
         // Register adapters
         uint256 adapterCount = handler.getAdapterCount();

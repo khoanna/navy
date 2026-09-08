@@ -187,7 +187,7 @@ contract DeployBaseSystemTest is Test {
         });
 
         // Deploy reward accountant (from vault constructor)
-        accountant = new RewardAccountant(address(this));
+        accountant = new RewardAccountant(address(this), address(vault));
         accountant.setUsdcUsdFeed(address(mockUsdcFeed));
 
         // Set reward executor and accountant (requires admin role - deployer has it)
@@ -375,6 +375,26 @@ contract DeployBaseSystemTest is Test {
         assertTrue(SEQUENCER_FEED != address(0), "SEQUENCER_FEED must be set");
         assertTrue(USDC_USD_FEED != address(0), "USDC_USD_FEED must be set");
         assertTrue(WETH_USD_FEED != address(0), "WETH_USD_FEED must be set");
+    }
+
+    /// @dev The deploy wiring must produce a vault that can actually accept a
+    ///      deposit. It previously called setRewardAccountant without
+    ///      authorising the vault on the accountant, so every deposit and mint
+    ///      reverted RewardAccountant.Unauthorized inside syncForShareAction
+    ///      while maxDeposit still advertised type(uint256).max - a bricked
+    ///      vault that read as an open one.
+    function testDeployedVaultAcceptsADeposit() public {
+        assertEq(accountant.vault(), address(vault), "the accountant must authorise the vault");
+        assertEq(vault.maxDeposit(address(this)), type(uint256).max, "the deployed vault must advertise capacity");
+
+        address depositor = address(0xD0D0);
+        mockUsdc.mint(depositor, 1_000e6);
+        vm.startPrank(depositor);
+        mockUsdc.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.deposit(100e6, depositor);
+        vm.stopPrank();
+
+        assertGt(shares, 0, "a deposit against the deployed wiring must succeed");
     }
 
     function testRolesAreComplete() public {

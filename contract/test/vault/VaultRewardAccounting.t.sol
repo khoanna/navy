@@ -127,7 +127,7 @@ contract VaultRewardAccountingTest is Test {
         vault.grantRole(vault.ALLOCATOR_ROLE(), allocator);
 
         // Deploy accountant
-        accountant = new RewardAccountant(admin);
+        accountant = new RewardAccountant(admin, address(vault));
 
         // Set up price feeds
         usdcFeed = new MockPriceFeed();
@@ -729,13 +729,152 @@ contract VaultRewardAccountingTest is Test {
         vm.prank(admin);
         accountant.setVault(address(vault));
 
-        // Deploy new accountant
-        RewardAccountant newAccountant = new RewardAccountant(admin);
+        // Deploy new accountant, wired to this vault
+        RewardAccountant newAccountant = new RewardAccountant(admin, address(vault));
 
         // Change accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(newAccountant));
 
         assertEq(vault.rewardAccountant(), address(newAccountant));
+    }
+
+    /// @dev An accountant that does not authorise this vault makes every
+    ///      deposit and mint revert Unauthorized inside syncForShareAction.
+    ///      The vault must not advertise capacity it cannot honour: with no
+    ///      material policy configured, _cacheStale() is false, so nothing
+    ///      else in the read path signals the brick and maxDeposit would
+    ///      otherwise report type(uint256).max on a vault that accepts
+    ///      nothing. This is the state DeployBaseSystem.s.sol used to ship.
+    function test_maxDeposit_isZeroWhenAccountantDoesNotAuthoriseTheVault() public {
+        RewardAccountant unwired = new RewardAccountant(admin, address(0));
+        vm.prank(admin);
+        vault.setRewardAccountant(address(unwired));
+
+        assertTrue(unwired.issuanceReady(), "precondition: nothing else in the read path is blocking");
+        assertEq(unwired.vault(), address(0), "precondition: the vault is not authorised");
+
+        assertEq(vault.maxDeposit(user), 0, "an unauthorised accountant must not advertise deposit capacity");
+        assertEq(vault.maxMint(user), 0, "an unauthorised accountant must not advertise mint capacity");
+
+        // ...and the advertised zero is honest: the deposit really does fail.
+        usdc.mint(user, 1000e6);
+        vm.prank(user);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(user);
+        vm.expectRevert(RewardAccountant.Unauthorized.selector);
+        vault.deposit(100e6, user);
+
+        // Positive control: authorising the vault restores the advertised
+        // capacity, so the zero above is caused by the authorisation and not
+        // by some unrelated condition.
+        vm.prank(admin);
+        unwired.setVault(address(vault));
+        assertEq(vault.maxDeposit(user), type(uint256).max, "authorising must restore capacity");
+        vm.prank(user);
+        assertGt(vault.deposit(100e6, user), 0, "and the deposit must now succeed");
+    }
+
+    /// @dev Paper 9.2's deliverable: "a cache that a live oracle can still
+    ///      safely refresh does not permanently close deposits."
+    ///
+    ///      Only the *cache* goes stale here (cacheLifetime 1 hour). The
+    ///      reward token's own feed has a 30-day maxAge and the USDC/USD leg
+    ///      sits inside the accountant's default 24h bound, so both oracles
+    ///      remain valid. Critically, NO feed is touched across the warp: the
+    ///      feeds simply have not published, which is the ordinary state of
+    ///      Chainlink's USDC/USD feed on Base (86400s heartbeat, 0.3%
+    ///      deviation threshold - a stable asset rarely breaches the band, so
+    ///      a publication within the last hour is the exception, not the
+    ///      rule). Fabricating a same-block heartbeat here would make the test
+    ///      pass against a USDC leg bounded far below the real cadence, which
+    ///      is the defect this test exists to catch.
+    function test_deposit_succeedsWhenTheLazyRefreshCanClearAStaleCache() public {
+        _configureRefreshableMaterialToken();
+
+        vm.warp(block.timestamp + 2 hours);
+
+        assertFalse(accountant.issuanceReady(), "precondition: the cache must be stale");
+        assertEq(vault.maxDeposit(user), 0, "precondition: the view path reports the stale cache");
+
+        vm.prank(user);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(user);
+        uint256 shares = vault.deposit(100e6, user);
+
+        assertGt(shares, 0, "the lazy refresh must let the deposit through");
+        assertTrue(accountant.issuanceReady(), "the deposit must have refreshed the cache");
+        (, uint256 lastUpdated,) = accountant.tokenCache(address(rewardToken));
+        assertEq(lastUpdated, block.timestamp, "the refresh must have re-stamped the cache");
+        assertGt(accountant.cachedRewardAssets(), 0, "the refresh must produce a real valuation");
+    }
+
+    /// @dev The mint() leg of the same deliverable.
+    function test_mint_succeedsWhenTheLazyRefreshCanClearAStaleCache() public {
+        _configureRefreshableMaterialToken();
+
+        vm.warp(block.timestamp + 2 hours);
+        assertFalse(accountant.issuanceReady(), "precondition: the cache must be stale");
+
+        vm.prank(user);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(user);
+        uint256 assets = vault.mint(100e6, user);
+
+        assertGt(assets, 0, "the lazy refresh must let the mint through");
+        assertTrue(accountant.issuanceReady(), "the mint must have refreshed the cache");
+    }
+
+    /// @dev A material token whose cache expires after an hour but whose own
+    ///      price feed stays valid for 30 days - the configuration paper 9.2's
+    ///      lazy refresh is written for.
+    function _configureRefreshableMaterialToken() internal {
+        vm.prank(admin);
+        vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setUsdcUsdFeed(address(usdcFeed));
+
+        // Seed the vault with a prior deposit so share price is well defined
+        // once reward NAV is recognised. Without existing supply the first
+        // deposit would round to zero shares against a non-zero totalAssets,
+        // which has nothing to do with the refresh under test.
+        vm.prank(user);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(user);
+        vault.deposit(1000e6, user);
+
+        MockPriceFeed rewardFeed = new MockPriceFeed();
+        rewardFeed.setPrice(50 * 1e18); // $50, expressed at the token's 18 decimals
+
+        address[] memory allowedAdapters = new address[](0);
+        IRewardAccountant.TokenPolicy memory policy = IRewardAccountant.TokenPolicy({
+            token: address(rewardToken),
+            feed: address(rewardFeed),
+            description: "Refreshable",
+            decimals: 18,
+            maxAge: 30 days, // the feed outlives the cache by design
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            haircutBps: 500,
+            contributionCap: type(uint256).max,
+            materialityThreshold: 1e6, // 1 USDC, well below the seeded value
+            cacheLifetime: 1 hours,
+            allowedAdapters: allowedAdapters,
+            exists: true
+        });
+        vm.prank(admin);
+        accountant.setTokenPolicy(address(rewardToken), policy);
+
+        rewardToken.mint(address(accountant), 10e18); // 10 x $50 x 95% = 475 USDC
+
+        address[] memory adapters = new address[](0);
+        vm.prank(admin);
+        accountant.refresh(adapters);
+
+        (uint256 seeded,, bool isMaterial) = accountant.tokenCache(address(rewardToken));
+        assertGt(seeded, 0, "seed precondition: the valuation must be non-zero");
+        assertTrue(isMaterial, "seed precondition: the entry must be material");
+        assertTrue(accountant.issuanceReady(), "seed precondition: the cache must start fresh");
+        assertEq(vault.maxDeposit(user), type(uint256).max, "seed precondition: deposits must start open");
     }
 }

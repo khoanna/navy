@@ -26,8 +26,30 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     /// @notice Grace period for sequencer recovery (24 hours)
     uint256 public constant SEQUENCER_GRACE_PERIOD = 24 hours;
 
+    /// @notice Default maximum accepted age for the USDC/USD leg.
+    /// @dev Sized to the published heartbeat of Chainlink's USDC/USD feed on
+    ///      Base: 86400s (24h) with a 0.3% deviation threshold
+    ///      (reference-data-directory, feeds-ethereum-mainnet-base-1.json).
+    ///      A stable asset rarely breaches a 0.3% band, so that feed normally
+    ///      publishes only on its heartbeat. Bounding the USDC leg below the
+    ///      heartbeat would make it invalid for most of any given day, which
+    ///      turns paper 9.2's lazy refresh into a no-op and leaves deposits
+    ///      closed - the exact failure this bound exists to avoid.
+    uint256 public constant DEFAULT_USDC_FEED_MAX_AGE = 24 hours;
+
+    /// @notice Hard ceiling on the configurable USDC/USD max age.
+    /// @dev Two heartbeats. An admin may tighten the bound (down to 1 second)
+    ///      but may not configure unbounded staleness back in.
+    uint256 public constant MAX_USDC_FEED_MAX_AGE = 48 hours;
+
     /// @notice Admin-controlled USDC/USD feed (set via setUsdcUsdFeed)
     address public usdcUsdFeed;
+
+    /// @notice Maximum accepted age of the USDC/USD feed's `updatedAt`, in
+    ///         seconds, for both refresh() and the paper 9.2 lazy refresh.
+    ///         Configurable via setUsdcFeedMaxAge within
+    ///         (0, MAX_USDC_FEED_MAX_AGE].
+    uint256 public usdcFeedMaxAge;
 
     /// @notice The vault authorised to trigger a lazy reward sync on its own
     ///         share-changing actions (set via setVault). Paper 9.2: this is
@@ -68,6 +90,7 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     error CacheStale();
     error MaterialCacheRequired();
     error ArrayLengthMismatch();
+    error InvalidUsdcFeedMaxAge();
 
     // ---- Events ----
 
@@ -96,12 +119,23 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
 
     event SequencerValidationFailed(string reason);
 
+    event UsdcFeedMaxAgeSet(uint256 maxAge);
+
     // ---- Constructor ----
 
-    constructor(address admin) {
+    /// @param admin      Holder of DEFAULT_ADMIN_ROLE and REWARD_ADMIN_ROLE.
+    /// @param vault_      The vault authorised to call syncForShareAction.
+    ///                    Passed at construction so a deployment cannot ship a
+    ///                    vault whose every deposit/mint reverts Unauthorized
+    ///                    when the broadcaster is not `admin` and therefore
+    ///                    cannot call setVault afterwards. Pass address(0)
+    ///                    deliberately to defer the wiring to setVault.
+    constructor(address admin, address vault_) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(REWARD_ADMIN_ROLE, admin);
         usdcUsdFeed = address(0); // Must be set by admin
+        usdcFeedMaxAge = DEFAULT_USDC_FEED_MAX_AGE;
+        vault = vault_;
     }
 
     // ---- Admin Functions ----
@@ -110,6 +144,16 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     function setUsdcUsdFeed(address feed) external onlyRole(REWARD_ADMIN_ROLE) {
         if (feed == address(0)) revert InvalidFeed();
         usdcUsdFeed = feed;
+    }
+
+    /// @notice Set the maximum accepted age of the USDC/USD feed.
+    /// @dev Must be non-zero (zero would mean "only a same-block update is
+    ///      acceptable", freezing every refresh) and at most
+    ///      MAX_USDC_FEED_MAX_AGE (so staleness cannot be configured back in).
+    function setUsdcFeedMaxAge(uint256 maxAge) external onlyRole(REWARD_ADMIN_ROLE) {
+        if (maxAge == 0 || maxAge > MAX_USDC_FEED_MAX_AGE) revert InvalidUsdcFeedMaxAge();
+        usdcFeedMaxAge = maxAge;
+        emit UsdcFeedMaxAgeSet(maxAge);
     }
 
     /// @notice Authorise the vault to call syncForShareAction directly,
@@ -208,7 +252,7 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
             return lastSafeValue;
         }
 
-        (bool usdcValid, int256 usdcPrice) = _getValidatedPrice(usdcUsdFeed, 1 hours);
+        (bool usdcValid, int256 usdcPrice) = _getValidatedPrice(usdcUsdFeed, usdcFeedMaxAge);
         if (!usdcValid) {
             // Cannot refresh without USDC price - preserve last safe cache
             emit SequencerValidationFailed("usdc_feed_invalid");
@@ -554,7 +598,7 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     function _lazyRefreshStaleMaterialTokens() internal returns (uint256 totalValue) {
         if (usdcUsdFeed == address(0)) return lastSafeValue;
 
-        (bool usdcValid, int256 usdcPrice) = _getValidatedPrice(usdcUsdFeed, 1 hours);
+        (bool usdcValid, int256 usdcPrice) = _getValidatedPrice(usdcUsdFeed, usdcFeedMaxAge);
         if (!usdcValid) {
             emit SequencerValidationFailed("usdc_feed_invalid");
             return lastSafeValue;

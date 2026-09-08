@@ -142,7 +142,7 @@ contract RewardAccountantTest is Test {
         user = address(uint160(0xB0B));
         vault = address(uint160(0x11A17));
 
-        accountant = new RewardAccountant(admin);
+        accountant = new RewardAccountant(admin, vault);
         vm.prank(admin);
         accountant.setVault(vault);
 
@@ -660,7 +660,11 @@ contract RewardAccountantTest is Test {
         vm.prank(admin);
         accountant.refresh(adapters);
 
-        (,, bool isMaterial) = accountant.tokenCache(address(rewardToken));
+        (uint256 seededValue,, bool isMaterial) = accountant.tokenCache(address(rewardToken));
+        // A zero seed would make every "must not raise NAV" assertion below
+        // trivially true, so pin that the seed is a real, non-zero valuation.
+        assertGt(seededValue, 0, "seed precondition: seeded value must be non-zero");
+        assertGt(accountant.cachedRewardAssets(), 0, "seed precondition: NAV must be non-zero");
         assertTrue(isMaterial, "seed precondition: token must be material");
         assertTrue(accountant.issuanceReady(), "seed precondition: cache must start fresh");
     }
@@ -670,32 +674,130 @@ contract RewardAccountantTest is Test {
     ///      on-chain remedy: refresh() is role-gated and nothing calls it.
     function test_syncForShareActionRefreshesAStaleCache() public {
         _seedMaterialToken();
-        vm.warp(block.timestamp + 2 days); // cache now stale (cacheLifetime is 1 hour)
-        // The USDC/USD feed heartbeats independently of our own refresh
-        // cadence; touch it here to reflect that, isolating "our cache is
-        // stale" from "the oracle itself went stale" (a different failure
-        // mode, covered separately below).
-        usdcFeed.setPrice(USDC_USD_PRICE);
+        // 2 hours: past the 1-hour cacheLifetime, but inside both the token
+        // feed's 30-day maxAge and the USDC leg's default 24h bound. NOTHING
+        // is touched across the warp - the feeds simply have not published,
+        // which is the ordinary state of a 24h-heartbeat stablecoin feed.
+        // Fabricating a same-block USDC heartbeat here would hide whether the
+        // USDC leg's own bound permits the refresh at all.
+        vm.warp(block.timestamp + 2 hours);
         assertFalse(accountant.issuanceReady(), "precondition: stale");
 
         vm.prank(vault);
         accountant.syncForShareAction(true);
 
         assertTrue(accountant.issuanceReady(), "sync must clear staleness");
+        assertGt(accountant.cachedRewardAssets(), 0, "the refresh must produce a real valuation");
     }
 
     /// @dev Paper 9.2: "A stale or invalid source cannot increase NAV."
+    /// @dev assertLe(after, before) would be satisfied by after == before,
+    ///      which is exactly what a no-op sync produces - so this pins the
+    ///      specific post-state instead: the token's contribution is dropped
+    ///      (NAV strictly falls, to zero here, its only material entry), the
+    ///      cache is left untouched so its staleness survives, and issuance
+    ///      stays blocked.
     function test_syncForShareActionDoesNotRaiseValueFromAnInvalidFeed() public {
         _seedMaterialToken();
-        rewardFeed.setPrice(-1); // invalid: latestAnswer <= 0 fails validation
-        vm.warp(block.timestamp + 2 days);
-        usdcFeed.setPrice(USDC_USD_PRICE); // keep USDC healthy; isolate the reward feed's invalidity
+        (, uint256 lastUpdatedBefore,) = accountant.tokenCache(address(rewardToken));
         uint256 before = accountant.cachedRewardAssets();
+        assertGt(before, 0, "precondition: NAV must start non-zero or the assertions below are trivial");
+
+        rewardFeed.setPrice(-1); // invalid: latestAnswer <= 0 fails validation
+        // 2 hours keeps the USDC leg inside its bound, so the ONLY invalid
+        // input is the reward feed. No feed is touched to fabricate freshness.
+        vm.warp(block.timestamp + 2 hours);
 
         vm.prank(vault);
         accountant.syncForShareAction(true);
 
-        assertLe(accountant.cachedRewardAssets(), before, "an invalid source must never raise NAV");
+        assertLt(accountant.cachedRewardAssets(), before, "an invalid source must never raise NAV");
+        assertEq(accountant.cachedRewardAssets(), 0, "the only material entry must be dropped, not carried");
+        assertFalse(accountant.issuanceReady(), "an unrefreshable material entry must keep issuance blocked");
+        (, uint256 lastUpdatedAfter,) = accountant.tokenCache(address(rewardToken));
+        assertEq(lastUpdatedAfter, lastUpdatedBefore, "an invalid refresh must not stamp the cache fresh");
+    }
+
+    /// @dev The USDC leg's max age is the gate every other refresh sits
+    ///      behind: it is checked before any per-token work, so a bound
+    ///      shorter than the feed's real publication cadence silently turns
+    ///      the whole paper 9.2 lazy refresh into a no-op. Tightening it to
+    ///      1 hour reproduces exactly that.
+    function test_syncForShareActionIsBlockedByAnOverTightUsdcFeedMaxAge() public {
+        _seedMaterialToken();
+        vm.prank(admin);
+        accountant.setUsdcFeedMaxAge(1 hours);
+
+        vm.warp(block.timestamp + 2 hours); // USDC feed now 2h old: outside 1h, inside the 24h default
+
+        vm.prank(vault);
+        accountant.syncForShareAction(true);
+        assertFalse(accountant.issuanceReady(), "a USDC feed outside the configured bound must block the refresh");
+
+        // The same scenario, with the bound restored to the default sized to
+        // the Base USDC/USD feed's real 24h heartbeat, does refresh.
+        // (Read the constant before the prank - an external call would
+        // consume it.)
+        uint256 defaultAge = accountant.DEFAULT_USDC_FEED_MAX_AGE();
+        vm.prank(admin);
+        accountant.setUsdcFeedMaxAge(defaultAge);
+        vm.prank(vault);
+        accountant.syncForShareAction(true);
+        assertTrue(accountant.issuanceReady(), "within the configured bound the refresh must proceed");
+    }
+
+    /// @dev The default must be at least the Base USDC/USD feed's published
+    ///      86400s heartbeat, or the leg is invalid for most of every day.
+    function test_defaultUsdcFeedMaxAgeCoversTheBaseHeartbeat() public view {
+        assertGe(accountant.usdcFeedMaxAge(), 86_400, "default must cover the 24h Chainlink heartbeat");
+        assertEq(accountant.usdcFeedMaxAge(), accountant.DEFAULT_USDC_FEED_MAX_AGE());
+    }
+
+    /// @dev Zero would freeze every refresh; an unbounded value would
+    ///      reinstate the staleness defect. Both must be rejected.
+    function test_setUsdcFeedMaxAge_rejectsZeroAndUnboundedValues() public {
+        vm.prank(admin);
+        vm.expectRevert(RewardAccountant.InvalidUsdcFeedMaxAge.selector);
+        accountant.setUsdcFeedMaxAge(0);
+
+        vm.prank(admin);
+        vm.expectRevert(RewardAccountant.InvalidUsdcFeedMaxAge.selector);
+        accountant.setUsdcFeedMaxAge(type(uint256).max);
+
+        uint256 ceiling = accountant.MAX_USDC_FEED_MAX_AGE();
+        vm.prank(admin);
+        vm.expectRevert(RewardAccountant.InvalidUsdcFeedMaxAge.selector);
+        accountant.setUsdcFeedMaxAge(ceiling + 1);
+
+        // The ceiling itself is accepted, so the bound is inclusive.
+        vm.prank(admin);
+        accountant.setUsdcFeedMaxAge(ceiling);
+        assertEq(accountant.usdcFeedMaxAge(), ceiling);
+    }
+
+    /// @dev setUsdcFeedMaxAge is REWARD_ADMIN_ROLE-gated.
+    function test_setUsdcFeedMaxAge_requiresAdmin() public {
+        vm.prank(user);
+        vm.expectRevert();
+        accountant.setUsdcFeedMaxAge(2 hours);
+        assertEq(accountant.usdcFeedMaxAge(), accountant.DEFAULT_USDC_FEED_MAX_AGE(), "must be unchanged");
+    }
+
+    /// @dev The constructor's vault argument exists so a deployment whose
+    ///      broadcaster is not `admin` cannot ship an accountant that
+    ///      authorises nobody - which bricks every deposit and mint.
+    function test_constructorAuthorisesTheVault() public {
+        RewardAccountant wired = new RewardAccountant(admin, vault);
+        assertEq(wired.vault(), vault, "constructor must authorise the vault");
+        // And the authorisation is real, not just a stored address.
+        vm.prank(vault);
+        wired.syncForShareAction(true);
+
+        RewardAccountant unwired = new RewardAccountant(admin, address(0));
+        assertEq(unwired.vault(), address(0));
+        vm.prank(vault);
+        vm.expectRevert(RewardAccountant.Unauthorized.selector);
+        unwired.syncForShareAction(true);
     }
 
     /// @dev syncForShareAction must reject a caller that is neither the

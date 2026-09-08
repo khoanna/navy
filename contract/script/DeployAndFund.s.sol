@@ -103,7 +103,7 @@ contract DeployAndFund is Script {
         info.compound = address(_compound);
         info.moonwell = address(_moonwell);
 
-        RewardAccountant accountant = new RewardAccountant(deployer);
+        RewardAccountant accountant = new RewardAccountant(deployer, info.vault);
         RewardExecutor rewardExecutor = new RewardExecutor({
             _vault: info.vault,
             _admin: deployer,

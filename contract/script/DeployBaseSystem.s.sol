@@ -29,7 +29,11 @@ contract DeployBaseSystem is Script {
     address internal constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
     uint256 internal constant RECOVERY_GRACE = 3600;
 
-    // Chainlink feeds for reward accounting
+    // Chainlink feeds for reward accounting.
+    // WARNING: USDC_USD_FEED is NOT referenced by run() - reward feeds are an
+    // admin post-deploy step (see script/POST_DEPLOY.md), and this constant
+    // does not appear in Chainlink's published Base feed directory. Verify the
+    // address against that directory before passing it to setUsdcUsdFeed.
     address internal constant USDC_USD_FEED = 0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56;
     address internal constant WETH_USD_FEED = 0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e;
 
@@ -73,18 +77,18 @@ contract DeployBaseSystem is Script {
             _sequencerFeed: SEQUENCER_FEED,
             _recoveryGrace: RECOVERY_GRACE
         });
-        accountant = new RewardAccountant(admin);
+        // The vault is passed at construction: RewardAccountant's constructor
+        // grants REWARD_ADMIN_ROLE only to `admin`, so a broadcaster that is
+        // not `admin` could never call setVault afterwards, and an accountant
+        // that does not authorise the vault makes every deposit and mint
+        // revert Unauthorized (paper 9.2's sync runs on both paths).
+        accountant = new RewardAccountant(admin, address(vault));
 
         vault.registerAdapter(address(aave), 4_000, 100, "Aave V3 Base USDC");
         vault.registerAdapter(address(compound), 4_000, 100, "Compound III Base USDC");
         vault.registerAdapter(address(moonwell), 2_000, 150, "Moonwell Base USDC");
         vault.setRewardExecutor(address(rewards));
         vault.setRewardAccountant(address(accountant));
-        // NOTE: accountant.setVault(address(vault)) authorises the vault to
-        // call syncForShareAction (paper 9.2's lazy refresh). It is deployer's
-        // (admin) responsibility as a post-deploy step: RewardAccountant's
-        // constructor grants REWARD_ADMIN_ROLE only to `admin`, not to this
-        // script's broadcaster, which may be a different key.
 
         // Admin gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE only
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), admin);
@@ -116,6 +120,18 @@ contract DeployBaseSystem is Script {
         console2.log("RewardAccountant", address(accountant));
         console2.log("Admin", admin);
         console2.log("Allocator", allocator);
+
+        // Steps the broadcaster cannot perform: RewardAccountant's
+        // REWARD_ADMIN_ROLE is held only by `admin`. Printed on every run so
+        // an operator cannot miss them; the detail is in script/POST_DEPLOY.md.
+        console2.log("");
+        console2.log("REQUIRED POST-DEPLOY STEPS (as BASE_ADMIN) - see script/POST_DEPLOY.md:");
+        console2.log("  1. accountant.setUsdcUsdFeed(<verified Base USDC/USD Chainlink feed>)");
+        console2.log("  2. accountant.setTokenPolicy(...) for each reward token");
+        console2.log("  3. rewards.approveRoute(...) for each active reward route");
+        console2.log("Until step 1 the accountant cannot value rewards; it reports the last safe value.");
+        console2.log("Vault authorised on accountant (must equal NavyVaultSRCLA above):");
+        console2.logAddress(accountant.vault());
     }
 
     function _configureRewardRoutes(RewardExecutor rewards_) internal {

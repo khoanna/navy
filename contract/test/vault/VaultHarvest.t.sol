@@ -955,6 +955,14 @@ contract MockRewardAccountant {
     uint256 public cachedRewardAssets_;
     bool public issuanceReady_ = true;
 
+    /// @dev The vault authorised for syncForShareAction; read by the vault's
+    ///      maxDeposit/maxMint.
+    address public vault;
+
+    function setVault(address vault_) external {
+        vault = vault_;
+    }
+
     function setCachedRewardAssets(uint256 value) external {
         cachedRewardAssets_ = value;
     }

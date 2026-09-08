@@ -264,18 +264,30 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     }
 
     function maxDeposit(address) public view override(ERC4626) returns (uint256) {
-        if (paused || _cacheStale()) return 0;
+        if (paused || _syncUnauthorised() || _cacheStale()) return 0;
         return type(uint256).max;
     }
 
     function maxMint(address) public view override(ERC4626) returns (uint256) {
-        if (paused || _cacheStale()) return 0;
+        if (paused || _syncUnauthorised() || _cacheStale()) return 0;
         return type(uint256).max;
     }
 
     /// @dev Helper to check if reward cache is stale (blocks deposits/mints)
     function _cacheStale() private view returns (bool) {
         return rewardAccountant != address(0) && !IRewardAccountant(rewardAccountant).issuanceReady();
+    }
+
+    /// @dev True when a reward accountant is wired but has not authorised
+    ///      this vault for syncForShareAction. deposit()/mint() call that
+    ///      function unconditionally, so in this state every deposit and mint
+    ///      reverts RewardAccountant.Unauthorized. Without this check the read
+    ///      path would advertise unlimited capacity (_cacheStale() is false
+    ///      while no material policy exists) for a vault that can accept
+    ///      nothing - the silent half of the bricked-deployment defect.
+    function _syncUnauthorised() private view returns (bool) {
+        return rewardAccountant != address(0)
+            && IRewardAccountant(rewardAccountant).vault() != address(this);
     }
 
     function maxWithdraw(address owner_) public view override(ERC4626) returns (uint256) {
