@@ -1,828 +1,376 @@
-# Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
+# SRCLA Evaluation Report
 
-**Evaluation Report Version:** 1.0
+**Generated:** 2026-09-08T17:22:47.092Z · **Code:** `f01c8e099a351122a0b02855a503c793ae23e58c` · **Artifact:** `591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f`
 
-**Date:** 2026-08-24
+> Regenerated from `src/evaluation/report/`. It supersedes every earlier version of this file, which was produced by an untracked `evaluation-v2/*.mjs` harness that is not the code this repository ships.
 
-**Chain:** Base Mainnet (Chain ID: 8453, Block: 0x3005bb1)
+## Verdict
 
-**Anvil Fork:** http://127.0.0.1:8545
+- **heldout-a** (267d, 6408 origins): §11.5 release gate **FAIL** — blocked on: Safety: stressed liquid coverage; No inert ablation; Statistically distinguishable from every deployable baseline; Outperforms every deployable baseline; §11.1 pinned-prestate fork replay
+- **heldout-b** (26793d, 361 origins): §11.5 release gate **FAIL** — blocked on: Safety: stressed liquid coverage; No inert ablation; Statistically distinguishable from every deployable baseline; Outperforms every deployable baseline; §11.1 pinned-prestate fork replay
 
-**Status:** ✅ PASSED — All Release Gates Achieved
+A `FAIL` here is a result, not an error. §11.5 requires publishing a negative result rather than retuning against held-out data.
 
----
+## Read this before citing any number
 
-## Abstract
+### Registered eras
 
-A lending vault should not allocate all capital to the market displaying the highest annual percentage yield (APY). A sufficiently large deposit changes utilization and the attainable supply rate; accounting assets may not be synchronously withdrawable; and gas, slippage, reward conversion, and rate reversal can eliminate an apparent yield advantage.
+| Era | Start | End | Days | Sealed | Role |
+|---|---|---|---|---|---|
+| `calibration` | 2024-09-01 | 2025-08-31 | 365 | — | The ONLY data any artifact, quantile, grid point or no-trade band may be fit on. |
+| `heldout-a` | 2025-09-01 | 2026-05-25 | 267 | **sealed** | PRIMARY held-out era, 267 days. |
+| `burned` | 2026-05-26 | 2026-08-23 | 90 | — | Paper §4. |
+| `heldout-b` | 2026-08-24 | 2099-12-31 | 26793 | **sealed** | SECONDARY held-out era, chronologically after everything including the burned window, and growing with the live collector. |
 
-This report presents the **Safe, Robust, Cost-Aware Lending Allocator (SRCLA)**, a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell.
+**Two deviations are disclosed, not buried:**
 
-Our **live on-chain experiments** on Base Mainnet fork (block 0x300fff0) verified that SRCLA achieves:
+1. Paper §4.1 says the burned window "lies inside the calibration era". Here it lies in **neither** era. Putting it in calibration would place fitting data *after* held-out A in time, inverting walk-forward order and creating exactly the look-ahead §7.3 forbids. Excluding it satisfies §4.1's purpose — the window must never be held-out — strictly more than including it would. This is a paper-owner decision.
+2. Held-out A **precedes** the burned window in time. The amendments P1–P8 and the code were designed with knowledge of May–Aug 2026. Nobody has looked at Sep 2025 – May 2026, so there is no direct contamination, but a designer who knew the later period could in principle have chosen mechanisms that suit the earlier one. Held-out B is chronologically clean and carries no such caveat. **Both are reported: A for statistical power, B for temporal purity. Neither alone is sufficient.**
 
-- **99.80% withdrawal success rate** (exceeds 99% threshold)
-- **Sharpe Ratio 1.36** (exceeds 1.0 threshold)
-- **3.42–3.52% net APY** across all tier sizes
-- **60% reduction in rebalancing frequency** vs B2 baseline
-- **$93/yr operational cost** for 1M vault
+### Withdrawals are a registered schedule, not observed
 
----
+`withdrawalSource` = `registered-schedule`. The Navy vault has no Base mainnet history, so §8.1's `W_H` has no real series over this window and `Q_β(W_H)` is computed against a registered schedule. No claim in this report is evidence about real user redemption behaviour.
 
-## Table of Contents
+### Quantities the decision needs that the dataset does not carry
 
-1. [Introduction](#1-introduction)
-2. [System Architecture](#2-system-architecture)
-3. [On-Chain Market Analysis](#3-on-chain-market-analysis)
-4. [Deterministic Return Forecasting](#4-deterministic-return-forecasting)
-5. [Reserve, Stress, and Allocation Optimization](#5-reserve-stress-and-allocation-optimization)
-6. [Movement, Rewards, and On-Chain Execution](#6-movement-rewards-and-on-chain-execution)
-7. [Registered Evaluation Protocol](#7-registered-evaluation-protocol)
-8. [Experimental Results](#8-experimental-results)
-9. [Release Gate Verification](#9-release-gate-verification)
-10. [Risk Analysis](#10-risk-analysis)
-11. [Failure Handling](#11-failure-handling)
-12. [Limitations and Future Work](#12-limitations-and-future-work)
-13. [Conclusion](#13-conclusion)
-14. [Appendices](#14-appendices)
+- per-venue absoluteCapBase / maxLossBps / dependencyGroupIds
+- dependency group registry (id, capBps, absoluteCapBase, members)
+- protocol supply-cap headroom (maxDeployableBase)
+- vault adminReserveBase / minIdleBps
 
----
+Each is supplied as a registered constant, never inferred from data. Gas and oracle observations are **no longer** on this list: they are measured per origin from the block header, the OP-Stack GasPriceOracle and the two Chainlink feeds (series digest `0x3a9a2d37a74058cefda1d77c0e38514378170a094ac623e375c5fee4a1310752`).
 
-## 1. Introduction
+## The registered forecast artifact
 
-### 1.1 The Five Core Decisions
+Fit on the calibration era only (2024-09-01 → 2025-08-31, 365d). Selected by the registered grid: **rolling**, horizon **14d**, coverage target **0.9**.
 
-An automated lending vault has a simple-looking objective: place USDC where it earns the best return. In practice, that statement hides five critical decisions:
+Per-venue achieved coverage (amendment P1 — the quantile is solved per venue to the target):
 
-| Decision | Question Addressed |
-|----------|-------------------|
-| **D1** | Which markets are safe and correctly configured at the decision block? |
-| **D2** | What return remains after the vault's own deposit changes utilization? |
-| **D3** | How much native USDC must remain synchronously available for users? |
-| **D4** | Does a proposed portfolio satisfy market, dependency, loss, and stress constraints? |
-| **D5** | Is changing the current portfolio worth its complete execution cost? |
+| Venue | Achieved coverage |
+|---|---|
+| `aave-v3-usdc` | 90.00% |
+| `compound-v3-usdc` | 90.00% |
+| `moonwell-usdc` | 90.00% |
 
-A highest-APY rule answers none of these questions completely. SRCLA addresses all five through:
+**P8's `k` did not resolve.** The sweep was inconclusive, so `k` remains at 1 as a registered default and every P8 result is provisional. A value chosen because it moves a gate would not be a registration.
 
-1. **Protocol-exact post-deposit rate simulation** — Prevents over-concentration in high-utilization venues
-2. **Deterministic lower prediction bounds** — Conservative forecasts without opaque AI services
-3. **Dynamic reserve with withdrawal stress testing** — Maintains synchronous liquidity
-4. **Constrained optimization under market/dependency caps** — Enforces safety envelope
-5. **Complete-cost movement gate** — Only rebalances when benefit exceeds cost
+## Results — era `heldout-a`
 
-### 1.2 Scope and Release Boundary
+6408 origins. Manifest `e3ca8cf8ac1e3401d8285c589d8deba5e50907e3dcc2d3278733eb421b89074b`, dataset `e4784ed8ad64cf1389ef8a4427979238d83bde8737e1e528794e934fa7c0c48d`, result `a5ffede94fd2590f60a7a4c48467ad76dd636af9ffbe949d583403804d25cf9e`. Reproduce with `pnpm run evaluation:verify`.
 
-**Release-one scope:**
+#### Tier 10,000 USDC
 
-| Item | Value |
-|------|-------|
-| Asset | Circle native Base USDC |
-| USDC Address | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| Chain | Base (chainId 8453) |
-| Protocols | Aave V3, Compound III, Moonwell |
-| User Interface | Standard ERC-4626 deposit/withdraw |
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 4.376% | 3825 | 1,825,256 | 0 | 100.0% | — |
+| `b2` | 11.2 | 4.271% | 2154 | 210,005 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 4.369% | 4984 | 163,838 | 0 | 100.0% | — |
+| `b3` | 11.2 | 4.044% | 25 | 55,809 | 0 | 100.0% | — |
+| `b4` | 11.2 | 3.695% | 6240 | 17,668 | 0 | 100.0% | — |
+| `b5` | 11.2 | 4.101% | 6 | 28,014 | 0 | 100.0% | — |
+| `h1` | 11.3 | 4.296% | 155 | 69,865 | 0 | 100.0% | — |
+| `h2` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | **INERT** |
+| `h3` | 11.3 | 4.271% | 2154 | 210,005 | 0 | 100.0% | — |
+| `h4` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | — |
+| `h5` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 4.180% | 301 | 61,652 | 0 | 100.0% | **INERT** |
 
-**Excluded from release one:** Bridged USDbC, Morpho, leverage, borrowing, derivatives, bridges, arbitrary strategies, asynchronous ERC-7540 withdrawals.
+#### Tier 100,000 USDC
 
-### 1.3 Research Claim
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 4.381% | 3826 | 18,252,478 | 0 | 100.0% | — |
+| `b2` | 11.2 | 4.272% | 2157 | 2,054,044 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 4.370% | 4984 | 1,595,278 | 0 | 100.0% | — |
+| `b3` | 11.2 | 4.045% | 25 | 558,089 | 0 | 100.0% | — |
+| `b4` | 11.2 | 3.695% | 6240 | 176,685 | 0 | 100.0% | — |
+| `b5` | 11.2 | 4.095% | 10 | 363,317 | 0 | 100.0% | — |
+| `h1` | 11.3 | 4.250% | 268 | 718,696 | 0 | 100.0% | — |
+| `h2` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | **INERT** |
+| `h3` | 11.3 | 4.272% | 2157 | 2,054,044 | 0 | 100.0% | — |
+| `h4` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | — |
+| `h5` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 4.182% | 297 | 594,634 | 0 | 100.0% | **INERT** |
 
-We make a **design-completeness claim**: the disclosed policy combines:
-- Capacity-aware rates
-- Uncertainty treatment
-- Dependency limits
-- Withdrawal feasibility
-- Complete movement costs
+#### Tier 1,000,000 USDC
 
-This report presents **experimental verification** demonstrating statistically distinguishable after-cost value while preserving the safety envelope.
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 4.382% | 3826 | 182,524,707 | 0 | 100.0% | — |
+| `b2` | 11.2 | 4.273% | 2164 | 18,660,916 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 4.371% | 4984 | 15,244,740 | 0 | 100.0% | — |
+| `b3` | 11.2 | 4.085% | 21 | 5,350,923 | 0 | 100.0% | — |
+| `b4` | 11.2 | 3.695% | 6240 | 1,766,850 | 0 | 100.0% | — |
+| `b5` | 11.2 | 4.103% | 11 | 3,729,852 | 0 | 100.0% | — |
+| `h1` | 11.3 | 4.250% | 268 | 7,186,962 | 0 | 100.0% | — |
+| `h2` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | — |
+| `h3` | 11.3 | 4.273% | 2162 | 18,580,925 | 0 | 100.0% | — |
+| `h4` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | — |
+| `h5` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 4.202% | 289 | 6,099,854 | 0 | 100.0% | — |
 
----
+#### Tier 10,000,000 USDC
 
-## 2. System Architecture
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 4.029% | 182 | 45,030,087 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 4.382% | 3826 | 1,825,246,993 | 0 | 100.0% | — |
+| `b2` | 11.2 | 3.975% | 2903 | 642,811,009 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 4.386% | 5566 | 390,411,748 | 0 | 100.0% | — |
+| `b3` | 11.2 | 4.128% | 12 | 29,520,991 | 0 | 100.0% | — |
+| `b4` | 11.2 | 3.695% | 6240 | 17,668,499 | 0 | 100.0% | — |
+| `b5` | 11.2 | 4.201% | 6 | 18,076,407 | 0 | 100.0% | — |
+| `h1` | 11.3 | 4.141% | 7 | 17,146,758 | 0 | 100.0% | — |
+| `h2` | 11.3 | 4.030% | 182 | 44,630,028 | 0 | 100.0% | — |
+| `h3` | 11.3 | 3.959% | 2620 | 414,170,153 | 0 | 100.0% | — |
+| `h4` | 11.3 | 4.029% | 182 | 45,030,087 | 0 | 100.0% | — |
+| `h5` | 11.3 | 4.029% | 182 | 45,030,087 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 4.029% | 182 | 45,030,087 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 4.012% | 69 | 35,660,708 | 0 | 100.0% | — |
 
-### 2.1 Trust Boundary
+### SRCLA against each deployable baseline
 
-The architecture separates **immutable custody and accounting** from **replaceable decision software**:
+| Tier | Baseline | SRCLA | Baseline | paired HAC p | bootstrap 95% CI of difference |
+|---|---|---|---|---|---|
+| 10,000 | `b0` | 4.180% | 0.000% | 0.0000 | [4.51e-6, 4.83e-6] |
+| 10,000 | `b1` | 4.180% | 4.376% | 0.0346 | [-4.88e-7, -1.80e-8] |
+| 10,000 | `b2` | 4.180% | 4.271% | 0.3028 | [-3.54e-7, 8.49e-8] |
+| 10,000 | `b3` | 4.180% | 4.044% | 0.0000 | [9.74e-8, 1.98e-7] |
+| 10,000 | `b4` | 4.180% | 3.695% | 0.0000 | [4.14e-7, 6.70e-7] |
+| 10,000 | `h1` | 4.180% | 4.296% | 0.0062 | [-2.44e-7, -3.55e-8] |
+| 10,000 | `h2` | 4.180% | 4.180% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h3` | 4.180% | 4.271% | 0.3028 | [-3.54e-7, 8.49e-8] |
+| 10,000 | `h4` | 4.180% | 4.180% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h5` | 4.180% | 4.180% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h6` | 4.180% | 4.180% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h7` | 4.180% | 4.180% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `b0` | 4.182% | 0.000% | 0.0000 | [4.52e-6, 4.83e-6] |
+| 100,000 | `b1` | 4.182% | 4.381% | 0.0284 | [-4.86e-7, -2.93e-8] |
+| 100,000 | `b2` | 4.182% | 4.272% | 0.3032 | [-3.49e-7, 8.51e-8] |
+| 100,000 | `b3` | 4.182% | 4.045% | 0.0000 | [1.03e-7, 1.94e-7] |
+| 100,000 | `b4` | 4.182% | 3.695% | 0.0000 | [4.23e-7, 6.64e-7] |
+| 100,000 | `h1` | 4.182% | 4.250% | 0.1506 | [-2.08e-7, 3.55e-8] |
+| 100,000 | `h2` | 4.182% | 4.182% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h3` | 4.182% | 4.272% | 0.3032 | [-3.49e-7, 8.51e-8] |
+| 100,000 | `h4` | 4.182% | 4.182% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h5` | 4.182% | 4.182% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h6` | 4.182% | 4.182% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h7` | 4.182% | 4.182% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `b0` | 4.202% | 0.000% | 0.0000 | [4.53e-6, 4.86e-6] |
+| 1,000,000 | `b1` | 4.202% | 4.382% | 0.0491 | [-4.68e-7, -5.63e-9] |
+| 1,000,000 | `b2` | 4.202% | 4.273% | 0.4139 | [-3.29e-7, 1.07e-7] |
+| 1,000,000 | `b3` | 4.202% | 4.085% | 0.0000 | [9.21e-8, 1.64e-7] |
+| 1,000,000 | `b4` | 4.202% | 3.695% | 0.0000 | [4.38e-7, 6.92e-7] |
+| 1,000,000 | `h1` | 4.202% | 4.250% | 0.3034 | [-1.86e-7, 5.53e-8] |
+| 1,000,000 | `h2` | 4.202% | 4.202% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h3` | 4.202% | 4.273% | 0.4145 | [-3.29e-7, 1.07e-7] |
+| 1,000,000 | `h4` | 4.202% | 4.202% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h5` | 4.202% | 4.202% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h6` | 4.202% | 4.202% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h7` | 4.202% | 4.202% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `b0` | 4.029% | 0.000% | 0.0000 | [4.31e-6, 4.72e-6] |
+| 10,000,000 | `b1` | 4.029% | 4.382% | 0.0000 | [-4.96e-7, -2.83e-7] |
+| 10,000,000 | `b2` | 4.029% | 3.975% | 0.1900 | [-5.23e-8, 1.56e-7] |
+| 10,000,000 | `b3` | 4.029% | 4.128% | 0.0179 | [-2.27e-7, -7.73e-9] |
+| 10,000,000 | `b4` | 4.029% | 3.695% | 0.0000 | [1.94e-7, 5.82e-7] |
+| 10,000,000 | `h1` | 4.029% | 4.141% | 0.0007 | [-2.08e-7, -4.88e-8] |
+| 10,000,000 | `h2` | 4.029% | 4.030% | 0.1325 | [-1.65e-9, 3.62e-11] |
+| 10,000,000 | `h3` | 4.029% | 3.959% | 0.0006 | [2.50e-8, 1.27e-7] |
+| 10,000,000 | `h4` | 4.029% | 4.029% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h5` | 4.029% | 4.029% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h6` | 4.029% | 4.029% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h7` | 4.029% | 4.012% | 0.5030 | [-4.74e-8, 7.93e-8] |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Wallet                                │
-│     approve/deposit/mint/withdraw/redeem; user pays Base gas     │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Immutable NavyVault                            │
-│                    (ERC-4626 over USDC)                         │
-├─────────────────┬─────────────────┬───────────────────────────────┤
-│   AaveV3Adapter │ CompoundAdapter │   MoonwellAdapter            │
-│   holds aUSDC   │ holds Comet     │   holds mUSDC               │
-│   + incentives  │ balance + COMP  │   + incentives              │
-└─────────────────┴─────────────────┴───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Immutable RewardExecutor                            │
-│        Uniswap V3 routes → USDC → NavyVault                     │
-└─────────────────────────────────────────────────────────────────┘
+### §11.5 gate
 
-┌─────────────────────────────────────────────────────────────────┐
-│                    SRCLA TypeScript Service                       │
-├─────────────────┬─────────────────┬───────────────────────────────┤
-│  Finalized       │  Forecast,      │  Cost/Emergency             │
-│  Snapshot        │  Reserve,       │  Decision Engine            │
-│  Collector       │  Optimizer      │  + Executor                 │
-└─────────────────┴─────────────────┴───────────────────────────────┘
-```
+| Verdict | Check | Detail |
+|---|---|---|
+| PASS | Every registered tier ran | all 4 of §11.1's tiers |
+| PASS | Every registered policy ran at every tier | all 60 required (policy, tier) runs |
+| PASS | Calibrated artifact | 591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f |
+| PASS | Safety: withdrawal success measured and met | >= 99% across 60 runs |
+| **FAIL** | Safety: stressed liquid coverage | b1@10000000000 0.905, b2@10000000000 0.906, b2u@10000000000 0.905, b5@10000000000 0.013, h1@10000000000 0.241, h3@10000000000 0.906, b1@100000000000 0.905, b2@100000000000 0.906, b2u@100000000000 0.905, b5@100000000000 0.000, h1@100000000000 0.243, h3@100000000000 0.906, srcla@1000000000000 0.836, b |
+| **FAIL** | No inert ablation | these made byte-identical decisions to SRCLA: h2, h5, h6, h7 |
+| **FAIL** | Statistically distinguishable from every deployable baseline | test not usable for h2@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@10000000000 (DEGENE |
+| **FAIL** | Outperforms every deployable baseline | b1@10000000000: SRCLA 4.180% vs 4.376%, b2@10000000000: SRCLA 4.180% vs 4.271%, h1@10000000000: SRCLA 4.180% vs 4.296%, h2@10000000000: SRCLA 4.180% vs 4.180%, h3@10000000000: SRCLA 4.180% vs 4.271%, h4@10000000000: SRCLA 4.180% vs 4.180%, h5@10000000000: SRCLA 4.180% vs 4.180%, h6@10000000000: SRCL |
+| **NOT PRODUCED** | §11.1 pinned-prestate fork replay | NOT PRODUCED: no fork replay was supplied. src/evaluation/fork-runner.ts is the scaffold for this and is wired to nothing. |
 
-### 2.2 Authority Matrix
+## Results — era `heldout-b`
 
-| Authority | Permitted | Forbidden |
-|----------|-----------|-----------|
-| **Admin/Guardian** | Adapter admission, caps, dependency groups, reserve floor, loss limits, impairment, pause | Arbitrary user-fund transfer, ERC-4626 ownership bypass |
-| **Allocator** | Register/execute staged plans, divest, deploy, harvest, emergency exits | Add adapters, lower limits, arbitrary calldata, transfer to self |
+361 origins. Manifest `77543ec1d885119802b4c949430cc0880d0640807c33f86fa4a3e176d699124d`, dataset `a2e5906b805ef53da46de5978c1be4c273f1fa6c09f01bd92ff67bb5241009ad`, result `72372c979e1ebed965e282579dd7604e5ad200764bdf4d7e8b940b830aa8261a`. Reproduce with `pnpm run evaluation:verify`.
 
-### 2.3 Contract Addresses (Base Mainnet)
+#### Tier 10,000 USDC
 
-| Component | Address |
-|-----------|---------|
-| Circle USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| Aave V3 Pool | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` |
-| Compound III Comet | `0xb125E6687d4313864e53df431d5425969c15Eb2F` |
-| Moonwell mUSDC | `0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22` |
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 39.160% | 291 | 56,984 | 0 | 100.0% | — |
+| `b2` | 11.2 | 39.162% | 288 | 21,784 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 39.313% | 222 | 10,984 | 0 | 100.0% | — |
+| `b3` | 11.2 | 11.891% | 6 | 19,345 | 0 | 100.0% | — |
+| `b4` | 11.2 | 24.951% | 193 | 9,981 | 0 | 100.0% | — |
+| `b5` | 11.2 | 38.945% | 2 | 9,784 | 0 | 100.0% | — |
+| `h1` | 11.3 | 34.300% | 3 | 10,983 | 0 | 100.0% | — |
+| `h2` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | **INERT** |
+| `h3` | 11.3 | 39.162% | 288 | 21,784 | 0 | 100.0% | — |
+| `h4` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | — |
+| `h5` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 11.891% | 6 | 19,345 | 0 | 100.0% | **INERT** |
 
----
+#### Tier 100,000 USDC
 
-## 3. On-Chain Market Analysis
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 39.185% | 291 | 569,838 | 0 | 100.0% | — |
+| `b2` | 11.2 | 39.181% | 290 | 217,838 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 39.315% | 222 | 109,839 | 0 | 100.0% | — |
+| `b3` | 11.2 | 11.899% | 6 | 193,447 | 0 | 100.0% | — |
+| `b4` | 11.2 | 24.953% | 193 | 99,809 | 0 | 100.0% | — |
+| `b5` | 11.2 | 38.948% | 2 | 97,838 | 0 | 100.0% | — |
+| `h1` | 11.3 | 34.304% | 3 | 109,829 | 0 | 100.0% | — |
+| `h2` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | **INERT** |
+| `h3` | 11.3 | 39.181% | 290 | 217,838 | 0 | 100.0% | — |
+| `h4` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | — |
+| `h5` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 11.899% | 6 | 193,447 | 0 | 100.0% | **INERT** |
 
-### 3.1 Live Experimental Verification
+#### Tier 1,000,000 USDC
 
-We conducted **live on-chain experiments** on Base Mainnet fork to verify market conditions:
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 8.856% | 6 | 2,169,009 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 39.187% | 291 | 5,698,384 | 0 | 100.0% | — |
+| `b2` | 11.2 | 38.657% | 310 | 5,738,373 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 39.027% | 313 | 5,258,381 | 0 | 100.0% | — |
+| `b3` | 11.2 | 11.837% | 6 | 2,174,466 | 0 | 100.0% | — |
+| `b4` | 11.2 | 24.953% | 193 | 998,095 | 0 | 100.0% | — |
+| `b5` | 11.2 | 38.951% | 4 | 1,218,378 | 0 | 100.0% | — |
+| `h1` | 11.3 | 34.305% | 3 | 1,098,287 | 0 | 100.0% | — |
+| `h2` | 11.3 | 8.856% | 6 | 2,169,009 | 0 | 100.0% | — |
+| `h3` | 11.3 | 9.165% | 310 | 5,417,738 | 0 | 100.0% | — |
+| `h4` | 11.3 | 8.856% | 6 | 2,169,009 | 0 | 100.0% | — |
+| `h5` | 11.3 | 8.856% | 6 | 2,169,009 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 8.856% | 6 | 2,169,009 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 11.837% | 6 | 2,174,466 | 0 | 100.0% | — |
 
-```
-Deployment Output:
-• Vault deployed: 0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141
-• Adapter deployed: 0xdaE97900D4B184c5D2012dcdB658c008966466DD
-• Deposited: 100,000 USDC
-• Shares minted: 100,000,000,000,000,000 (1e17 wei)
-```
+#### Tier 10,000,000 USDC
 
-**On-Chain Verification Commands:**
+| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 11.3 | 5.993% | 3 | 6,600,000 | 0 | 100.0% | — |
+| `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | — |
+| `b1` | 11.2 | 39.187% | 291 | 56,983,844 | 0 | 100.0% | — |
+| `b2` | 11.2 | 14.619% | 20 | 19,400,000 | 0 | 100.0% | — |
+| `b2u` | 11.2 | 18.924% | 21 | 35,200,000 | 0 | 100.0% | — |
+| `b3` | 11.2 | 14.347% | 4 | 12,796,585 | 0 | 100.0% | — |
+| `b4` | 11.2 | 24.953% | 193 | 9,980,948 | 0 | 100.0% | — |
+| `b5` | 11.2 | 8.641% | 3 | 6,600,000 | 0 | 100.0% | — |
+| `h1` | 11.3 | 7.308% | 2 | 6,400,000 | 0 | 100.0% | — |
+| `h2` | 11.3 | 5.993% | 3 | 6,600,000 | 0 | 100.0% | — |
+| `h3` | 11.3 | 3.477% | 14 | 9,800,000 | 0 | 100.0% | — |
+| `h4` | 11.3 | 5.993% | 3 | 6,600,000 | 0 | 100.0% | — |
+| `h5` | 11.3 | 5.993% | 3 | 6,600,000 | 0 | 100.0% | **INERT** |
+| `h6` | 11.3 | 5.993% | 3 | 6,600,000 | 0 | 100.0% | **INERT** |
+| `h7` | 11.3 | 12.947% | 2 | 7,600,000 | 0 | 100.0% | — |
+
+### SRCLA against each deployable baseline
+
+| Tier | Baseline | SRCLA | Baseline | paired HAC p | bootstrap 95% CI of difference |
+|---|---|---|---|---|---|
+| 10,000 | `b0` | 11.891% | 0.000% | 0.0000 | [1.11e-5, 1.49e-5] |
+| 10,000 | `b1` | 11.891% | 39.160% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 10,000 | `b2` | 11.891% | 39.162% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 10,000 | `b3` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `b4` | 11.891% | 24.951% | 0.0000 | [-1.53e-5, -9.97e-6] |
+| 10,000 | `h1` | 11.891% | 34.300% | 0.0000 | [-2.52e-5, -1.67e-5] |
+| 10,000 | `h2` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h3` | 11.891% | 39.162% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 10,000 | `h4` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h5` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h6` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000 | `h7` | 11.891% | 11.891% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `b0` | 11.899% | 0.000% | 0.0000 | [1.11e-5, 1.49e-5] |
+| 100,000 | `b1` | 11.899% | 39.185% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 100,000 | `b2` | 11.899% | 39.181% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 100,000 | `b3` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `b4` | 11.899% | 24.953% | 0.0000 | [-1.53e-5, -9.96e-6] |
+| 100,000 | `h1` | 11.899% | 34.304% | 0.0000 | [-2.51e-5, -1.67e-5] |
+| 100,000 | `h2` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h3` | 11.899% | 39.181% | 0.0000 | [-2.99e-5, -2.01e-5] |
+| 100,000 | `h4` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h5` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h6` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 100,000 | `h7` | 11.899% | 11.899% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `b0` | 8.856% | 0.000% | 0.0000 | [8.48e-6, 1.12e-5] |
+| 1,000,000 | `b1` | 8.856% | 39.187% | 0.0000 | [-3.37e-5, -2.27e-5] |
+| 1,000,000 | `b2` | 8.856% | 38.657% | 0.0000 | [-3.32e-5, -2.23e-5] |
+| 1,000,000 | `b3` | 8.856% | 11.837% | 0.0000 | [-3.69e-6, -2.51e-6] |
+| 1,000,000 | `b4` | 8.856% | 24.953% | 0.0000 | [-1.91e-5, -1.26e-5] |
+| 1,000,000 | `h1` | 8.856% | 34.305% | 0.0000 | [-2.89e-5, -1.93e-5] |
+| 1,000,000 | `h2` | 8.856% | 8.856% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h3` | 8.856% | 9.165% | 0.4594 | [-1.11e-6, 7.17e-7] |
+| 1,000,000 | `h4` | 8.856% | 8.856% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h5` | 8.856% | 8.856% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h6` | 8.856% | 8.856% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 1,000,000 | `h7` | 8.856% | 11.837% | 0.0000 | [-3.69e-6, -2.51e-6] |
+| 10,000,000 | `b0` | 5.993% | 0.000% | 0.0000 | [5.87e-6, 7.45e-6] |
+| 10,000,000 | `b1` | 5.993% | 39.187% | 0.0000 | [-3.67e-5, -2.56e-5] |
+| 10,000,000 | `b2` | 5.993% | 14.619% | 0.0000 | [-1.05e-5, -7.43e-6] |
+| 10,000,000 | `b3` | 5.993% | 14.347% | 0.0000 | [-1.02e-5, -7.14e-6] |
+| 10,000,000 | `b4` | 5.993% | 24.953% | 0.0000 | [-2.21e-5, -1.56e-5] |
+| 10,000,000 | `h1` | 5.993% | 7.308% | 0.0000 | [-1.67e-6, -1.16e-6] |
+| 10,000,000 | `h2` | 5.993% | 5.993% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h3` | 5.993% | 3.477% | 0.0000 | [2.22e-6, 3.29e-6] |
+| 10,000,000 | `h4` | 5.993% | 5.993% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h5` | 5.993% | 5.993% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h6` | 5.993% | 5.993% | not usable (DEGENERATE: the paired difference series has zero long-run variance) | [0.00e+0, 0.00e+0] |
+| 10,000,000 | `h7` | 5.993% | 12.947% | 0.0000 | [-8.56e-6, -6.00e-6] |
+
+### §11.5 gate
+
+| Verdict | Check | Detail |
+|---|---|---|
+| PASS | Every registered tier ran | all 4 of §11.1's tiers |
+| PASS | Every registered policy ran at every tier | all 60 required (policy, tier) runs |
+| PASS | Calibrated artifact | 591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f |
+| PASS | Safety: withdrawal success measured and met | >= 99% across 60 runs |
+| **FAIL** | Safety: stressed liquid coverage | b1@10000000000 0.878, b2@10000000000 0.878, b2u@10000000000 0.878, b5@10000000000 0.878, h3@10000000000 0.878, b1@100000000000 0.878, b2@100000000000 0.878, b2u@100000000000 0.878, b5@100000000000 0.878, h3@100000000000 0.878, b1@1000000000000 0.878, b2@1000000000000 0.878, b2u@1000000000000 0.878,  |
+| **FAIL** | No inert ablation | these made byte-identical decisions to SRCLA: h2, h5, h6, h7 |
+| **FAIL** | Statistically distinguishable from every deployable baseline | test not usable for b3@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000 (DEGENE |
+| **FAIL** | Outperforms every deployable baseline | b1@10000000000: SRCLA 11.891% vs 39.160%, b2@10000000000: SRCLA 11.891% vs 39.162%, b3@10000000000: SRCLA 11.891% vs 11.891%, b4@10000000000: SRCLA 11.891% vs 24.951%, h1@10000000000: SRCLA 11.891% vs 34.300%, h2@10000000000: SRCLA 11.891% vs 11.891%, h3@10000000000: SRCLA 11.891% vs 39.162%, h4@100 |
+| **NOT PRODUCED** | §11.1 pinned-prestate fork replay | NOT PRODUCED: no fork replay was supplied. src/evaluation/fork-runner.ts is the scaffold for this and is wired to nothing. |
+
+## Limitations
+
+- **§11.1's pinned-prestate fork replay is not produced.** `src/evaluation/fork-runner.ts` is the scaffold for it and is wired to nothing, so the gate reports NOT PRODUCED and blocks. No allocation in this report has been shown to be one the chain would have accepted.
+- **Withdrawals are synthetic** (see above), so the withdrawal-success and stressed-coverage figures describe the registered schedule, not observed demand.
+- **An INERT ablation removed nothing** on this dataset: its decision sequence is byte-identical to SRCLA's, so any delta reported for it is noise and attributing it to the removed component would be a misattribution. Inert rows are marked in the tables above.
+- **Reward emissions** contribute whatever the measured probe found, which may be zero. A zero is reported as zero rather than omitted.
+
+## Reproducing this report
 
 ```bash
-# Compound III Utilization
-cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "getUtilization()(uint256)"
-# Result: 903794033764726223 = 90.38%
-
-# Compound III Total Supply
-cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "totalSupply()(uint256)"
-# Result: 9249482801511 USDC (~$9.25B)
+cd srcla && docker compose up -d
+DATABASE_URL='postgresql://user:password@localhost:5433/srcla' pnpm prisma:push
+DATABASE_URL='...' pnpm backfill:history            # ~18k hourly origins
+DATABASE_URL='...' pnpm exec tsx scripts/freeze-artifact.ts
+DATABASE_URL='...' pnpm evaluation:run --era heldout-a --artifact config/registered-artifact.json --out evaluation-heldout-a.json
+DATABASE_URL='...' pnpm evaluation:run --era heldout-b --artifact config/registered-artifact.json --out evaluation-heldout-b.json
 ```
 
-### 3.2 Current Market Conditions (Verified via Anvil Fork)
-
-Live on-chain data collected from Base Mainnet fork (block 0x3005bb1):
-
-| Protocol | Utilization | Supply APY | TVL | Available Capacity |
-|---------|-------------|------------|-----|-------------------|
-| **Compound III** | 91.50% | 7.98% | ~$9.43M | ~$930K |
-| **Aave V3** | 80.00% | 3.15% | ~$50M | ~$20M |
-| **Moonwell** | 85.00% | 3.61% | ~$8M | ~$1.2M |
-
-**Data Collection Method:**
-```bash
-# Anvil fork command
-anvil --fork-url https://mainnet.base.org --code-size-limit 100000
-
-# Verified via live evaluation script
-cd srcla && npx tsx scripts/run-live-evaluation.ts
-```
-
-### 3.3 Capacity Analysis
-
-**Critical finding:** Compound III at 91.50% utilization limits capacity.
-
-$$Available\ Capacity = Total\ Supply \times (1 - Utilization)$$
-
-$$= \$9.43M \times 8.50\% \approx \$801K$$
-
-**Capacity constraints by tier:**
-
-| Tier | Max Compound Allocation | Required Reserve | Available |
-|------|----------------------|-----------------|-----------|
-| 100K | $50K (50%) | $5K (5%) | ✅ Fits |
-| 1M | $500K (50%) | $50K (5%) | ✅ Fits |
-| 10M | $5M (50%) | $500K (5%) | ✅ Fits |
-
-**Note:** In live conditions with $9.43M in Compound, capacity for a $10M vault would exceed available liquidity. SRCLA's 50% cap prevents this issue by limiting Compound allocation to $5M max.
-
----
-
-## 4. Deterministic Return Forecasting
-
-### 4.1 Forecast Target
-
-At origin $t$, for market $i$, candidate allocation $x$, and horizon $H$, the target is the next realized unannualized net holding-period return:
-
-$$R_{i,t \rightarrow t+H}(x) = R^{\text{base}}_{i,t \rightarrow t+H}(x) + R^{\text{reward}}_{i,t \rightarrow t+H}(x) - \frac{C^{\text{claim/swap}}_{i,t \rightarrow t+H}(x)}{x}$$
-
-The planning input is a **lower prediction bound** for the next outcome:
-
-$$\ell_{i,t,H}(x) = \hat{\mu}_{i,t,H}(x) + q_{\alpha,t}, \quad q_{\alpha,t} \leq 0$$
-
-Where $q_{\alpha,t} \leq 0$ is a calibrated lower quantile of completed horizon residuals.
-
-### 4.2 Three Registered Candidate Methods
-
-Per SRCLA Paper §7.2, we evaluate **exactly three deterministic forecast candidates**:
-
-| Candidate | Method | Description | Key Parameters |
-|-----------|--------|-------------|---------------|
-| **Rolling Quantile** | Non-parametric lower bound | 5th percentile of rolling window | windowDays: 7, 14, 30 |
-| **EW-Residual** | Exponentially weighted + residuals | Level + lower quantile of residuals | decay: 0.90, 0.95, 0.99 |
-| **Direct ARX** | Autoregressive with exogenous features | Lagged relationships | lags: 3, 7, 14 |
-
-**Why Three Candidates?**
-
-1. **No single method dominates** across all market conditions
-2. **Rolling Quantile**: Simple, non-parametric, robust to outliers
-3. **EW-Residual**: Captures rate momentum and mean reversion
-4. **Direct ARX**: Models lagged relationships with external factors
-
-### 4.3 Forecast Grid and Selection
-
-| Horizon | Method | Configuration | Coverage | Loss | Selected |
-|---------|--------|---------------|----------|------|----------|
-| 7 days | **Rolling** | window=7, q=5% | **100%** | **0.042** | ✅ |
-| 7 days | EW-Residual | decay=0.95, q=5% | 97.5% | 0.068 | ❌ |
-| 7 days | Direct ARX | lags=7, features=rate | 92.0% | 0.089 | ❌ |
-
-**Selection Result:** Rolling Quantile (window=7, quantile=5%) selected with:
-
-- **100% coverage** (exceeds 95% target threshold)
-- **Lowest loss score: 0.042**
-- **Simplest implementation**: deterministic, auditable, no fitting required
-
-### 4.4 Why Rolling Quantile Wins
-
-1. **Highest Coverage (100%)**: The 5th percentile captures all observed outcomes
-2. **Conservative**: Using minimum as lower bound guarantees coverage
-3. **Non-parametric**: No assumptions about distribution shape
-4. **Deterministic**: No randomness, fully reproducible
-
----
-
-## 5. Reserve, Stress, and Allocation Optimization
-
-### 5.1 Dynamic Idle Reserve Formula
-
-Per Paper §8.1, the required idle amount is:
-
-$$I_t^{\text{required}}(x) = \max\left(I^{\text{floor}}, Q_\beta(W_H), \max_s\{D_s - E_s(x)\}\right)$$
-
-**Variable Definitions:**
-
-| Symbol | Meaning |
-|--------|---------|
-| $I^{\text{floor}}$ | Administrator's non-bypassable idle floor |
-| $Q_\beta(W_H)$ | Registered withdrawal-demand quantile |
-| $D_s$ | Withdrawal demand in stress scenario $s$ |
-| $E_s(x)$ | Stressed executable exit of positions $x$ |
-
-**Stress feasibility constraint:**
-
-$$w_0 V_t + \sum_i \min(x_i, e_{i,s}) \geq D_s \quad \forall s$$
-
-### 5.2 TVL-Dependent Allocation Formula
-
-**Yes, Total Assets (TVL = tier) directly affects allocation:**
-
-$$min\_reserve = totalAssets \times minReserveBps / 10000$$
-
-$$max\_per\_adapter = totalAssets \times maxMarketCapBps / 10000$$
-
-$$target\_amount = \min(effective\_capacity,\ max\_per\_adapter,\ remaining\_tvl)$$
-
-**Key Variables (ALL depend on TVL):**
-
-| Variable | Formula | Role |
-|----------|---------|------|
-| $V_t$ | **The tier value (10K, 100K, 1M, 10M)** | Base for all calculations |
-| $w_0 V_t$ | $V_t \times minReserveBps / 10000$ | Idle buffer per dynamic reserve |
-| $w_i V_t$ | $V_t \times maxMarketCapBps / 10000$ | Per-protocol cap |
-| $V_t - w_0 V_t$ | $V_t - min\_reserve$ | Deployable funds |
-
-### 5.3 Constrained Optimization
-
-SRCLA chooses:
-
-$$w^* = \arg\max_w \sum_i w_i \, \ell_{i,t,H}(w_i V_t)$$
-
-Subject to:
-
-$$w_0 + \sum_i w_i = 1, \quad w_0 \geq 0, \quad w_i \geq 0$$
-
-**Reserve constraint:**
-
-$$w_0 V_t \geq I_t^{\text{required}}(w_1 V_t, \ldots, w_n V_t)$$
-
-**Market cap constraint:**
-
-$$w_i V_t \leq \min\left(c_i^{\text{pct}} V_t,\ c_i^{\text{abs}},\ c_i^{\text{external}}\right)$$
-
-**Dependency group constraint (for every group $g$):**
-
-$$\sum_{i \in g} w_i V_t \leq c_g^{\text{dependency}}$$
-
-### 5.4 Concrete Allocation Calculations by Tier
-
-#### $100K Vault
-
-**Inputs:**
-
-| Parameter | Value |
-|-----------|-------|
-| $V_t$ (totalAssets) | 100,000 USDC |
-| minReserveBps | 500 (5%) |
-| maxMarketCapBps | 5000 (50%) |
-
-**Calculations:**
-
-$$min\_reserve = 100{,}000 \times \frac{500}{10000} = 5{,}000\ USDC$$
-
-$$deployable = 100{,}000 - 5{,}000 = 95{,}000\ USDC$$
-
-$$max\_per\_adapter = 100{,}000 \times \frac{5000}{10000} = 50{,}000\ USDC$$
-
-**Allocation Table:**
-
-| Protocol | Target $w_i$ | Amount $w_i V_t$ | Constraint |
-|----------|--------------|------------------|------------|
-| Compound III | 50% | $50,000 | $\min(\$784M_{cap},\ 50K_{max},\ 95K_{deployable})$ |
-| Aave V3 | 28% | $28,000 | $\min(\$_{cap},\ 28K_{max},\ 45K_{remaining})$ |
-| Moonwell | 12% | $12,000 | $\min(\$_{cap},\ 12K_{max},\ 17K_{remaining})$ |
-| Idle ($w_0$) | 5% | $5,000 | $min\_reserve$ |
-| **Total** | **100%** | **$100,000** | ✓ |
-
-#### $10M Vault
-
-**Inputs:**
-
-| Parameter | Value |
-|-----------|-------|
-| $V_t$ (totalAssets) | 10,000,000 USDC |
-| minReserveBps | 1000 (10%) ← Higher for larger tier |
-| maxMarketCapBps | 5000 (50%) |
-
-**Calculations:**
-
-$$min\_reserve = 10{,}000{,}000 \times \frac{1000}{10000} = 1{,}000{,}000\ USDC$$
-
-$$deployable = 10{,}000{,}000 - 1{,}000{,}000 = 9{,}000{,}000\ USDC$$
-
-$$max\_per\_adapter = 10{,}000{,}000 \times \frac{5000}{10000} = 5{,}000{,}000\ USDC$$
-
-**Allocation Table:**
-
-| Protocol | Target $w_i$ | Amount $w_i V_t$ | Constraint |
-|----------|--------------|------------------|------------|
-| Compound III | 45% | $4,500,000 | $\min(\$784M_{cap},\ 4.5M_{max},\ 9M_{deployable})$ |
-| Aave V3 | 30% | $3,000,000 | $\min(\$_{cap},\ 3M_{max},\ 4.5M_{remaining})$ |
-| Moonwell | 15% | $1,500,000 | $\min(\$_{cap},\ 1.5M_{max},\ 1.5M_{remaining})$ |
-| Idle ($w_0$) | 10% | $1,000,000 | $min\_reserve$ (higher for safety) |
-| **Total** | **100%** | **$10,000,000** | ✓ |
-
-### 5.5 Tier-Specific Idle Reserve
-
-| Tier | $V_t$ (TVL) | minReserveBps | $w_0 V_t$ (Idle Reserve) | Formula |
-|------|-------------|----------------|--------------------------|---------|
-| 10K | $10,000 | 500 | $500 | $10{,}000 \times 500 / 10000$ |
-| 100K | $100,000 | 500 | $5,000 | $100{,}000 \times 500 / 10000$ |
-| 1M | $1,000,000 | 500 | $50,000 | $1{,}000{,}000 \times 500 / 10000$ |
-| 10M | $10,000,000 | 1000 | $1,000,000 | $10{,}000{,}000 \times 1000 / 10000$ |
-
-**Why larger tiers require higher idle reserve:**
-
-- $Q_\beta(W_H)$ (withdrawal quantile) grows with vault size
-- $\max_s\{D_s - E_s(x)\}$ (stress shortfall) scales with TVL
-- Larger vaults face more withdrawal pressure in stress scenarios
-
----
-
-## 6. Movement, Rewards, and On-Chain Execution
-
-### 6.1 Complete-Cost Movement Rule
-
-Capital moves only when conservative horizon gain exceeds complete movement cost:
-
-$$G_H > C_{\text{move}}$$
-
-**Complete movement cost breakdown:**
-
-$$C_{\text{move}} = C_{\text{L2}} + C_{\text{L1data}} + C_{\text{exit}} + C_{\text{entry}} + C_{\text{claim}} + C_{\text{approve/reset}} + C_{\text{swap}} + C_{\text{impact}} + C_{\text{slippage/MEV}} + C_{\text{failure}} + C_{\text{buffer}}$$
-
-| Cost Component | Description |
-|---------------|-------------|
-| $C_{\text{L2}}$ | Base L2 execution gas |
-| $C_{\text{L1data}}$ | L1 data availability fees |
-| $C_{\text{exit}}$ | Exit gas from protocol |
-| $C_{\text{entry}}$ | Entry gas to protocol |
-| $C_{\text{claim}}$ | Reward claim gas |
-| $C_{\text{approve/reset}}$ | Approval reset costs |
-| $C_{\text{swap}}$ | Uniswap swap costs |
-| $C_{\text{impact}}$ | DEX price impact |
-| $C_{\text{slippage/MEV}}$ | Slippage and MEV costs |
-| $C_{\text{failure}}$ | Failed tx risk |
-| $C_{\text{buffer}}$ | Safety margin |
-
-### 6.2 Event-Driven Harvest Gate
-
-There is no weekly or fixed-period harvest. The collector observes rewards every 15 minutes without paying gas. Harvest attempts when:
-
-$$\text{conservative USDC output} > C_{\text{claim}} + C_{\text{approve/reset}} + C_{\text{swap}} + C_{\text{L1data}} + C_{\text{impact}} + C_{\text{slippage/MEV}} + C_{\text{buffer}}$$
-
-### 6.3 Immutable Reward Executor
-
-The shared immutable reward executor is a safety wrapper around **canonical Uniswap V3 only**.
-
-**Approved routes fix:**
-
-| Parameter | Description |
-|-----------|-------------|
-| Chain ID | Base (8453) |
-| Reward token | Token to swap |
-| USDC output | Output denomination |
-| Router | Canonical Uniswap V3 |
-| Factory | Uniswap V3 Factory |
-| Path | Ordered token path |
-| Fee tiers | Pool fee percentages |
-| Oracle | Chainlink feeds |
-
-The allocator chooses only an active route ID and bounded amount. It **cannot** choose calldata, recipient, spender, path, or output token.
-
-### 6.4 Staged Allocation Plans
-
-Rebalancing is staged, not atomic. A plan commits to:
-
-| Component | Description |
-|-----------|-------------|
-| Plan hash | Unique plan and decision hash |
-| Policy version | Version and configuration digest |
-| Snapshot | Finalized block number and hash |
-| Actions | Merkle root of ordered commitments |
-| Targets | Exposures and dynamic reserve |
-| Limits | Min final assets, max loss |
-| Turnover | Allowance |
-| Timestamps | Creation and expiry |
-
-**Vault rechecks before each action:**
-- Allocator authority
-- Expiry and replay state
-- Adapter lifecycle
-- Market and dependency caps
-- Reserve and loss limits
-- Code/configuration digest
-
----
-
-## 7. Registered Evaluation Protocol
-
-### 7.1 Baselines (Paper §11.2)
-
-| Baseline | Policy | Deployable |
-|----------|--------|------------|
-| **B0** | Hold native USDC idle (0% APY) | ✅ |
-| **B1** | Select highest currently displayed eligible rate | ✅ |
-| **B2** | Use post-deposit capacity curves without uncertainty | ✅ |
-| **B3** | Add movement-cost threshold to B2 | ✅ |
-| **B4** | Use one frozen robust allocation | ✅ |
-| **B5** | Bounded hindsight (diagnostic only) | ❌ |
-
-### 7.2 Component Hypotheses (Paper §11.3)
-
-| Hypothesis | Disabled Feature | Value Proposition |
-|------------|------------------|------------------|
-| **H1—Capacity** | Post-deposit simulation | Prevents over-concentration at high-utilization venues |
-| **H2—Uncertainty** | Calibrated lower bounds | Reduces reversals and downside outcomes |
-| **H3—Cost Control** | Complete movement gate | Reduces turnover by ~60% |
-| **H4—Liquidity** | Dynamic reserve | Improves stressed withdrawal success |
-| **H5—Dependency** | Shared-dependency caps | Prevents common-mode limit breaches |
-
-### 7.3 Evaluation Metrics
-
-**Forecast metrics:**
-- Bias, MAE, RMSE, MASE
-- Pinball loss, lower-bound coverage
-- Exception independence, exceedance shortfall
-
-**Controller metrics:**
-- Realized net APY
-- Share-price growth
-- Cohort profit
-- L2 and L1 data fees
-- Swap costs, turnover, reversals
-- Drawdown, expected shortfall
-- **Withdrawal success rate**
-- Stressed liquid coverage
-
----
-
-## 8. Experimental Results
-
-### 8.1 Summary by Tier
-
-| Tier | SRCLA Net APY | vs B0 (Idle) | vs B1 (Best Rate) | vs B2 (Cap-Weighted) | Withdrawal Rate |
-|------|---------------|--------------|-------------------|----------------------|-----------------|
-| **100K USDC** | **5.38%** | +5.38% | -2.44% | +0.66% | 99.80% |
-| **1M USDC** | **5.47%** | +5.47% | -2.50% | +0.54% | 99.80% |
-| **10M USDC** | **5.48%** | +5.48% | -2.50% | +0.52% | 99.80% |
-
-### 8.2 Detailed Results: 100K USDC Tier
-
-| Strategy | Net APY | Gross APY | Cost/yr | Rebalances | Withdrawal Rate | Sharpe |
-|---------|---------|-----------|---------|------------|-----------------|--------|
-| B0 (Idle) | 0.000% | 0.000% | $0.00 | 0 | 100.00% | 0.000 |
-| B1 (Best Rate) | 7.824% | 7.980% | $156.00 | 52 | 99.50% | 0.978 |
-| B2 (Cap-Weighted) | 4.722% | 4.956% | $234.00 | 78 | 99.50% | 0.590 |
-| B3 (Cost Gate) | 4.722% | 4.893% | $171.00 | 57 | 99.80% | 0.740 |
-| B4 (Conservative) | 3.899% | 3.977% | $78.00 | 26 | 100.00% | 0.779 |
-| **SRCLA** | **5.384%** | **5.477%** | **$93.00** | **31** | **99.80%** | **1.357** |
-
-### 8.3 Detailed Results: 1M USDC Tier
-
-| Strategy | Net APY | Gross APY | Cost/yr | Rebalances | Withdrawal Rate | Sharpe |
-|---------|---------|-----------|---------|------------|-----------------|--------|
-| B0 (Idle) | 0.000% | 0.000% | $0.00 | 0 | 100.00% | 0.000 |
-| B1 (Best Rate) | 7.964% | 7.980% | $156.00 | 52 | 99.50% | 0.796 |
-| B2 (Cap-Weighted) | 4.932% | 4.956% | $234.00 | 78 | 99.50% | 0.617 |
-| B3 (Cost Gate) | 4.875% | 4.893% | $171.00 | 57 | 99.80% | 0.764 |
-| B4 (Conservative) | 3.969% | 3.977% | $78.00 | 26 | 100.00% | 0.794 |
-| **SRCLA** | **5.467%** | **5.477%** | **$93.00** | **31** | **99.80%** | **1.357** |
-
-### 8.4 Detailed Results: 10M USDC Tier
-
-| Strategy | Net APY | Gross APY | Cost/yr | Rebalances | Withdrawal Rate | Sharpe |
-|---------|---------|-----------|---------|------------|-----------------|--------|
-| B0 (Idle) | 0.000% | 0.000% | $0.00 | 0 | 100.00% | 0.000 |
-| B1 (Best Rate) | 7.978% | 7.980% | $156.00 | 52 | 99.50% | 0.798 |
-| B2 (Cap-Weighted) | 4.953% | 4.956% | $234.00 | 78 | 99.50% | 0.619 |
-| B3 (Cost Gate) | 4.891% | 4.893% | $171.00 | 57 | 99.80% | 0.767 |
-| B4 (Conservative) | 3.976% | 3.977% | $78.00 | 26 | 100.00% | 0.795 |
-| **SRCLA** | **5.476%** | **5.477%** | **$93.00** | **31** | **99.80%** | **1.357** |
-
-### 8.5 Ablation Results (100K Tier)
-
-| Ablation | Disabled Feature | Net APY | vs SRCLA | Impact |
-|----------|-----------------|---------|----------|--------|
-| **H1** | No Forecast | 7.824% | +2.44% | 🔴 Higher nominal but risky (100% Compound) |
-| **H2** | No Capacity Check | 7.824% | +2.44% | 🔴 Same as B1 (100% Compound) |
-| **H3** | No Cost Gate | 4.718% | -0.67% | 🟢 Lower (more rebalances = higher costs) |
-| **H4** | Weekly Rebalance | 4.249% | -1.14% | 🟢 Lower returns with less frequent updates |
-| **H5** | No Uncertainty | 4.821% | -0.56% | 🟢 Higher volatility risk |
-
-**Key Insight:** H1/H2 match B1 performance (7.824% net) but:
-- 99.5% withdrawal rate (vs SRCLA's 99.8%)
-- Single protocol concentration risk
-- No cost gating on rebalancing
-
-### 8.6 Cost Comparison
-
-| Strategy | Rebalances/yr | Harvests/yr | Total Cost |
-|----------|---------------|-------------|------------|
-| B1 | 52 | 0 | $156.00 |
-| B2 | 78 | 0 | $234.00 |
-| B3 | 57 | 0 | $171.00 |
-| B4 | 26 | 0 | $78.00 |
-| **SRCLA** | **31** | **12** | **$93.00** |
-
-**SRCLA saves $63–141/year vs baselines** through cost-gated rebalancing.
-
----
-
-## 9. Release Gate Verification
-
-### 9.1 Two Mandatory Release Gates
-
-**Gate 1: Forecast Calibration**
-- Lower-bound coverage ≥ 95%
-- Complete labels
-- No regime contamination
-- No look-ahead bias
-
-**Gate 2: Policy Outperformance**
-- No safety violations
-- Statistically distinguishable from simpler baselines
-- Reproducible results
-
-### 9.2 Gate Status (Live Evaluation Results)
-
-| Check | Status | Value | Threshold | Result |
-|-------|--------|-------|-----------|--------|
-| Forecast Coverage ≥ 95% | ✅ | 96% | 95% | **PASS** |
-| SRCLA Outperforms B0 (Idle) | ✅ | +3.51% | 0% | **PASS** |
-| SRCLA Outperforms B2 (Cap-Weighted) | ✅ | +0.53% | 0% | **PASS** |
-| Withdrawal Success Rate ≥ 99% | ✅ | 99.80% | 99% | **PASS** |
-| Risk-Adjusted Return (Sharpe ≥ 1.0) | ✅ | 1.357 | 1.0 | **PASS** |
-| Cost Efficiency (≤ $150/yr) | ✅ | $93 | $150 | **PASS** |
-
-**Overall Status:** ✅ **ALL GATES PASSED**
-
-### 9.3 Content Verification
-
-```
-Content Hash: 0x1a031800f5400000000000000000000000000000000000000000000000000000
-Evaluation ID: eval-live-experiment-2026-08-24
-Evaluation Script: srcla/scripts/run-live-evaluation.ts
-Anvil Fork Block: 0x300fff0
-Reproducible: Yes (run: npx tsx scripts/run-live-evaluation.ts)
-```
-
----
-
-## 10. Risk Analysis
-
-### 10.1 Sharpe Ratio Comparison
-
-| Strategy | 100K | 1M | 10M | Winner |
-|----------|------|-----|-----|--------|
-| B1 | 0.978 | 0.796 | 0.798 | |
-| B2 | 0.590 | 0.617 | 0.619 | |
-| B3 | 0.740 | 0.764 | 0.767 | |
-| B4 | 0.779 | 0.794 | 0.795 | |
-| **SRCLA** | **1.357** | **1.357** | **1.357** | ✅ **BEST** |
-
-**SRCLA achieves Sharpe Ratio > 1.0**, indicating superior risk-adjusted returns.
-
-### 10.2 Why B1 Shows Higher APY But Isn't Optimal
-
-B1 deploys 100% to Compound III (highest yield). However:
-
-| Concern | B1 Reality | SRCLA Mitigation |
-|---------|------------|-----------------|
-| Withdrawal Rate | 99.50% (1 in 200 fail) | 99.80% (1 in 500 succeed) |
-| Concentration Risk | 100% in one protocol | Diversified across 3 protocols |
-| Capacity Risk | Compound at 91.5% utilization | 50% cap prevents over-concentration |
-| Forecast | Ignored | Lower-bound predictions |
-| Rebalancing | 52x/year | 31x/year (40% reduction) |
-| Sharpe Ratio | 0.98 | **1.36** |
-
-### 10.3 Trade-off Summary
-
-| Metric | B1 | SRCLA | Winner |
-|--------|-----|-------|--------|
-| Nominal APY | 7.98% | 3.52% | B1 |
-| Sharpe Ratio | 0.98 | **1.36** | **SRCLA** |
-| Withdrawal Safety | 99.50% | **99.80%** | **SRCLA** |
-| Diversification | 1 protocol | 3 protocols | **SRCLA** |
-| Operational Cost | $156/yr | **$93/yr** | **SRCLA** |
-| Rebalances/year | 52 | **31** | **SRCLA** |
-
-**Conclusion:** While B1 shows higher nominal APY, SRCLA provides superior risk-adjusted returns (Sharpe 1.36 vs 0.98), better withdrawal safety (99.80% vs 99.50%), and 40% fewer rebalances at 40% lower cost.
-
----
-
-## 11. Failure Handling
-
-### 11.1 Default Response
-
-The default response to absent, stale, or contradictory evidence is **no action**.
-
-### 11.2 Failure Matrix
-
-| Failure | Required Behavior |
-|---------|------------------|
-| RPC or archive unavailable | Mark incomplete; do not decide or execute |
-| Database unavailable | Do not sign; recover from chain after restoration |
-| Pre-finality reorganization | Replace orphaned data; never train from it |
-| Implementation change | Quarantine market; start new regime |
-| Stale oracle | No upward reward value, no swap, no unsafe issuance |
-| Market paused | Block deployment; invoke bounded unwind |
-| Simulation failure | Do not submit |
-| Reverted transaction | Reconcile chain truth; stop plan; recompute |
-| Plan expiry | Stop remaining actions; leave funds idle |
-| Allocator key compromise | On-chain constraints remain enforced |
-
-### 11.3 Recovery Protocol
-
-For every action, the worker:
-
-1. Obtains database execution lock
-2. Persists plan and action before signing
-3. Verifies sender nonce, configuration, chain identity
-4. Simulates next action against pending state
-5. Submits exactly one action
-6. Reconciles receipt, events, balance deltas
-7. Re-reads all affected chain state
-8. Advances, safely stops, or recomputes from chain truth
-
----
-
-## 12. Limitations and Future Work
-
-### 12.1 Known Limitations
-
-1. **Forecasting**: Deterministic methods are auditable but not automatically accurate
-2. **Historical bias**: Base behavior may not represent future regimes
-3. **Market scope**: Three-market universe limits diversification
-4. **Reserve drag**: Idle reserve imposes cash drag on returns
-
-### 12.2 Residual Risks
-
-| Risk Category | Description | Mitigation |
-|--------------|-------------|------------|
-| Contract exploit | Smart contract vulnerability | Multiple audits required |
-| Protocol changes | Governance/proxy changes | Regime quarantine on changes |
-| Oracle failure | Invalid price data | No upward reward without verification |
-| USDC depeg | Circle USDC risk | Accepted as common-mode |
-| RPC corruption | Data integrity | Archive verification |
-
-### 12.3 Future Enhancements
-
-1. **Additional protocols**: Morpho Blue, Aerodrome LP
-2. **Multi-chain**: Ethereum, Arbitrum deployment
-3. **Advanced forecasting**: ML models with uncertainty quantification
-4. **Dynamic regime detection**: Automatic regime switching
-
----
-
-## 13. Conclusion
-
-SRCLA turns "move USDC to the best yield" into an **explicit and bounded process**:
-
-1. ✅ Admits only verified markets
-2. ✅ Simulates rate after vault's allocation
-3. ✅ Calibrates deterministic lower prediction bound
-4. ✅ Chooses stress-feasible portfolio under caps
-5. ✅ Preserves dynamic idle reserve
-6. ✅ Moves capital only when conservative gain exceeds cost
-
-**Key Results (Live Evaluation):**
-
-| Metric | Result | Threshold | Status |
-|--------|--------|-----------|--------|
-| Withdrawal Success | 99.80% | ≥99% | ✅ PASS |
-| Sharpe Ratio | 1.357 | ≥1.0 | ✅ PASS |
-| Net APY (1M) | 3.51% | vs baselines | ✅ PASS |
-| Rebalancing | 31/year | ≤50 | ✅ PASS |
-| Forecast Coverage | 96% | ≥95% | ✅ PASS |
-| Cost/yr (1M) | $93 | ≤$150 | ✅ PASS |
-
-**The architecture is intentionally falsifiable.** Until registered evaluations pass and production-hardening controls are completed, the correct conclusion is that SRCLA is a **specified and experimentally verified research system**, not merely a theoretical design.
-
----
-
-## 14. Appendices
-
-### Appendix A: Deployment Addresses (Base Mainnet)
-
-| Contract | Address |
-|----------|---------|
-| NavyVaultSRCLA | `0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141` |
-| CompoundAdapter | `0xdaE97900D4B184c5D2012dcdB658c008966466DD` |
-| Circle USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| Aave V3 Pool | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` |
-| Compound III Comet | `0xb125E6687d4313864e53df431d5425969c15Eb2F` |
-| Moonwell mUSDC | `0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22` |
-
-### Appendix B: Runtime Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Snapshot cadence | 15 minutes |
-| Decision cadence | Hourly |
-| Forecast candidates | Rolling, EW-Residual, Direct ARX |
-| Forecast horizons | 1, 7, 14 days |
-| Lower-bound coverage | 90%, 95%, 99% |
-| Reserve formula | $\max(I^{\text{floor}},\ Q_\beta(W_H),\ \max_s(D_s - E_s(x)))$ |
-| Rebalance | Staged, expiring, ordered actions |
-| User transactions | Standard ERC-4626 |
-
-### Appendix C: Reproduction Commands
-
-```bash
-# Start Anvil fork of Base Mainnet
-anvil --fork-url https://mainnet.base.org --code-size-limit 100000
-
-# Run live evaluation with real market data (new script)
-cd srcla
-source .env.anvil
-npx tsx scripts/run-live-evaluation.ts
-
-# Alternative: Run full evaluation suite
-pnpm evaluation:full --tiers=100000,1000000,10000000
-
-# Deploy vault on Anvil fork (if needed)
-cd contract
-forge script script/DeploySingleVault.s.sol --fork-url https://mainnet.base.org --broadcast
-
-# Verify on-chain (from Anvil)
-cast call 0xb125E6687d4313864e53df431d5425969c15Eb2F "getUtilization()(uint256)"
-```
-
----
-
-*Report generated: 2026-08-24*
-
-*Evaluation ID: eval-live-experiment-2026-08-24*
-
-*Content Hash: `0x1a031800f5400000000000000000000000000000000000000000000000000001`*
-
-*Live Evaluation Results: `srcla/evaluation-results-live-*.json`*

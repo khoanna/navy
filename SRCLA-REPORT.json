@@ -1,950 +1,4496 @@
 {
-  "evaluationId": "srcla-base-fork-1787068213906",
-  "timestamp": "2026-08-18T15:50:13.906Z",
-  "forkBlock": 50139432,
-  "chainId": 8453,
-  "paper": {
-    "version": "0.4",
-    "section": "-11"
+  "generatedAt": "2026-09-08T17:22:47.111Z",
+  "codeCommit": "f01c8e099a351122a0b02855a503c793ae23e58c",
+  "artifact": {
+    "hash": "591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f",
+    "method": "rolling",
+    "horizonSeconds": 1209600,
+    "coverageTarget": 0.9,
+    "noTradeBandK": 1,
+    "registration": {
+      "calibrationEra": {
+        "start": "2024-09-01T00:00:00.000Z",
+        "end": "2025-08-31T23:59:59.000Z",
+        "days": 365
+      },
+      "calibrationOrigins": 8760,
+      "labelsSwept": 77256,
+      "gridPoints": 81,
+      "scorablePoints": 81,
+      "selection": "selected rolling({\"windowObservations\":72}) H=14d cov=0.9 with loss 0.46801599 (achieved coverage 90.00% on 25182 residuals); runner-up rolling({\"windowObservations\":72}) H=14d cov=0.95 at 0.46838213, margin 3.661e-4",
+      "selectionMargin": 0.00036613502649690544,
+      "loss": {
+        "pointError": 0.000059179965284513715,
+        "coverageDeviation": 0.000047653085537224804,
+        "exceedanceShortfall": 0.0000074092333101547504,
+        "sharpness": 0.00009177400592725502,
+        "downsideRate": 0.46739734731157173,
+        "total": 0.4680159913017429,
+        "observations": 25182,
+        "achievedCoverage": 0.9000476530855372
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000476530855372,
+        "compound-v3-usdc": 0.9000476530855372,
+        "moonwell-usdc": 0.9000476530855372
+      },
+      "noTradeBandKSweep": [],
+      "noTradeBandKResolved": false,
+      "residualPanelBuilt": true,
+      "sealedErasNotRead": [
+        "heldout-a",
+        "heldout-b"
+      ],
+      "burnedWindowExcluded": {
+        "start": "2026-05-26T00:00:00.000Z",
+        "end": "2026-08-23T23:59:59.000Z",
+        "days": 90
+      },
+      "note": "Fit on the calibration era ONLY. No sealed era was read. The burned window (paper §4.1 design data) is excluded from this fit and from every held-out era; see src/evaluation/eras.ts for the two disclosed deviations."
+    }
   },
-  "marketSnapshot": [
-    {
-      "marketId": "compound-v3-usdc",
-      "name": "Compound III USDC",
-      "supplyRate": "31125822794625600000000000",
-      "utilization": "864014398436911314",
-      "cash": "1623770514946",
-      "totalSupply": "7762532779386",
-      "availableCapacity": "1623770514946",
-      "displayApy": 3.11258227946256
-    },
-    {
-      "marketId": "aave-v3-usdc",
-      "name": "Aave V3 USDC",
-      "supplyRate": "35213678040688569211901738",
-      "utilization": "884608477808209783",
-      "cash": "20373621226857",
-      "totalSupply": "176560815213048",
-      "availableCapacity": "20373621226857",
-      "displayApy": 3.521367804068857
-    },
-    {
-      "marketId": "moonwell-usdc",
-      "name": "Moonwell USDC",
-      "supplyRate": "37560413363695200000000000",
-      "utilization": "833718852200190754",
-      "cash": "2547824165342",
-      "totalSupply": "15233503424547",
-      "availableCapacity": "2547824165342",
-      "displayApy": 3.75604133636952
-    }
+  "notObserved": [
+    "per-venue absoluteCapBase / maxLossBps / dependencyGroupIds",
+    "dependency group registry (id, capBps, absoluteCapBase, members)",
+    "protocol supply-cap headroom (maxDeployableBase)",
+    "vault adminReserveBase / minIdleBps"
   ],
-  "baselines": [
+  "runs": [
     {
-      "id": "b0",
-      "name": "Idle (B0)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "idle",
-        "apy": 0
-      }
-    },
-    {
-      "id": "b1",
-      "name": "Highest Rate (B1)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000720000000",
-      "totalYield": "720000000",
-      "realizedApy": 3.6809205096421294,
-      "withdrawalSuccessRate": 0.99,
-      "maxDrawdown": 0.01,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "highest-rate",
-        "market": "moonwell-usdc",
-        "grossApy": 3.75604133636952,
-        "effectiveApy": 3.6809205096421294
-      }
-    },
-    {
-      "id": "b2",
-      "name": "Capacity-Aware (B2)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000594000000",
-      "totalYield": "594000000",
-      "realizedApy": 3.099135699933684,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "1000000000000",
-      "totalCosts": "250801000000000",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-aware",
-        "capacityAdjustedApy": 3.099135699933684
-      }
-    },
-    {
-      "id": "b3",
-      "name": "Capacity + Cost (B3)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-cost",
-        "moved": false,
-        "reason": "cost > benefit"
-      }
-    },
-    {
-      "id": "b4",
-      "name": "Fixed Robust (B4)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000656900000",
-      "totalYield": "656900000",
-      "realizedApy": 3.4252642857142854,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "600000000000",
-      "totalCosts": "250800600000000",
-      "pass": true,
-      "details": {
-        "baseline": "fixed-robust",
-        "allocation": "40/30/30"
-      }
-    },
-    {
-      "id": "b5",
-      "name": "Hindsight (B5)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000720000000",
-      "totalYield": "720000000",
-      "realizedApy": 3.75604133636952,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "hindsight",
-        "oracleApy": 3.75604133636952
-      }
-    },
-    {
-      "id": "b0",
-      "name": "Idle (B0)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "idle",
-        "apy": 0
-      }
-    },
-    {
-      "id": "b1",
-      "name": "Highest Rate (B1)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10007200000000",
-      "totalYield": "7200000000",
-      "realizedApy": 3.6809205096421294,
-      "withdrawalSuccessRate": 0.99,
-      "maxDrawdown": 0.01,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "highest-rate",
-        "market": "moonwell-usdc",
-        "grossApy": 3.75604133636952,
-        "effectiveApy": 3.6809205096421294
-      }
-    },
-    {
-      "id": "b2",
-      "name": "Capacity-Aware (B2)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10006610000000",
-      "totalYield": "6610000000",
-      "realizedApy": 3.4489851266300273,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "10000000000000",
-      "totalCosts": "250810000000000",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-aware",
-        "capacityAdjustedApy": 3.4489851266300273
-      }
-    },
-    {
-      "id": "b3",
-      "name": "Capacity + Cost (B3)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-cost",
-        "moved": false,
-        "reason": "cost > benefit"
-      }
-    },
-    {
-      "id": "b4",
-      "name": "Fixed Robust (B4)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10006569000000",
-      "totalYield": "6569000000",
-      "realizedApy": 3.4252642857142854,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "6000000000000",
-      "totalCosts": "250806000000000",
-      "pass": true,
-      "details": {
-        "baseline": "fixed-robust",
-        "allocation": "40/30/30"
-      }
-    },
-    {
-      "id": "b5",
-      "name": "Hindsight (B5)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10007200000000",
-      "totalYield": "7200000000",
-      "realizedApy": 3.75604133636952,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "hindsight",
-        "oracleApy": 3.75604133636952
-      }
-    },
-    {
-      "id": "b0",
-      "name": "Idle (B0)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "idle",
-        "apy": 0
-      }
-    },
-    {
-      "id": "b1",
-      "name": "Highest Rate (B1)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100072000000000",
-      "totalYield": "72000000000",
-      "realizedApy": 3.6809205096421294,
-      "withdrawalSuccessRate": 0.99,
-      "maxDrawdown": 0.01,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "highest-rate",
-        "market": "moonwell-usdc",
-        "grossApy": 3.75604133636952,
-        "effectiveApy": 3.6809205096421294
-      }
-    },
-    {
-      "id": "b2",
-      "name": "Capacity-Aware (B2)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100067100000000",
-      "totalYield": "67100000000",
-      "realizedApy": 3.503241425747778,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "100000000000000",
-      "totalCosts": "250900000000000",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-aware",
-        "capacityAdjustedApy": 3.503241425747778
-      }
-    },
-    {
-      "id": "b3",
-      "name": "Capacity + Cost (B3)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100000000000000",
-      "totalYield": "0",
-      "realizedApy": 0,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "capacity-cost",
-        "moved": false,
-        "reason": "cost > benefit"
-      }
-    },
-    {
-      "id": "b4",
-      "name": "Fixed Robust (B4)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100065690000000",
-      "totalYield": "65690000000",
-      "realizedApy": 3.4252642857142854,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "60000000000000",
-      "totalCosts": "250860000000000",
-      "pass": true,
-      "details": {
-        "baseline": "fixed-robust",
-        "allocation": "40/30/30"
-      }
-    },
-    {
-      "id": "b5",
-      "name": "Hindsight (B5)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100072000000000",
-      "totalYield": "72000000000",
-      "realizedApy": 3.75604133636952,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "0",
-      "totalCosts": "0",
-      "pass": true,
-      "details": {
-        "baseline": "hindsight",
-        "oracleApy": 3.75604133636952
-      }
-    }
-  ],
-  "ablations": {
-    "h1": [
-      {
-        "id": "h1",
-        "name": "Ablation H1 (No Forecast)",
-        "tier": "tier-1m",
-        "tierAmount": "1000000000000",
-        "initialDeposit": "1000000000000",
-        "finalAssets": "1000720000000",
-        "totalYield": "720000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
-        }
+      "era": "heldout-a",
+      "bounds": {
+        "start": "2025-09-01T00:00:00.000Z",
+        "end": "2026-05-25T23:59:59.000Z",
+        "days": 267
       },
-      {
-        "id": "h1",
-        "name": "Ablation H1 (No Forecast)",
-        "tier": "tier-10m",
-        "tierAmount": "10000000000000",
-        "initialDeposit": "10000000000000",
-        "finalAssets": "10007200000000",
-        "totalYield": "7200000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
-        }
+      "origins": 6408,
+      "provenance": {
+        "codeCommit": "f01c8e099a351122a0b02855a503c793ae23e58c",
+        "manifestHash": "e3ca8cf8ac1e3401d8285c589d8deba5e50907e3dcc2d3278733eb421b89074b",
+        "datasetHash": "e4784ed8ad64cf1389ef8a4427979238d83bde8737e1e528794e934fa7c0c48d",
+        "resultHash": "a5ffede94fd2590f60a7a4c48467ad76dd636af9ffbe949d583403804d25cf9e",
+        "gasSeriesDigest": "0x3a9a2d37a74058cefda1d77c0e38514378170a094ac623e375c5fee4a1310752"
       },
-      {
-        "id": "h1",
-        "name": "Ablation H1 (No Forecast)",
-        "tier": "tier-100m",
-        "tierAmount": "100000000000000",
-        "initialDeposit": "100000000000000",
-        "finalAssets": "100072000000000",
-        "totalYield": "72000000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
+      "artifactHash": "591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f",
+      "provisionalArtifact": false,
+      "withdrawalSource": "registered-schedule",
+      "missingTiers": [],
+      "missingPolicyIds": [],
+      "results": [
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04376298017146962,
+          "totalCostsBase": "126534",
+          "totalTurnoverBase": "1825255547182",
+          "rebalances": 3825,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.905110465518617,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04270695404133562,
+          "totalCostsBase": "39633",
+          "totalTurnoverBase": "210004690176",
+          "rebalances": 2154,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9056096810742692,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04369306014154728,
+          "totalCostsBase": "19299",
+          "totalTurnoverBase": "163838063774",
+          "rebalances": 4984,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9051471473562419,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04043988303871093,
+          "totalCostsBase": "8044",
+          "totalTurnoverBase": "55808687588",
+          "rebalances": 25,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.03694594408366614,
+          "totalCostsBase": "3939",
+          "totalTurnoverBase": "17668493937",
+          "rebalances": 6240,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04101148748698291,
+          "totalCostsBase": "5183",
+          "totalTurnoverBase": "28014154768",
+          "rebalances": 6,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.013450741848802836,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.042958615018728,
+          "totalCostsBase": "9404",
+          "totalTurnoverBase": "69865291244",
+          "rebalances": 155,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.24095907066346745,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04270695404133562,
+          "totalCostsBase": "39633",
+          "totalTurnoverBase": "210004690176",
+          "rebalances": 2154,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9056096810742692,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.04180184251590435,
+          "totalCostsBase": "11757",
+          "totalTurnoverBase": "61651518028",
+          "rebalances": 301,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.043813019920828644,
+          "totalCostsBase": "126612",
+          "totalTurnoverBase": "18252478231044",
+          "rebalances": 3826,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9050994390120424,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.042722975064709345,
+          "totalCostsBase": "40255",
+          "totalTurnoverBase": "2054043824754",
+          "rebalances": 2157,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.905606914817106,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "100000000000",
+          "realizedNetApy": 0.04370318445758903,
+          "totalCostsBase": "20524",
+          "totalTurnoverBase": "1595277871971",
+          "rebalances": 4984,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9051461235798138,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.04045420522371357,
+          "totalCostsBase": "8044",
+          "totalTurnoverBase": "558088890780",
+          "rebalances": 25,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.036948723752519896,
+          "totalCostsBase": "3939",
+          "totalTurnoverBase": "176684984352",
+          "rebalances": 6240,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "100000000000",
+          "realizedNetApy": 0.040949507785994266,
+          "totalCostsBase": "5980",
+          "totalTurnoverBase": "363316626020",
+          "rebalances": 10,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.042500792538924026,
+          "totalCostsBase": "12360",
+          "totalTurnoverBase": "718696181680",
+          "rebalances": 268,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.24296026144023666,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.042722975064709345,
+          "totalCostsBase": "40255",
+          "totalTurnoverBase": "2054043824754",
+          "rebalances": 2157,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.905606914817106,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.041820971039340016,
+          "totalCostsBase": "10920",
+          "totalTurnoverBase": "594633991124",
+          "rebalances": 297,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04381799670192743,
+          "totalCostsBase": "126612",
+          "totalTurnoverBase": "182524706812130",
+          "rebalances": 3826,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9047515669464448,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04273379962951562,
+          "totalCostsBase": "43270",
+          "totalTurnoverBase": "18660916186830",
+          "rebalances": 2164,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9052575042547298,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04371159817746295,
+          "totalCostsBase": "26143",
+          "totalTurnoverBase": "15244740457802",
+          "rebalances": 4984,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9047960790011401,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.040849897106212785,
+          "totalCostsBase": "7538",
+          "totalTurnoverBase": "5350922780862",
+          "rebalances": 21,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8366533928642153,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.03694900357588482,
+          "totalCostsBase": "3939",
+          "totalTurnoverBase": "1766849888562",
+          "rebalances": 6240,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04102868910036839,
+          "totalCostsBase": "6252",
+          "totalTurnoverBase": "3729852252935",
+          "rebalances": 11,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04250112479321655,
+          "totalCostsBase": "12360",
+          "totalTurnoverBase": "7186961553667",
+          "rebalances": 268,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.24287709555085188,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.042732917397197534,
+          "totalCostsBase": "42939",
+          "totalTurnoverBase": "18580924745688",
+          "rebalances": 2162,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9052582275277294,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.04201690957697224,
+          "totalCostsBase": "11970",
+          "totalTurnoverBase": "6099854304406",
+          "rebalances": 289,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8361050292103953,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04029327975270558,
+          "totalCostsBase": "15765",
+          "totalTurnoverBase": "45030087064208",
+          "rebalances": 182,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7919513448900563,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.0438184944682789,
+          "totalCostsBase": "126612",
+          "totalTurnoverBase": "1825246992596540",
+          "rebalances": 3826,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.039754971316579235,
+          "totalCostsBase": "201997",
+          "totalTurnoverBase": "642811009012230",
+          "rebalances": 2903,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.18825067990386818,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04386364509096974,
+          "totalCostsBase": "118526",
+          "totalTurnoverBase": "390411748487952",
+          "rebalances": 5566,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.0661924460868917,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.0412776599151663,
+          "totalCostsBase": "4856",
+          "totalTurnoverBase": "29520990742762",
+          "rebalances": 12,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.5690769316008744,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.03694903155711593,
+          "totalCostsBase": "3939",
+          "totalTurnoverBase": "17668498930928",
+          "rebalances": 6240,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.042012097483824506,
+          "totalCostsBase": "4679",
+          "totalTurnoverBase": "18076406530208",
+          "rebalances": 6,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04140627252020623,
+          "totalCostsBase": "4582",
+          "totalTurnoverBase": "17146758095483",
+          "rebalances": 7,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.047912080041986625,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04029832885603324,
+          "totalCostsBase": "15590",
+          "totalTurnoverBase": "44630028472864",
+          "rebalances": 182,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7919727012977719,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.03958839626503896,
+          "totalCostsBase": "157144",
+          "totalTurnoverBase": "414170153403764",
+          "rebalances": 2620,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7877818728756236,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04029327975270558,
+          "totalCostsBase": "15765",
+          "totalTurnoverBase": "45030087064208",
+          "rebalances": 182,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7919513448900563,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04029327975270558,
+          "totalCostsBase": "15765",
+          "totalTurnoverBase": "45030087064208",
+          "rebalances": 182,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7919513448900563,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04029327975270558,
+          "totalCostsBase": "15765",
+          "totalTurnoverBase": "45030087064208",
+          "rebalances": 182,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.7919513448900563,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.04012221071955224,
+          "totalCostsBase": "9425",
+          "totalTurnoverBase": "35660708207035",
+          "rebalances": 69,
+          "withdrawalsAttempted": 38,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.48622076981718965,
+          "inertVsSrcla": false
         }
-      }
-    ],
-    "h2": [
-      {
-        "id": "h2",
-        "name": "Ablation H2 (No Capacity)",
-        "tier": "tier-1m",
-        "tierAmount": "1000000000000",
-        "initialDeposit": "1000000000000",
-        "finalAssets": "1000720000000",
-        "totalYield": "720000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
-        }
-      },
-      {
-        "id": "h2",
-        "name": "Ablation H2 (No Capacity)",
-        "tier": "tier-10m",
-        "tierAmount": "10000000000000",
-        "initialDeposit": "10000000000000",
-        "finalAssets": "10007200000000",
-        "totalYield": "7200000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
-        }
-      },
-      {
-        "id": "h2",
-        "name": "Ablation H2 (No Capacity)",
-        "tier": "tier-100m",
-        "tierAmount": "100000000000000",
-        "initialDeposit": "100000000000000",
-        "finalAssets": "100072000000000",
-        "totalYield": "72000000000",
-        "realizedApy": 3.6809205096421294,
-        "withdrawalSuccessRate": 0.99,
-        "maxDrawdown": 0.01,
-        "totalTurnover": "0",
-        "totalCosts": "0",
-        "pass": true,
-        "details": {
-          "baseline": "highest-rate",
-          "market": "moonwell-usdc",
-          "grossApy": 3.75604133636952,
-          "effectiveApy": 3.6809205096421294
-        }
-      }
-    ],
-    "h3": [
-      {
-        "id": "h3",
-        "name": "Ablation H3 (No Cost Gate)",
-        "tier": "tier-1m",
-        "tierAmount": "1000000000000",
-        "initialDeposit": "1000000000000",
-        "finalAssets": "1000594000000",
-        "totalYield": "594000000",
-        "realizedApy": 3.099135699933684,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "1000000000000",
-        "totalCosts": "250801000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.099135699933684,
-          "costGateDisabled": true
-        }
-      },
-      {
-        "id": "h3",
-        "name": "Ablation H3 (No Cost Gate)",
-        "tier": "tier-10m",
-        "tierAmount": "10000000000000",
-        "initialDeposit": "10000000000000",
-        "finalAssets": "10006610000000",
-        "totalYield": "6610000000",
-        "realizedApy": 3.4489851266300273,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "10000000000000",
-        "totalCosts": "250810000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.4489851266300273,
-          "costGateDisabled": true
-        }
-      },
-      {
-        "id": "h3",
-        "name": "Ablation H3 (No Cost Gate)",
-        "tier": "tier-100m",
-        "tierAmount": "100000000000000",
-        "initialDeposit": "100000000000000",
-        "finalAssets": "100067100000000",
-        "totalYield": "67100000000",
-        "realizedApy": 3.503241425747778,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "100000000000000",
-        "totalCosts": "250900000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.503241425747778,
-          "costGateDisabled": true
-        }
-      }
-    ],
-    "h4": [
-      {
-        "id": "h4",
-        "name": "Ablation H4 (Weekly Rebalance)",
-        "tier": "tier-1m",
-        "tierAmount": "1000000000000",
-        "initialDeposit": "1000000000000",
-        "finalAssets": "1000656900000",
-        "totalYield": "656900000",
-        "realizedApy": 3.254001071428571,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "600000000000",
-        "totalCosts": "250800600000000",
-        "pass": true,
-        "details": {
-          "baseline": "fixed-robust",
-          "allocation": "40/30/30"
-        }
-      },
-      {
-        "id": "h4",
-        "name": "Ablation H4 (Weekly Rebalance)",
-        "tier": "tier-10m",
-        "tierAmount": "10000000000000",
-        "initialDeposit": "10000000000000",
-        "finalAssets": "10006569000000",
-        "totalYield": "6569000000",
-        "realizedApy": 3.254001071428571,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "6000000000000",
-        "totalCosts": "250806000000000",
-        "pass": true,
-        "details": {
-          "baseline": "fixed-robust",
-          "allocation": "40/30/30"
-        }
-      },
-      {
-        "id": "h4",
-        "name": "Ablation H4 (Weekly Rebalance)",
-        "tier": "tier-100m",
-        "tierAmount": "100000000000000",
-        "initialDeposit": "100000000000000",
-        "finalAssets": "100065690000000",
-        "totalYield": "65690000000",
-        "realizedApy": 3.254001071428571,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "60000000000000",
-        "totalCosts": "250860000000000",
-        "pass": true,
-        "details": {
-          "baseline": "fixed-robust",
-          "allocation": "40/30/30"
-        }
-      }
-    ],
-    "h5": [
-      {
-        "id": "h5",
-        "name": "Ablation H5 (No Uncertainty)",
-        "tier": "tier-1m",
-        "tierAmount": "1000000000000",
-        "initialDeposit": "1000000000000",
-        "finalAssets": "1000594000000",
-        "totalYield": "594000000",
-        "realizedApy": 3.099135699933684,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "1000000000000",
-        "totalCosts": "250801000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.099135699933684
-        }
-      },
-      {
-        "id": "h5",
-        "name": "Ablation H5 (No Uncertainty)",
-        "tier": "tier-10m",
-        "tierAmount": "10000000000000",
-        "initialDeposit": "10000000000000",
-        "finalAssets": "10006610000000",
-        "totalYield": "6610000000",
-        "realizedApy": 3.4489851266300273,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "10000000000000",
-        "totalCosts": "250810000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.4489851266300273
-        }
-      },
-      {
-        "id": "h5",
-        "name": "Ablation H5 (No Uncertainty)",
-        "tier": "tier-100m",
-        "tierAmount": "100000000000000",
-        "initialDeposit": "100000000000000",
-        "finalAssets": "100067100000000",
-        "totalYield": "67100000000",
-        "realizedApy": 3.503241425747778,
-        "withdrawalSuccessRate": 1,
-        "maxDrawdown": 0,
-        "totalTurnover": "100000000000000",
-        "totalCosts": "250900000000000",
-        "pass": true,
-        "details": {
-          "baseline": "capacity-aware",
-          "capacityAdjustedApy": 3.503241425747778
-        }
-      }
-    ]
-  },
-  "srcla": [
-    {
-      "id": "srcla",
-      "name": "SRCLA (Full Algorithm)",
-      "tier": "tier-1m",
-      "tierAmount": "1000000000000",
-      "initialDeposit": "1000000000000",
-      "finalAssets": "1000684000000",
-      "totalYield": "684000000",
-      "realizedApy": 3.5665714285714287,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "950000000000",
-      "totalCosts": "250800950000000",
-      "pass": true,
-      "details": {
-        "allocationBreakdown": [
-          {
-            "market": "moonwell-usdc",
-            "amountUsdc": 950000,
-            "pctOfVault": "95.00",
-            "lowerBoundApy": "3.193",
-            "actualApy": "3.756"
-          }
-        ],
-        "idleUsdc": 50000,
-        "reserveFloor": "5.0%",
-        "sharpeRatio": 2.5
-      }
-    },
-    {
-      "id": "srcla",
-      "name": "SRCLA (Full Algorithm)",
-      "tier": "tier-10m",
-      "tierAmount": "10000000000000",
-      "initialDeposit": "10000000000000",
-      "finalAssets": "10006527152087",
-      "totalYield": "6527152087",
-      "realizedApy": 3.403443588221429,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "9500000000000",
-      "totalCosts": "250809500000000",
-      "pass": true,
-      "details": {
-        "allocationBreakdown": [
-          {
-            "market": "moonwell-usdc",
-            "amountUsdc": 2547824.165342,
-            "pctOfVault": "25.48",
-            "lowerBoundApy": "3.193",
-            "actualApy": "3.756"
-          },
-          {
-            "market": "aave-v3-usdc",
-            "amountUsdc": 6952175.834658,
-            "pctOfVault": "69.52",
-            "lowerBoundApy": "2.993",
-            "actualApy": "3.521"
-          }
-        ],
-        "idleUsdc": 500000,
-        "reserveFloor": "5.0%",
-        "sharpeRatio": 2.5
-      }
-    },
-    {
-      "id": "srcla",
-      "name": "SRCLA (Full Algorithm)",
-      "tier": "tier-100m",
-      "tierAmount": "100000000000000",
-      "initialDeposit": "100000000000000",
-      "finalAssets": "100016554394953",
-      "totalYield": "16554394953",
-      "realizedApy": 0.8631934511207143,
-      "withdrawalSuccessRate": 1,
-      "maxDrawdown": 0,
-      "totalTurnover": "24545215907145",
-      "totalCosts": "250824545215907",
-      "pass": true,
-      "details": {
-        "allocationBreakdown": [
-          {
-            "market": "moonwell-usdc",
-            "amountUsdc": 2547824.165342,
-            "pctOfVault": "2.55",
-            "lowerBoundApy": "3.193",
-            "actualApy": "3.756"
-          },
-          {
-            "market": "aave-v3-usdc",
-            "amountUsdc": 20373621.226857,
-            "pctOfVault": "20.37",
-            "lowerBoundApy": "2.993",
-            "actualApy": "3.521"
-          },
-          {
-            "market": "compound-v3-usdc",
-            "amountUsdc": 1623770.514946,
-            "pctOfVault": "1.62",
-            "lowerBoundApy": "2.646",
-            "actualApy": "3.113"
-          }
-        ],
-        "idleUsdc": 5000000,
-        "reserveFloor": "5.0%",
-        "sharpeRatio": 2.5
-      }
-    }
-  ],
-  "edgeCases": [
-    {
-      "name": "Inflation Attack",
-      "paperSection": "5.1",
-      "description": "Inflation Attack defense",
-      "pass": true,
-      "details": {
-        "protection": "virtual-share-offset",
-        "status": "verified"
-      }
-    },
-    {
-      "name": "Illiquid Protocol Exit",
-      "paperSection": "5.2",
-      "description": "Illiquid Protocol Exit defense",
-      "pass": true,
-      "details": {
-        "cap": "synchronousLiquidity",
-        "status": "verified"
-      }
-    },
-    {
-      "name": "Stale Oracle Shutdown",
-      "paperSection": "9.2",
-      "description": "Stale Oracle Shutdown defense",
-      "pass": true,
-      "details": {
-        "protection": "cache-staleness",
-        "status": "verified"
-      }
-    },
-    {
-      "name": "Staged Rebalance Partial",
-      "paperSection": "9.5",
-      "description": "Staged Rebalance Partial defense",
-      "pass": true,
-      "details": {
-        "protection": "plan-stop-on-failure",
-        "status": "verified"
-      }
-    },
-    {
-      "name": "Dependency Group Cap",
-      "paperSection": "6.1",
-      "description": "Dependency Group Cap defense",
-      "pass": true,
-      "details": {
-        "protection": "dependency-group-caps",
-        "status": "verified"
-      }
-    },
-    {
-      "name": "Protocol Error Codes",
-      "paperSection": "6.5",
-      "description": "Protocol Error Codes defense",
-      "pass": true,
-      "details": {
-        "protection": "error-code-revert",
-        "status": "verified"
-      }
-    }
-  ],
-  "releaseGate": {
-    "pass": false,
-    "checks": [
-      {
-        "name": "Forecast Calibration",
-        "pass": true,
-        "value": 0.95,
-        "threshold": 0.95,
-        "details": "Lower bound coverage meets 95% target"
-      },
-      {
-        "name": "Withdrawal Success Rate",
-        "pass": true,
-        "value": 1,
-        "threshold": 0.99,
-        "details": "100.0% withdrawal success"
-      },
-      {
-        "name": "Max Drawdown",
-        "pass": true,
-        "value": 0,
-        "threshold": 0.05,
-        "details": "0.00% maximum drawdown"
-      },
-      {
-        "name": "Outperformance vs B2",
+      ],
+      "releaseGate": {
         "pass": false,
-        "value": -0.7393845947993052,
-        "threshold": 0,
-        "details": "-0.739% APY average differential"
-      },
-      {
-        "name": "Edge Case Security",
-        "pass": true,
-        "value": 1,
-        "threshold": 0.9,
-        "details": "All paper edge cases verified"
+        "blockedReasons": [
+          "Safety: stressed liquid coverage",
+          "No inert ablation",
+          "Statistically distinguishable from every deployable baseline",
+          "Outperforms every deployable baseline",
+          "§11.1 pinned-prestate fork replay"
+        ],
+        "checks": [
+          {
+            "name": "Every registered tier ran",
+            "passed": true,
+            "detail": "all 4 of §11.1's tiers"
+          },
+          {
+            "name": "Every registered policy ran at every tier",
+            "passed": true,
+            "detail": "all 60 required (policy, tier) runs"
+          },
+          {
+            "name": "Calibrated artifact",
+            "passed": true,
+            "detail": "591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f"
+          },
+          {
+            "name": "Safety: withdrawal success measured and met",
+            "passed": true,
+            "detail": ">= 99% across 60 runs"
+          },
+          {
+            "name": "Safety: stressed liquid coverage",
+            "passed": false,
+            "detail": "b1@10000000000 0.905, b2@10000000000 0.906, b2u@10000000000 0.905, b5@10000000000 0.013, h1@10000000000 0.241, h3@10000000000 0.906, b1@100000000000 0.905, b2@100000000000 0.906, b2u@100000000000 0.905, b5@100000000000 0.000, h1@100000000000 0.243, h3@100000000000 0.906, srcla@1000000000000 0.836, b1@1000000000000 0.905, b2@1000000000000 0.905, b2u@1000000000000 0.905, b3@1000000000000 0.837, b5@1000000000000 0.000, h1@1000000000000 0.243, h2@1000000000000 0.836, h3@1000000000000 0.905, h4@1000000000000 0.836, h5@1000000000000 0.836, h6@1000000000000 0.836, h7@1000000000000 0.836, srcla@10000000000000 0.792, b1@10000000000000 0.000, b2@10000000000000 0.188, b2u@10000000000000 0.066, b3@10000000000000 0.569, b4@10000000000000 0.000, b5@10000000000000 0.000, h1@10000000000000 0.048, h2@10000000000000 0.792, h3@10000000000000 0.788, h4@10000000000000 0.792, h5@10000000000000 0.792, h6@10000000000000 0.792, h7@10000000000000 0.486"
+          },
+          {
+            "name": "No inert ablation",
+            "passed": false,
+            "detail": "these made byte-identical decisions to SRCLA: h2, h5, h6, h7"
+          },
+          {
+            "name": "Statistically distinguishable from every deployable baseline",
+            "passed": false,
+            "detail": "test not usable for h2@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h7@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h7@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h7@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance)"
+          },
+          {
+            "name": "Outperforms every deployable baseline",
+            "passed": false,
+            "detail": "b1@10000000000: SRCLA 4.180% vs 4.376%, b2@10000000000: SRCLA 4.180% vs 4.271%, h1@10000000000: SRCLA 4.180% vs 4.296%, h2@10000000000: SRCLA 4.180% vs 4.180%, h3@10000000000: SRCLA 4.180% vs 4.271%, h4@10000000000: SRCLA 4.180% vs 4.180%, h5@10000000000: SRCLA 4.180% vs 4.180%, h6@10000000000: SRCLA 4.180% vs 4.180%, h7@10000000000: SRCLA 4.180% vs 4.180%, b1@100000000000: SRCLA 4.182% vs 4.381%, b2@100000000000: SRCLA 4.182% vs 4.272%, h1@100000000000: SRCLA 4.182% vs 4.250%, h2@100000000000: SRCLA 4.182% vs 4.182%, h3@100000000000: SRCLA 4.182% vs 4.272%, h4@100000000000: SRCLA 4.182% vs 4.182%, h5@100000000000: SRCLA 4.182% vs 4.182%, h6@100000000000: SRCLA 4.182% vs 4.182%, h7@100000000000: SRCLA 4.182% vs 4.182%, b1@1000000000000: SRCLA 4.202% vs 4.382%, b2@1000000000000: SRCLA 4.202% vs 4.273%, h1@1000000000000: SRCLA 4.202% vs 4.250%, h2@1000000000000: SRCLA 4.202% vs 4.202%, h3@1000000000000: SRCLA 4.202% vs 4.273%, h4@1000000000000: SRCLA 4.202% vs 4.202%, h5@1000000000000: SRCLA 4.202% vs 4.202%, h6@1000000000000: SRCLA 4.202% vs 4.202%, h7@1000000000000: SRCLA 4.202% vs 4.202%, b1@10000000000000: SRCLA 4.029% vs 4.382%, b3@10000000000000: SRCLA 4.029% vs 4.128%, h1@10000000000000: SRCLA 4.029% vs 4.141%, h2@10000000000000: SRCLA 4.029% vs 4.030%, h4@10000000000000: SRCLA 4.029% vs 4.029%, h5@10000000000000: SRCLA 4.029% vs 4.029%, h6@10000000000000: SRCLA 4.029% vs 4.029%"
+          },
+          {
+            "name": "§11.1 pinned-prestate fork replay",
+            "passed": null,
+            "detail": "NOT PRODUCED: no fork replay was supplied. src/evaluation/fork-runner.ts is the scaffold for this and is wired to nothing."
+          }
+        ],
+        "comparisons": [
+          {
+            "tier": "10000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000004671671997970978,
+              "standardError": 6.944780175021693e-8,
+              "tStatistic": 67.26882464579069,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000004671671997970978,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.000004510907842828156,
+              "upper": 0.000004834551435773384,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04376298017146962,
+            "test": {
+              "meanDifference": -2.1454613734977446e-7,
+              "standardError": 1.0152060692349654e-7,
+              "tStatistic": -2.1133259921451337,
+              "pValue": 0.034572753632725606,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -2.1454613734977446e-7,
+              "pValue": 0.06146926536731634,
+              "lower": -4.876235731231465e-7,
+              "upper": -1.801146246293127e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04270695404133562,
+            "test": {
+              "meanDifference": -9.907083393163661e-8,
+              "standardError": 9.614415079857485e-8,
+              "tStatistic": -1.0304405739585059,
+              "pValue": 0.3028032777215095,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -9.907083393163661e-8,
+              "pValue": 0.40679660169915044,
+              "lower": -3.536196191665358e-7,
+              "upper": 8.494468909005791e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04043988303871093,
+            "test": {
+              "meanDifference": 1.4923222444201643e-7,
+              "standardError": 2.1357386381364823e-8,
+              "tStatistic": 6.987382340576445,
+              "pValue": 2.8186342149183474e-12,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 1.4923222444201643e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 9.738911862025907e-8,
+              "upper": 1.9812823942562826e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.03694594408366614,
+            "test": {
+              "meanDifference": 5.329679183705327e-7,
+              "standardError": 5.5647125265088714e-8,
+              "tStatistic": 9.57763614619101,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 5.329679183705327e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 4.1366037505852944e-7,
+              "upper": 6.695034481036375e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.042958615018728,
+            "test": {
+              "meanDifference": -1.2659990042141415e-7,
+              "standardError": 4.626817418712763e-8,
+              "tStatistic": -2.7362199318562217,
+              "pValue": 0.006215055160575744,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -1.2659990042141415e-7,
+              "pValue": 0.021989005497251374,
+              "lower": -2.442688766973624e-7,
+              "upper": -3.550917324801001e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04180184251590435,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04270695404133562,
+            "test": {
+              "meanDifference": -9.907083393163661e-8,
+              "standardError": 9.614415079857485e-8,
+              "tStatistic": -1.0304405739585059,
+              "pValue": 0.3028032777215095,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -9.907083393163661e-8,
+              "pValue": 0.40679660169915044,
+              "lower": -3.536196191665358e-7,
+              "upper": 8.494468909005791e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04180184251590435,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04180184251590435,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04180184251590435,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.04180184251590435,
+            "baselineNetApy": 0.04180184251590435,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.0000046737663271421935,
+              "standardError": 6.674789450862045e-8,
+              "tStatistic": 70.0211798671579,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.0000046737663271421935,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.00000451617448259715,
+              "upper": 0.000004830677535039797,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.043813019920828644,
+            "test": {
+              "meanDifference": -2.1792074715155197e-7,
+              "standardError": 9.939933294934933e-8,
+              "tStatistic": -2.1923763538996517,
+              "pValue": 0.028352243833110524,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -2.1792074715155197e-7,
+              "pValue": 0.050974512743628186,
+              "lower": -4.861436481972817e-7,
+              "upper": -2.9263523177774428e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.042722975064709345,
+            "test": {
+              "meanDifference": -9.872928000624314e-8,
+              "standardError": 9.58949476228891e-8,
+              "tStatistic": -1.02955663936019,
+              "pValue": 0.30321822090348816,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -9.872928000624314e-8,
+              "pValue": 0.40379810094952523,
+              "lower": -3.492143032620572e-7,
+              "upper": 8.507503761510863e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.04045420522371357,
+            "test": {
+              "meanDifference": 1.4975621991571727e-7,
+              "standardError": 1.865352217385014e-8,
+              "tStatistic": 8.028307925977455,
+              "pValue": 8.881784197001252e-16,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 1.4975621991571727e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 1.0264935211487466e-7,
+              "upper": 1.9407485609489639e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.036948723752519896,
+            "test": {
+              "meanDifference": 5.347564452942074e-7,
+              "standardError": 5.217675912235849e-8,
+              "tStatistic": 10.248939456744766,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 5.347564452942074e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 4.2258338457936605e-7,
+              "upper": 6.642226102700175e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.042500792538924026,
+            "test": {
+              "meanDifference": -7.44185685968473e-8,
+              "standardError": 5.176960974067648e-8,
+              "tStatistic": -1.4374952596634132,
+              "pValue": 0.15057741135650216,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -7.44185685968473e-8,
+              "pValue": 0.2288855572213893,
+              "lower": -2.0824373263617908e-7,
+              "upper": 3.551208022475419e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.041820971039340016,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.042722975064709345,
+            "test": {
+              "meanDifference": -9.872928000624314e-8,
+              "standardError": 9.58949476228891e-8,
+              "tStatistic": -1.02955663936019,
+              "pValue": 0.30321822090348816,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -9.872928000624314e-8,
+              "pValue": 0.40379810094952523,
+              "lower": -3.492143032620572e-7,
+              "upper": 8.507503761510863e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.041820971039340016,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.041820971039340016,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.041820971039340016,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.041820971039340016,
+            "baselineNetApy": 0.041820971039340016,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000004695219472451986,
+              "standardError": 6.844834498627556e-8,
+              "tStatistic": 68.5950766726853,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000004695219472451986,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.000004533540509130624,
+              "upper": 0.000004858072308568741,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04381799670192743,
+            "test": {
+              "meanDifference": -1.9701151100359011e-7,
+              "standardError": 1.0012605642304573e-7,
+              "tStatistic": -1.9676347800136123,
+              "pValue": 0.049109936611213545,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -1.9701151100359011e-7,
+              "pValue": 0.07596201899050475,
+              "lower": -4.6821813017012475e-7,
+              "upper": -5.62779975027317e-9,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04273379962951562,
+            "test": {
+              "meanDifference": -7.846036912751688e-8,
+              "standardError": 9.602408593286162e-8,
+              "tStatistic": -0.8170905077125651,
+              "pValue": 0.4138765952535426,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -7.846036912751688e-8,
+              "pValue": 0.5182408795602199,
+              "lower": -3.288036599032312e-7,
+              "upper": 1.0671044529420921e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.040849897106212785,
+            "test": {
+              "meanDifference": 1.278330845949741e-7,
+              "standardError": 1.4481941225573084e-8,
+              "tStatistic": 8.827068319352017,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 1.278330845949741e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 9.208398392383338e-8,
+              "upper": 1.6368036803496198e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.03694900357588482,
+            "test": {
+              "meanDifference": 5.561788156703611e-7,
+              "standardError": 5.464862310274517e-8,
+              "tStatistic": 10.177361918610217,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 5.561788156703611e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": 4.382560931793359e-7,
+              "upper": 6.915493213672566e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04250112479321655,
+            "test": {
+              "meanDifference": -5.3001777430934886e-8,
+              "standardError": 5.150048728169326e-8,
+              "tStatistic": -1.0291509892135582,
+              "pValue": 0.3034087706941482,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -5.3001777430934886e-8,
+              "pValue": 0.383808095952024,
+              "lower": -1.863024011237732e-7,
+              "upper": 5.5256027157796455e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04201690957697224,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.042732917397197534,
+            "test": {
+              "meanDifference": -7.83638495395656e-8,
+              "standardError": 9.6024851469933e-8,
+              "tStatistic": -0.8160788414663953,
+              "pValue": 0.41445493210005346,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -7.83638495395656e-8,
+              "pValue": 0.5187406296851574,
+              "lower": -3.2862426705166187e-7,
+              "upper": 1.068021584204782e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04201690957697224,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04201690957697224,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04201690957697224,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.04201690957697224,
+            "baselineNetApy": 0.04201690957697224,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000004506364432027457,
+              "standardError": 8.51967591765648e-8,
+              "tStatistic": 52.893613273344194,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000004506364432027457,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.000004314208635086615,
+              "upper": 0.000004722791615264534,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.0438184944682789,
+            "test": {
+              "meanDifference": -3.859209478695153e-7,
+              "standardError": 4.602070850546149e-8,
+              "tStatistic": -8.385810657906674,
+              "pValue": 0,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -3.859209478695153e-7,
+              "pValue": 0.0004997501249375312,
+              "lower": -4.956652531606035e-7,
+              "upper": -2.8284441829249307e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.039754971316579235,
+            "test": {
+              "meanDifference": 5.904224114250034e-8,
+              "standardError": 4.5051292509860946e-8,
+              "tStatistic": 1.3105559874797603,
+              "pValue": 0.19000795140379578,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 5.904224114250034e-8,
+              "pValue": 0.2818590704647676,
+              "lower": -5.2346522085219295e-8,
+              "upper": 1.5598048103636627e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.0412776599151663,
+            "test": {
+              "meanDifference": -1.0789945341033224e-7,
+              "standardError": 4.555264518789435e-8,
+              "tStatistic": -2.368675912568226,
+              "pValue": 0.017851861388320733,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -1.0789945341033224e-7,
+              "pValue": 0.050974512743628186,
+              "lower": -2.2732941751209623e-7,
+              "upper": -7.730304978929218e-9,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.03694903155711593,
+            "test": {
+              "meanDifference": 3.673206931481209e-7,
+              "standardError": 8.307568377272919e-8,
+              "tStatistic": 4.421518746123151,
+              "pValue": 0.000009809158431295373,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 3.673206931481209e-7,
+              "pValue": 0.0029985007496251873,
+              "lower": 1.9355757858592106e-7,
+              "upper": 5.816711941626369e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04140627252020623,
+            "test": {
+              "meanDifference": -1.2198802325581387e-7,
+              "standardError": 3.599667047456801e-8,
+              "tStatistic": -3.3888696273173258,
+              "pValue": 0.000701918429633519,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -1.2198802325581387e-7,
+              "pValue": 0.004997501249375313,
+              "lower": -2.076159213360376e-7,
+              "upper": -4.877258701420317e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04029832885603324,
+            "test": {
+              "meanDifference": -5.536798813797397e-10,
+              "standardError": 3.6805781293543686e-10,
+              "tStatistic": -1.5043285644825148,
+              "pValue": 0.13249684461275502,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -5.536798813797397e-10,
+              "pValue": 0.24437781109445278,
+              "lower": -1.6527735289527162e-9,
+              "upper": 3.6156703605434646e-11,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.03958839626503896,
+            "test": {
+              "meanDifference": 7.732298314343684e-8,
+              "standardError": 2.2570572505122463e-8,
+              "tStatistic": 3.4258317163150442,
+              "pValue": 0.0006130194244755582,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 7.732298314343684e-8,
+              "pValue": 0.004497751124437781,
+              "lower": 2.5013320586858105e-8,
+              "upper": 1.2697347432495668e-7,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04029327975270558,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04029327975270558,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04029327975270558,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 10,
+              "n": 6407,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.04029327975270558,
+            "baselineNetApy": 0.04012221071955224,
+            "test": {
+              "meanDifference": 1.8760201498361154e-8,
+              "standardError": 2.8007958598846647e-8,
+              "tStatistic": 0.6698168105380479,
+              "pValue": 0.502974444190341,
+              "lag": 10,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 1.8760201498361154e-8,
+              "pValue": 0.5572213893053474,
+              "lower": -4.7385376775401996e-8,
+              "upper": 7.93232996722334e-8,
+              "blockLength": 19,
+              "iterations": 2000,
+              "n": 6407,
+              "usable": true,
+              "reason": "OK"
+            }
+          }
+        ]
       }
-    ],
-    "overallReason": "Some release gates failed - see individual checks"
-  },
-  "statisticalTests": {
-    "srclaVsB1": {
-      "tStatistic": 106.98510203376053,
-      "pValue": 0.001,
-      "significant": true,
-      "interpretation": "SRCLA has lower nominal APY due to conservative risk management"
     },
-    "srclaVsB2": {
-      "tStatistic": 73.93845947993051,
-      "pValue": 0.001,
-      "significant": false,
-      "interpretation": "SRCLA underperforms due to conservative allocation"
-    },
-    "confidenceInterval": {
-      "lower": -0.7493845947993052,
-      "upper": -0.7293845947993052,
-      "mean": -0.7393845947993052
+    {
+      "era": "heldout-b",
+      "bounds": {
+        "start": "2026-08-24T00:00:00.000Z",
+        "end": "2099-12-31T23:59:59.000Z",
+        "days": 26793
+      },
+      "origins": 361,
+      "provenance": {
+        "codeCommit": "f01c8e099a351122a0b02855a503c793ae23e58c",
+        "manifestHash": "77543ec1d885119802b4c949430cc0880d0640807c33f86fa4a3e176d699124d",
+        "datasetHash": "a2e5906b805ef53da46de5978c1be4c273f1fa6c09f01bd92ff67bb5241009ad",
+        "resultHash": "72372c979e1ebed965e282579dd7604e5ad200764bdf4d7e8b940b830aa8261a",
+        "gasSeriesDigest": "0xee69e179b08e3474e4597c6c74fad4e6ba0008aed4d24b541ca1ec08ac8f2d20"
+      },
+      "artifactHash": "591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f",
+      "provisionalArtifact": false,
+      "withdrawalSource": "registered-schedule",
+      "missingTiers": [],
+      "missingPolicyIds": [],
+      "results": [
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.39160137743291523,
+          "totalCostsBase": "85593",
+          "totalTurnoverBase": "56983836418",
+          "rebalances": 291,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780212273164893,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.39162304239184054,
+          "totalCostsBase": "66504",
+          "totalTurnoverBase": "21783837050",
+          "rebalances": 288,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780205276805575,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000",
+          "realizedNetApy": 0.3931332258189548,
+          "totalCostsBase": "11084",
+          "totalTurnoverBase": "10983879769",
+          "rebalances": 222,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8779720654376145,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.2495114786539232,
+          "totalCostsBase": "13547",
+          "totalTurnoverBase": "9980946599",
+          "rebalances": 193,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000",
+          "realizedNetApy": 0.38945481420805494,
+          "totalCostsBase": "12931",
+          "totalTurnoverBase": "9783776977",
+          "rebalances": 2,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780898600247913,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.34300368346814825,
+          "totalCostsBase": "18473",
+          "totalTurnoverBase": "10982869043",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.39162304239184054,
+          "totalCostsBase": "66504",
+          "totalTurnoverBase": "21783837050",
+          "rebalances": 288,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780205276805575,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000",
+          "realizedNetApy": 0.11890604715045572,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "19344720228",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.39184635007972957,
+          "totalCostsBase": "85593",
+          "totalTurnoverBase": "569838432875",
+          "rebalances": 291,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780129498461504,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.39180512728016903,
+          "totalCostsBase": "77588",
+          "totalTurnoverBase": "217838420854",
+          "rebalances": 290,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780142806300743,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "100000000000",
+          "realizedNetApy": 0.3931531613389987,
+          "totalCostsBase": "11084",
+          "totalTurnoverBase": "109838803627",
+          "rebalances": 222,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8779710044174633,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.2495299098698469,
+          "totalCostsBase": "13547",
+          "totalTurnoverBase": "99809474234",
+          "rebalances": 193,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "100000000000",
+          "realizedNetApy": 0.3894802521641789,
+          "totalCostsBase": "12931",
+          "totalTurnoverBase": "97837778647",
+          "rebalances": 2,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.878088603247211,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.3430444741233225,
+          "totalCostsBase": "18473",
+          "totalTurnoverBase": "109828704176",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.39180512728016903,
+          "totalCostsBase": "77588",
+          "totalTurnoverBase": "217838420854",
+          "rebalances": 290,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780142806300743,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "100000000000",
+          "realizedNetApy": 0.11899256344811593,
+          "totalCostsBase": "40025",
+          "totalTurnoverBase": "193447428803",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.08855738425700821,
+          "totalCostsBase": "48646",
+          "totalTurnoverBase": "2169009363805",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.3918708492350065,
+          "totalCostsBase": "85593",
+          "totalTurnoverBase": "5698384397442",
+          "rebalances": 291,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780031560008057,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.38656980297376076,
+          "totalCostsBase": "205670",
+          "totalTurnoverBase": "5738372790362",
+          "rebalances": 310,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8781661383064345,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.3902683870234007,
+          "totalCostsBase": "225375",
+          "totalTurnoverBase": "5258381212714",
+          "rebalances": 313,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780516588017305,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.11836876345617409,
+          "totalCostsBase": "42488",
+          "totalTurnoverBase": "2174465561095",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9996603553916542,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.2495317545041975,
+          "totalCostsBase": "13547",
+          "totalTurnoverBase": "998094750582",
+          "rebalances": 193,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.3895107940111906,
+          "totalCostsBase": "24015",
+          "totalTurnoverBase": "1218377877123",
+          "rebalances": 4,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.8780786045900091,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.3430485492782964,
+          "totalCostsBase": "18473",
+          "totalTurnoverBase": "1098287055503",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.08855738425700821,
+          "totalCostsBase": "48646",
+          "totalTurnoverBase": "2169009363805",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.09165448726061465,
+          "totalCostsBase": "216138",
+          "totalTurnoverBase": "5417737715784",
+          "rebalances": 310,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.08855738425700821,
+          "totalCostsBase": "48646",
+          "totalTurnoverBase": "2169009363805",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.08855738425700821,
+          "totalCostsBase": "48646",
+          "totalTurnoverBase": "2169009363805",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.08855738425700821,
+          "totalCostsBase": "48646",
+          "totalTurnoverBase": "2169009363805",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "1000000000000",
+          "realizedNetApy": 0.11836876345617409,
+          "totalCostsBase": "42488",
+          "totalTurnoverBase": "2174465561095",
+          "rebalances": 6,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.9996603553916542,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "srcla",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.05992585365480041,
+          "totalCostsBase": "17857",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b0",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0,
+          "totalCostsBase": "0",
+          "totalTurnoverBase": "0",
+          "rebalances": 0,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b1",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.3918732990545952,
+          "totalCostsBase": "85593",
+          "totalTurnoverBase": "56983844043107",
+          "rebalances": 291,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.14618723573502246,
+          "totalCostsBase": "67735",
+          "totalTurnoverBase": "19400000000000",
+          "rebalances": 20,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b2u",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.18924471273935284,
+          "totalCostsBase": "70815",
+          "totalTurnoverBase": "35200000000000",
+          "rebalances": 21,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.32000000023648,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b3",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.14347397705038167,
+          "totalCostsBase": "27094",
+          "totalTurnoverBase": "12796585432564",
+          "rebalances": 4,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b4",
+          "paperSection": "11.2",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.24953193942242335,
+          "totalCostsBase": "13547",
+          "totalTurnoverBase": "9980947514075",
+          "rebalances": 193,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 0.5897530343579928,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "b5",
+          "paperSection": "11.2",
+          "deployable": false,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.08641405610982522,
+          "totalCostsBase": "17241",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h1",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.07308093992079034,
+          "totalCostsBase": "14778",
+          "totalTurnoverBase": "6400000000000",
+          "rebalances": 2,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h2",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.05992585365480041,
+          "totalCostsBase": "17857",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h3",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.034774691714213324,
+          "totalCostsBase": "43720",
+          "totalTurnoverBase": "9800000000000",
+          "rebalances": 14,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h4",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.05992585365480041,
+          "totalCostsBase": "17857",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        },
+        {
+          "policyId": "h5",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.05992585365480041,
+          "totalCostsBase": "17857",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h6",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.05992585365480041,
+          "totalCostsBase": "17857",
+          "totalTurnoverBase": "6600000000000",
+          "rebalances": 3,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": true
+        },
+        {
+          "policyId": "h7",
+          "paperSection": "11.3",
+          "deployable": true,
+          "tier": "10000000000000",
+          "realizedNetApy": 0.12947148979359935,
+          "totalCostsBase": "14778",
+          "totalTurnoverBase": "7600000000000",
+          "rebalances": 2,
+          "withdrawalsAttempted": 2,
+          "withdrawalSuccessRate": 1,
+          "minStressedLiquidCoverage": 1,
+          "inertVsSrcla": false
+        }
+      ],
+      "releaseGate": {
+        "pass": false,
+        "blockedReasons": [
+          "Safety: stressed liquid coverage",
+          "No inert ablation",
+          "Statistically distinguishable from every deployable baseline",
+          "Outperforms every deployable baseline",
+          "§11.1 pinned-prestate fork replay"
+        ],
+        "checks": [
+          {
+            "name": "Every registered tier ran",
+            "passed": true,
+            "detail": "all 4 of §11.1's tiers"
+          },
+          {
+            "name": "Every registered policy ran at every tier",
+            "passed": true,
+            "detail": "all 60 required (policy, tier) runs"
+          },
+          {
+            "name": "Calibrated artifact",
+            "passed": true,
+            "detail": "591f812fb99b60e98498f77fa84776ce3804dd7cde26fe7a9dacf85383e6635f"
+          },
+          {
+            "name": "Safety: withdrawal success measured and met",
+            "passed": true,
+            "detail": ">= 99% across 60 runs"
+          },
+          {
+            "name": "Safety: stressed liquid coverage",
+            "passed": false,
+            "detail": "b1@10000000000 0.878, b2@10000000000 0.878, b2u@10000000000 0.878, b5@10000000000 0.878, h3@10000000000 0.878, b1@100000000000 0.878, b2@100000000000 0.878, b2u@100000000000 0.878, b5@100000000000 0.878, h3@100000000000 0.878, b1@1000000000000 0.878, b2@1000000000000 0.878, b2u@1000000000000 0.878, b5@1000000000000 0.878, b1@10000000000000 0.000, b2u@10000000000000 0.320, b4@10000000000000 0.590"
+          },
+          {
+            "name": "No inert ablation",
+            "passed": false,
+            "detail": "these made byte-identical decisions to SRCLA: h2, h5, h6, h7"
+          },
+          {
+            "name": "Statistically distinguishable from every deployable baseline",
+            "passed": false,
+            "detail": "test not usable for b3@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), h7@10000000000 (DEGENERATE: the paired difference series has zero long-run variance), b3@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h7@100000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@1000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h2@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h4@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h5@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance), h6@10000000000000 (DEGENERATE: the paired difference series has zero long-run variance)"
+          },
+          {
+            "name": "Outperforms every deployable baseline",
+            "passed": false,
+            "detail": "b1@10000000000: SRCLA 11.891% vs 39.160%, b2@10000000000: SRCLA 11.891% vs 39.162%, b3@10000000000: SRCLA 11.891% vs 11.891%, b4@10000000000: SRCLA 11.891% vs 24.951%, h1@10000000000: SRCLA 11.891% vs 34.300%, h2@10000000000: SRCLA 11.891% vs 11.891%, h3@10000000000: SRCLA 11.891% vs 39.162%, h4@10000000000: SRCLA 11.891% vs 11.891%, h5@10000000000: SRCLA 11.891% vs 11.891%, h6@10000000000: SRCLA 11.891% vs 11.891%, h7@10000000000: SRCLA 11.891% vs 11.891%, b1@100000000000: SRCLA 11.899% vs 39.185%, b2@100000000000: SRCLA 11.899% vs 39.181%, b3@100000000000: SRCLA 11.899% vs 11.899%, b4@100000000000: SRCLA 11.899% vs 24.953%, h1@100000000000: SRCLA 11.899% vs 34.304%, h2@100000000000: SRCLA 11.899% vs 11.899%, h3@100000000000: SRCLA 11.899% vs 39.181%, h4@100000000000: SRCLA 11.899% vs 11.899%, h5@100000000000: SRCLA 11.899% vs 11.899%, h6@100000000000: SRCLA 11.899% vs 11.899%, h7@100000000000: SRCLA 11.899% vs 11.899%, b1@1000000000000: SRCLA 8.856% vs 39.187%, b2@1000000000000: SRCLA 8.856% vs 38.657%, b3@1000000000000: SRCLA 8.856% vs 11.837%, b4@1000000000000: SRCLA 8.856% vs 24.953%, h1@1000000000000: SRCLA 8.856% vs 34.305%, h2@1000000000000: SRCLA 8.856% vs 8.856%, h3@1000000000000: SRCLA 8.856% vs 9.165%, h4@1000000000000: SRCLA 8.856% vs 8.856%, h5@1000000000000: SRCLA 8.856% vs 8.856%, h6@1000000000000: SRCLA 8.856% vs 8.856%, h7@1000000000000: SRCLA 8.856% vs 11.837%, b1@10000000000000: SRCLA 5.993% vs 39.187%, b2@10000000000000: SRCLA 5.993% vs 14.619%, b3@10000000000000: SRCLA 5.993% vs 14.347%, b4@10000000000000: SRCLA 5.993% vs 24.953%, h1@10000000000000: SRCLA 5.993% vs 7.308%, h2@10000000000000: SRCLA 5.993% vs 5.993%, h4@10000000000000: SRCLA 5.993% vs 5.993%, h5@10000000000000: SRCLA 5.993% vs 5.993%, h6@10000000000000: SRCLA 5.993% vs 5.993%, h7@10000000000000: SRCLA 5.993% vs 12.947%"
+          },
+          {
+            "name": "§11.1 pinned-prestate fork replay",
+            "passed": null,
+            "detail": "NOT PRODUCED: no fork replay was supplied. src/evaluation/fork-runner.ts is the scaffold for this and is wired to nothing."
+          }
+        ],
+        "comparisons": [
+          {
+            "tier": "10000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000012816839672222237,
+              "standardError": 8.970519883737337e-7,
+              "tStatistic": 14.287733418280357,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000012816839672222237,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.000011121830072222223,
+              "upper": 0.000014894723308333333,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.39160137743291523,
+            "test": {
+              "meanDifference": -0.000024881507191666668,
+              "standardError": 0.0000022321007348851974,
+              "tStatistic": -11.147125576725545,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000024881507191666668,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000029901095872222234,
+              "upper": -0.00002005957321111111,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.39162304239184054,
+            "test": {
+              "meanDifference": -0.000024883283136111113,
+              "standardError": 0.0000022318104793919602,
+              "tStatistic": -11.149371044664319,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000024883283136111113,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000029909599649999985,
+              "upper": -0.000020051268916666653,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.2495114786539232,
+            "test": {
+              "meanDifference": -0.000012594571277777779,
+              "standardError": 0.0000012159702957122006,
+              "tStatistic": -10.357630710379375,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000012594571277777779,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000015329504461111117,
+              "upper": -0.000009971252147222216,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.34300368346814825,
+            "test": {
+              "meanDifference": -0.000020826265475000012,
+              "standardError": 0.000001913197204530034,
+              "tStatistic": -10.885582221052777,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000020826265475000012,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000025153233136111146,
+              "upper": -0.000016692258730555584,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.39162304239184054,
+            "test": {
+              "meanDifference": -0.000024883283136111113,
+              "standardError": 0.0000022318104793919602,
+              "tStatistic": -11.149371044664319,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000024883283136111113,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000029909599649999985,
+              "upper": -0.000020051268916666653,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.11890604715045572,
+            "baselineNetApy": 0.11890604715045572,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000012825660230555567,
+              "standardError": 8.976056715723835e-7,
+              "tStatistic": 14.288746870424935,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000012825660230555567,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.00001112746428333334,
+              "upper": 0.00001490233007222223,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.39184635007972957,
+            "test": {
+              "meanDifference": -0.00002489276676666667,
+              "standardError": 0.000002229414723574106,
+              "tStatistic": -11.165606158175725,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.00002489276676666667,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00002991083751111109,
+              "upper": -0.000020073757897222228,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.39180512728016903,
+            "test": {
+              "meanDifference": -0.000024889388069444433,
+              "standardError": 0.0000022300551887949647,
+              "tStatistic": -11.160884355913044,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000024889388069444433,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00002990926519444443,
+              "upper": -0.00002006552882222223,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.2495299098698469,
+            "test": {
+              "meanDifference": -0.000012587433486111115,
+              "standardError": 0.0000012168780587210677,
+              "tStatistic": -10.344038497448496,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000012587433486111115,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00001532761077499999,
+              "upper": -0.00000996363936666667,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.3430444741233225,
+            "test": {
+              "meanDifference": -0.000020820909711111112,
+              "standardError": 0.000001913319781445262,
+              "tStatistic": -10.882085636193887,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000020820909711111112,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00002514726877222226,
+              "upper": -0.000016691048724999997,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.39180512728016903,
+            "test": {
+              "meanDifference": -0.000024889388069444433,
+              "standardError": 0.0000022300551887949647,
+              "tStatistic": -11.160884355913044,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000024889388069444433,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00002990926519444443,
+              "upper": -0.00002006552882222223,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "100000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.11899256344811593,
+            "baselineNetApy": 0.11899256344811593,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.000009679883086111106,
+              "standardError": 6.689503604439739e-7,
+              "tStatistic": 14.470256178181428,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.000009679883086111106,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.000008484920127777775,
+              "upper": 0.000011240311599999996,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.3918708492350065,
+            "test": {
+              "meanDifference": -0.000028040551869444443,
+              "standardError": 0.0000024825116446735105,
+              "tStatistic": -11.295234779505826,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000028040551869444443,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000033677708424999994,
+              "upper": -0.00002272776252499999,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.38656980297376076,
+            "test": {
+              "meanDifference": -0.000027605229680555588,
+              "standardError": 0.000002460152118355934,
+              "tStatistic": -11.22094421502828,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000027605229680555588,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00003319335118055556,
+              "upper": -0.00002229838236666666,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.11836876345617409,
+            "test": {
+              "meanDifference": -0.000003082164494444442,
+              "standardError": 2.7559788422528504e-7,
+              "tStatistic": -11.183556445320727,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000003082164494444442,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000003694949594444445,
+              "upper": -0.000002506987600000001,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.2495317545041975,
+            "test": {
+              "meanDifference": -0.000015733379013888884,
+              "standardError": 0.00000145334868742257,
+              "tStatistic": -10.825605135262567,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000015733379013888884,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000019057164722222225,
+              "upper": -0.000012588178880555566,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.3430485492782964,
+            "test": {
+              "meanDifference": -0.000023967033019444454,
+              "standardError": 0.0000021644413197971483,
+              "tStatistic": -11.073080522086247,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000023967033019444454,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00002889685338611111,
+              "upper": -0.000019290114763888903,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.08855738425700821,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.09165448726061465,
+            "test": {
+              "meanDifference": -3.241016277777778e-7,
+              "standardError": 4.380478290831596e-7,
+              "tStatistic": -0.7398772605633662,
+              "pValue": 0.45937433596316923,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -3.241016277777778e-7,
+              "pValue": 0.49025487256371814,
+              "lower": -0.0000011129149666666656,
+              "upper": 7.171802333333342e-7,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.08855738425700821,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.08855738425700821,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.08855738425700821,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "1000000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.08855738425700821,
+            "baselineNetApy": 0.11836876345617409,
+            "test": {
+              "meanDifference": -0.000003082164494444442,
+              "standardError": 2.7559788422528504e-7,
+              "tStatistic": -11.183556445320727,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000003082164494444442,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000003694949594444445,
+              "upper": -0.000002506987600000001,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b0",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0,
+            "test": {
+              "meanDifference": 0.0000066391948750000034,
+              "standardError": 3.714922468664672e-7,
+              "tStatistic": 17.871691619412076,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.0000066391948750000034,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.00000587057441666667,
+              "upper": 0.000007453750886111118,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b1",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.3918732990545952,
+            "test": {
+              "meanDifference": -0.000031081440888888884,
+              "standardError": 0.0000025594223881967318,
+              "tStatistic": -12.143927876940875,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000031081440888888884,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00003674910918333333,
+              "upper": -0.000025598789050000012,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b2",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.14618723573502246,
+            "test": {
+              "meanDifference": -0.000008925755597222218,
+              "standardError": 7.012411585257149e-7,
+              "tStatistic": -12.72851071090532,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000008925755597222218,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000010488562852777771,
+              "upper": -0.000007430568280555555,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b3",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.14347397705038167,
+            "test": {
+              "meanDifference": -0.000008655388013888902,
+              "standardError": 7.086922808109775e-7,
+              "tStatistic": -12.213182291169145,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.000008655388013888902,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.00001022000537777778,
+              "upper": -0.000007137197333333338,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "b4",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.24953193942242335,
+            "test": {
+              "meanDifference": -0.00001877408411666669,
+              "standardError": 0.0000014970916387115038,
+              "tStatistic": -12.540370696896623,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.00001877408411666669,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.000022107659980555538,
+              "upper": -0.00001559351952777776,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h1",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.07308093992079034,
+            "test": {
+              "meanDifference": -0.0000014071476277777784,
+              "standardError": 1.1791992487406001e-7,
+              "tStatistic": -11.933077715921462,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.0000014071476277777784,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.0000016661174333333325,
+              "upper": -0.000001155453608333334,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h2",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.05992585365480041,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h3",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.034774691714213324,
+            "test": {
+              "meanDifference": 0.0000027396077722222227,
+              "standardError": 2.491696126413106e-7,
+              "tStatistic": 10.994951363375097,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": 0.0000027396077722222227,
+              "pValue": 0.0004997501249375312,
+              "lower": 0.0000022176402833333293,
+              "upper": 0.0000032892611472222235,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h4",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.05992585365480041,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h5",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.05992585365480041,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h6",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.05992585365480041,
+            "test": {
+              "meanDifference": 0,
+              "standardError": 0,
+              "tStatistic": 0,
+              "pValue": 1,
+              "lag": 5,
+              "n": 360,
+              "usable": false,
+              "reason": "DEGENERATE: the paired difference series has zero long-run variance"
+            },
+            "bootstrap": {
+              "meanDifference": 0,
+              "pValue": 1,
+              "lower": 0,
+              "upper": 0,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          },
+          {
+            "tier": "10000000000000",
+            "baselineId": "h7",
+            "srclaNetApy": 0.05992585365480041,
+            "baselineNetApy": 0.12947148979359935,
+            "test": {
+              "meanDifference": -0.00000724979750277778,
+              "standardError": 5.913096767203532e-7,
+              "tStatistic": -12.26057645967869,
+              "pValue": 0,
+              "lag": 5,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            },
+            "bootstrap": {
+              "meanDifference": -0.00000724979750277778,
+              "pValue": 0.0004997501249375312,
+              "lower": -0.0000085575424888889,
+              "upper": -0.000005995394302777778,
+              "blockLength": 7,
+              "iterations": 2000,
+              "n": 360,
+              "usable": true,
+              "reason": "OK"
+            }
+          }
+        ]
+      }
     }
-  },
-  "summary": {
-    "srclaAverageApy": 2.611069489304524,
-    "b0AverageApy": 0,
-    "b1AverageApy": 3.6809205096421294,
-    "b2AverageApy": 3.3504540841038293,
-    "b3AverageApy": 0,
-    "b4AverageApy": 3.425264285714286,
-    "srclaImprovementOverB2": -0.7393845947993052,
-    "totalEdgeCases": 6,
-    "edgeCasesPassed": 6
-  }
+  ]
 }

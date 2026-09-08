@@ -233,7 +233,11 @@ async function runEra(
 
 async function main(): Promise<void> {
   const artifactPath = arg('artifact') ?? 'config/registered-artifact.json';
-  const outDir = arg('out-dir') ?? '.';
+  // Default to the REPOSITORY ROOT, not the cwd. SRCLA-REPORT.{md,json} are
+  // tracked at the root; writing them to srcla/ produced a fresh report
+  // sitting beside a stale tracked one, which is the shape of mistake where
+  // someone later cites the wrong file.
+  const outDir = arg('out-dir') ?? '..';
   const eras = (arg('eras') ?? 'heldout-a,heldout-b').split(',').map((e) => e.trim()) as EraTag[];
   const tiers = arg('tiers')
     ? arg('tiers')!.split(',').map((t) => BigInt(t.trim()) * 1_000_000n)
