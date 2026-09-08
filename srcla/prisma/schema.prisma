@@ -39,6 +39,46 @@ model ChainBlock {
   @@index([timestamp])
 }
 
+/// Per-origin MEASURED execution-cost inputs (paper §9.1's C_move terms).
+///
+/// Every field is read from chain at the origin's own block, replacing the
+/// five registered constants `scripts/run-registered-evaluation.ts`'s
+/// `harnessConfig()` asserted under a NOT OBSERVED banner. They ride in the
+/// same Multicall3 batch as the venue state, so they cost nothing extra to
+/// collect -- and H3 ablates the cost gate, so a constant-priced gate would
+/// make H3's result a statement about the constant rather than about the
+/// mechanism.
+///
+/// `l1BaseFeeWei`/`l1BlobBaseFeeWei`/the two scalars come from the OP-Stack
+/// GasPriceOracle predeploy 0x420...000F; `ethUsdE8`/`usdcUsdE8` from the Base
+/// Chainlink feeds; `l2BaseFeeWei` is the block header's own baseFeePerGas.
+model ChainCostSnapshot {
+  id               String   @id @default(cuid())
+  blockNumber      BigInt   @unique
+  blockHash        String
+  timestamp        DateTime
+
+  l2BaseFeeWei     String   // BigInt as string
+  l1BaseFeeWei     String   // BigInt as string
+  l1BlobBaseFeeWei String   // BigInt as string
+  /// OP-Stack fee scalars, so the L1 data cost is reproducible rather than
+  /// assumed. Null on blocks predating Ecotone, where the caller must fall
+  /// back to the pre-Ecotone formula rather than substituting a scalar.
+  baseFeeScalar     Int?
+  blobBaseFeeScalar Int?
+
+  ethUsdE8         String   // BigInt as string, 8 dp (Chainlink)
+  usdcUsdE8        String   // BigInt as string, 8 dp (Chainlink)
+  /// Chainlink round ids and update times, so a feed that was stale at this
+  /// origin is detectable after the fact rather than silently priced.
+  ethUsdRoundId    String?
+  usdcUsdRoundId   String?
+  ethUsdUpdatedAt  DateTime?
+  usdcUsdUpdatedAt DateTime?
+
+  @@index([timestamp])
+}
+
 model MarketSnapshot {
   id               String   @id @default(cuid())
   marketId         String
@@ -68,6 +108,27 @@ model MarketSnapshot {
   // Provenance
   qualityFlags     String?
 
+  // Archive provenance (paper §10.1). The live collector keys on blockHash
+  // alone; a BACKFILLED row must also carry the height, because resume, gap
+  // detection and the manifest's pinned-block claim are all expressed in
+  // block numbers rather than hashes.
+  blockNumber      BigInt?
+  /// Protocol reserve factor, bps. Distinct from `aaveReserveFactorBps`,
+  /// which is Aave-specific by name; Compound III and Moonwell each carry one
+  /// too and it is a rate-model input, not a cosmetic field.
+  reserveFactorBps Int?
+  /// The address of the interest-rate model that produced the irm* fields.
+  /// NOT constant over a multi-year window -- Moonwell's mUSDC model was
+  /// 0x54dC...2445 at block 19_300_000 and 0x0F70...6cab at 35_338_178 -- so a
+  /// reader cannot infer which model a historical parameter set came from
+  /// without it.
+  irmAddress       String?
+  /// Which registered era this origin falls in ('calibration', 'heldout-a',
+  /// 'burned', 'heldout-b'), denormalised from src/evaluation/eras.ts at write
+  /// time so the SEALING GUARD is a database predicate rather than a
+  /// convention a query can forget to apply.
+  eraTag           String?
+
   // Per-snapshot IRM parameters (paper §6.3-6.5) — the live registered
   // rate-strategy inputs, captured alongside the state they governed, so a
   // historical snapshot can be re-simulated with the parameters that were
@@ -95,6 +156,7 @@ model MarketSnapshot {
   @@unique([marketId, blockHash])
   @@index([marketId, timestamp])
   @@index([timestamp])
+  @@index([eraTag, timestamp])
 }
 
 model ContractRegime {
