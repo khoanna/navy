@@ -98,7 +98,13 @@ export function formatReportMarkdown(report: EvaluationReport): string {
   const rm = report.risk;
   lines.push(`- **Max Drawdown:** ${(rm.maxDrawdown * 100).toFixed(3)}%`);
   lines.push(`- **Expected Shortfall:** ${(rm.expectedShortfall * 100).toFixed(4)}%`);
-  lines.push(`- **Withdrawal Success Rate:** ${(rm.withdrawalSuccessRate * 100).toFixed(2)}%`);
+  lines.push(
+    `- **Withdrawal Success Rate:** ${
+      rm.withdrawalSuccessRate === null
+        ? 'NOT MEASURED (no redemption was attempted)'
+        : `${(rm.withdrawalSuccessRate * 100).toFixed(2)}%`
+    }`,
+  );
 
   return lines.join(`\n`);
 }

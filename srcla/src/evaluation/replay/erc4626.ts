@@ -5,6 +5,9 @@
 import type { VaultState, Cohort } from './state.js';
 import { createInitialState, sharePrice } from './state.js';
 
+/** Why a redemption did not fill. 'FILLED' means it did. */
+export type RedeemFailure = 'FILLED' | 'INSUFFICIENT_LIQUIDITY' | 'INSUFFICIENT_SHARES';
+
 export class VaultReplay {
   private state: VaultState;
 
@@ -115,6 +118,47 @@ export class VaultReplay {
     this.state.strategyBalances.set(adapterId, current - actual);
 
     return actual;
+  }
+
+  /**
+   * Redeem exactly `assetsBase` USDC base units from `cohortId`, burning the
+   * shares that value is worth (rounded UP, so the redeemer can never be
+   * handed more value than the shares they gave up — the same direction
+   * ERC-4626's `previewWithdraw` rounds).
+   *
+   * Fails — with NO state change — when the cohort does not hold enough
+   * shares or the vault does not hold enough IDLE assets. Idle, not total
+   * assets: a real `redeem` on NavyVaultSRCLA can only pay out of the
+   * vault's own USDC balance, so sourcing from a venue has to happen first,
+   * via `divest`. That is precisely what makes the reserve worth something,
+   * and it is what the previous replay never exercised.
+   *
+   * Returns the assets actually paid out (0n on failure).
+   */
+  redeemAssets(cohortId: string, assetsBase: bigint): { grantedBase: bigint; reason: RedeemFailure } {
+    if (assetsBase <= 0n) return { grantedBase: 0n, reason: 'FILLED' };
+
+    const cohort = this.state.cohorts.get(cohortId);
+    if (!cohort) return { grantedBase: 0n, reason: 'INSUFFICIENT_SHARES' };
+
+    const shares = this.sharesForAssets(assetsBase);
+    if (shares > cohort.shares) return { grantedBase: 0n, reason: 'INSUFFICIENT_SHARES' };
+    if (assetsBase > this.state.idleBase) return { grantedBase: 0n, reason: 'INSUFFICIENT_LIQUIDITY' };
+
+    this.state.totalAssets -= assetsBase;
+    this.state.totalShares -= shares;
+    this.state.idleBase -= assetsBase;
+    cohort.shares -= shares;
+
+    return { grantedBase: assetsBase, reason: 'FILLED' };
+  }
+
+  /** Shares that `assetsBase` USDC base units are worth, rounded up. */
+  sharesForAssets(assetsBase: bigint): bigint {
+    if (this.state.totalAssets === 0n) return assetsBase;
+    const exact = assetsBase * this.state.totalShares;
+    const rounded = exact / this.state.totalAssets;
+    return exact % this.state.totalAssets === 0n ? rounded : rounded + 1n;
   }
 
   /**

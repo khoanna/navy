@@ -52,15 +52,25 @@ export function evaluateReleaseGate(params: ReleaseGateParams): ReleaseGateResul
       : undefined,
   });
 
-  // Check 2: Safety — withdrawal success rate >= 99%
+  // Check 2: Safety — withdrawal success rate >= 99%.
+  //
+  // An UNMEASURED rate (null: the replay attempted no redemption) FAILS this
+  // gate. §11.5 fails the policy gate on a missing result, and the previous
+  // behaviour — a hardcoded 1.0 for an empty withdrawal set — is what let a
+  // policy holding zero cash clear a liquidity gate it had never been
+  // subjected to.
+  const rate = params.riskMetrics.withdrawalSuccessRate;
   checks.push({
     name: 'Safety: Withdrawal Success',
-    pass: params.riskMetrics.withdrawalSuccessRate >= 0.99,
-    value: params.riskMetrics.withdrawalSuccessRate,
+    pass: rate !== null && rate >= 0.99,
+    value: rate ?? 0,
     threshold: 0.99,
-    reason: params.riskMetrics.withdrawalSuccessRate < 0.99
-      ? `${((1 - params.riskMetrics.withdrawalSuccessRate) * 100).toFixed(2)}% withdrawals failed`
-      : undefined,
+    reason:
+      rate === null
+        ? 'withdrawal success rate not measured: the replay attempted no redemption'
+        : rate < 0.99
+          ? `${((1 - rate) * 100).toFixed(2)}% withdrawals failed`
+          : undefined,
   });
 
   // Check 3: Max drawdown <= 5%

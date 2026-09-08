@@ -46,7 +46,8 @@ export interface PolicyResult {
   realizedGrossApy: number;
   totalCost: bigint;
   rebalanceCount: number;
-  withdrawalSuccessRate: number;
+  /** `null` when the replay attempted no redemption — see ReplayResult. */
+  withdrawalSuccessRate: number | null;
   maxDrawdown: number;
   sharpeRatio: number;
 }
@@ -359,22 +360,34 @@ export class EvaluationRunner {
       }
     }
 
-    // Safety Gate: No catastrophic failures, withdrawal success >= threshold
+    // Safety Gate: No catastrophic failures, withdrawal success >= threshold.
+    // An UNMEASURED withdrawal rate (null) is a FAILURE, not a free pass:
+    // §11.5 fails the policy gate on a missing result, and a hardcoded 1.0
+    // for "no redemption was attempted" is how the old harness let a
+    // zero-cash policy clear a liquidity gate it never faced.
     const srclaResults = results.filter((r) => r.policyId === 'srcla');
     let minWithdrawalRate = 1;
+    let withdrawalRateMeasured = srclaResults.length > 0;
     let noCatastrophicFailures = true;
 
     for (const result of srclaResults) {
-      if (result.withdrawalSuccessRate < minWithdrawalRate) {
-        minWithdrawalRate = result.withdrawalSuccessRate;
+      const rate = result.withdrawalSuccessRate;
+      if (rate === null) {
+        withdrawalRateMeasured = false;
+        noCatastrophicFailures = false;
+        continue;
+      }
+      if (rate < minWithdrawalRate) {
+        minWithdrawalRate = rate;
       }
       // Catastrophic failure: >5% drawdown or <99% withdrawal success
-      if (result.maxDrawdown > 0.05 || result.withdrawalSuccessRate < 0.99) {
+      if (result.maxDrawdown > 0.05 || rate < 0.99) {
         noCatastrophicFailures = false;
       }
     }
 
     const safetyPassed =
+      withdrawalRateMeasured &&
       noCatastrophicFailures &&
       minWithdrawalRate >= this.manifest.evaluation.successCriteria.minWithdrawalSuccessRate;
 
@@ -402,9 +415,11 @@ export class EvaluationRunner {
         noCatastrophicFailures,
         withdrawalSuccessRate: minWithdrawalRate,
         minRequiredRate: this.manifest.evaluation.successCriteria.minWithdrawalSuccessRate,
-        details: noCatastrophicFailures
-          ? `No catastrophic failures, withdrawal success rate: ${(minWithdrawalRate * 100).toFixed(2)}%`
-          : `Safety violations detected`,
+        details: !withdrawalRateMeasured
+          ? 'Withdrawal success rate NOT MEASURED: no redemption was attempted'
+          : noCatastrophicFailures
+            ? `No catastrophic failures, withdrawal success rate: ${(minWithdrawalRate * 100).toFixed(2)}%`
+            : `Safety violations detected`,
       },
       performanceGate: {
         passed: performancePassed,

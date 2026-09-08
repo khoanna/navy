@@ -5,7 +5,17 @@
 export interface RiskMetrics {
   maxDrawdown: number;
   expectedShortfall: number;   // CVaR at 5%
-  withdrawalSuccessRate: number;
+  /**
+   * Fraction of ATTEMPTED redemptions that filled, or `null` when none were
+   * attempted.
+   *
+   * It used to be `withdrawals.length > 0 ? successful/length : 1`, which
+   * scored an empty set a perfect 1.0 and fed a >= 0.99 release gate — so
+   * the gate passed precisely because the property had never been tested.
+   * `null` is not a number and cannot clear a numeric threshold; callers are
+   * forced to say what an unmeasured rate means.
+   */
+  withdrawalSuccessRate: number | null;
   stressedCoverage: number;
 }
 
@@ -26,7 +36,12 @@ export function calculateRiskMetrics(
   withdrawals: WithdrawalAttempt[],
 ): RiskMetrics {
   if (snapshots.length === 0) {
-    return { maxDrawdown: 0, expectedShortfall: 0, withdrawalSuccessRate: 1, stressedCoverage: 1 };
+    return {
+      maxDrawdown: 0,
+      expectedShortfall: 0,
+      withdrawalSuccessRate: withdrawalSuccessRate(withdrawals),
+      stressedCoverage: 1,
+    };
   }
 
   // Max drawdown
@@ -52,21 +67,29 @@ export function calculateRiskMetrics(
     ? tailReturns.reduce((a, b) => a + b, 0) / tailReturns.length
     : 0;
 
-  // Withdrawal success rate
-  let successful = 0;
-  for (const w of withdrawals) {
-    // Success if granted >= 99% of requested
-    if (w.requested > 0n && w.granted >= (w.requested * 99n) / 100n) {
-      successful++;
-    }
-  }
-
   return {
     maxDrawdown,
     expectedShortfall,
-    withdrawalSuccessRate: withdrawals.length > 0 ? successful / withdrawals.length : 1,
+    withdrawalSuccessRate: withdrawalSuccessRate(withdrawals),
     stressedCoverage: 1 - maxDrawdown,
   };
+}
+
+/**
+ * Measured redemption fill rate. A redemption counts as filled when at least
+ * 99% of the requested assets were paid out. Returns `null` — never 1 — for
+ * an empty attempt set: "no redemption was ever attempted" is not evidence
+ * that redemptions succeed.
+ *
+ * A zero-asset request is not an attempt and is ignored entirely; counting it
+ * as a failure would let a malformed schedule fail a safety gate, and
+ * counting it as a success would reintroduce the vacuity.
+ */
+export function withdrawalSuccessRate(withdrawals: WithdrawalAttempt[]): number | null {
+  const attempts = withdrawals.filter((w) => w.requested > 0n);
+  if (attempts.length === 0) return null;
+  const successful = attempts.filter((w) => w.granted >= (w.requested * 99n) / 100n).length;
+  return successful / attempts.length;
 }
 
 function calculateDailyReturns(snapshots: AssetSnapshot[]): number[] {

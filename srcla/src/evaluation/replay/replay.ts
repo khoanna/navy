@@ -1,14 +1,22 @@
 /**
- * Main replay engine
+ * Main replay engine.
+ *
+ * UNITS: money is bigint USDC base units (6 dp); rates are WAD (1e18)
+ * annualized; times are seconds; gas prices are wei.
  */
-import { VaultReplay } from './erc4626.js';
+import { VaultReplay, type RedeemFailure } from './erc4626.js';
 import { modelExecution } from './execution.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
 import type { VaultState } from './state.js';
 
+const WAD = 10n ** 18n;
+/** Matches protocols/math.ts's SECONDS_PER_YEAR (365.25 days). */
+const SECONDS_PER_YEAR = 31_557_600n;
+
 export interface BaselineAction {
   kind: 'deploy' | 'divest';
   adapter: string;
+  /** USDC base units. */
   amount: bigint;
 }
 
@@ -17,13 +25,43 @@ export type PolicyFn = (
   snapshot: TimeOrderedSnapshot,
 ) => BaselineAction[];
 
+/** A redemption the replay will actually attempt. */
+export interface WithdrawalRequest {
+  /** Index into `dataset.snapshots` at which the redemption is attempted. */
+  snapshotIndex: number;
+  /** USDC base units requested. */
+  assetsBase: bigint;
+}
+
+export interface WithdrawalOutcome {
+  snapshotIndex: number;
+  /** USDC base units. */
+  requestedBase: bigint;
+  /** USDC base units actually paid out; 0n on a failed redemption. */
+  grantedBase: bigint;
+  success: boolean;
+  reason: RedeemFailure;
+  /** Venues the vault had to unwind to fund this redemption. */
+  divestedFrom: string[];
+}
+
 export interface ReplaySnapshot {
   timestamp: Date;
   totalAssets: bigint;
   totalShares: bigint;
   sharePriceWad: bigint;
+  /** Cumulative share-price growth since the first snapshot, dimensionless. */
   totalReturn: number;
   idleBase: bigint;
+  /**
+   * §11.4 "stressed liquid coverage": the worst ratio, over the registered
+   * §8.1 demand set {5,10,25,50}% of TVL, of what the vault could have paid
+   * synchronously to what was demanded — computed on the CONSERVATIVE exit
+   * capacity (the vault's own supplied cash assumed borrowed out). 1 means
+   * every stress demand was coverable. This is a measurement, not a
+   * constraint: it never changes the replay's state.
+   */
+  stressedLiquidCoverage: number;
 }
 
 export interface ReplayResult {
@@ -33,8 +71,22 @@ export interface ReplayResult {
   snapshots: ReplaySnapshot[];
   realizedNetApy: number;
   totalTurnover: bigint;
-  withdrawalSuccessRate: number;
+  /**
+   * Fraction of ATTEMPTED redemptions that filled.
+   *
+   * `null` — never 1 — when no redemption was attempted. The old replay
+   * returned a hardcoded 1 here because `totalWithdrawals` was never
+   * incremented (`void totalWithdrawals; // placeholder`), which fed a
+   * >= 0.99 safety gate and made a policy holding zero cash costless. A
+   * caller that cannot distinguish "measured 100%" from "never measured"
+   * cannot gate on this at all, so the type forces the distinction.
+   */
+  withdrawalSuccessRate: number | null;
+  withdrawals: WithdrawalOutcome[];
+  /** USDC base units. Already charged against NAV — see runReplay. */
   totalCosts: bigint;
+  /** Worst `stressedLiquidCoverage` over the whole replay; 1 when never squeezed. */
+  minStressedLiquidCoverage: number;
 }
 
 /**
@@ -52,55 +104,139 @@ export interface ReplayConfig {
   significanceLevel?: number;
   tier: bigint;
   policy: PolicyFn;
+  /**
+   * Redemptions to execute. Empty/absent means none were attempted, and
+   * `withdrawalSuccessRate` will be `null` rather than a flattering 1.
+   */
+  withdrawals?: WithdrawalRequest[];
+  /** wei per gas unit. Registered constant — the collector persists no gas
+   *  observation, see the harness's `REPLAY_GAS` note. */
+  gasPriceWei?: bigint;
+  /** USD per ETH, 8 decimals. Same provenance caveat as `gasPriceWei`. */
+  ethUsdE8?: bigint;
 }
 
+/** Registered §8.1 stress demand set, in bps of TVL. */
+const STRESS_DEMAND_BPS = [500, 1000, 2500, 5000] as const;
+
+/** Base-chain gas price used when the caller supplies none. wei per gas. */
+export const DEFAULT_REPLAY_GAS_PRICE_WEI = 30_000_000n; // 0.03 gwei
+/** ETH/USD used when the caller supplies none. USD, 8 decimals. */
+export const DEFAULT_REPLAY_ETH_USD_E8 = 350_000_000_000n; // $3,500.00
+
 /**
- * Run replay for a specific tier and policy
+ * Run replay for a specific tier and policy.
+ *
+ * Two properties the previous implementation did not have:
+ *
+ *  1. **Yield comes from the snapshot.** Each venue accrues its own observed
+ *     `supplyRateE18` over the real elapsed time between snapshots, applied
+ *     to the vault's balance in that venue. The old engine awarded a flat 5%
+ *     APY on everything deployed and discarded the snapshot entirely, which
+ *     made venue choice causally irrelevant to the returns it reported.
+ *
+ *  2. **Redemptions are executed.** A redemption is paid out of idle; if idle
+ *     is short, the vault unwinds venues (in sorted id order, each capped by
+ *     its observed synchronous exit capacity) and pays gas for every unwind.
+ *     If it still cannot reach the requested amount, the redemption FAILS —
+ *     atomically, as ERC-4626 `redeem` does on NavyVaultSRCLA. That is the
+ *     penalty a zero-cash policy was previously exempt from.
+ *
+ * Costs are charged to NAV at the moment they occur, so every reported
+ * return series is already after-cost per period (§11.5's criterion) rather
+ * than gross with a lump subtracted at the end.
  */
 export function runReplay(config: ReplayConfig): ReplayResult {
   const { dataset, evaluationId, tier, policy } = config;
+  const gasPriceWei = config.gasPriceWei ?? DEFAULT_REPLAY_GAS_PRICE_WEI;
+  const ethUsdE8 = config.ethUsdE8 ?? DEFAULT_REPLAY_ETH_USD_E8;
 
   const cohortId = `tier-${tier}`;
-  const vault = new VaultReplay(tier);
-
-  // Deposit the full tier so idleBase = tier
+  // Start EMPTY and let the tier arrive as a deposit. Constructing with
+  // `tier` and then depositing `tier` again (what this did before) seeded the
+  // vault with twice the tier and left the cohort holding only half the
+  // shares — so no tier in the manifest was the size it claimed, and a
+  // redemption sized as a fraction of the tier was really half that fraction
+  // of NAV.
+  const vault = new VaultReplay(0n);
   vault.deposit(tier, cohortId);
 
   const snapshots: ReplaySnapshot[] = [];
+  const withdrawalOutcomes: WithdrawalOutcome[] = [];
   let totalTurnover = 0n;
   let totalCosts = 0n;
-  let successfulWithdrawals = 0;
-  let totalWithdrawals = 0;
+  let minStressedLiquidCoverage = 1;
   const initialSharePrice = vault.currentSharePrice();
 
+  const requestsByIndex = new Map<number, WithdrawalRequest[]>();
+  for (const w of config.withdrawals ?? []) {
+    const list = requestsByIndex.get(w.snapshotIndex) ?? [];
+    list.push(w);
+    requestsByIndex.set(w.snapshotIndex, list);
+  }
+
+  const charge = (costBase: bigint): void => {
+    if (costBase <= 0n) return;
+    totalCosts += costBase;
+    vault.applyLoss(costBase);
+  };
+
+  let previousTimestampSeconds: number | null = null;
+
   // Replay each snapshot
-  for (const snapshot of dataset.snapshots) {
+  for (let i = 0; i < dataset.snapshots.length; i++) {
+    const snapshot = dataset.snapshots[i]!;
+    const nowSeconds = Math.floor(snapshot.timestamp.getTime() / 1000);
+
+    // Accrue the yield earned SINCE the previous snapshot, on the positions
+    // that were held over that interval, before this snapshot's policy gets
+    // to act on new information.
+    if (previousTimestampSeconds !== null) {
+      const elapsed = BigInt(Math.max(0, nowSeconds - previousTimestampSeconds));
+      vault.addYield(accruedYieldBase(vault.getState(), snapshot, elapsed));
+    }
+    previousTimestampSeconds = nowSeconds;
+
     // Get policy actions
     const actions = policy(vault.getState(), snapshot);
 
     // Execute actions
     for (const action of actions) {
-      const cost = modelExecution(
-        { ...action, gasPrice: 30_000_000_000n },
-        vault.getState(),
-      );
-      totalCosts += cost.totalCostBase;
-      totalTurnover += action.amount;
-
+      const state = vault.getState();
       if (action.kind === 'deploy') {
-        vault.deploy(action.adapter, action.amount);
-      } else if (action.kind === 'divest') {
-        vault.divest(action.adapter, action.amount);
+        const available = state.idleBase;
+        const amount = action.amount < available ? action.amount : available;
+        if (amount <= 0n) continue;
+        charge(modelExecution({ ...action, amount, gasPriceWei, ethUsdE8 }, state).totalCostBase);
+        totalTurnover += amount;
+        vault.deploy(action.adapter, amount);
+      } else {
+        if (action.amount <= 0n) continue;
+        charge(modelExecution({ ...action, gasPriceWei, ethUsdE8 }, state).totalCostBase);
+        const moved = vault.divest(action.adapter, action.amount);
+        totalTurnover += moved;
       }
     }
 
-    // Add realized yield (simplified: 5% APY daily)
-    const yield_ = calculateDailyYield(vault.getState(), snapshot);
-    vault.addYield(yield_);
+    // Attempt this snapshot's redemptions against real liquidity.
+    for (const request of requestsByIndex.get(i) ?? []) {
+      withdrawalOutcomes.push(
+        executeRedemption(vault, cohortId, request, i, snapshot, {
+          gasPriceWei,
+          ethUsdE8,
+          charge,
+          onTurnover: (moved) => {
+            totalTurnover += moved;
+          },
+        }),
+      );
+    }
 
     // Record state
     const sharePriceWad = vault.currentSharePrice();
-    const totalReturn = (Number(sharePriceWad) - Number(initialSharePrice)) / Number(1e18);
+    const totalReturn = Number(sharePriceWad - initialSharePrice) / Number(WAD);
+    const coverage = stressedLiquidCoverage(vault.getState(), snapshot);
+    if (coverage < minStressedLiquidCoverage) minStressedLiquidCoverage = coverage;
 
     snapshots.push({
       timestamp: snapshot.timestamp,
@@ -109,78 +245,174 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       sharePriceWad,
       totalReturn,
       idleBase: vault.getState().idleBase,
+      stressedLiquidCoverage: coverage,
     });
-
-    void totalWithdrawals; // placeholder for withdrawal tracking
-    void successfulWithdrawals;
   }
 
-  // Calculate net APY
-  const realizedNetApy = calculateNetApy(snapshots, totalCosts, tier);
+  const successful = withdrawalOutcomes.filter((w) => w.success).length;
 
   return {
     policyId: evaluationId,
     tier,
     cohortId,
     snapshots,
-    realizedNetApy,
+    realizedNetApy: annualizedSharePriceGrowth(snapshots),
     totalTurnover,
-    withdrawalSuccessRate: totalWithdrawals > 0 ? successfulWithdrawals / totalWithdrawals : 1,
+    withdrawalSuccessRate:
+      withdrawalOutcomes.length > 0 ? successful / withdrawalOutcomes.length : null,
+    withdrawals: withdrawalOutcomes,
     totalCosts,
+    minStressedLiquidCoverage,
   };
 }
 
 /**
- * Calculate daily yield from snapshot (simplified)
- * Uses per-snapshot rate from the market snapshot or defaults to 5% APY.
+ * Source `request.assetsBase` from idle, unwinding venues in sorted id order
+ * when idle is short. Each unwind is a real transaction and pays gas.
+ *
+ * Exit capacity per venue is `min(vault balance there, venue cash)` — the
+ * same conservative same-transaction exit `MarketObservation.maxWithdrawableBase`
+ * uses in the policy kernel, read from the snapshot rather than assumed.
  */
-function calculateDailyYield(state: VaultState, _snapshot: TimeOrderedSnapshot): bigint {
-  // Default: 5% APY = 5e16 in WAD (0.05)
-  const APY_WAD = 50_000_000_000_000_000n; // 0.05 WAD
-  const SECONDS_PER_YEAR = 31_557_600n;
-  const SECONDS_PER_DAY = 86_400n;
+function executeRedemption(
+  vault: VaultReplay,
+  cohortId: string,
+  request: WithdrawalRequest,
+  snapshotIndex: number,
+  snapshot: TimeOrderedSnapshot,
+  ctx: {
+    gasPriceWei: bigint;
+    ethUsdE8: bigint;
+    charge: (costBase: bigint) => void;
+    onTurnover: (movedBase: bigint) => void;
+  },
+): WithdrawalOutcome {
+  const divestedFrom: string[] = [];
+  const cashByMarket = new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase]));
 
-  // Daily rate in WAD = APY * secondsPerDay / secondsPerYear
-  const dailyRate = (APY_WAD * SECONDS_PER_DAY) / SECONDS_PER_YEAR;
+  const ordered = [...vault.getState().strategyBalances.keys()].sort();
+  for (const marketId of ordered) {
+    const state = vault.getState();
+    const shortfall = request.assetsBase - state.idleBase;
+    if (shortfall <= 0n) break;
 
-  // Deployed = totalAssets - idle (funds not deployed earn nothing)
-  const deployed = state.totalAssets - state.idleBase;
-  if (deployed === 0n) return 0n;
+    const balance = state.strategyBalances.get(marketId) ?? 0n;
+    const venueCash = cashByMarket.get(marketId) ?? 0n;
+    const exitable = balance < venueCash ? balance : venueCash;
+    if (exitable <= 0n) continue;
 
-  // yield = deployed * dailyRate (WAD) / WAD → yields small decimal added to USDC units
-  // deployed is in USDC units (e.g., 10_000_000_000_000n = 10M USDC)
-  // dailyRate = 5e16 / 31_557_600 ≈ 1.585e9 = 1.585e-9 WAD
-  // yield = 10_000_000_000_000 * 1.585e9 / 1e18 = 15,849 USDC (6-decimal)
-  const dailyYield = (deployed * dailyRate) / (1_000_000_000_000_000_000n);
-  return dailyYield > 0n ? dailyYield : 1n; // minimum 1 unit to avoid zero-yield stall
+    const amount = shortfall < exitable ? shortfall : exitable;
+    ctx.charge(
+      modelExecution(
+        { kind: 'divest', adapter: marketId, amount, gasPriceWei: ctx.gasPriceWei, ethUsdE8: ctx.ethUsdE8 },
+        state,
+      ).totalCostBase,
+    );
+    const moved = vault.divest(marketId, amount);
+    ctx.onTurnover(moved);
+    divestedFrom.push(marketId);
+  }
+
+  const { grantedBase, reason } = vault.redeemAssets(cohortId, request.assetsBase);
+
+  return {
+    snapshotIndex,
+    requestedBase: request.assetsBase,
+    grantedBase,
+    success: grantedBase >= request.assetsBase,
+    reason,
+    divestedFrom,
+  };
 }
 
 /**
- * Calculate annualized net APY from replay snapshots
+ * Interest earned over `elapsedSeconds` by the vault's actual per-venue
+ * balances at each venue's OWN observed supply rate.
+ *
+ *   yieldBase = balanceBase * supplyRateWad * elapsedSeconds
+ *               / (SECONDS_PER_YEAR * WAD)
+ *
+ * A venue the vault holds but that is absent from this snapshot earns
+ * nothing: a missing observation is not evidence of yield. Idle USDC earns
+ * nothing either. There is no floor — the old engine returned a minimum of
+ * 1n "to avoid zero-yield stall", which manufactured return for a policy
+ * that deployed nothing.
  */
-export function calculateNetApy(
-  snapshots: ReplaySnapshot[],
-  totalCosts: bigint,
-  initialInvestment: bigint,
-): number {
-  if (snapshots.length < 2 || initialInvestment === 0n) return 0;
+export function accruedYieldBase(
+  state: VaultState,
+  snapshot: TimeOrderedSnapshot,
+  elapsedSeconds: bigint,
+): bigint {
+  if (elapsedSeconds <= 0n) return 0n;
+  const rateByMarket = new Map(snapshot.snapshots.map((m) => [m.marketId, m.supplyRateE18]));
 
-  const start = snapshots[0]!.totalAssets;
-  const end = snapshots[snapshots.length - 1]!.totalAssets;
-  const netEnd = end > totalCosts ? end - totalCosts : 0n;
+  let accrued = 0n;
+  for (const [marketId, balance] of state.strategyBalances) {
+    if (balance <= 0n) continue;
+    const rateWad = rateByMarket.get(marketId);
+    if (rateWad === undefined || rateWad <= 0n) continue;
+    accrued += (balance * rateWad * elapsedSeconds) / (SECONDS_PER_YEAR * WAD);
+  }
+  return accrued;
+}
 
-  const totalReturnFraction = Number(netEnd - start) / Number(initialInvestment);
+/**
+ * §11.4 stressed liquid coverage. For each registered §8.1 demand
+ * D_s = s * TVL, what fraction of D_s could the vault have paid
+ * synchronously from idle plus conservative venue exits? The conservative
+ * exit assumes the vault's own supplied cash has been borrowed out, i.e.
+ * `min(balance, max(0, venueCash - balance))`.
+ *
+ * Returns the worst (minimum) ratio over the demand set, capped at 1.
+ */
+export function stressedLiquidCoverage(state: VaultState, snapshot: TimeOrderedSnapshot): number {
+  const tvl = state.totalAssets;
+  if (tvl <= 0n) return 1;
 
-  // Annualize based on actual time difference between first and last snapshot
+  const cashByMarket = new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase]));
+  let liquid = state.idleBase;
+  for (const [marketId, balance] of state.strategyBalances) {
+    if (balance <= 0n) continue;
+    const venueCash = cashByMarket.get(marketId) ?? 0n;
+    const external = venueCash > balance ? venueCash - balance : 0n;
+    liquid += balance < external ? balance : external;
+  }
+
+  let worst = 1;
+  for (const bps of STRESS_DEMAND_BPS) {
+    const demand = (tvl * BigInt(bps)) / 10_000n;
+    if (demand <= 0n) continue;
+    const ratio = liquid >= demand ? 1 : Number(liquid) / Number(demand);
+    if (ratio < worst) worst = ratio;
+  }
+  return worst;
+}
+
+/**
+ * Annualized realized net APY, measured as SHARE-PRICE growth (§11.4's
+ * "share-price growth"), not as total-asset growth.
+ *
+ * This has to be share price: the replay now executes redemptions, so total
+ * assets fall for reasons that have nothing to do with performance, and a
+ * total-asset measure would score every policy by how much of the vault
+ * happened to be redeemed. Costs are already charged against NAV as they
+ * occur, so this figure is after-cost.
+ */
+export function annualizedSharePriceGrowth(snapshots: ReplaySnapshot[]): number {
+  if (snapshots.length < 2) return 0;
+  const start = snapshots[0]!.sharePriceWad;
+  const end = snapshots[snapshots.length - 1]!.sharePriceWad;
+  if (start <= 0n) return 0;
+
+  const growth = Number(end - start) / Number(start);
+
   const firstTime = snapshots[0]!.timestamp.getTime();
   const lastTime = snapshots[snapshots.length - 1]!.timestamp.getTime();
   const years = (lastTime - firstTime) / (365.25 * 24 * 60 * 60 * 1000);
-  if (years < 1 / 365) return totalReturnFraction; // Less than 1 day — return simple return
+  if (years < 1 / 365) return growth; // less than a day — report the simple return
 
-  // Clamp: negative total return → floor of -100% (avoid NaN from Math.pow)
-  if (totalReturnFraction <= -1) return -1;
-
-  const base = 1 + totalReturnFraction;
+  if (growth <= -1) return -1;
+  const base = 1 + growth;
   if (base <= 0) return -1;
 
   return Math.pow(base, 1 / years) - 1;
