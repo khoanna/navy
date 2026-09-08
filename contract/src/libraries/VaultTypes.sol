@@ -8,11 +8,6 @@ library VaultTypes {
     bytes32 internal constant HARVEST_REQUEST_TYPEHASH =
         keccak256("HarvestRequest(address adapter,address token,uint256 maxClaim,bytes32 routeId,uint256 minOut,uint256 deadline)");
 
-    enum ActionKind {
-        Divest,
-        Deploy
-    }
-
     enum AdapterStatus {
         None,
         Active,
@@ -50,16 +45,6 @@ library VaultTypes {
         uint256 minFinalAssets;
         uint256 maxRecognizedLoss;
         uint256 turnoverLimit;
-    }
-
-    struct Action {
-        uint256 planId;
-        uint32 index;
-        ActionKind kind;
-        address adapter;
-        uint256 amount;
-        uint256 minOut;
-        bytes32 dataHash;
     }
 
     struct HarvestRequest {
