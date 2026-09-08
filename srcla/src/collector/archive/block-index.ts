@@ -57,6 +57,18 @@ export function estimateBlockForTimestamp(
 export interface ResolvedBlock {
   blockNumber: number;
   timestampSeconds: number;
+  /** Canonical block hash. */
+  hash: string;
+  /**
+   * The block's own EIP-1559 base fee, in wei.
+   *
+   * It MUST come from the header. Multicall3's `getBasefee()` reads
+   * `block.basefee`, which an `eth_call` executes with a zero context on
+   * OP-Stack -- it returned 0 at both probe blocks while the headers read
+   * 3_869_277 and 714_160 wei. A zero L2 base fee would make every §9.1
+   * execution-cost estimate free, and the cost gate would pass everything.
+   */
+  baseFeePerGasWei: bigint;
 }
 
 /**
@@ -80,7 +92,12 @@ export async function resolveBlockAtOrBefore(
   const headerAt = async (n: number): Promise<ResolvedBlock> => {
     const block = await pool.call(async (p) => p.getBlock(n));
     if (block === null) throw new Error(`no block at height ${n}`);
-    return { blockNumber: Number(block.number), timestampSeconds: Number(block.timestamp) };
+    return {
+      blockNumber: Number(block.number),
+      timestampSeconds: Number(block.timestamp),
+      hash: block.hash ?? '',
+      baseFeePerGasWei: block.baseFeePerGas ?? 0n,
+    };
   };
 
   let header = await headerAt(estimateBlockForTimestamp(anchor, targetSeconds, blockTime));
