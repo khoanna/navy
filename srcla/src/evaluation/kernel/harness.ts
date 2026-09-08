@@ -30,6 +30,7 @@ import {
 } from './decision-input.js';
 import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
 import { gasAt } from '../gas-series.js';
+import { buildIdentityPin } from '../../domain/config-digest.js';
 import { summariseLastAction, type PersistedActionRecord } from '../../policy/last-action.js';
 import {
   REGISTERED_POLICIES,
@@ -184,10 +185,22 @@ export function buildHindsightRates(
 export function buildWithdrawalSchedule(
   dataset: EvaluationDataset,
   tier: bigint,
-  opts: { redemptionBps?: number; cadenceSnapshots?: number } = {},
+  opts: { redemptionBps?: number; cadenceSeconds?: number } = {},
 ): WithdrawalSchedule {
   const redemptionBps = BigInt(opts.redemptionBps ?? 500); // 5% of the tier
-  const cadence = opts.cadenceSnapshots ?? 7;
+  // CADENCE IS TIME, NOT SNAPSHOT COUNT.
+  //
+  // This was `cadenceSnapshots: 7`, which meant "weekly" only because the
+  // dataset it was written against had daily origins. Against the hourly
+  // origins the archive backfill produces, the same 7 meant every SEVEN
+  // HOURS: 5% of NAV seventeen times a day, ~240% of the vault demanded
+  // inside a single 14-day reserve horizon. §8.1 then correctly required the
+  // entire vault in cash, nothing was ever deployable, and all seventeen
+  // policies realised exactly 0.000% net APY with zero rebalances -- a total
+  // that looks like a policy result and is actually a unit error in the test
+  // harness. Expressed in seconds it cannot silently rescale with the
+  // dataset's cadence again.
+  const cadenceSeconds = opts.cadenceSeconds ?? 7 * 86_400;
 
   const observed = dataset.withdrawals ?? [];
   if (observed.length > 0 && dataset.snapshots.length > 0) {
@@ -214,8 +227,15 @@ export function buildWithdrawalSchedule(
   }
 
   const requests: WithdrawalRequest[] = [];
-  for (let i = cadence; i < dataset.snapshots.length; i += cadence) {
-    requests.push({ snapshotIndex: i, assetsBase: (tier * redemptionBps) / 10_000n });
+  if (dataset.snapshots.length > 0) {
+    const firstSeconds = seconds(dataset.snapshots[0]!);
+    let nextAt = firstSeconds + cadenceSeconds;
+    for (let i = 0; i < dataset.snapshots.length; i++) {
+      if (seconds(dataset.snapshots[i]!) >= nextAt) {
+        requests.push({ snapshotIndex: i, assetsBase: (tier * redemptionBps) / 10_000n });
+        nextAt += cadenceSeconds;
+      }
+    }
   }
   return { requests, source: 'registered-schedule' };
 }
@@ -251,13 +271,35 @@ export function prepareArtifact(
   labels: CompletedLabel[],
   calibrationFraction: number,
 ): PolicyArtifact {
-  const pinnedConfigDigests: Record<string, string> = {};
+  // A REGISTERED artifact is FROZEN. Returning it untouched is not an
+  // optimisation, it is the whole point of registering one.
+  //
+  // Everything below re-fits the quantiles and re-pins the digests from the
+  // dataset it is handed. That is right for the PROVISIONAL bootstrap, whose
+  // quantiles are placeholders and whose only data is the run's own -- but
+  // against a registered artifact and a HELD-OUT era it would refit the
+  // policy on the very data the run is meant to test, which is the
+  // look-ahead §2.2 rejects outright. It would also silently discard the
+  // calibration era's registration, so the artifact hash in the manifest
+  // would describe something the run did not use.
+  if (base._provisional === undefined) return base;
+
+  // Pinned IDENTITIES, from every digest observed -- not the first FULL
+  // digest seen. Pinning the full digest makes a venue permanently
+  // inadmissible at its first governance rate change, which is what made an
+  // earlier end-to-end run realise 0.000% for all seventeen policies. See
+  // src/domain/config-digest.ts.
+  const digestsByMarket = new Map<string, Set<string>>();
   for (const s of dataset.snapshots) {
     for (const m of s.snapshots) {
-      if (pinnedConfigDigests[m.marketId] === undefined) {
-        pinnedConfigDigests[m.marketId] = m.configDigest;
-      }
+      const set = digestsByMarket.get(m.marketId) ?? new Set<string>();
+      set.add(m.configDigest);
+      digestsByMarket.set(m.marketId, set);
     }
+  }
+  const pinnedConfigDigests: Record<string, string> = {};
+  for (const [marketId, set] of digestsByMarket) {
+    pinnedConfigDigests[marketId] = buildIdentityPin(set);
   }
 
   const splitIndex = Math.floor(dataset.snapshots.length * calibrationFraction);

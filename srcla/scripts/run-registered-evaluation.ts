@@ -17,16 +17,27 @@
  *
  * Usage:
  *   DATABASE_URL=... tsx scripts/run-registered-evaluation.ts \
- *     --start 2026-06-01 --end 2026-08-23 [--tiers 10000,100000] [--out file.json]
+ *     --era heldout-a [--tiers 10000,100000] [--out file.json]
+ *   DATABASE_URL=... tsx scripts/run-registered-evaluation.ts \
+ *     --start 2026-06-01 --end 2026-08-23 ...
+ *
+ * `--era` is the registered form and the one a citable result must use: it
+ * names a boundary fixed in `src/evaluation/eras.ts` before any fitting ran,
+ * rather than a date range chosen after the fact. Running a SEALED era is the
+ * moment the held-out data is legitimately opened -- everything that fits
+ * anything must already be committed, because a result that prompts a change
+ * to the artifact or the grid is a new registration on a new era, not a
+ * retune.
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
  */
 import { writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
-import { loadDataset } from '../src/evaluation/dataset.js';
+import { loadDataset, loadEra } from '../src/evaluation/dataset.js';
+import { REGISTERED_ERAS, eraBounds, type EraTag } from '../src/evaluation/eras.js';
 import { loadGasSeries } from '../src/evaluation/gas-series.js';
-import { loadBootstrapArtifact } from '../src/policy/artifact.js';
+import { loadBootstrapArtifact, loadRegisteredArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import {
   runRegisteredEvaluation,
@@ -34,6 +45,7 @@ import {
   type RegisteredEvaluationResult,
 } from '../src/evaluation/kernel/harness.js';
 import type { HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
+import type { PolicyArtifact } from '../src/policy/types.js';
 import { NOT_OBSERVED } from '../src/evaluation/kernel/decision-input.js';
 import {
   buildRunRecord,
@@ -92,7 +104,7 @@ function required(name: string): string {
  * dependency-group registry, no absolute caps and no protocol supply-cap
  * headroom. See the surviving entries in `NOT_OBSERVED`.
  */
-function harnessConfig(gas: HarnessConfig['gas']): HarnessConfig {
+function harnessConfig(gas: HarnessConfig['gas'], artifact: PolicyArtifact): HarnessConfig {
   return {
     vault: {
       adminReserveBase: 0n,
@@ -113,8 +125,13 @@ function harnessConfig(gas: HarnessConfig['gas']): HarnessConfig {
     // harness will report it INERT rather than emit a number for it.
     dependencyGroups: [],
     gas,
-    horizonSeconds: 604_800,
-    availabilityLagSeconds: 900,
+    // FROM THE ARTIFACT, not a constant. The harness derives its labels at
+    // this horizon and the policy forecasts at `artifact.horizonSeconds`; if
+    // the two disagree, every label the kernel trains on describes a
+    // different horizon than the quantiles were solved for. The runner used
+    // to hardcode 7 days while the registered grid may select 1, 7 or 14.
+    horizonSeconds: artifact.horizonSeconds,
+    availabilityLagSeconds: artifact.availabilityLagSeconds,
   };
 }
 
@@ -146,10 +163,33 @@ function summarize(out: RegisteredEvaluationResult): Record<string, unknown> {
 }
 
 async function main(): Promise<void> {
-  const startDate = new Date(required('start'));
-  const endDate = new Date(required('end'));
+  const eraArg = arg('era');
+  if (eraArg !== undefined && !(eraArg in REGISTERED_ERAS)) {
+    throw new Error(
+      `--era must be one of ${Object.keys(REGISTERED_ERAS).join(', ')}, got '${eraArg}'`,
+    );
+  }
+  const era = eraArg as EraTag | undefined;
+
+  const startDate =
+    era !== undefined
+      ? new Date(REGISTERED_ERAS[era].startSeconds * 1000)
+      : new Date(required('start'));
+  const endDate =
+    era !== undefined
+      ? new Date(Math.min(REGISTERED_ERAS[era].endSeconds, Math.floor(Date.now() / 1000)) * 1000)
+      : new Date(required('end'));
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
     throw new Error('--start and --end must be parseable dates');
+  }
+  if (era !== undefined) {
+    const b = eraBounds(era);
+    console.error(
+      `[evaluation] era '${era}': ${b.start} -> ${b.end} (${b.days}d)` +
+        (REGISTERED_ERAS[era].sealed
+          ? ' — SEALED. This run OPENS it; nothing may be refit afterwards.'
+          : ''),
+    );
   }
 
   const tiers = arg('tiers')
@@ -160,7 +200,12 @@ async function main(): Promise<void> {
 
   const prisma = new PrismaClient();
   try {
-    const dataset = await loadDataset(prisma, arg('manifest') ?? 'registered', startDate, endDate);
+    // A sealed era is opened deliberately here, with the intent recorded at
+    // the call site. Every other loader path refuses one.
+    const dataset =
+      era !== undefined
+        ? await loadEra(prisma, era, 'the registered §11 evaluation', { allowSealed: true })
+        : await loadDataset(prisma, arg('manifest') ?? 'registered', startDate, endDate);
     if (dataset.snapshots.length === 0) {
       // No synthetic fallback: an empty window is a failed run, not a run
       // over invented data.
@@ -182,8 +227,21 @@ async function main(): Promise<void> {
         `${gas.summary.minL2BaseFeeWei}..${gas.summary.maxL2BaseFeeWei} wei, ETH ` +
         `${gas.summary.minEthUsdE8}..${gas.summary.maxEthUsdE8} (1e8), digest ${gas.digest}`,
     );
-    const config = harnessConfig(gas);
-    const artifact = loadBootstrapArtifact();
+    // The registered artifact when one is given, the provisional bootstrap
+    // otherwise. §11.5's "Calibrated artifact" check blocks on the bootstrap,
+    // so a run without --artifact is a rehearsal, not a citable result.
+    const artifactPath = arg('artifact');
+    const artifact =
+      artifactPath !== undefined ? loadRegisteredArtifact(artifactPath) : loadBootstrapArtifact();
+    console.error(
+      `[evaluation] artifact ${artifact.artifactHash} ` +
+        `(${artifact._provisional !== undefined ? 'PROVISIONAL — results are not citable' : 'registered'})`,
+    );
+    console.error(
+      `[evaluation] horizon ${artifact.horizonSeconds / 86_400}d, coverage ` +
+        `${artifact.coverageTarget}, method ${artifact.method}, k ${artifact.noTradeBandK}`,
+    );
+    const config = harnessConfig(gas, artifact);
 
     const out = runRegisteredEvaluation({
       dataset,

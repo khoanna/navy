@@ -4,7 +4,12 @@ import { simulateCurves, flatDisplayedRateCurves } from './steps/simulate.js';
 import { forecastMarkets } from './steps/forecast.js';
 import { requiredReserve } from './steps/reserve.js';
 import { optimize, reserveOptsFrom, resolveQuantumBase, type PolicyAblations } from './steps/optimize.js';
-import { costGate, type CostParams } from './steps/cost.js';
+import {
+  clampToTurnoverBudget,
+  costGate,
+  remainingTurnoverBase,
+  type CostParams,
+} from './steps/cost.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
 import { safetyUnwind } from './steps/unwind.js';
 import type { DecisionInput, DecisionOutput, PolicyArtifact } from './types.js';
@@ -295,12 +300,24 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       : simulateCurves(input, admission.eligible, quantumBase, opts.maxCurvePoints);
   const lowerBounds = forecastMarkets(input, curves, artifact);
 
-  const { target, enumeration } = optimize(input, curves, artifact, {
+  const { target: unclampedTarget, enumeration } = optimize(input, curves, artifact, {
     quantumBase,
     reserveQuantile: opts.reserveQuantile,
     reserveHorizonSeconds: opts.reserveHorizonSeconds,
     disable,
   });
+
+  // §9.1's turnover cap TRIMS the move; it does not veto it. Rejecting a
+  // move that exceeded the window made a cold start unresolvable (a vault
+  // holding 100% cash proposes ~94% of NAV, is refused, and finds the same
+  // 100% cash at the next origin) and broke §11.1's equal envelope, since
+  // B0 and B4 never run through this gate at all. See
+  // `clampToTurnoverBudget`. Ablating the cost gate ablates the brake too,
+  // so H3 removes the trim along with the threshold.
+  const target =
+    disable.costGate === true
+      ? unclampedTarget
+      : clampToTurnoverBudget(current, unclampedTarget, remainingTurnoverBase(input, opts.cost));
 
   // Same derivation the optimiser scored candidates with (reserveOptsFrom),
   // so the reported reserve cannot disagree with the one the search obeyed.

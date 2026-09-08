@@ -339,6 +339,65 @@ function signedDeltas(current: ReadonlyMap<string, bigint>, target: ReadonlyMap<
  * `runtime/decision-driver.ts#loadLastAction` derives from persisted
  * decisions. They are inert only when there genuinely is no history.
  */
+/**
+ * The turnover still available in the rolling window, in USDC base units.
+ *
+ * Zero when the window is already full. Never negative.
+ */
+export function remainingTurnoverBase(input: DecisionInput, p: CostParams): bigint {
+  const maxTurnover = (input.vault.totalAssetsBase * BigInt(p.maxTurnoverBps)) / 10_000n;
+  const used = input.lastAction.turnoverWindowBase;
+  return used >= maxTurnover ? 0n : maxTurnover - used;
+}
+
+/**
+ * Scale a target back toward `current` so its notional fits `budgetBase`.
+ *
+ * §9.1's turnover limit is a CAP on how much may move per window -- "move at
+ * most X" -- not a veto that says "if you want more than X, move nothing".
+ * The gate used to reject wholesale, and that had two consequences serious
+ * enough to invalidate the whole evaluation:
+ *
+ *   1. A COLD START could never resolve. A vault holding 100% cash wants to
+ *      deploy ~94% of NAV, which exceeds a 50%/day cap, so the move was
+ *      rejected; the next origin found the same 100% cash and rejected the
+ *      same move. Every SRCLA and ablation run realised 0.000% net APY
+ *      forever.
+ *   2. It broke §11.1's equal-envelope requirement. B0 and B4 do not run
+ *      through the cost gate at all (`frozenEqualWeightTarget` ->
+ *      `targetToActions`), so the baselines deployed freely from cash while
+ *      every policy that DID use the gate was frozen out. That is not a
+ *      comparison of policies, it is a comparison of one policy against a
+ *      brake only it wears.
+ *
+ * Trimming preserves the brake exactly -- no window ever exceeds the cap --
+ * while letting a large move complete over several cycles. Deltas are scaled
+ * proportionally so the target's DIRECTION and relative mix are preserved;
+ * the trimmed move is then subject to the rest of the gate as usual, so a
+ * trim that lands below MIN_TURNOVER is still correctly refused.
+ */
+export function clampToTurnoverBudget(
+  current: ReadonlyMap<string, bigint>,
+  target: ReadonlyMap<string, bigint>,
+  budgetBase: bigint,
+): Map<string, bigint> {
+  const deltas = signedDeltas(current, target);
+  let notional = 0n;
+  for (const d of deltas.values()) notional += d < 0n ? -d : d;
+  if (notional <= budgetBase || notional === 0n) return new Map(target);
+  if (budgetBase <= 0n) return new Map(current);
+
+  const clamped = new Map<string, bigint>(current);
+  for (const [marketId, delta] of deltas) {
+    if (delta === 0n) continue;
+    // Integer scaling, truncating toward zero: the trimmed notional is
+    // therefore never ABOVE the budget, which is the direction that matters.
+    const scaled = (delta * budgetBase) / notional;
+    clamped.set(marketId, (current.get(marketId) ?? 0n) + scaled);
+  }
+  return clamped;
+}
+
 export function costGate(
   input: DecisionInput,
   curves: RateCurve[],
