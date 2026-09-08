@@ -717,6 +717,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             _divest(adapter, strategyBalance, 0);
         }
 
+        // Paper 9.2's allocator leg. Best-effort - see
+        // _refreshRewardsForAllocatorAction: an unwind is never blocked by it.
+        _refreshRewardsForAllocatorAction();
+
         emit EmergencyExit(adapter, strategyBalance);
     }
 
@@ -784,6 +788,10 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
 
         _enforceDivestBeforeDeploy(action.kind);
         _executeAction(action);
+        // Paper 9.2's allocator leg. Before the risk check, so the plan's
+        // minFinalAssets is evaluated against the freshest reward NAV rather
+        // than a figure the last deposit happened to leave behind.
+        _refreshRewardsForAllocatorAction();
         activePlanTurnover += action.amount;
         _enforceActivePlanRiskLimits(false);
 
@@ -1094,6 +1102,50 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             activePlanDeployExecuted = true;
         } else if (kind == ActionKind.Divest || kind == ActionKind.EmergencyExit) {
             if (activePlanDeployExecuted) revert PlanActionOrderInvalid();
+        }
+    }
+
+    /// @notice Refresh material reward values on an ALLOCATOR transaction.
+    /// @dev Paper 9.2: "There is no periodic on-chain refresh transaction:
+    ///      share-changing AND ALLOCATOR transactions refresh material reward
+    ///      values lazily when cache-age or material-change rules require it."
+    ///      Only the share-changing leg existed - deposit()/mint() call
+    ///      syncForShareAction. `executeNextActionWithProof` and
+    ///      `emergencyExit` never touched the accountant, so a plan that
+    ///      deployed or divested, or an unwind, left reward NAV at whatever
+    ///      the last harvest or deposit wrote. The only allocator-side refresh
+    ///      was inside `_harvestAtomic`, and a harvest is not a deploy, a
+    ///      divest or an exit.
+    ///
+    ///      `syncForShareAction`, not `refresh(adapters)`: it refreshes ONLY
+    ///      tokens whose cache is both material AND older than their policy's
+    ///      cacheLifetime, which is precisely 9.2's "lazily when cache-age or
+    ///      material-change rules require it". `false` because no shares are
+    ///      being issued on this path.
+    ///
+    ///      Authorisation: the VAULT is the caller, so RewardAccountant's
+    ///      existing `msg.sender == vault` check covers this. No second
+    ///      authorisation concept is required, because every allocator action
+    ///      in this system - submitPlan, executeNextActionWithProof,
+    ///      executeHarvestAction, harvest, cancelPlan, emergencyExit - passes
+    ///      through this contract. The allocator key never needs to address
+    ///      the accountant itself.
+    ///
+    ///      Best-effort by design. A reverting or misconfigured accountant
+    ///      must not be able to block a divest or an emergency exit: that
+    ///      would let a reward-oracle outage suppress exactly the bounded
+    ///      safety unwind paper 9.1 requires. The failure is not silent - the
+    ///      cache stays stale, so `_cacheStale()` holds maxDeposit and maxMint
+    ///      at zero "until a safe refresh succeeds", which is 9.2's own
+    ///      remedy. Nothing here is ever valued at zero on a failed read.
+    function _refreshRewardsForAllocatorAction() internal {
+        address accountant = rewardAccountant;
+        if (accountant == address(0)) return;
+        // solhint-disable-next-line no-empty-blocks
+        try IRewardAccountant(accountant).syncForShareAction(false) returns (uint256) {}
+        catch {
+            // See the doc comment: a failed refresh leaves the cache stale,
+            // which independently closes issuance. It must not close the exit.
         }
     }
 

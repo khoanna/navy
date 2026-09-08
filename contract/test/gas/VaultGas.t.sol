@@ -642,9 +642,29 @@ contract VaultGasTest16Adapters is VaultGasTestBase {
         //            SLOAD, paid across the same three totalAssets() calls.
         // 38_217 + 2_201 + 8_862 + 41_222 = 90_502, matching 945_876 - 855_374
         // exactly. This is the confirmed cost of the guardrail, not a
-        // regression; 970_000 keeps real headroom above the measured value
-        // rather than passing by a hair's width.
-        assertLt(gasUsed, 970_000, "plan deploy gas should be under budget");
+        // regression.
+        //
+        // Budget raised again, 970_000 -> 1_000_000, and the headroom claim
+        // above corrected. Two facts, measured rather than assumed:
+        //
+        //   1. The 945_876 figure had already drifted to 969_843 by the time
+        //      paper 9.2's allocator refresh leg was added - 157 gas of
+        //      headroom, not "real headroom". That +23_967 accumulated in
+        //      earlier changes on this branch and is NOT attributed here;
+        //      whoever needs it should bisect it.
+        //   2. Adding `_refreshRewardsForAllocatorAction()` to
+        //      `executeNextActionWithProof` costs +167 gas on this path:
+        //      969_843 -> 970_010, A/B-measured on this exact test. That is
+        //      one WARM SLOAD of `rewardAccountant` plus the zero-check
+        //      branch - warm because `currentConfigurationDigest()` already
+        //      hashes `rewardAccountant` twice per plan action. No accountant
+        //      is wired in this fixture, so the call returns immediately and
+        //      nothing else is paid.
+        //
+        // 1_000_000 restores ~3% headroom over the 970_010 measurement, so
+        // this stays a regression detector rather than a tripwire that a
+        // three-opcode guard can set off.
+        assertLt(gasUsed, 1_000_000, "plan deploy gas should be under budget");
     }
 
     function test_gas_planDivest_16adapters() public {
