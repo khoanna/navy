@@ -69,7 +69,7 @@ pnpm prisma:push                  # after schema.prisma changes — Prisma **5**
 
 1. **Anvil fork of Base mainnet:** `anvil --fork-url https://mainnet.base.org --code-size-limit 100000` (`:8545`). This *is* the chain for local dev — there is no testnet.
 2. **Deploy + configure:** `cd contract && forge script script/DeployNavyVaultSRCLA.s.sol --fork-url http://127.0.0.1:8545 --broadcast`, or `DeployAndFund.s.sol` for funded multi-tier vaults with the three adapters registered. Other entry points: `DeployBaseSystem.s.sol` (full Base package), `ConfigureAnvil.s.sol` (tops up a vault — reads `VAULT_ADDRESS` from the env), `FundVaultAnvil.s.sol`. Deploy scripts apply the paper's on-chain guardrails via `script/VaultGuardrails.sol`; the required post-deploy step is in `script/POST_DEPLOY.md`. **`NavyVaultSimple` and its four deploy scripts were deleted** — it was a stub the keeper could not drive (incompatible `submitPlan`, no harvest/emergency-exit), its `_divest` moved funds the wrong way, and its shares were 6 dp against the real vault's 12 dp. Then **write the new addresses into `be/.env` and `srcla/.env.anvil`** — they change on every redeploy.
-3. **Two separate Postgres instances:** `cd be && docker compose up -d` gives `navy` on **:5432**; srcla needs its own `srcla` DB on **:5433** (there is *no* compose file in `srcla/` — bring your own instance).
+3. **Two separate Postgres instances:** `cd be && docker compose up -d` gives `navy` on **:5432**; `cd srcla && docker compose up -d` gives `srcla` on **:5433**.
 4. `cd srcla && pnpm dev` (`:3100`) — must be up before `be`, which reads it.
 5. `cd be && pnpm start` (`:3000`; reads srcla at `SRCLA_API_URL`).
 6. `cd fe && pnpm dev` (`:3001` — pinned, since `be` owns `:3000`) and/or `cd expo-wallet && pnpm start`.
@@ -120,7 +120,7 @@ pnpm prisma:push                  # after schema.prisma changes — Prisma **5**
 
 **Anvil fork:** see *Running the stack* above for the fork + deploy commands. `contract/script/` holds the real set — there is **no** `DeployVaultAnvil.s.sol` and, since the stub was removed, no `DeploySimpleAnvil.s.sol`/`SetupAnvil.s.sol`/`DeployFull.s.sol`/`DeployDirect.s.sol` either. Both `be` and `srcla` point at this fork (`be/.env` `BASE_RPC_URL`, `srcla/.env.anvil`).
 
-**srcla Database:** Uses separate Postgres on port 5433. `DATABASE_URL=postgresql://user:password@localhost:5433/srcla`. There is **no** `docker-compose.yml` in `srcla/` — provide the instance yourself (`be/docker-compose.yml` only serves `be`'s `navy` DB on 5432). Run `pnpm prisma:push` after schema changes.
+**srcla Database:** Separate Postgres on port 5433, via `srcla/docker-compose.yml` (added in Phase 4; `be/docker-compose.yml` only serves `be`'s `navy` DB on 5432). `DATABASE_URL=postgresql://user:password@localhost:5433/srcla`. Run `pnpm prisma:push` after schema changes.
 
 **SRCLA Paper & evaluation.** Algorithm spec: `docs/research/output/srcla-paper.md` — **v0.5**, carrying an Amendment Record (P1–P8) and a burned-window declaration; both are binding spec, not proposals. Defines baselines B0–B5 (incl. B2u), ablations **H1–H7**, and two release gates (forecast calibration + policy outperformance). Evaluation report: `SRCLA-REPORT.md` (+ `SRCLA-REPORT.json`). Run a live eval against the fork: `cd srcla && source .env.anvil && npx tsx scripts/run-live-evaluation.ts` (results land in `srcla/evaluation-results-live-*.json`); `scripts/show-live-apys.ts` prints the venue APYs the fork is currently reporting.
 
@@ -128,35 +128,103 @@ pnpm prisma:push                  # after schema.prisma changes — Prisma **5**
 
 ## Paper conformance status (2026-09-08)
 
-Phases 1–3 of the paper-conformance work are **complete**; the code now implements
-the paper rather than approximating it. What that changed is recorded in
-`contract/audit/2026-09-07-phase2-changes.md` (contract behaviour, incl. an ABI
-break: `RewardAccountant`'s constructor is now `(address admin, address vault_)`).
+Phases 1–4 of the paper-conformance work are **complete**. The code implements the
+paper rather than approximating it, and there is now a real dataset to evaluate it
+on. Phase 2's contract changes are recorded in
+`contract/audit/2026-09-07-phase2-changes.md` (incl. an ABI break:
+`RewardAccountant`'s constructor is now `(address admin, address vault_)`).
 
-**Before running an evaluation, know these three things:**
+### The dataset and the eras
 
-1. **There is no held-out data.** The only dataset in the repo spans exactly the
-   paper's declared burned window (2026-05-26 → 2026-08-23). A run needs a
-   held-out era starting strictly after that, and the §11.5 gate now *fails* on a
-   missing tier, a missing (policy, tier) pair, an unmeasured withdrawal rate, an
-   inert ablation, a provisional artifact, or an uncomputable significance test —
-   absence no longer reads as success anywhere.
-2. **`SRCLA-REPORT.md` is stale.** It predates all of this and its headline
-   conclusions were artifacts of defects since fixed — the baselines were not the
-   paper's baselines (B5 had no hindsight at all), gas was booked in wei into a
-   6-dp accumulator (~3.3×10⁸× overstatement), and no replay executed a
-   redemption, which is what produced "the reserve is pure cash drag". Do not
-   cite it; regenerate it.
-3. **Two calibration inputs are still missing**, and the code says so rather than
-   guessing: P8's `k` needs a held-out turnover-vs-return sweep, and the reward
-   path needs a reward-observation collector that does not exist (so
-   `chainlink-oracle.ts`, `twap-oracle.ts` and `evaluateHarvest` are deliberately
-   unwired, each documenting what it needs). A live probe found **no materially
-   harvestable emissions on Base** at the time of writing, so this is not
-   currently on the critical path.
+**There IS held-out data now.** Phase 4 backfilled **~17,700 hourly origins over
+two years** of Base mainnet venue state (Compound III, Aave V3, Moonwell) with
+**zero gaps**, reading the protocols directly at archive blocks — `pnpm
+backfill:history`, resumable, multi-endpoint. Base archive state for all three
+venues reads back to at least 2024-09-03, and this repository had never looked at
+any of it, so the "no held-out data" blocker is closed by collecting rather than by
+waiting.
 
-Open decisions that are the paper owner's, not the code's: the B0–B5 switch
-mapping (implemented from a reading of §11.2), §9.2's material-change refresh
-trigger (only cache-age exists), the §9.2-vs-§9.3 conflict over an ended emission
-that still holds an accrued balance, and an absolute dust allowance for residual
-pulls — no bps value can cover a base-unit venue floor.
+`srcla/src/evaluation/eras.ts` is the registered split, and it is enforced in code
+(`assertNotSealed` throws; `loadEra` is the only loader that takes an era):
+
+| Era | Window | Days | Role |
+|---|---|---|---|
+| `calibration` | 2024-09-01 → 2025-08-31 | 365 | the ONLY data anything may be fit on |
+| `heldout-a` | 2025-09-01 → 2026-05-25 | 267 | **sealed**, primary — statistical power |
+| `burned` | 2026-05-26 → 2026-08-23 | 90 | §4.1 design data; in NEITHER era |
+| `heldout-b` | 2026-08-24 → present | 16+ | **sealed**, secondary — temporal purity |
+
+Two deviations are deliberate and must stay disclosed in any report: §4.1's letter
+puts the burned window inside calibration, and here it is in neither (including it
+would place fitting data *after* held-out A and invert walk-forward order); and
+held-out A *precedes* the burned window, so it carries a design-knowledge caveat
+that held-out B does not. **Both eras are reported; neither alone is sufficient.**
+
+### Running the experiment
+
+```bash
+cd srcla && docker compose up -d                       # Postgres on :5433 (new)
+DATABASE_URL=… pnpm prisma:push
+DATABASE_URL=… pnpm backfill:history                   # ~45 min, resumable, 0 gaps
+DATABASE_URL=… pnpm phase4:freeze                      # -> config/registered-artifact.json
+DATABASE_URL=… pnpm phase4:run                         # both held-out eras + SRCLA-REPORT.{md,json}
+DATABASE_URL=… pnpm evaluation:verify evaluation-heldout-a.json
+```
+
+`pnpm digests:rewrite` repairs persisted `configDigest`s in place if the format
+changes; it re-derives from columns already stored and fetches no blocks.
+
+### Things that will bite you
+
+- **The backfill CANNOT reuse `SnapshotCollector`.** That reads venue state through
+  the deployed Navy adapters, which exist only on the Anvil fork and have no Base
+  mainnet history. `src/collector/archive/calls.ts` reads Comet, the Aave Pool and
+  the mToken directly — one multicall3 `aggregate3` per origin, 39 legs.
+- **`configDigest` is `identity|parameters`** (`src/domain/config-digest.ts`).
+  Identity is protocol + market contract and is what `CONFIG_DIGEST_MISMATCH` pins;
+  parameters include the rate-model address and coefficients and are what starts a
+  new regime. Conflating them makes every venue permanently inadmissible at its
+  first governance rate change — the registered window holds 6 Compound, 14 Aave
+  and 11 Moonwell parameter regimes. A pin registers a SET of identities.
+- **IRM parameters are read from chain, not from `DEFAULT_*_CONFIG`.** Those
+  placeholders assert an 80% kink and a 6.25% low slope; Compound's real values are
+  **90%** and **~3.60%**. Compound's rate is computed per-second and annualized
+  afterwards, reproducing `Comet.getSupplyRate` exactly.
+- **Gas and oracle inputs are MEASURED per origin** (`ChainCostSnapshot` +
+  `src/evaluation/gas-series.ts`), not the five constants `harnessConfig` used to
+  assert. The series refuses to extrapolate backwards and carries a digest, because
+  the manifest's dataset hash covers snapshots and withdrawals only.
+- **A registered artifact is FROZEN.** `prepareArtifact` returns it untouched;
+  re-fitting it against a held-out era would train the policy on the data the run
+  exists to test.
+- **`SRCLA-REPORT.{md,json}` is generated by `pnpm phase4:run`** from
+  `src/evaluation/report/render-markdown.ts`. The untracked `evaluation-v2/*.mjs`
+  harness that produced every earlier version is retired.
+
+### Still open
+
+1. **§11.1's pinned-prestate fork replay is unwired.** `src/evaluation/fork-runner.ts`
+   is the scaffold and nothing calls it, so the §11.5 gate reports it `NOT PRODUCED`
+   and **blocks**. Expect the registered run to `FAIL` on that check alone. That is
+   the designed behaviour — a reproducible `FAIL` is an acceptable outcome and
+   §11.5 forbids retuning against held-out data to avoid one.
+2. **Withdrawals are a registered schedule, not observed.** The Navy vault has no
+   Base mainnet history, so §8.1's `W_H` has no real series. Its cadence is now in
+   SECONDS: counted in snapshots it silently meant "every 7 hours" on hourly
+   origins and demanded ~240% of the vault per reserve horizon.
+3. **P8's `k` did not resolve.** The sweep in `freeze-artifact.ts` is a step
+   function against a dispersion proxy, not an informative curve; scoring it needs
+   turnover-vs-return through the replay. It is reported UNRESOLVED rather than set
+   to a convenient value.
+4. **`forecast/calibration.ts` still carries the F2/F3 shape** on the LIVE weekly
+   calibration path. `select.ts` was its dead duplicate and is deleted;
+   `forecast/grid-sweep.ts` is the registered replacement used by the evaluation.
+5. **Reward emissions**: a live probe found no materially harvestable emissions on
+   Base, so §9.2–9.4 ships tested and contributes a measured zero.
+
+Open decisions that are the paper owner's, not the code's: the burned-window
+placement above, the B0–B5 switch mapping (implemented from a reading of §11.2),
+§9.2's material-change refresh trigger (only cache-age exists), the §9.2-vs-§9.3
+conflict over an ended emission that still holds an accrued balance, and an
+absolute dust allowance for residual pulls — no bps value can cover a base-unit
+venue floor.
