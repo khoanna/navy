@@ -37,6 +37,7 @@ import {
   type SweepRow,
 } from '../src/forecast/grid-sweep.js';
 import { buildResidualPanel } from '../src/policy/steps/portfolio-quantile.js';
+import { buildIdentityPin, regimeOf } from '../src/domain/config-digest.js';
 import type { CompletedLabel } from '../src/policy/types.js';
 import type { HorizonSeconds } from '../src/policy/registered.js';
 
@@ -208,14 +209,31 @@ async function main(): Promise<void> {
             `gate is not a registration.`,
     );
 
-    // Pinned configuration digests, from the calibration era's own regimes.
-    const pinnedConfigDigests: Record<string, string> = {};
+    // Pinned IDENTITIES, from every one observed during calibration.
+    //
+    // Not the first digest seen, and not the whole digest: pinning the whole
+    // thing makes a venue permanently inadmissible at its first governance
+    // rate change, which is what made the first end-to-end run realise 0.000%
+    // for every policy. Registering the SET of identities is the honest
+    // analogue of an operator pinning what was deployed -- a novel
+    // implementation in the held-out era is still caught. See
+    // src/domain/config-digest.ts.
+    const digestsByMarket = new Map<string, Set<string>>();
     for (const s of dataset.snapshots) {
       for (const m of s.snapshots) {
-        if (pinnedConfigDigests[m.marketId] === undefined) {
-          pinnedConfigDigests[m.marketId] = m.configDigest;
-        }
+        const set = digestsByMarket.get(m.marketId) ?? new Set<string>();
+        set.add(m.configDigest);
+        digestsByMarket.set(m.marketId, set);
       }
+    }
+    const pinnedConfigDigests: Record<string, string> = {};
+    for (const [marketId, set] of digestsByMarket) {
+      pinnedConfigDigests[marketId] = buildIdentityPin(set);
+      const regimes = new Set([...set].map(regimeOf)).size;
+      console.log(
+        `[freeze] ${marketId.padEnd(18)} identities=${pinnedConfigDigests[marketId]!.split(',').length} ` +
+          `regimes=${regimes}`,
+      );
     }
 
     // Portfolio scalar fallback: the most conservative solved per-venue

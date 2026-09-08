@@ -418,8 +418,14 @@ export function createMoonwellSimulationEngine(
 // Exports
 // ============================================================================
 
-// Types
-export {
+// Types. `export type`, NOT a bare `export`: these are type-only declarations,
+// and a value re-export of them makes Node throw at import time --
+// "does not provide an export named 'AaveSimulatorConfig'" -- because nothing
+// with that name exists in the emitted JavaScript. `tsc --noEmit` does not
+// catch it (isolatedModules is off), so the failure only appears when a script
+// actually imports this barrel, which is what blocked the first end-to-end
+// evaluation run.
+export type {
   AaveSimulatorConfig,
   CompoundSimulatorConfig,
   DetailedSimulatedRate,

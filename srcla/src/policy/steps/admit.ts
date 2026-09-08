@@ -1,4 +1,5 @@
 import type { AdmissionResult, DecisionInput, MarketObservation, PolicyArtifact } from '../types.js';
+import { identityMatchesPin, identityOf } from '../../domain/config-digest.js';
 
 const WAD = 10n ** 18n;
 /** Utilisation above this is treated as past the kink for admission purposes. */
@@ -42,8 +43,17 @@ const RULES: Rule[] = [
     check: (m, _input, artifact) => {
       const pinned = artifact.pinnedConfigDigests[m.marketId];
       if (pinned === undefined) return { passed: true, detail: 'no pin to contradict' };
-      const ok = pinned === m.configDigest;
-      return { passed: ok, detail: ok ? 'digest matches pin' : `digest ${m.configDigest} != pin ${pinned}` };
+      // MEMBERSHIP, not equality: a pin may register every identity observed
+      // during calibration, because a rate-strategy contract genuinely was
+      // swapped inside the registered window. A novel identity in the
+      // held-out era is still caught. See src/domain/config-digest.ts.
+      const ok = identityMatchesPin(pinned, m.configDigest);
+      return {
+        passed: ok,
+        detail: ok
+          ? 'identity matches pin'
+          : `identity ${identityOf(m.configDigest)} not among pinned [${pinned}]`,
+      };
     },
   },
   {

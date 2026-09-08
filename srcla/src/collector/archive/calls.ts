@@ -30,6 +30,7 @@
  */
 import { Interface, type Result } from 'ethers';
 import type { RpcPool } from './endpoints.js';
+import { DIGEST_SEPARATOR } from '../../domain/config-digest.js';
 
 /** Matches src/protocols/math.ts and evaluation/replay.ts (365.25 days). */
 const SECONDS_PER_YEAR = 31_557_600n;
@@ -503,7 +504,7 @@ export function decodeOrigin(
         // denominator, where 0 is the conservative choice.
         reservesBase: 0n,
         paused,
-        configDigest: configDigestFor('compound', irm, paused),
+        configDigest: configDigestFor('compound', addr.comet, irm, paused),
         reserveFactorBps: null,
         irm,
         raw: {
@@ -549,7 +550,12 @@ export function decodeOrigin(
         // Frozen and inactive reserves reject supply() exactly as a paused
         // one does; AaveV3Adapter.maxDeployable treats all three alike.
         paused: !flags.active || flags.frozen || flags.paused,
-        configDigest: configDigestFor('aave', irm, !flags.active || flags.frozen || flags.paused),
+        configDigest: configDigestFor(
+          'aave',
+          addr.aavePool,
+          irm,
+          !flags.active || flags.frozen || flags.paused,
+        ),
         reserveFactorBps: flags.reserveFactorBps,
         irm,
         raw: {
@@ -603,7 +609,7 @@ export function decodeOrigin(
         borrowsBase: borrows,
         reservesBase: reserves,
         paused,
-        configDigest: configDigestFor('moonwell', irm, paused),
+        configDigest: configDigestFor('moonwell', addr.mToken, irm, paused),
         reserveFactorBps: reserveFactor === null ? null : Number((reserveFactor * 10_000n) / WAD),
         irm,
         raw: {
@@ -834,24 +840,50 @@ export function decodeAaveConfiguration(data: bigint): AaveReserveFlags {
 }
 
 /**
- * A configuration digest for a historical origin.
+ * A configuration digest for a historical origin, as `identity|parameters`.
  *
- * §6.2 treats a regime AS a configuration digest, and `admit`'s
- * REGIME_MIN_HISTORY resets when it changes. The chain exposes no such digest
- * for these venues, so it is derived from the parameters whose change SHOULD
- * start a new regime: the rate model's identity and coefficients, and the
- * paused flag. Deriving it from the whole snapshot would make every origin its
- * own regime and no venue would ever accumulate history.
+ * The two halves answer two different §6.2 questions and MUST NOT be one
+ * string -- see `src/domain/config-digest.ts` for what went wrong when they
+ * were. In short: identity changes are an implementation swap (quarantine the
+ * market); parameter changes are a re-parameterisation (start a new regime,
+ * reset the history requirement). Governance re-parameterises these venues
+ * routinely, so a pin over the combined string makes every venue permanently
+ * inadmissible at the first rate change.
+ *
+ * The chain exposes no digest of its own for these venues, so identity is the
+ * protocol, the market contract and the rate-model contract; parameters are
+ * the model's coefficients and the paused flag. Deriving either from the whole
+ * snapshot would make every origin its own regime and no venue would ever
+ * accumulate history.
  */
-function configDigestFor(protocol: string, irm: IrmReading | null, paused: boolean): string {
-  if (irm === null) return `${protocol}:no-irm:${paused ? 'paused' : 'active'}`;
-  return [
-    protocol,
-    irm.address.toLowerCase(),
-    irm.baseRateWad.toString(),
-    irm.kinkRay.toString(),
-    irm.slopeLowWad.toString(),
-    irm.slopeHighWad.toString(),
-    paused ? 'paused' : 'active',
-  ].join(':');
+function configDigestFor(
+  protocol: string,
+  marketAddress: string,
+  irm: IrmReading | null,
+  paused: boolean,
+): string {
+  // IDENTITY is the protocol and the MARKET contract only. The rate-model
+  // ADDRESS belongs to the parameter half even though §6.2 lists "rate
+  // strategy" among the identity pins, because for two of the three venues
+  // the model contract IS the parameters: Moonwell's JumpRateModel is
+  // immutable, so governance re-parameterises by deploying a new one, and the
+  // registered window contains TEN Moonwell model addresses against ten
+  // parameter sets. Pinning the model address as identity would fire the
+  // implementation-swap alarm on every routine rate change -- the same
+  // failure the identity/parameter split exists to prevent. A change to the
+  // Comet, Pool or mToken contract itself remains an identity change and is
+  // still caught.
+  const identity = [protocol, marketAddress.toLowerCase()].join(':');
+  const params =
+    irm === null
+      ? `no-irm:${paused ? 'paused' : 'active'}`
+      : [
+          irm.address.toLowerCase(),
+          irm.baseRateWad.toString(),
+          irm.kinkRay.toString(),
+          irm.slopeLowWad.toString(),
+          irm.slopeHighWad.toString(),
+          paused ? 'paused' : 'active',
+        ].join(':');
+  return `${identity}${DIGEST_SEPARATOR}${params}`;
 }

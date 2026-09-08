@@ -19,6 +19,7 @@
  */
 import { createHash } from 'crypto';
 import { protocolOf } from '../../domain/protocol.js';
+import { identityOf, regimeOf } from '../../domain/config-digest.js';
 import type { HorizonSeconds } from '../../policy/registered.js';
 import type {
   CompletedLabel,
@@ -167,11 +168,14 @@ export function buildDecisionInput(
       // exit — see MarketObservation's doc comment for why min(position,
       // cash) is a cold-start deadlock. Same value the live driver uses.
       maxWithdrawableBase: m.cashBase,
-      configDigest: m.configDigest,
-      // §6.2: a regime IS a configuration digest (ContractRegime.digest), so
-      // a configuration change starts a new regime and resets the history
-      // requirement — which is the behaviour the admission rule wants.
-      regimeId: m.configDigest,
+      // The IDENTITY half only. A pin over the whole digest is defeated by
+      // any routine rate re-parameterisation, which made every venue
+      // permanently inadmissible; see src/domain/config-digest.ts.
+      configDigest: identityOf(m.configDigest),
+      // §6.2: a regime IS a configuration digest, so a configuration change —
+      // including a parameter change — starts a new regime and resets the
+      // history requirement. That is the FULL digest, identity included.
+      regimeId: regimeOf(m.configDigest),
       paused: m.paused,
       capBps: m.capBps,
       absoluteCapBase: cfg.absoluteCapBase,
