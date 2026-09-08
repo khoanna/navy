@@ -41,6 +41,21 @@ export class VaultController {
   }
 
   /**
+   * POST /vault/transactions/approve
+   * Get the unsigned ERC-20 approve transaction granting the vault an allowance.
+   * Paper §2.1: the farming entry path is a user-signed, user-paid approval
+   * followed by `deposit`/`mint` — there is no relayer.
+   */
+  @Post('transactions/approve')
+  @HttpCode(200)
+  buildApproveTransactions(
+    @Body() body: { amountBase: string },
+  ): { transactions: TransactionProposal[] } {
+    const transactions = this.vaultService.buildApproveTransactions(body.amountBase);
+    return { transactions };
+  }
+
+  /**
    * POST /vault/transactions/deposit
    * Get unsigned transaction calldata for deposit
    */

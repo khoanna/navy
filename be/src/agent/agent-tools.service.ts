@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NAVY_EVM, type NavyEvm } from '../evm/evm.module';
 import { OrdersService } from '../payments/orders.service';
 import { VaultService } from '../vault/vault.service';
-import { VaultDepositService } from '../vault/vault-deposit.service';
 import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
 import { PriceService } from '../market/price.service';
@@ -16,7 +15,6 @@ export class AgentToolsService {
     @Inject(NAVY_EVM) private readonly chain: NavyEvm,
     private readonly orders: OrdersService,
     private readonly vault: VaultService,
-    private readonly vaultDeposit: VaultDepositService,
     private readonly transfers: TransferService,
     private readonly users: UserService,
     private readonly prices: PriceService,
@@ -87,17 +85,17 @@ export class AgentToolsService {
         const res = await this.transfers.buildAuthorization(userId, walletAddress, String(a.recipient), BigInt(String(a.amountBase)));
         return { display: { kind: 'action', action: 'transfer' }, asset: 'USDC', ...res };
       },
+      // Paper 2.1: farming has no relayer. These propose UNSIGNED transactions the
+      // user signs and pays gas for themselves — no EIP-3009 authorization, no permit.
       build_farming_deposit: async (a) => {
         if (!hasAmount) return { error: CLARIFY.farming_deposit };
         const amountBase = String(a.amountBase);
         try {
-          const auth = await this.vaultDeposit.buildDepositAuthorization(userId, walletAddress, amountBase);
+          const transactions = await this.vault.buildDepositTransactions(walletAddress, amountBase);
           return {
             display: { kind: 'action', action: 'farming_deposit' },
             amountBase,
-            authorizationId: auth.id,
-            typedData: auth.typedData,
-            transactions: auth.typedData, // keep transactions for compatibility
+            transactions,
           };
         } catch (e) {
           return { error: (e as Error).message };
@@ -107,12 +105,18 @@ export class AgentToolsService {
         if (!hasAmount) return { error: CLARIFY.farming_withdraw };
         const amount = String(a.amount);
         try {
-          const permit = await this.vaultDeposit.buildRedeemPermit(userId, walletAddress, amount);
+          // "all" resolves against the user's current navUSDC share balance.
+          let sharesBase = amount;
+          if (amount.toLowerCase() === 'all') {
+            const position = await this.vault.getPosition(walletAddress);
+            if (BigInt(position.sharesBase) === 0n) return { error: 'No shares to withdraw.' };
+            sharesBase = position.sharesBase;
+          }
+          const transactions = await this.vault.buildRedeemTransactions(walletAddress, sharesBase);
           return {
             display: { kind: 'action', action: 'farming_withdraw' },
-            sharesBase: permit.sharesBase,
-            authorizationId: permit.id,
-            typedData: permit.typedData,
+            sharesBase,
+            transactions,
           };
         } catch (e) {
           return { error: (e as Error).message };

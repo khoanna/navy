@@ -2,7 +2,7 @@
  * VaultService — Deep module providing vault position queries, ERC-4626 limits,
  * unsigned calldata builders for local wallet signing, and SRCLA strategy integration.
  */
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ethers } from 'ethers';
 import { NavyConfigService } from '../config/config.service';
 import { SrclaClient, StrategyAllocation } from './srcla-client';
@@ -59,14 +59,13 @@ export class VaultService {
     private readonly config: NavyConfigService,
     private readonly srclaClient: SrclaClient,
   ) {
-    const rpcUrl = config.farmingBaseRpcUrl;
-    this.chainId = config.farmingBaseChainId;
-    this.usdcAddress = config.farmingBaseUsdcAddress;
-    this.vaultAddress = config.farmingVaultAddress;
-
-    if (!rpcUrl) throw new Error('Missing required env var: FARMING_BASE_RPC_URL');
-    if (!this.usdcAddress) throw new Error('Missing required env var: FARMING_BASE_USDC_ADDRESS');
-    if (!this.vaultAddress) throw new Error('Missing required env var: FARMING_VAULT_ADDRESS');
+    // Canonical EVM config — the vault runs on the same chain as payments.
+    // (The old FARMING_BASE_* / FARMING_VAULT_ADDRESS duplicates existed only while
+    // payments were on Sepolia and farming was on Base; both are Base now.)
+    const rpcUrl = config.evmRpcUrl;
+    this.chainId = config.evmChainId;
+    this.usdcAddress = config.usdcAddress;
+    this.vaultAddress = config.vaultAddress;
 
     this.provider = new ethers.JsonRpcProvider(rpcUrl, this.chainId);
     this.usdc = new ethers.Contract(this.usdcAddress, ERC20_ABI, this.provider);
@@ -115,6 +114,43 @@ export class VaultService {
    */
   async getAllowance(walletAddress: string): Promise<bigint> {
     return this.usdc.allowance(walletAddress, this.vaultAddress) as Promise<bigint>;
+  }
+
+  /**
+   * Build the standalone ERC-20 `approve` transaction for the vault as spender.
+   *
+   * Paper §2.1 makes the farming entry path "USDC approval followed by `deposit`
+   * or `mint`", signed and paid for by the user — there is no relayer. This is
+   * the approval half, exposed on its own so a client can drive the two steps
+   * independently (and re-approve without re-deriving a deposit).
+   *
+   * @throws BadRequestException if amountBase is not a non-negative integer string
+   */
+  buildApproveTransactions(amountBase: string): TransactionProposal[] {
+    let amount: bigint;
+    try {
+      amount = BigInt(amountBase);
+    } catch {
+      throw new BadRequestException('amountBase must be a valid integer string (6-decimal USDC base units)');
+    }
+    if (amount < 0n) {
+      throw new BadRequestException('amountBase must not be negative');
+    }
+
+    const approveData = this.usdc.interface.encodeFunctionData('approve', [
+      this.vaultAddress,
+      amount,
+    ]);
+
+    return [
+      {
+        to: this.usdcAddress,
+        data: approveData,
+        value: '0',
+        chainId: this.chainId,
+        description: `Approve vault to spend ${amount.toString()} USDC`,
+      },
+    ];
   }
 
   /**
