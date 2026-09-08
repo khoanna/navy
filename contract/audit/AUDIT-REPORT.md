@@ -1,5 +1,54 @@
 # Navy Contract System — Living Security Audit and Production Readiness Register
 
+> ## ⚠️ STALE AS OF 2026-09-08 — this register describes PRE-PHASE-2 BYTECODE
+>
+> Everything below was written against the contract source as it stood on **2026-08-13**.
+> The Phase 2 SRCLA paper-conformance work (branch `feat/srcla-paper-conformance`, commits
+> `22d59355` … `71958a21`) changed `NavyVaultSRCLA`, `RewardExecutor` and `RewardAccountant`
+> in ways that alter economics, authority and the external ABI. **The findings, the
+> disposition table and the verification matrix below no longer describe the code in this
+> tree.**
+>
+> **Read `audit/2026-09-07-phase2-changes.md` first.** It is the delta: what changed, which
+> paper section required it, what an auditor must re-examine, and three findings that were
+> deliberately left open.
+>
+> The historical findings below are **not** edited — an audit report is a dated artefact and
+> rewriting it destroys the record. What follows is the list of entries an auditor must
+> re-verify against current source rather than trust as written.
+>
+> ### Loudest first
+>
+> 1. **ABI BREAK.** `RewardAccountant`'s constructor is now
+>    `constructor(address admin, address vault_)`. Anything constructing it the old way no
+>    longer compiles, and any recorded constructor-argument blob is wrong for this bytecode.
+> 2. **`RewardAccountant.syncForShareAction` is no longer `view`.** It is state-changing and
+>    is called by `NavyVaultSRCLA.deposit`/`mint`, on a vault with **no `ReentrancyGuard`**.
+>    Every caller's gas and reentrancy surface changed.
+> 3. **No redeploy has occurred.** Every address recorded in `DEPLOYMENTS.md` and in the
+>    `.env` files refers to superseded bytecode. `vault-e2e` is **BLOCKED**, not passing.
+>
+> ### Register entries needing re-verification
+>
+> | Entry | Why Phase 2 disturbed it |
+> |---|---|
+> | `AMMORACLE-7` (Open) | Half-closed: `RewardExecutor` now enforces per-route `maxRewardFeedAge`/`maxUsdcFeedAge` **and** a governed ceiling `MAX_FEED_AGE = 48 hours`. **The Base sequencer-uptime/grace check is still absent**, so the finding stays Open — but its evidence text is out of date. |
+> | `AMMORACLE-8` (Open) | Unchanged — governed economic min/max answer bounds are still absent. Re-confirm against the rewritten `_validateChainlinkPrice`. |
+> | `AMMORACLE-3` / `MATH-6` (Partially fixed) | The route digest now covers `block.chainid`, `keccak256(pools)` and the two max-age fields; `computeDigest` is `view`, not `pure`. **Every previously computed route digest is invalidated.** The feed pair/direction is still a governance assertion. |
+> | `AMMORACLE-4` / `MATH-7` (Fixed) | `setDailyVolume` — the admin backdoor that reset the daily cap — has been **removed** from the contract and `IRewardExecutor`. Re-verify the cap is now only reachable through real enforcement. |
+> | `LENDACCESS-3` / `SIGCHAIN-2` (Fixed) | Plan commitments: the legacy `executePlan`/`executeNextAction`/3-arg `harvest` and the weak `executeAction` are **deleted from the bytecode**, not disabled. `executeHarvestAction` now takes its action from a Merkle proof. `currentConfigurationDigest()` covers a new per-adapter field, so **every previously computed configuration digest is invalidated**. |
+> | `LENDACCESS-8` (Fixed) | `setAdapterRisk` gained a fifth argument (`liquidityFloorBps`) and `AdapterRiskSet`'s topic0 changed. A deploy can now revert `AdapterLiquidityFloorBreached` — new liveness-affecting behaviour driven by a third-party venue's transient liquidity. |
+> | `LENDACCESS-6` (Operational gate) | **Newly sharper.** `recognizeLoss` and `setAdapterAccountingCap` give `ADMIN_ROLE` a direct, single-call, un-timelocked lever on `totalAssets()` and therefore on share price. One-directional (NAV can only be lowered), but the multisig/timelock policy this gate demands must now cover it explicitly. |
+> | `ERC20-4` / `ERC4626-6` / `MATH-3` / `MATH-8` (Fixed) | "Counters are telemetry only" is **no longer true**: `recognizedLosses` gates plan execution via `activePlanMaxRecognizedLoss`, and `totalAssets()` now subtracts a durable per-adapter `adapterRecognizedLoss`. Re-verify the double-accounting claim. |
+> | `ERC4626-5` (Fixed) | `totalAssets()` pays an extra SLOAD per active adapter, and `deposit`/`mint` now make a **state-mutating** external call to the accountant plus a `STATICCALL` from `maxDeposit`. The P1 gas budgets below were raised; re-baseline them. |
+> | `ERC20-5` / `LENDACCESS-5` (Feature disabled) | Still disabled — and compounded. Recognized reward NAV **ignores claimable amounts entirely**: `refresh(address[])` declares an adapters array and never reads it. See finding **F8** in the change record; the property "a failed claim contributes zero" holds **vacuously**, not by code. |
+> | `GENERAL-5` (Fixed in scripts) | `DeployBaseSystem.s.sol` shipped a vault whose every deposit reverted (`Unauthorized()`); fixed by binding the accountant's vault at construction. A **REQUIRED post-deploy step** is now documented in `script/POST_DEPLOY.md`. Separately, the `USDC_USD_FEED` constant at `DeployBaseSystem.s.sol:33` **does not appear in Chainlink's Base feed directory** and is unresolved. |
+> | Verification matrix — "Local tests" | The recorded `190 passed / 0 failed / 60 skipped` is from 2026-08-13. Current: **450 passed / 0 failed / 3 skipped** on `forge test --no-match-path 'test/{fork,integration}/*' --no-match-contract 'Fork'`. Fork suites still cannot run. |
+>
+> Nothing in this banner authorises a release. The release decision below stands: **NOT
+> AUTHORIZED FOR PRODUCTION.**
+
+
 **Canonical status date:** 2026-08-13  
 **Audit baseline:** current working tree under `contract/`  
 **Targets:** Sepolia `NavyPayments`; Base mainnet `NavyVaultSRCLA`, lending adapters, oracle wrapper, and reward executor  
@@ -180,6 +229,7 @@ For every contract, adapter, deployment, oracle, role, fee, or backend-ABI chang
 |---|---|---|
 | 2026-08-12 | Seven-domain audit and remediation baseline created. | Detailed specialist files under `2026-08-12-audit/`. |
 | 2026-08-13 | Rewritten as the canonical living register; all 49 finding records reconciled against current source; backend nonce/ABI migration, governance, oracle, reward, fork, quality, and performance gates made explicit. | `forge fmt --check`, `forge build`, `forge test`: 190 passed, 0 failed, 60 RPC-dependent skips; document reconciliation and whitespace checks passed. |
+| 2026-09-08 | **Phase 2 SRCLA paper-conformance changed the contracts; this register was NOT rewritten.** A staleness banner was added at the top naming the entries that need re-verification. The delta is recorded separately in `audit/2026-09-07-phase2-changes.md`, including an ABI break (`RewardAccountant`'s constructor), a `view` → state-changing mutability change on `syncForShareAction`, a new admin lever on `totalAssets()`, five deleted external functions, and three findings (F6, F7, F8) deliberately left open. | `forge build` clean; `forge test --no-match-path 'test/{fork,integration}/*' --no-match-contract 'Fork'`: 450 passed, 0 failed, 3 skipped. Golden plan-encoding vectors pass; `PlanHeader` unchanged. **No fork/integration suite was run and no redeploy occurred** — `vault-e2e` is BLOCKED. |
 
 ## Scope and limitations
 
