@@ -1,23 +1,32 @@
-import { ethers, Filter } from 'ethers';
+import { Filter } from 'ethers';
 import { ChainClient } from '../chain/client.js';
+import { VAULT_EVENTS_IFACE, WITHDRAW_TOPIC } from '../chain/contract-abis.js';
 import { PrismaClient } from '@prisma/client';
 
 /**
- * Withdrawal event from the vault
+ * A finalized ERC-4626 `Withdraw` from the vault.
  */
 export interface WithdrawalEvent {
   blockHash: string;
   timestamp: Date;
-  sender: string;
+  /**
+   * The account whose shares were burned (the ERC-4626 `owner`), NOT the
+   * caller. Under Navy's gasless redeem the caller is always the relayer, so
+   * `sender` would identify the relayer on every single event and carry no
+   * information at all. Persisted into the `WithdrawalEvent.sender` column,
+   * which predates this distinction.
+   */
+  owner: string;
+  /** The ERC-4626 `sender` — whoever called `withdraw`/`redeem`. */
+  caller: string;
+  /** The ERC-4626 `receiver` — where the assets were sent. */
+  receiver: string;
   assets: bigint;
   shares: bigint;
+  /** Position of the log within its block, used as the deduplication key. */
+  logIndex: number;
   regimeId?: string;
 }
-
-/**
- * Withdrawal event signature: Withdrawal(address indexed sender, uint256 assets, uint256 shares)
- */
-const WITHDRAWAL_TOPIC = ethers.id('Withdrawal(address,uint256,uint256)');
 
 /**
  * Withdrawal log from ethers provider
@@ -28,6 +37,8 @@ interface WithdrawalLog {
   data: string;
   blockHash: string;
   blockNumber: number;
+  /** Position of this log within its block — part of the dedup key. */
+  logIndex: number;
   timestamp: number | undefined;
 }
 
@@ -51,16 +62,20 @@ export class WithdrawalTracker {
    * Parses Withdrawal events from the vault contract and stores them in the database.
    */
   async collectSince(fromBlock: number): Promise<WithdrawalEvent[]> {
-    const currentBlock = await this.chainClient.getBlockNumber();
+    // Paper §7.3/§10.1: observations must come from FINALIZED blocks. This
+    // read `getBlockNumber()` (the chain head), so a reorg could retract a
+    // withdrawal that had already been folded into the reserve quantile.
+    const finalized = await this.chainClient.getFinalizedBlock();
+    const currentBlock = Number(finalized.number);
 
     if (fromBlock >= currentBlock) {
       return [];
     }
 
-    // Build filter for Withdrawal events from the vault
+    // Build filter for the vault's ERC-4626 Withdraw events
     const filter: Filter = {
       address: this.vaultAddress,
-      topics: [WITHDRAWAL_TOPIC],
+      topics: [WITHDRAW_TOPIC],
       fromBlock: fromBlock + 1,
       toBlock: currentBlock,
     };
@@ -91,6 +106,7 @@ export class WithdrawalTracker {
         data: log.data,
         blockHash: log.blockHash,
         blockNumber: log.blockNumber,
+        logIndex: log.index,
         timestamp: blockTimestamps.get(log.blockNumber),
       };
       const event = this.parseWithdrawalLog(parsedLog);
@@ -101,7 +117,7 @@ export class WithdrawalTracker {
       }
     }
 
-    console.log(`[WithdrawalTracker] Collected ${events.length} withdrawal events from blocks ${fromBlock + 1}-${currentBlock}`);
+    console.log(`[WithdrawalTracker] Collected ${events.length} withdrawal events from finalized blocks ${fromBlock + 1}-${currentBlock}`);
     return events;
   }
 
@@ -109,13 +125,21 @@ export class WithdrawalTracker {
    * Get historical withdrawal amounts for quantile calculation.
    * Returns assets amounts for withdrawals within the specified window.
    */
-  async getWithdrawalHistory(marketId: string, windowDays: number): Promise<bigint[]> {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - windowDays);
+  async getWithdrawalHistory(
+    windowDays: number,
+    nowSeconds: number,
+    owner?: string
+  ): Promise<bigint[]> {
+    // Previously `where: { sender: marketId }` against `new Date()`. The
+    // column holds a withdrawing ACCOUNT, never a market id, so the filter
+    // matched nothing for every caller; and anchoring the window on wall
+    // clock rather than on the caller's origin time makes the result
+    // non-reproducible from a snapshot. Both are fixed here.
+    const cutoff = new Date((nowSeconds - windowDays * 86_400) * 1000);
 
     const events = await this.prisma.withdrawalEvent.findMany({
       where: {
-        sender: marketId,
+        ...(owner ? { sender: owner } : {}),
         timestamp: {
           gte: cutoff,
         },
@@ -158,47 +182,22 @@ export class WithdrawalTracker {
   }
 
   /**
-   * Parse a Withdrawal log entry into a WithdrawalEvent.
-   * The log data layout:
-   * - topic[1]: sender address (indexed)
-   * - data[0]: assets (uint256)
-   * - data[1]: shares (uint256)
+   * Parse an ERC-4626 `Withdraw` log into a WithdrawalEvent.
+   *
+   * `Withdraw(address indexed sender, address indexed receiver,
+   *           address indexed owner, uint256 assets, uint256 shares)` —
+   * THREE indexed parameters, so `assets` and `shares` are the only two words
+   * in `data`. The previous implementation assumed the (nonexistent)
+   * `Withdrawal(address indexed sender, uint256, uint256)` shape and read
+   * `topics[1]` as the withdrawing account; under this real event `topics[1]`
+   * is the caller and `topics[3]` is the owner.
+   *
+   * Decoded by name through the interface rather than by slicing words, so a
+   * future parameter change cannot silently shift which value is read.
    */
   private parseWithdrawalLog(log: WithdrawalLog): WithdrawalEvent | null {
-    if (!log.data || log.data === '0x') {
-      return null;
-    }
-
     try {
-      // Parse the log data
-      // After the 3 topics (event signature + indexed sender), the data contains:
-      // - assets (uint256) at offset 0
-      // - shares (uint256) at offset 32
-      const data = log.data.slice(2); // Remove '0x' prefix
-      const words: string[] = [];
-
-      for (let i = 0; i < data.length; i += 64) {
-        words.push(data.slice(i, i + 64) as string);
-      }
-
-      if (words.length < 2) {
-        return null;
-      }
-
-      // Parse assets and shares (uint256 values)
-      const assets = ethers.toBigInt('0x' + words[0]);
-      const shares = ethers.toBigInt('0x' + words[1]);
-
-      // Get sender from topic (indexed parameter)
-      // topic[0] = event signature hash
-      // topic[1] = sender address (indexed)
-      const senderTopic = log.topics[1];
-      if (!senderTopic) {
-        return null;
-      }
-
-      // Extract address from topic (last 20 bytes / 40 hex chars)
-      const sender = '0x' + senderTopic.slice(-40);
+      const decoded = VAULT_EVENTS_IFACE.decodeEventLog('Withdraw', log.data, log.topics);
 
       // Get timestamp from the pre-fetched block data
       const timestamp = log.timestamp ? new Date(log.timestamp * 1000) : new Date();
@@ -206,9 +205,12 @@ export class WithdrawalTracker {
       return {
         blockHash: log.blockHash,
         timestamp,
-        sender,
-        assets,
-        shares,
+        logIndex: log.logIndex,
+        caller: decoded.getValue('sender') as string,
+        receiver: decoded.getValue('receiver') as string,
+        owner: decoded.getValue('owner') as string,
+        assets: decoded.getValue('assets') as bigint,
+        shares: decoded.getValue('shares') as bigint,
       };
     } catch (error) {
       console.error('[WithdrawalTracker] Failed to parse withdrawal log:', error);
@@ -232,7 +234,9 @@ export class WithdrawalTracker {
         id: eventKey,
         blockHash: event.blockHash,
         timestamp: event.timestamp,
-        sender: event.sender,
+        // The `sender` COLUMN carries the ERC-4626 `owner` — see the doc on
+        // WithdrawalEvent.owner. Renaming the column needs a migration.
+        sender: event.owner,
         assets: event.assets.toString(),
         shares: event.shares.toString(),
         regimeId: event.regimeId ?? null,
@@ -244,17 +248,13 @@ export class WithdrawalTracker {
   }
 
   /**
-   * Generate a unique key for event deduplication.
+   * Deduplication key. (blockHash, logIndex) is the only pair that uniquely
+   * identifies a log; the previous key was a 32-bit string hash of
+   * (blockHash, account, assets, shares), which collapsed two identical
+   * withdrawals by the same account in the same block into one row and
+   * therefore under-counted withdrawal demand exactly when it spikes.
    */
   private hashEventKey(event: WithdrawalEvent): string {
-    const data = `${event.blockHash}-${event.sender}-${event.assets}-${event.shares}`;
-    // Simple deterministic ID based on event data
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      const char = data.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return 'we_' + Math.abs(hash).toString(36) + '_' + event.blockHash.slice(0, 8);
+    return `we_${event.blockHash}_${event.logIndex}`;
   }
 }

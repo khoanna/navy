@@ -1,253 +1,264 @@
-import { ethers } from 'ethers';
-
 /**
- * Unit tests for withdrawal event parsing logic.
- * Tests the raw event data parsing without Prisma dependencies.
+ * WithdrawalTracker — exercised against the real class, with a fake chain and
+ * a fake Prisma client.
+ *
+ * The previous version of this file asserted nothing about the tracker: it
+ * re-implemented hex slicing and percentile arithmetic inline and checked its
+ * own reimplementation, so it stayed green through the entire lifetime of
+ * audit finding NEW-10 (the tracker filtered on `Withdrawal(address,uint256,
+ * uint256)`, an event that exists nowhere in contract/src, and therefore
+ * matched zero logs forever — making the paper's §8.1 demand quantile
+ * `Q_beta(W_H)` identically zero).
  */
-describe('Withdrawal Event Parsing', () => {
-  // Event signature for Withdrawal(address,uint256,uint256)
-  const WITHDRAWAL_TOPIC = ethers.id('Withdrawal(address,uint256,uint256)');
+import { ethers } from 'ethers';
+import type { PrismaClient } from '@prisma/client';
+import type { ChainClient } from '../../../src/chain/client.js';
+import { WithdrawalTracker } from '../../../src/collector/withdrawal-tracker.js';
+import { VAULT_EVENTS_IFACE, WITHDRAW_TOPIC } from '../../../src/chain/contract-abis.js';
 
-  describe('Event Topic', () => {
-    it('should compute correct withdrawal event topic', () => {
-      // Verify the topic matches expected value
-      expect(WITHDRAWAL_TOPIC).toBeTruthy();
-      expect(WITHDRAWAL_TOPIC.startsWith('0x')).toBe(true);
-      expect(WITHDRAWAL_TOPIC.length).toBe(66); // 32 bytes = 64 hex chars + 0x
-    });
+const VAULT = '0x' + '11'.repeat(20);
+/** Navy's gasless redeem is relayed, so the ERC-4626 `sender` is the relayer. */
+const RELAYER = '0x' + '22'.repeat(20);
+const OWNER = '0x' + '33'.repeat(20);
+const RECEIVER = '0x' + '44'.repeat(20);
+
+interface FakeLog {
+  address: string;
+  topics: string[];
+  data: string;
+  blockHash: string;
+  blockNumber: number;
+  index: number;
+}
+
+/** Build a real ABI-encoded `Withdraw` log. */
+function withdrawLog(opts: {
+  assets: bigint;
+  shares: bigint;
+  owner?: string;
+  blockNumber?: number;
+  blockHash?: string;
+  index?: number;
+}): FakeLog {
+  const encoded = VAULT_EVENTS_IFACE.encodeEventLog('Withdraw', [
+    RELAYER,
+    RECEIVER,
+    opts.owner ?? OWNER,
+    opts.assets,
+    opts.shares,
+  ]);
+  return {
+    address: VAULT,
+    topics: [...encoded.topics],
+    data: encoded.data,
+    blockHash: opts.blockHash ?? '0x' + 'be'.repeat(32),
+    blockNumber: opts.blockNumber ?? 90,
+    index: opts.index ?? 0,
+  };
+}
+
+function fakeChain(opts: { head: number; finalized: number; logs: FakeLog[] }) {
+  const filters: ethers.Filter[] = [];
+  const client = {
+    getBlockNumber: async () => opts.head,
+    getFinalizedBlock: async () => ({ number: opts.finalized, hash: '0x' + 'aa'.repeat(32), timestamp: 1_700_000_000 }),
+    getBlock: async (n: number) => ({ number: n, timestamp: 1_700_000_000 + n }),
+    getLogs: async (filter: ethers.Filter) => {
+      filters.push(filter);
+      return opts.logs as unknown as ethers.Log[];
+    },
+  };
+  return { client: client as unknown as ChainClient, filters };
+}
+
+function fakePrisma() {
+  const upserts: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const rows: Array<Record<string, unknown>> = [];
+  const queries: unknown[] = [];
+  const prisma = {
+    withdrawalEvent: {
+      upsert: async (args: { where: { id: string }; create: Record<string, unknown> }) => {
+        upserts.push({ id: args.where.id, data: args.create });
+        return {};
+      },
+      findMany: async (args: unknown) => {
+        queries.push(args);
+        return rows;
+      },
+      findFirst: async () => null,
+    },
+    chainBlock: { findUnique: async () => null },
+  } as unknown as PrismaClient;
+  return { prisma, upserts, rows, queries };
+}
+
+describe('WithdrawalTracker.collectSince — the event it filters on', () => {
+  it('filters the vault for the ERC-4626 Withdraw topic', async () => {
+    const chain = fakeChain({ head: 200, finalized: 100, logs: [] });
+    const tracker = new WithdrawalTracker(chain.client, VAULT, fakePrisma().prisma);
+
+    await tracker.collectSince(50);
+
+    expect(chain.filters).toHaveLength(1);
+    expect(chain.filters[0]!.address).toBe(VAULT);
+    expect(chain.filters[0]!.topics).toEqual([
+      ethers.id('Withdraw(address,address,address,uint256,uint256)'),
+    ]);
   });
 
-  describe('Event Data Parsing', () => {
-    it('should parse assets and shares from event data', () => {
-      const assets = 1000000n; // 1 USDC (6 decimals)
-      const shares = 1100000n; // 1.1 shares
-
-      // Build raw log data: two 32-byte words
-      // Manual hex padding since ethers v6 zeroPadValue has type restrictions
-      const padHex = (value: bigint): string => {
-        const hex = value.toString(16);
-        return '0x' + hex.padStart(64, '0');
-      };
-
-      const assetsHex = padHex(assets);
-      const sharesHex = padHex(shares);
-      const rawData = assetsHex.slice(2) + sharesHex.slice(2);
-
-      // Parse assets from data (first 32 bytes)
-      const assetsParsed = ethers.toBigInt('0x' + rawData.slice(0, 64));
-      expect(assetsParsed).toBe(assets);
-
-      // Parse shares from data (second 32 bytes)
-      const sharesParsed = ethers.toBigInt('0x' + rawData.slice(64, 128));
-      expect(sharesParsed).toBe(shares);
-    });
-
-    it('should handle large values correctly', () => {
-      const assets = 1_000_000_000_000n; // 1 million USDC
-      const shares = 1_100_000_000_000n; // 1.1 million shares
-
-      const padHex = (value: bigint): string => {
-        const hex = value.toString(16);
-        return '0x' + hex.padStart(64, '0');
-      };
-
-      const assetsHex = padHex(assets);
-      const sharesHex = padHex(shares);
-      const rawData = assetsHex.slice(2) + sharesHex.slice(2);
-
-      const assetsParsed = ethers.toBigInt('0x' + rawData.slice(0, 64));
-      const sharesParsed = ethers.toBigInt('0x' + rawData.slice(64, 128));
-
-      expect(assetsParsed).toBe(assets);
-      expect(sharesParsed).toBe(shares);
-    });
+  it('does not filter on the nonexistent Withdrawal(address,uint256,uint256) topic', async () => {
+    const chain = fakeChain({ head: 200, finalized: 100, logs: [] });
+    await new WithdrawalTracker(chain.client, VAULT, fakePrisma().prisma).collectSince(50);
+    expect(chain.filters[0]!.topics![0]).not.toBe(
+      ethers.id('Withdrawal(address,uint256,uint256)')
+    );
+    expect(chain.filters[0]!.topics![0]).toBe(WITHDRAW_TOPIC);
   });
 
-  describe('Indexed Parameter Parsing', () => {
-    it('should parse sender address from indexed topic', () => {
-      const sender = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+  it('scans only up to the FINALIZED block, not the chain head (§7.3/§10.1)', async () => {
+    // A reorg above the finalized head could otherwise retract a withdrawal
+    // that had already been folded into the reserve quantile.
+    const chain = fakeChain({ head: 200, finalized: 137, logs: [] });
+    await new WithdrawalTracker(chain.client, VAULT, fakePrisma().prisma).collectSince(50);
 
-      // Pad sender to 32 bytes (as EVM stores indexed address parameters)
-      const paddedSender = ethers.zeroPadValue(sender, 32);
-
-      // The topic value is the padded address
-      // To extract: take last 40 hex chars (20 bytes = address)
-      const extractedSender = '0x' + paddedSender.slice(-40);
-
-      expect(extractedSender).toBe(sender.toLowerCase());
-    });
+    expect(chain.filters[0]!.fromBlock).toBe(51);
+    expect(chain.filters[0]!.toBlock).toBe(137);
+    expect(chain.filters[0]!.toBlock).not.toBe(200);
   });
 
-  describe('Event Structure', () => {
-    it('should build correct log structure for Withdrawal event', () => {
-      const sender = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
-      const assets = 5000000n; // 5 USDC
-      const shares = 5500000n; // 5.5 shares
-
-      // Pad address helper
-      const padAddress = (addr: string): string => {
-        return '0x' + addr.slice(2).padStart(64, '0');
-      };
-
-      // Build the topics array (same as EVM log structure)
-      const topics = [
-        WITHDRAWAL_TOPIC, // Event signature
-        padAddress(sender), // Indexed: sender
-        // Note: assets and shares are NOT indexed, so they're in data
-      ];
-
-      // Build the data (non-indexed parameters)
-      const padHex = (value: bigint): string => {
-        const hex = value.toString(16);
-        return '0x' + hex.padStart(64, '0');
-      };
-      const assetsHex = padHex(assets);
-      const sharesHex = padHex(shares);
-      // Build data as hex without 0x prefix
-      const data = assetsHex.slice(2) + sharesHex.slice(2);
-
-      // Verify structure matches Withdrawal(address indexed sender, uint256 assets, uint256 shares)
-      expect(topics.length).toBe(2); // signature + sender (indexed)
-      expect(topics[0]).toBe(WITHDRAWAL_TOPIC);
-      expect(topics[1]).toBe(ethers.zeroPadValue(sender, 32));
-
-      // Data contains assets and shares
-      const parsedAssets = ethers.toBigInt('0x' + data.slice(0, 64));
-      const parsedShares = ethers.toBigInt('0x' + data.slice(64, 128));
-
-      expect(parsedAssets).toBe(assets);
-      expect(parsedShares).toBe(shares);
-    });
-  });
-
-  describe('Timestamp Calculation', () => {
-    it('should convert block timestamp to Date correctly', () => {
-      const blockTimestamp = 1700000000; // Unix timestamp
-      const expectedDate = new Date(blockTimestamp * 1000);
-
-      expect(expectedDate.getTime()).toBe(1700000000000);
-    });
-
-    it('should handle zero timestamp', () => {
-      const blockTimestamp = 0;
-      const expectedDate = new Date(blockTimestamp * 1000);
-
-      expect(expectedDate.getTime()).toBe(0);
-    });
-  });
-
-  describe('Event ID Generation', () => {
-    it('should generate deterministic event IDs', () => {
-      // Test the hashing logic used for deduplication
-      const eventData = '0xblockhash-0xsender-1000000-1100000';
-
-      // Simple deterministic hash (like the actual implementation)
-      let hash = 0;
-      for (let i = 0; i < eventData.length; i++) {
-        const char = eventData.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-      }
-
-      const eventId = 'we_' + Math.abs(hash).toString(36) + '_' + '0xblockhash'.slice(0, 8);
-
-      expect(eventId.startsWith('we_')).toBe(true);
-      expect(eventId.length).toBeGreaterThan(10);
-    });
-
-    it('should generate different IDs for different events', () => {
-      const event1 = '0xblock1-0xsender1-1000000-1100000';
-      const event2 = '0xblock2-0xsender2-2000000-2200000';
-
-      // Simple hash
-      const hash1 = (() => {
-        let h = 0;
-        for (let i = 0; i < event1.length; i++) {
-          h = ((h << 5) - h) + event1.charCodeAt(i);
-          h = h & h;
-        }
-        return Math.abs(h);
-      })();
-
-      const hash2 = (() => {
-        let h = 0;
-        for (let i = 0; i < event2.length; i++) {
-          h = ((h << 5) - h) + event2.charCodeAt(i);
-          h = h & h;
-        }
-        return Math.abs(h);
-      })();
-
-      expect(hash1).not.toBe(hash2);
-    });
+  it('does nothing when the cursor is already at or past the finalized head', async () => {
+    const chain = fakeChain({ head: 200, finalized: 137, logs: [] });
+    const events = await new WithdrawalTracker(chain.client, VAULT, fakePrisma().prisma).collectSince(
+      137
+    );
+    expect(events).toEqual([]);
+    expect(chain.filters).toHaveLength(0);
   });
 });
 
-describe('Withdrawal History for Reserve Calculation', () => {
-  describe('Quantile Calculation', () => {
-    it('should calculate 95th percentile correctly', () => {
-      // Sample withdrawal amounts (in USDC base units)
-      const withdrawals = [
-        1000000n,  // 1 USDC
-        2000000n,  // 2 USDC
-        1500000n,  // 1.5 USDC
-        3000000n,  // 3 USDC
-        5000000n,  // 5 USDC
-        4000000n,  // 4 USDC
-        2500000n,  // 2.5 USDC
-        3500000n,  // 3.5 USDC
-      ];
+describe('WithdrawalTracker.collectSince — decoding a real Withdraw log', () => {
+  it('reads assets and shares out of the two data words', async () => {
+    const chain = fakeChain({
+      head: 200,
+      finalized: 100,
+      logs: [withdrawLog({ assets: 4_250_000n, shares: 4_000_000n })],
+    });
+    const db = fakePrisma();
 
-      // Sort ascending
-      const sorted = [...withdrawals].sort((a, b) => {
-        if (a < b) return -1;
-        if (a > b) return 1;
-        return 0;
-      });
+    const [event] = await new WithdrawalTracker(chain.client, VAULT, db.prisma).collectSince(50);
 
-      // Calculate 95th percentile index
-      const percentile = 0.95;
-      const index = (sorted.length - 1) * percentile;
-      const lower = Math.floor(index);
-      const upper = Math.ceil(index);
+    expect(event!.assets).toBe(4_250_000n);
+    expect(event!.shares).toBe(4_000_000n);
+  });
 
-      let p95: bigint;
-      if (lower === upper || upper >= sorted.length) {
-        p95 = sorted[lower]!;
-      } else {
-        // Linear interpolation
-        const fraction = index - lower;
-        const lowerValue = Number(sorted[lower]);
-        const upperValue = Number(sorted[upper]);
-        const interpolated = lowerValue + fraction * (upperValue - lowerValue);
-        p95 = BigInt(Math.round(interpolated));
-      }
-
-      // With 8 values, 95th percentile should be ~4.5 USDC
-      expect(Number(p95)).toBeGreaterThanOrEqual(4000000);
-      expect(Number(p95)).toBeLessThanOrEqual(5000000);
+  it('attributes the withdrawal to the share OWNER, not to the relayer that called it', async () => {
+    // `Withdraw` has THREE indexed parameters. The old parser assumed the
+    // one-indexed-parameter `Withdrawal` shape and read topics[1] — under the
+    // real event that is the caller, which for Navy is always the relayer.
+    const chain = fakeChain({
+      head: 200,
+      finalized: 100,
+      logs: [withdrawLog({ assets: 1_000_000n, shares: 1_000_000n })],
     });
 
-    it('should handle empty history', () => {
-      const withdrawals: bigint[] = [];
+    const [event] = await new WithdrawalTracker(chain.client, VAULT, fakePrisma().prisma).collectSince(
+      50
+    );
 
-      // With empty history, should use floor reserve
-      const floor = 500000000n; // 500 USDC (5% of hypothetical 10M total)
+    expect(event!.owner.toLowerCase()).toBe(OWNER);
+    expect(event!.caller.toLowerCase()).toBe(RELAYER);
+    expect(event!.receiver.toLowerCase()).toBe(RECEIVER);
+    expect(event!.owner.toLowerCase()).not.toBe(RELAYER);
+  });
 
-      expect(withdrawals.length).toBe(0);
-      // In the actual ReserveOptimizer, empty history falls back to floor
-      expect(floor).toBe(500000000n);
+  it('persists the owner into the sender column and stamps the finalized block timestamp', async () => {
+    const chain = fakeChain({
+      head: 200,
+      finalized: 100,
+      logs: [withdrawLog({ assets: 7_500_000n, shares: 7_000_000n, blockNumber: 90 })],
     });
+    const db = fakePrisma();
 
-    it('should handle single value', () => {
-      const withdrawals = [1000000n];
+    await new WithdrawalTracker(chain.client, VAULT, db.prisma).collectSince(50);
 
-      // 95th percentile of single value is that value
-      const percentile = 0.95;
-      const index = (withdrawals.length - 1) * percentile;
-      const result = withdrawals[Math.floor(index)]!;
+    expect(db.upserts).toHaveLength(1);
+    expect(db.upserts[0]!.data.sender).toBe(ethers.getAddress(OWNER));
+    expect(db.upserts[0]!.data.assets).toBe('7500000');
+    expect(db.upserts[0]!.data.shares).toBe('7000000');
+    expect((db.upserts[0]!.data.timestamp as Date).getTime()).toBe((1_700_000_000 + 90) * 1000);
+  });
+});
 
-      expect(result).toBe(1000000n);
+describe('WithdrawalTracker — deduplication', () => {
+  it('keeps two identical withdrawals in the same block apart by log index', async () => {
+    // Two 1,000,000-unit redemptions by the same owner in one block are two
+    // distinct withdrawals. The old key hashed (blockHash, account, assets,
+    // shares) into 32 bits, so they collapsed to one row — under-counting
+    // demand exactly when it spikes.
+    const same = { assets: 1_000_000n, shares: 1_000_000n, blockNumber: 90 };
+    const chain = fakeChain({
+      head: 200,
+      finalized: 100,
+      logs: [withdrawLog({ ...same, index: 0 }), withdrawLog({ ...same, index: 1 })],
     });
+    const db = fakePrisma();
+
+    const events = await new WithdrawalTracker(chain.client, VAULT, db.prisma).collectSince(50);
+
+    expect(events).toHaveLength(2);
+    expect(new Set(db.upserts.map((u) => u.id)).size).toBe(2);
+  });
+
+  it('gives the same log the same id on a re-scan', async () => {
+    const log = withdrawLog({ assets: 2_000_000n, shares: 2_000_000n, index: 3 });
+    const first = fakePrisma();
+    const second = fakePrisma();
+
+    await new WithdrawalTracker(fakeChain({ head: 200, finalized: 100, logs: [log] }).client, VAULT, first.prisma).collectSince(50);
+    await new WithdrawalTracker(fakeChain({ head: 300, finalized: 250, logs: [log] }).client, VAULT, second.prisma).collectSince(50);
+
+    expect(first.upserts[0]!.id).toBe(second.upserts[0]!.id);
+  });
+});
+
+describe('WithdrawalTracker.getWithdrawalHistory', () => {
+  it('anchors the window on the supplied origin time and does not filter by market id', async () => {
+    // The old signature took a `marketId` and filtered `sender: marketId`.
+    // `sender` holds a withdrawing ACCOUNT, so that matched nothing, ever —
+    // and it anchored the cutoff on `new Date()`, making the result
+    // irreproducible from a snapshot.
+    const db = fakePrisma();
+    const chain = fakeChain({ head: 200, finalized: 100, logs: [] });
+    const tracker = new WithdrawalTracker(chain.client, VAULT, db.prisma);
+
+    const originSeconds = 1_700_000_000;
+    await tracker.getWithdrawalHistory(7, originSeconds);
+
+    const where = (db.queries[0] as { where: { sender?: string; timestamp: { gte: Date } } }).where;
+    expect(where.sender).toBeUndefined();
+    expect(where.timestamp.gte.getTime()).toBe((originSeconds - 7 * 86_400) * 1000);
+  });
+
+  it('narrows to a single owner when one is supplied', async () => {
+    const db = fakePrisma();
+    const chain = fakeChain({ head: 200, finalized: 100, logs: [] });
+    const tracker = new WithdrawalTracker(chain.client, VAULT, db.prisma);
+
+    await tracker.getWithdrawalHistory(30, 1_700_000_000, OWNER);
+
+    expect((db.queries[0] as { where: { sender?: string } }).where.sender).toBe(OWNER);
+  });
+
+  it('returns the persisted assets as bigints', async () => {
+    const db = fakePrisma();
+    db.rows.push({ assets: '12345678' }, { assets: '999' });
+    const chain = fakeChain({ head: 200, finalized: 100, logs: [] });
+
+    const out = await new WithdrawalTracker(chain.client, VAULT, db.prisma).getWithdrawalHistory(
+      7,
+      1_700_000_000
+    );
+
+    expect(out).toEqual([12_345_678n, 999n]);
   });
 });

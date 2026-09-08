@@ -27,7 +27,9 @@ export class WithdrawalRepository {
       data: {
         blockHash: event.blockHash,
         timestamp: event.timestamp,
-        sender: event.sender,
+        // The `sender` column holds the ERC-4626 `owner` (the account whose
+        // shares were burned), not the caller — see WithdrawalEvent.owner.
+        sender: event.owner,
         assets: event.assets.toString(),
         shares: event.shares.toString(),
         regimeId: event.regimeId ?? null,
@@ -45,7 +47,7 @@ export class WithdrawalRepository {
       data: events.map((e) => ({
         blockHash: e.blockHash,
         timestamp: e.timestamp,
-        sender: e.sender,
+        sender: e.owner,
         assets: e.assets.toString(),
         shares: e.shares.toString(),
         regimeId: e.regimeId ?? null,
