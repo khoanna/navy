@@ -4,6 +4,8 @@ import { ethers } from 'ethers';
 @Injectable()
 export class NavyConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {
+    // Legacy name: the per-user subwallets it was built for were removed 2026-07-29.
+    // It now keys the be/src/crypto AES envelope for merchant API secrets + webhook secrets.
     if (!/^[0-9a-fA-F]{64}$/.test(this.req('SUBWALLET_MASTER_KEY'))) {
       throw new Error('SUBWALLET_MASTER_KEY must be 32 bytes (64 hex chars)');
     }
@@ -27,7 +29,6 @@ export class NavyConfigService {
   get masterKey(): Buffer { return Buffer.from(this.req('SUBWALLET_MASTER_KEY'), 'hex'); }
   get privyAppId(): string { return this.req('PRIVY_APP_ID'); }
   get privyAppSecret(): string { return this.req('PRIVY_APP_SECRET'); }
-  get privyAuthorizationKey(): string | undefined { return this.env.PRIVY_AUTHORIZATION_KEY || undefined; }
   get adminMaxTotpFails(): number {
     const n = parseInt(this.req('ADMIN_MAX_TOTP_FAILS'), 10);
     if (!Number.isFinite(n) || n <= 0) {
@@ -41,7 +42,7 @@ export class NavyConfigService {
     return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
   }
   // --- EVM (Base) ---
-  get evmRpcUrl(): string { return this.env.BASE_RPC_URL ?? this.req('BASE_RPC_URL'); }
+  get evmRpcUrl(): string { return this.req('BASE_RPC_URL'); }
   get evmChainId(): number {
     const n = parseInt(this.env.EVM_CHAIN_ID ?? '8453', 10);
     return Number.isFinite(n) ? n : 8453;
@@ -53,7 +54,6 @@ export class NavyConfigService {
   get ownerPrivateKey(): string { return this.req('NAVY_OWNER_PRIVATE_KEY'); }
   // --- NavyVault (ERC-4626 farming vault) ---
   get vaultAddress(): string { return this.req('NAVY_VAULT_ADDRESS'); }
-  get keeperPrivateKey(): string { return this.env.NAVY_KEEPER_PRIVATE_KEY ?? this.req('NAVY_OWNER_PRIVATE_KEY'); }
   get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault Simple'; }
   get vaultShareEip712Version(): string { return this.env.NAVY_VAULT_EIP712_VERSION ?? '1'; }
   /** USDC EIP-712 domain name/version. Circle Base USDC (EIP-3009) uses name "USD Coin", version "2"; overridable + verify against chain. */
@@ -77,14 +77,6 @@ export class NavyConfigService {
   get cloudinaryCloudName(): string { return this.req('CLOUDINARY_CLOUD_NAME'); }
   get cloudinaryApiKey(): string { return this.req('CLOUDINARY_API_KEY'); }
   get cloudinaryApiSecret(): string { return this.req('CLOUDINARY_API_SECRET'); }
-  // --- Farming Chain (Base Mainnet) ---
-  get farmingBaseRpcUrl(): string { return this.req('FARMING_BASE_RPC_URL'); }
-  get farmingBaseChainId(): number {
-    const n = parseInt(this.env.FARMING_BASE_CHAIN_ID ?? '8453', 10);
-    return Number.isFinite(n) ? n : 8453;
-  }
-  get farmingBaseUsdcAddress(): string { return this.req('FARMING_BASE_USDC_ADDRESS'); }
-  get farmingVaultAddress(): string { return this.req('FARMING_VAULT_ADDRESS'); }
   // --- SRCLA Service ---
   get srclaApiUrl(): string { return this.env.SRCLA_API_URL ?? 'http://localhost:3100'; }
 }

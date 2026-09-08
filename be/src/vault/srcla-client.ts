@@ -13,15 +13,6 @@
 import { Injectable } from '@nestjs/common';
 import { NavyConfigService } from '../config/config.service';
 
-/** SRCLA production configuration constants */
-export const SRCLA_CONFIG = {
-  FORECAST_METHOD: 'rolling' as const,
-  FORECAST_WINDOW_DAYS: 7,
-  FORECAST_QUANTILE: 0.05,
-  COVERAGE_TARGET: 0.95,
-  ARTIFACT_HASH: '5ed517d128bab909',
-} as const;
-
 export interface StrategyAllocation {
   totalAssets: string;
   allocations: Array<{
@@ -160,16 +151,6 @@ export class SrclaClient {
   }
 
   /**
-   * Trigger a manual rebalance decision cycle.
-   * This calls the SRCLA internal trigger endpoint to force a decision evaluation.
-   *
-   * @param force - If true, skip the decision interval check and force immediate evaluation
-   */
-  async triggerRebalance(force = false): Promise<{ triggered: boolean; message: string }> {
-    return this.post('/v1/internal/trigger', { force });
-  }
-
-  /**
    * Submit a rebalance proposal to SRCLA for evaluation.
    * SRCLA checks admission, cost gate, reserve policy, and adapter caps.
    * If valid, returns a signed evaluation for on-chain execution.
@@ -247,41 +228,4 @@ export class SrclaClient {
     }
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    const url = new URL(path, this.baseUrl);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        throw new Error(`SRCLA ${res.status}: ${await res.text().catch(() => '')}`);
-      }
-
-      return res.json() as Promise<T>;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`SRCLA request timeout after ${this.timeout}ms`);
-      }
-      if (error instanceof Error) {
-        const cause = (error as any).cause as { code?: string } | undefined;
-        if (error.message.includes('ECONNREFUSED') || cause?.code === 'ECONNREFUSED') {
-          throw new Error(`SRCLA service unavailable at ${this.baseUrl}`);
-        }
-      }
-      throw error;
-    }
-  }
 }

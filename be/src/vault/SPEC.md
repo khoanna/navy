@@ -1,7 +1,8 @@
 # SrclaClient Specification
 
 ## Overview
-HTTP client for querying the /srcla service that provides strategy allocation data and rebalancing decisions.
+HTTP client for the `srcla` service, which owns yield forecasting, allocation decisions, and on-chain keeper
+execution. `be` is a **read-only** consumer: it never computes allocations and never calls the keeper.
 
 ## Interface
 
@@ -17,15 +18,25 @@ HTTP client for querying the /srcla service that provides strategy allocation da
 | `getCurrentAllocation()` | `GET /v1/allocation` | Current vault allocation across adapters |
 | `getDecision(hash)` | `GET /v1/decisions/:hash` | Single decision by hash |
 | `getDecisions(params?)` | `GET /v1/decisions` | Paginated decisions list |
+| `getLatestDecision()` | `GET /v1/decisions?limit=1` | Most recent decision, or `null` |
 | `getHarvests(params?)` | `GET /v1/harvests` | Paginated harvest records |
 | `getMarkets()` | `GET /v1/markets` | Available yield markets |
 | `getHealth()` | `GET /v1/health` | Service health status |
+| `reviewProposal(req)` | `POST /v1/proposals/review` | Submit a proposal for policy review (currently unreferenced by `be`) |
+
+`triggerRebalance()` was removed: paper §10.2 says `be` "does not relay farming transactions,
+possess the allocator key, or execute rebalances". Composing srcla *history* over HTTP is
+permitted; asking srcla to run a decision cycle is not.
 
 ## Configuration
-- Base URL injected via `'SRCLA_API_URL'` token
-- Default timeout: 5000ms
-- Connection errors thrown as descriptive `Error`
+- Base URL from `NavyConfigService.srclaApiUrl` (env `SRCLA_API_URL`, default `http://localhost:3100`)
+- Default timeout: 5000 ms, enforced with an `AbortController`
+- Connection and timeout errors are rethrown as descriptive `Error`s
 
 ## Dependencies
-- `@nestjs/axios` HttpService
-- `rxjs` firstValueFrom
+- Native `fetch` — matching the `CoinGeckoClient` / `OpenRouterClient` pattern. No `@nestjs/axios`, no `rxjs`.
+
+## Consumers
+`be/src/vault/vault-admin.controller.ts` re-serves this under
+`/vault/admin/{strategy,decisions,harvests,cohorts,rebalance/status,rebalance/proposals}` —
+all `GET`, with no trigger or other mutation.

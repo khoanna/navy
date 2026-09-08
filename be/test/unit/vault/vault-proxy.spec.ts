@@ -18,10 +18,10 @@ describe('VaultService proxy', () => {
         {
           provide: NavyConfigService,
           useValue: {
-            farmingBaseRpcUrl: 'https://mainnet.base.org',
-            farmingBaseChainId: 8453,
-            farmingBaseUsdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-            farmingVaultAddress: '0x55E728b08FdB9432520FB3fd1b9D7777320f8ED3',
+            evmRpcUrl: 'https://mainnet.base.org',
+            evmChainId: 8453,
+            usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            vaultAddress: '0x55E728b08FdB9432520FB3fd1b9D7777320f8ED3',
           },
         },
         {
@@ -30,7 +30,6 @@ describe('VaultService proxy', () => {
             getDecisions: jest.fn(),
             getHarvests: jest.fn(),
             getCurrentAllocation: jest.fn(),
-            triggerRebalance: jest.fn(),
           },
         },
       ],
@@ -46,7 +45,8 @@ describe('VaultService proxy', () => {
         data: [{ decisionHash: '0x123', timestamp: '2026-09-01T00:00:00Z' }],
         meta: { count: 1 },
       };
-      srclaClient.getDecisions.mockResolvedValue(mockResponse);
+      // Partial fixture: the proxy is pass-through, so only the fields asserted below matter.
+      srclaClient.getDecisions.mockResolvedValue(mockResponse as never);
 
       const result = await vaultService.getDecisions();
 
@@ -138,26 +138,6 @@ describe('VaultService proxy', () => {
 
       expect(srclaClient.getCurrentAllocation).toHaveBeenCalled();
       expect(result.totalAssets).toBe('1000000');
-    });
-  });
-
-  describe('triggerRebalance', () => {
-    it('should proxy triggerRebalance from srclaClient', async () => {
-      const mockResponse = { triggered: true, message: 'Rebalance triggered' };
-      srclaClient.triggerRebalance.mockResolvedValue(mockResponse);
-
-      const result = await vaultService.triggerRebalance();
-
-      expect(srclaClient.triggerRebalance).toHaveBeenCalledWith(false);
-      expect(result.triggered).toBe(true);
-    });
-
-    it('should pass force=true when specified', async () => {
-      srclaClient.triggerRebalance.mockResolvedValue({ triggered: true, message: 'Force rebalance triggered' });
-
-      await vaultService.triggerRebalance(true);
-
-      expect(srclaClient.triggerRebalance).toHaveBeenCalledWith(true);
     });
   });
 });

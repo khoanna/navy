@@ -26,9 +26,10 @@ export interface NavyEvm {
   treasury: string;
   paymentsAddress: string;
   usdcDomain: UsdcDomain;
-  vault: ethers.Contract;         // connected to the relayer wallet (depositWithAuthorization/permit/redeem/reads)
-  vaultAsKeeper: ethers.Contract; // connected to the keeper wallet (reallocate/deployToAdapter)
-  keeper: ethers.Wallet;
+  // Read-only vault handle. Paper §10.2: be "does not relay farming transactions,
+  // possess the allocator key, or execute rebalances" — srcla owns keeper execution,
+  // so there is deliberately no keeper wallet or allocator-connected contract here.
+  vault: ethers.Contract;
   vaultShareDomain: UsdcDomain;
   yieldAdapterAbi: any;           // bare ABI array, for constructing adapter contracts on the fly
 }
@@ -51,9 +52,7 @@ export interface NavyEvm {
         chainId: cfg.evmChainId,
         verifyingContract: cfg.usdcAddress,
       };
-      const keeper = new ethers.Wallet(cfg.keeperPrivateKey, provider);
-      const vault = new ethers.Contract(cfg.vaultAddress, vaultArtifact, relayer);
-      const vaultAsKeeper = new ethers.Contract(cfg.vaultAddress, vaultArtifact, keeper);
+      const vault = new ethers.Contract(cfg.vaultAddress, vaultArtifact, provider);
       const vaultShareDomain: UsdcDomain = {
         name: cfg.vaultShareEip712Name,
         version: cfg.vaultShareEip712Version,
@@ -64,7 +63,7 @@ export interface NavyEvm {
         provider, payments, paymentsAsOwner, relayer, owner, usdc,
         usdcAddress: cfg.usdcAddress, treasury: cfg.treasuryAddress,
         paymentsAddress: cfg.paymentsAddress, usdcDomain,
-        vault, vaultAsKeeper, keeper, vaultShareDomain, yieldAdapterAbi: adapterArtifact,
+        vault, vaultShareDomain, yieldAdapterAbi: adapterArtifact,
       };
     },
   }],

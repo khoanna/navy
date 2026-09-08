@@ -1,8 +1,12 @@
 /**
  * VaultAdminController — cohort-level accounting endpoints (admin-only).
  * Exposes read-only views of vault event history and profit tracking.
+ *
+ * Paper §10.2: be "does not relay farming transactions, possess the allocator key,
+ * or execute rebalances". Composing SRCLA *history* over HTTP is permitted; a
+ * trigger is not history, so this controller is GET-only by construction.
  */
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { VaultEventWatcher, DEFAULT_COHORT_ADDRESS } from './vault-event-watcher';
 import { VaultService } from './vault.service';
 import { RolesGuard } from '../auth/roles.guard';
@@ -126,16 +130,5 @@ export class VaultController {
     @Query('limit') limit?: string,
   ) {
     return this.vaultService.getHarvests({ adapter, cursor, limit });
-  }
-
-  /**
-   * POST /vault/admin/rebalance/trigger
-   * Trigger a manual rebalance decision cycle in SRCLA.
-   * Calls the SRCLA internal trigger endpoint to force a decision evaluation.
-   */
-  @Post('rebalance/trigger')
-  async triggerRebalance(@Body() body: { force?: boolean }) {
-    const force = body.force ?? false;
-    return this.vaultService.triggerRebalance(force);
   }
 }

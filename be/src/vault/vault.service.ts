@@ -321,12 +321,4 @@ export class VaultService {
     }));
     return { harvests, next: res.meta.nextCursor };
   }
-
-  /**
-   * Trigger a manual rebalance decision cycle in SRCLA.
-   * Proxies the request to the SRCLA internal trigger endpoint.
-   */
-  async triggerRebalance(force = false): Promise<{ triggered: boolean; message: string }> {
-    return this.srclaClient.triggerRebalance(force);
-  }
 }
