@@ -289,7 +289,6 @@ describe('runRegisteredEvaluation reaches the kernel', () => {
 
   it('reports missing tiers and produces a result for every registered policy', () => {
     const out = run();
-    expect(out.missingPolicyIds).toEqual([]);
     // Only one of the four registered tiers was run, and §11.5 fails the
     // gate on a missing tier — so the absence has to be visible.
     expect(out.missingTiers).toEqual([
@@ -297,6 +296,39 @@ describe('runRegisteredEvaluation reaches the kernel', () => {
       1_000_000_000_000n,
       10_000_000_000_000n,
     ]);
+    // Every policy DID run at the tier that ran.
+    for (const p of REGISTERED_POLICIES) {
+      expect(out.results.some((r) => r.policy.id === p.id && r.tier === TIER)).toBe(true);
+      expect(out.missingPolicyIds).not.toContain(`${p.id}@${TIER}`);
+    }
+  });
+
+  // The absence-reads-as-success shape, at the (policy, tier) level: a
+  // GLOBAL "was this id seen anywhere" set reports nothing for a policy that
+  // ran at one tier and not at the other three, exactly as `TIERS.every(...)`
+  // over the tiers present reports nothing for an absent tier.
+  it('reports every registered policy as missing at every tier that did not run', () => {
+    const out = run();
+
+    expect(out.missingPolicyIds).toHaveLength(
+      REGISTERED_POLICIES.length * out.missingTiers.length,
+    );
+    for (const t of out.missingTiers) {
+      for (const p of REGISTERED_POLICIES) {
+        expect(out.missingPolicyIds).toContain(`${p.id}@${t}`);
+      }
+    }
+  });
+
+  it('reports a policy that ran at some tiers but not all', () => {
+    const out = run({ tiers: [TIER, 100_000_000_000n] });
+
+    // srcla ran at two of the four registered tiers: it must still be
+    // reported missing at the other two.
+    expect(out.results.filter((r) => r.policy.id === 'srcla')).toHaveLength(2);
+    expect(out.missingPolicyIds).toContain('srcla@1000000000000');
+    expect(out.missingPolicyIds).toContain('srcla@10000000000000');
+    expect(out.missingPolicyIds).not.toContain('srcla@10000000000');
   });
 
   it('flags the artifact as provisional when it is not calibrated', () => {

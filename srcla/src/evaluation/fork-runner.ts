@@ -1,8 +1,34 @@
 /**
- * Implements paper §11.4: Pinned Base-fork jobs validate exact adapter math.
+ * Scaffold for paper §11.1's per-policy PINNED-PRESTATE FORK REPLAY, and for
+ * §11.4's pinned Base-fork validation of exact adapter math.
  *
- * ForkRunner spawns a local Anvil process with a mainnet fork,
- * takes vault state snapshots, and cleans up when done.
+ * ForkRunner spawns a local Anvil process with a mainnet fork, takes vault
+ * state snapshots, and cleans up when done.
+ *
+ * ---------------------------------------------------------------------------
+ * STATUS: NOT WIRED. Nothing in `src/`, `scripts/` or `test/` calls this.
+ *
+ * DO NOT DELETE IT AS DEAD CODE. §11.1 requires each policy's decisions to be
+ * replayed against a pinned chain prestate so the reported allocation is one
+ * the chain would actually have accepted; that requirement is currently
+ * UNMET, and this file is the only thing in the repo that could meet it.
+ * Removing it would silently drop the requirement instead of cleaning
+ * anything up. The harness that produced SRCLA-REPORT.md hand-fed constants
+ * from `fork-measurements.txt` in place of doing this.
+ *
+ * The gap is VISIBLE rather than silent: `evaluation/kernel/gates.ts`
+ * declares a `§11.1 pinned-prestate fork replay` check that reports
+ * NOT PRODUCED (and therefore BLOCKS the release gate) whenever no
+ * `ForkReplayResult[]` is supplied — which, until this runner is wired, is
+ * always.
+ *
+ * To wire it: drive `ForkRunner` once per (policy, tier) at the manifest's
+ * pinned block, execute the decision sequence `kernel/harness.ts` recorded
+ * (`PolicyRunResult.decisionHashes` identifies it), and map each outcome to a
+ * `ForkReplayResult` for `evaluateRegisteredRelease({ forkResults })`. Note
+ * that doing so requires starting an Anvil process, which is why it is not
+ * exercised by the unit suite.
+ * ---------------------------------------------------------------------------
  */
 
 import { spawn, ChildProcess } from 'child_process';

@@ -83,7 +83,16 @@ export interface RegisteredEvaluationResult {
   /** Artifact used; `provisional` is true when it is not calibrated. */
   artifact: PolicyArtifact;
   provisional: boolean;
-  /** Policy ids that produced no result. §11.5 fails the gate on these. */
+  /**
+   * Registered policy ids that produced no result AT SOME TIER, as
+   * `policyId@tier`. §11.5 fails the gate on these.
+   *
+   * Per (policy, tier), not per policy: a global "was this id seen anywhere"
+   * set would report nothing for a policy that ran at three tiers and was
+   * skipped at the fourth, which is the same absence-reads-as-success shape
+   * as a gate written `TIERS.every(...)` over the tiers that happen to be
+   * present.
+   */
   missingPolicyIds: string[];
   /** Registered tiers with no result. §11.5 fails the gate on these too. */
   missingTiers: bigint[];
@@ -422,15 +431,25 @@ export function runRegisteredEvaluation(
     results.push(...perTier);
   }
 
-  const seenIds = new Set(results.map((r) => r.policy.id));
+  const seenPairs = new Set(results.map((r) => `${r.policy.id}@${r.tier}`));
   const seenTiers = new Set(results.map((r) => r.tier.toString()));
+
+  // Every registered policy is required at every REGISTERED tier, not merely
+  // at the tiers this invocation happened to run: a run restricted with
+  // `--tiers` is an incomplete run, and §11.5 fails on a missing tier.
+  const missingPolicyIds: string[] = [];
+  for (const t of REGISTERED_TIERS) {
+    for (const p of REGISTERED_POLICIES) {
+      if (!seenPairs.has(`${p.id}@${t}`)) missingPolicyIds.push(`${p.id}@${t}`);
+    }
+  }
 
   return {
     results,
     withdrawalSource,
     artifact,
     provisional: artifact._provisional !== undefined,
-    missingPolicyIds: REGISTERED_POLICIES.filter((p) => !seenIds.has(p.id)).map((p) => p.id),
+    missingPolicyIds,
     missingTiers: REGISTERED_TIERS.filter((t) => !seenTiers.has(t.toString())),
   };
 }

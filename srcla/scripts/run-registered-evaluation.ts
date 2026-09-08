@@ -38,6 +38,7 @@ import {
   buildRunRecord,
   manifestConfigForRun,
 } from '../src/evaluation/kernel/provenance.js';
+import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 
 /** Schema version of the manifest this script emits. */
@@ -203,8 +204,21 @@ async function main(): Promise<void> {
 
     const record = buildRunRecord({ codeCommit: commit, manifest, evaluation: out });
 
+    // §11.5. Failure here is the point of the run: a missing tier, a missing
+    // (policy, tier), an unmeasured withdrawal rate, an inert ablation, an
+    // indistinguishable comparison and an absent fork replay each BLOCK,
+    // rather than being skipped by a gate that iterates only over what is
+    // present.
+    const gate = evaluateRegisteredRelease(out);
+
     const summary = {
       ...summarize(out),
+      releaseGate: {
+        pass: gate.pass,
+        blockedReasons: gate.blockedReasons,
+        checks: gate.checks,
+        comparisons: gate.comparisons,
+      },
       provenance: {
         codeCommit: record.codeCommit,
         manifestHash: manifest.contentHashes.manifest,
@@ -225,6 +239,17 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(summary, null, 2));
     }
 
+    console.error('');
+    for (const c of gate.checks) {
+      const mark = c.passed === true ? 'OK         ' : c.passed === false ? 'FAILED     ' : 'NOT PRODUCED';
+      console.error(`[gate] [${mark}] ${c.name}: ${c.detail}`);
+    }
+    console.error(
+      gate.pass
+        ? '[gate] §11.5 release gate PASSED'
+        : `[gate] §11.5 release gate BLOCKED: ${gate.blockedReasons.join(', ')}`,
+    );
+
     if (out.provisional) {
       console.error(
         '[evaluation] WARNING: the artifact is PROVISIONAL (config/bootstrap-artifact.json says ' +
@@ -238,6 +263,9 @@ async function main(): Promise<void> {
           `nothing on this dataset: ${[...new Set(inert)].join(', ')}`
       );
     }
+    // A blocked gate is a failed run. Exiting 0 would let CI, and a reader,
+    // treat "did not verify" as "verified".
+    if (!gate.pass) process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }
