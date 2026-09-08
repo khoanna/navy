@@ -34,7 +34,7 @@ import { writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
-import { loadEra } from '../src/evaluation/dataset.js';
+import { loadEra, loadWarmup } from '../src/evaluation/dataset.js';
 import { loadGasSeries } from '../src/evaluation/gas-series.js';
 import { REGISTERED_ERAS, eraBounds, type EraTag } from '../src/evaluation/eras.js';
 import { loadRegisteredArtifact } from '../src/policy/artifact.js';
@@ -158,6 +158,18 @@ async function runEra(
       `digest ${gas.digest}`,
   );
 
+  // History the policy would have carried across the era boundary. Sized at
+  // the artifact's horizon plus enough origins to clear minObservations --
+  // without it, an era is evaluated cold and REGIME_MIN_HISTORY rejects every
+  // venue until labels complete INSIDE the window, which on a short era is
+  // the whole era. Never replayed, never scored, never fitted on.
+  const warmupDays = Math.ceil(artifact.horizonSeconds / 86_400) + 30;
+  const warmupSnapshots = await loadWarmup(prisma, era, warmupDays);
+  console.error(
+    `    warm-up: ${warmupSnapshots.length} origins over the ${warmupDays}d before the era ` +
+      `(history only — not replayed, not scored)`,
+  );
+
   const config = harnessConfig(gas, artifact);
   const evaluation = runRegisteredEvaluation({
     dataset,
@@ -166,6 +178,7 @@ async function runEra(
     tiers,
     decideOpts: DEFAULT_DECIDE_OPTS,
     calibrationFraction: CALIBRATION_FRACTION,
+    warmupSnapshots,
   });
 
   const manifest = signManifest(

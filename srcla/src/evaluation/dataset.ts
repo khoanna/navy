@@ -225,3 +225,28 @@ export async function loadEra(
 
   return loadDataset(prisma, `era:${tag}`, start, end);
 }
+
+/**
+ * Origins from the `warmupDays` immediately BEFORE an era starts.
+ *
+ * These supply the history a policy would have carried across the era
+ * boundary in production. They are never replayed, never scored and never
+ * fitted on -- see `RegisteredEvaluationOptions.warmupSnapshots` for why that
+ * is not look-ahead.
+ *
+ * Deliberately NOT behind `assertNotSealed`: the warm-up for a sealed era is
+ * drawn from the era BEFORE it, which is calibration or burned data, and
+ * loading it is exactly what a live deployment's own history would be.
+ */
+export async function loadWarmup(
+  prisma: PrismaClient,
+  tag: EraTag,
+  warmupDays: number,
+): Promise<TimeOrderedSnapshot[]> {
+  if (warmupDays <= 0) return [];
+  const era = REGISTERED_ERAS[tag];
+  const start = new Date((era.startSeconds - warmupDays * 86_400) * 1000);
+  const end = new Date((era.startSeconds - 1) * 1000);
+  const ds = await loadDataset(prisma, `warmup:${tag}`, start, end);
+  return ds.snapshots;
+}

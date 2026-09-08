@@ -18,7 +18,13 @@
  *
  * Usage:
  *   DATABASE_URL=... pnpm exec tsx scripts/freeze-artifact.ts \
- *     [--out config/registered-artifact.json] [--min-observations 30]
+ *     [--out config/registered-artifact.json] [--min-observations 30] [--sweep-k]
+ *
+ * `--sweep-k` is OPT-IN because it runs SRCLA through six full replays of the
+ * calibration era and takes the better part of an hour, which is too long to
+ * sit on the critical path of every re-freeze. Without it, k is reported
+ * UNRESOLVED at the registered default of 1.0 -- which is not a guess, it is
+ * a refusal to claim, and it is what the report then says.
  *
  * UNITS: returns and quantiles are WAD over the horizon; times are seconds.
  */
@@ -173,6 +179,7 @@ function sweepNoTradeBandK(
 async function main(): Promise<void> {
   const outPath = arg('out') ?? 'config/registered-artifact.json';
   const minObservations = arg('min-observations') !== undefined ? Number(arg('min-observations')) : 30;
+  const shouldSweepK = process.argv.includes('--sweep-k');
 
   const prisma = new PrismaClient();
   try {
@@ -346,8 +353,21 @@ async function main(): Promise<void> {
       availabilityLagSeconds: AVAILABILITY_LAG_SECONDS,
     };
 
-    console.log('[freeze] P8 noTradeBandK sweep (SRCLA through the real replay):');
-    const kOutcome = sweepNoTradeBandK(dataset, kBaseArtifact, kConfig);
+    // OPT-IN: six full replays of the calibration era is roughly an hour, and
+    // a scalar that the report is willing to call UNRESOLVED does not belong
+    // on the critical path of every re-freeze.
+    const kOutcome = shouldSweepK
+      ? (console.log('[freeze] P8 noTradeBandK sweep (SRCLA through the real replay):'),
+        sweepNoTradeBandK(dataset, kBaseArtifact, kConfig))
+      : {
+          rows: [],
+          resolved: false,
+          selected: 1.0,
+          reason:
+            'NOT SWEPT (--sweep-k not given). k stays at the registered default 1.0 and every ' +
+            'P8 result is provisional. This is a refusal to claim, not a guess: the sweep that ' +
+            'would register it runs SRCLA through six full replays of the calibration era.',
+        };
     const kSweep = kOutcome.rows;
     const kResolved = kOutcome.resolved;
     const selectedK = kOutcome.selected;

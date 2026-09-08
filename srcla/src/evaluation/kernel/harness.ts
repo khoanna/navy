@@ -128,6 +128,24 @@ export interface RegisteredEvaluationOptions {
    * check by simply not running the policies it would have failed on.
    */
   policyIds?: readonly string[];
+  /**
+   * Origins from BEFORE the evaluated window, used only to derive the history
+   * the policy sees at its first origins.
+   *
+   * Without this an era is evaluated in isolation and every policy starts with
+   * an empty `input.history`, so `admit`'s REGIME_MIN_HISTORY rejects every
+   * venue until enough labels complete inside the window itself. On a 15-day
+   * era with a 14-day horizon that is the WHOLE era -- every policy reported
+   * exactly 0.000% net APY, which reads like a result and is an artifact of
+   * where the window was cut.
+   *
+   * It is NOT look-ahead. Labels are past outcomes relative to the origin that
+   * consumes them, and `labelsAvailableAt` still applies the availability lag,
+   * so a warm-up origin can only supply history a live deployment would also
+   * have had. The replay itself still runs over `dataset` alone, so nothing
+   * before the era contributes a return, a cost or a rebalance.
+   */
+  warmupSnapshots?: readonly TimeOrderedSnapshot[];
 }
 
 /**
@@ -462,8 +480,11 @@ export function runRegisteredEvaluation(
   const baseOpts: Omit<DecideOpts, 'disable'> = options.decideOpts ?? DEFAULT_DECIDE_OPTS;
   const quantumSteps = options.quantumStepsPerTier ?? 100;
 
+  // Labels come from the warm-up PLUS the evaluated window; the replay below
+  // runs over the evaluated window alone. See `warmupSnapshots`.
+  const warmup = options.warmupSnapshots ?? [];
   const labels = deriveCompletedLabels(
-    dataset.snapshots,
+    warmup.length > 0 ? [...warmup, ...dataset.snapshots] : dataset.snapshots,
     config.horizonSeconds,
     config.availabilityLagSeconds,
   );
