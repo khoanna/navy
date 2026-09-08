@@ -237,6 +237,16 @@ contract VaultHandler is Test {
     uint256 public totalDeposits;
     uint256 public totalWithdrawals;
     uint256 public totalDeployments;
+
+    /// @dev Plan ids used to be derived from `block.timestamp`, which an
+    ///      invariant campaign does not advance. With three adapters that gave
+    ///      exactly three distinct plan ids for the whole run, and the first
+    ///      attempt on each - a uniformly fuzzed amount against a 50% cap, so
+    ///      almost always AdapterCapExceeded - burned it via `cancelPlan`'s
+    ///      `usedPlanIds` write. Every later attempt then failed at
+    ///      `submitPlan` with PlanAlreadyUsed. A monotone nonce gives each
+    ///      attempt its own plan id.
+    uint256 private _planNonce;
     uint256 public totalDivestments;
     uint256 public initialAssets;
 
@@ -363,7 +373,7 @@ contract VaultHandler is Test {
         amount = bound(amount, 1, idle);
 
         NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
-            planId: uint256(keccak256(abi.encode("deploy", block.timestamp, adapterIndex))),
+            planId: uint256(keccak256(abi.encode("deploy", ++_planNonce, adapterIndex))),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Deploy,
             adapter: adapter,
@@ -412,7 +422,7 @@ contract VaultHandler is Test {
         amount = bound(amount, 1, strategyBalance);
 
         NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
-            planId: uint256(keccak256(abi.encode("divest", block.timestamp, adapterIndex))),
+            planId: uint256(keccak256(abi.encode("divest", ++_planNonce, adapterIndex))),
             index: 0,
             kind: NavyVaultSRCLA.ActionKind.Divest,
             adapter: adapter,
@@ -490,6 +500,15 @@ contract NavyVaultInvariantTest is Test {
 
         // Create handler with reward accountant
         handler = new VaultHandler(usdc, vault, 3); // 3 adapters
+        // The handler is the caller for every deploy/divest it drives - its
+        // `vm.prank(address(this))` pranks the handler itself - so it needs
+        // ALLOCATOR_ROLE. Without this grant `submitPlan` reverted
+        // AccessControl on every single call and the `try` swallowed it, so
+        // `deploy()` and `divest()` were silent no-ops: 855 calls / 0 reverts
+        // in the campaign summary, versus 32074 / 4674 once they actually run.
+        // Every invariant that depends on funds being deployed was therefore
+        // being checked against a vault that had never deployed anything.
+        vault.grantRole(vault.ALLOCATOR_ROLE(), address(handler));
         vault.setRewardAccountant(address(handler.accountant()));
         handler.accountant().setVault(address(vault));
 
@@ -656,6 +675,15 @@ contract NavyVaultHandlerInvariantTest is Test {
 
         // Create handler with reward accountant
         handler = new VaultHandler(usdc, vault, 3); // 3 adapters
+        // The handler is the caller for every deploy/divest it drives - its
+        // `vm.prank(address(this))` pranks the handler itself - so it needs
+        // ALLOCATOR_ROLE. Without this grant `submitPlan` reverted
+        // AccessControl on every single call and the `try` swallowed it, so
+        // `deploy()` and `divest()` were silent no-ops: 855 calls / 0 reverts
+        // in the campaign summary, versus 32074 / 4674 once they actually run.
+        // Every invariant that depends on funds being deployed was therefore
+        // being checked against a vault that had never deployed anything.
+        vault.grantRole(vault.ALLOCATOR_ROLE(), address(handler));
         vault.setRewardAccountant(address(handler.accountant()));
         handler.accountant().setVault(address(vault));
 
