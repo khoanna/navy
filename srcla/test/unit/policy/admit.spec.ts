@@ -6,6 +6,7 @@ const WAD = 10n ** 18n;
 const ALL_CODES = [
   'PAUSED',
   'CONFIG_DIGEST_UNPINNED',
+  'CONFIG_DIGEST_MISMATCH',
   'REGIME_MIN_HISTORY',
   'NO_MARKET_DATA',
   'NO_SYNC_LIQUIDITY',
@@ -108,10 +109,25 @@ describe('admit', () => {
     expectOnlyCodeFails(r.reasons, 'REGIME_MIN_HISTORY');
   });
 
-  it('rejects a market whose config digest is not the pinned one on CONFIG_DIGEST_UNPINNED alone', () => {
+  // The two digest states are now SEPARATE codes. They were one code with
+  // two `detail` strings, so nothing downstream could distinguish "never
+  // registered" (a configuration gap, and the shipped bootstrap artifact's
+  // permanent state) from "changed since registration" (§12's
+  // quarantine-and-unwind trigger). steps/unwind.ts grants only the second
+  // the power to bypass the economic gate.
+  it('rejects a market whose config digest CHANGED on CONFIG_DIGEST_MISMATCH alone', () => {
     const r = admit(input([market({ configDigest: '0xchanged' })]), artifact);
     expect(r.eligible).toEqual([]);
-    expectOnlyCodeFails(r.reasons, 'CONFIG_DIGEST_UNPINNED');
+    expectOnlyCodeFails(r.reasons, 'CONFIG_DIGEST_MISMATCH');
+  });
+
+  it('does not raise CONFIG_DIGEST_MISMATCH when there is no pin to contradict', () => {
+    const base = input([market({ marketId: 'unregistered' })], 0);
+    base.history = labelsFor('unregistered', 'r1', 40);
+    const r = admit(base, artifact);
+    expect(
+      r.reasons.some((x) => x.marketId === 'unregistered' && x.code === 'CONFIG_DIGEST_MISMATCH' && !x.passed)
+    ).toBe(false);
   });
 
   it('rejects a market with no pinned digest registered on CONFIG_DIGEST_UNPINNED alone', () => {

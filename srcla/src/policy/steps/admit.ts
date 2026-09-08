@@ -15,12 +15,33 @@ const RULES: Rule[] = [
     check: (m) => ({ passed: !m.paused, detail: m.paused ? 'market paused' : 'active' }),
   },
   {
+    // No pin registered yet. NOT a safety condition: the market has not
+    // changed, the vault simply has not registered what it should look
+    // like. Blocks deployment; must never trigger a §9.1 safety unwind (see
+    // SAFETY_EXIT_CODES) - the bootstrap artifact ships
+    // `pinnedConfigDigests: {}`, so treating this as a safety event would
+    // emergency-exit every venue on every cycle.
     code: 'CONFIG_DIGEST_UNPINNED',
     check: (m, _input, artifact) => {
       const pinned = artifact.pinnedConfigDigests[m.marketId];
-      if (pinned === undefined) {
-        return { passed: false, detail: 'no pinned digest registered' };
-      }
+      return {
+        passed: pinned !== undefined,
+        detail: pinned === undefined ? 'no pinned digest registered' : `pinned as ${pinned}`,
+      };
+    },
+  },
+  {
+    // A pin EXISTS and the live digest no longer matches it: the market's
+    // implementation or material configuration changed under us. §12 -
+    // "Implementation or material configuration change | Quarantine the
+    // market and start a new regime". This is a safety condition, and it is
+    // why the unpinned case above had to be split off from it: the two
+    // shared one code and one `detail` string, so nothing downstream could
+    // tell "never registered" from "changed since registration".
+    code: 'CONFIG_DIGEST_MISMATCH',
+    check: (m, _input, artifact) => {
+      const pinned = artifact.pinnedConfigDigests[m.marketId];
+      if (pinned === undefined) return { passed: true, detail: 'no pin to contradict' };
       const ok = pinned === m.configDigest;
       return { passed: ok, detail: ok ? 'digest matches pin' : `digest ${m.configDigest} != pin ${pinned}` };
     },

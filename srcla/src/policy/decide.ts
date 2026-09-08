@@ -6,6 +6,7 @@ import { requiredReserve } from './steps/reserve.js';
 import { optimize, reserveOptsFrom, type PolicyAblations } from './steps/optimize.js';
 import { costGate, type CostParams } from './steps/cost.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
+import { safetyUnwind } from './steps/unwind.js';
 import type { DecisionInput, DecisionOutput, PolicyArtifact } from './types.js';
 
 export interface DecideOpts {
@@ -15,7 +16,12 @@ export interface DecideOpts {
   reserveQuantile: number;
   reserveHorizonSeconds: number;
   cost: CostParams;
-  plan: Omit<BuildPlanOpts, 'snapshotHash'>;
+  plan: Omit<BuildPlanOpts, 'snapshotHash' | 'emergencyExitAdapters'>;
+  /**
+   * §9.1's bounded safety unwind: at most this many basis points of total
+   * assets may leave venues in one safety plan. See steps/unwind.ts.
+   */
+  safetyUnwindMaxBps: number;
   /**
    * The registered baseline/ablation switch set (optimize.ts's
    * `PolicyAblations`). This is the ONLY sanctioned way to express B0-B5,
@@ -77,6 +83,12 @@ export const DEFAULT_DECIDE_OPTS: DecideOpts = {
     // calldata-priced figure a pre-blob model would use).
     l1BytesPerAction: 400n,
   },
+  // §9.1's bounded safety unwind. 25% of TVL per plan: an incident affecting
+  // one of a three-venue universe fits in a single plan, while a
+  // simultaneous multi-venue failure is staged across cycles rather than
+  // dumped into thin markets at once. NOT CALIBRATED - §9.1 says "bounded"
+  // and fixes no number.
+  safetyUnwindMaxBps: 2500,
   plan: {
     chainId: 8453,
     vaultAddress: '0x0000000000000000000000000000000000000001',
@@ -175,6 +187,74 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   }
 
   const admission = admit(input, artifact);
+
+  // §9.1 - "A market that becomes ineligible invokes a bounded safety unwind
+  // and BYPASSES THE ECONOMIC GATE." This must run BEFORE the
+  // ADMISSION_EMPTY return below: a universe in which every market has
+  // failed admission is exactly the case that most needs an unwind, and
+  // returning early there produced a HOLD over a stranded position.
+  //
+  // The unwind is emitted as its own plan - divests only, no deploys, no
+  // unrelated rebalancing. A safety exit must not be able to carry an
+  // economic move through the gate with it, and an economic move must not
+  // be able to ride out on a safety exit's bypass. Ordinary rebalancing
+  // resumes on the next cycle.
+  const unwind = safetyUnwind(input, admission, { maxBps: opts.safetyUnwindMaxBps });
+  if (unwind.exits.length > 0) {
+    const unwindTarget = new Map(current);
+    for (const e of unwind.exits) unwindTarget.set(e.marketId, 0n);
+
+    reasons.push(
+      `SAFETY_UNWIND: exiting ${unwind.exits.map((e) => `${e.marketId}[${e.codes.join('+')}]`).join(', ')} ` +
+        `(${unwind.notionalBase} of a ${unwind.boundBase} bound)` +
+        (unwind.deferred.length > 0 ? `; deferred to a later cycle: ${unwind.deferred.join(', ')}` : '')
+    );
+
+    const unwindReserve = requiredReserve(
+      input,
+      unwindTarget,
+      reserveOptsFrom(opts.disable ?? {}, {
+        reserveQuantile: opts.reserveQuantile,
+        reserveHorizonSeconds: opts.reserveHorizonSeconds,
+      })
+    );
+
+    // Reported, never evaluated. A caller reading `costGate.passed === true`
+    // must be able to tell "the gate cleared this" from "the gate was
+    // bypassed", so the reason is explicit and every amount is zero rather
+    // than a fabricated gain.
+    const bypassed = {
+      passed: true,
+      reason: 'SAFETY_UNWIND_BYPASS',
+      gainBase: 0n,
+      moveCostBase: 0n,
+      bandBase: 0n,
+      terms: {},
+    };
+
+    const emergencyExitAdapters = new Set(unwind.exits.map((e) => e.adapter));
+    const planOpts = { ...opts.plan, emergencyExitAdapters, snapshotHash: `0x${snapshotHash}` };
+    const placeholder = '0x' + '00'.repeat(31) + '01';
+    const draft = buildPlan(input, unwindTarget, unwindReserve.requiredBase, placeholder, planOpts);
+    if (draft === null) {
+      // Unreachable in practice (every exit carries a strictly positive
+      // position, so at least one action exists) but never assumed.
+      reasons.push('NO_ACTIONS');
+      return finish({ admission, reserve: unwindReserve, target: unwindTarget, costGate: bypassed });
+    }
+
+    const out = finish({
+      admission,
+      reserve: unwindReserve,
+      target: unwindTarget,
+      costGate: bypassed,
+      plan: draft,
+      action: 'rebalance',
+    });
+    out.plan = buildPlan(input, unwindTarget, unwindReserve.requiredBase, `0x${out.decisionHash}`, planOpts);
+    return out;
+  }
+
   if (admission.eligible.length === 0) {
     reasons.push('ADMISSION_EMPTY');
     // Whole-branch review, Critical 3: distinguish "the pipeline has no

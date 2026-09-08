@@ -54,6 +54,19 @@ export interface BuildPlanOpts {
   snapshotHash: string;
   maxLossBps: number;
   turnoverLimitBase: bigint;
+  /**
+   * §9.1's bounded safety unwind. Adapters listed here have their divest
+   * emitted as `ActionKind.EmergencyExit` (kind 3) rather than
+   * `ActionKind.Divest` (kind 1). Lowercased comparison, because an adapter
+   * address reaches here from two sources (the collector's checksummed
+   * string and a market observation) that need not agree on case.
+   *
+   * `NavyVaultSRCLA._executeAction`'s kind-3 branch divests
+   * `strategyAssets[adapter]` IN FULL and ignores `action.amount`, so
+   * `steps/unwind.ts` only ever produces full-position exits and this
+   * function must not be handed a partial one for such an adapter.
+   */
+  emergencyExitAdapters?: ReadonlySet<string>;
 }
 
 /**
@@ -165,7 +178,7 @@ function proofFor(levels: string[][], index: number): string[] {
 }
 
 interface ActionDraft {
-  kind: 0 | 1;
+  kind: 0 | 1 | 2 | 3;
   adapter: string;
   amountBase: bigint;
   minOutBase: bigint;
@@ -199,6 +212,9 @@ export function buildPlan(
 
   const divests: ActionDraft[] = [];
   const deploys: ActionDraft[] = [];
+  const emergencyAdapters = new Set(
+    [...(opts.emergencyExitAdapters ?? [])].map((a) => a.toLowerCase())
+  );
 
   for (const m of [...input.markets].sort((a, b) => (a.marketId < b.marketId ? -1 : a.marketId > b.marketId ? 1 : 0))) {
     const delta = (target.get(m.marketId) ?? 0n) - m.positionBase;
@@ -206,7 +222,13 @@ export function buildPlan(
     const amount = delta > 0n ? delta : -delta;
     const minOut = (amount * BigInt(10_000 - opts.maxLossBps)) / 10_000n;
     if (delta < 0n) {
-      divests.push({ kind: ActionKind.Divest, adapter: m.adapter, amountBase: amount, minOutBase: minOut });
+      // §9.1's safety unwind is emitted as EmergencyExit, not Divest. The
+      // vault orders both ahead of any Deploy (_enforceDivestBeforeDeploy),
+      // so this stays inside the divests-first list.
+      const kind = emergencyAdapters.has(m.adapter.toLowerCase())
+        ? ActionKind.EmergencyExit
+        : ActionKind.Divest;
+      divests.push({ kind, adapter: m.adapter, amountBase: amount, minOutBase: minOut });
     } else {
       deploys.push({ kind: ActionKind.Deploy, adapter: m.adapter, amountBase: amount, minOutBase: minOut });
     }
