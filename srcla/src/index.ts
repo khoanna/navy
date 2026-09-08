@@ -1,7 +1,12 @@
 import { loadConfig } from './config.js';
 import { ChainClient } from './chain/client.js';
 import { SnapshotCollector } from './collector/snapshot-collector.js';
-import { buildServer, startServer } from './http/server.js';
+import {
+  buildServer,
+  buildOperatorServer,
+  startServer,
+  startOperatorServer,
+} from './http/server.js';
 import { Scheduler } from './runtime/scheduler.js';
 import { UNCONFIGURED_EXECUTION_LOCK } from './execution/keeper-executor.js';
 import { DecisionDriver, buildRawOriginFromCollector, persistDecisionOutput } from './runtime/decision-driver.js';
@@ -147,21 +152,31 @@ async function main(): Promise<void> {
   });
   scheduler.setDecisionDriver(decisionDriver);
 
-  // Build HTTP server with scheduler for trigger endpoint
+  // Two listeners (paper §10.2: the read API "has no mutation or transaction
+  // endpoint"). The public one carries GETs only and refuses to boot if a
+  // mutation is registered on it; the operator one carries POST /v1/manifests,
+  // POST /v1/proposals/review and POST /v1/internal/trigger, and binds to
+  // 127.0.0.1 only.
   const server = await buildServer({
     host: config.httpHost,
     port: config.httpPort,
-  }, scheduler);
+  });
+  const operatorServer = await buildOperatorServer(
+    { port: config.operatorHttpPort },
+    scheduler
+  );
 
   // Start
   await scheduler.start();
   await startServer(server, { host: config.httpHost, port: config.httpPort });
+  await startOperatorServer(operatorServer, { port: config.operatorHttpPort });
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\nReceived ${signal}, shutting down...`);
     scheduler.stop();
     await server.close();
+    await operatorServer.close();
     await prisma.$disconnect();
     chainClient.close();
     process.exit(0);

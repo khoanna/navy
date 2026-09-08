@@ -1,11 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { PrismaClient, PlanAction } from '@prisma/client';
 import { serializeMarket, serializeDecision, serializePlan, serializeHarvest } from './serializers.js';
-import { ProposalEvaluator, RebalanceProposal } from '../evaluation/proposal-evaluator.js';
-import { loadConfig } from '../config.js';
-import type { Scheduler } from '../runtime/scheduler.js';
-
-const prisma = new PrismaClient();
+import { getSharedPrisma } from './prisma.js';
 
 // Type for ExecutionPlan with included actions
 type ExecutionPlanWithActions = {
@@ -18,7 +14,20 @@ type ExecutionPlanWithActions = {
   actions: PlanAction[];
 };
 
-export async function registerRoutes(server: FastifyInstance, scheduler?: Scheduler): Promise<void> {
+/**
+ * Registers the PUBLIC read surface (paper §10.2: *"It has no mutation or
+ * transaction endpoint."*). Every route here MUST be a GET -- `buildServer`
+ * installs an `onRoute` guard that refuses to boot if anything else appears.
+ * Mutations belong on the loopback operator listener
+ * (`src/http/operator-routes.ts`).
+ *
+ * `prisma` is a parameter so these routes can be exercised in-process with
+ * `server.inject()` against a stub client, with no database.
+ */
+export async function registerRoutes(
+  server: FastifyInstance,
+  prisma: PrismaClient = getSharedPrisma()
+): Promise<void> {
   // GET /v1/health - Service health
   server.get('/v1/health', async () => {
     const lastSnapshot = await prisma.marketSnapshot.findFirst({
@@ -349,48 +358,6 @@ export async function registerRoutes(server: FastifyInstance, scheduler?: Schedu
     };
   });
 
-  // POST /v1/manifests - Create a new manifest
-  server.post('/v1/manifests', async (request, reply) => {
-    const body = request.body as {
-      datasetStart: string;
-      datasetEnd: string;
-      calibrationEnd: string;
-      heldOutStart: string;
-      markets: Array<{ marketId: string; protocol: string; adapterAddress: string }>;
-    };
-
-    // Validate required fields
-    if (!body.datasetStart || !body.datasetEnd || !body.calibrationEnd || !body.heldOutStart) {
-      return reply.status(400).send({
-        error: { code: 'INVALID_INPUT', message: 'Missing required date fields' },
-      });
-    }
-
-    // Create manifest hash from content
-    const contentHash = require('crypto')
-      .createHash('sha256')
-      .update(JSON.stringify(body))
-      .digest('hex');
-
-    const run = await prisma.evaluationRun.create({
-      data: {
-        manifestHash: contentHash,
-        status: 'running',
-        results: body,
-      },
-    });
-
-    return reply.status(201).send({
-      data: {
-        id: run.id,
-        manifestHash: run.manifestHash,
-        status: run.status,
-        startedAt: run.startedAt.toISOString(),
-      },
-      meta: { timestamp: new Date().toISOString() },
-    });
-  });
-
   // ─────────────────────────────────────────────────────────────
   // Enumeration Routes (§8.2)
   // ─────────────────────────────────────────────────────────────
@@ -427,79 +394,163 @@ export async function registerRoutes(server: FastifyInstance, scheduler?: Schedu
     };
   });
 
-  // POST /v1/proposals/review - Evaluate backend rebalance proposal (§4)
-  server.post('/v1/proposals/review', async (request, reply) => {
-    const body = request.body as {
-      proposalId: string;
-      actions: Array<{
-        index: number;
-        kind: 'deploy' | 'divest' | 'harvest' | 'emergency';
-        adapter: string;
-        amount: string;
-        minOut: string;
-      }>;
-      targetReserve: string;
-    };
+  // ─────────────────────────────────────────────────────────────
+  // §10.2 read surface completion: synchronisation, active policy,
+  // reserve and emergencies. Each of these answers from stored
+  // evidence or returns an explicit empty result — none of them
+  // invents a shape to keep a client typechecking.
+  // ─────────────────────────────────────────────────────────────
 
-    if (!body || !body.proposalId || !Array.isArray(body.actions) || body.targetReserve === undefined) {
-      return reply.status(400).send({
-        error: { code: 'INVALID_INPUT', message: 'Invalid proposal review payload' },
-      });
-    }
+  // GET /v1/sync - Collector synchronisation status
+  server.get('/v1/sync', async () => {
+    const [latestBlock, snapshots] = await Promise.all([
+      prisma.chainBlock.findFirst({ orderBy: { blockNumber: 'desc' } }),
+      prisma.marketSnapshot.findMany({
+        distinct: ['marketId'],
+        orderBy: { timestamp: 'desc' },
+      }),
+    ]);
 
-    try {
-      const config = loadConfig();
-      const evaluator = new ProposalEvaluator(config);
+    const nowMs = Date.now();
 
-      const proposal: RebalanceProposal = {
-        id: body.proposalId,
-        actions: body.actions.map((a) => ({
-          index: a.index,
-          kind: a.kind,
-          adapter: a.adapter,
-          amount: BigInt(a.amount),
-          minOut: BigInt(a.minOut),
+    return {
+      data: {
+        // null when the collector has never written a block — the honest
+        // answer for "how far has synchronisation got", not a zero.
+        latestBlock: latestBlock
+          ? {
+              chainId: latestBlock.chainId,
+              blockNumber: latestBlock.blockNumber.toString(),
+              blockHash: latestBlock.blockHash,
+              timestamp: latestBlock.timestamp.toISOString(),
+              ageSeconds: Math.floor((nowMs - latestBlock.timestamp.getTime()) / 1000),
+            }
+          : null,
+        markets: snapshots.map((s) => ({
+          marketId: s.marketId,
+          blockHash: s.blockHash,
+          timestamp: s.timestamp.toISOString(),
+          ageSeconds: Math.floor((nowMs - s.timestamp.getTime()) / 1000),
         })),
-        targetReserve: BigInt(body.targetReserve),
-      };
-
-      const result = await evaluator.reviewProposal(proposal);
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Proposal review failed';
-      return reply.status(500).send({
-        error: { code: 'EVALUATION_FAILED', message },
-      });
-    }
+      },
+      meta: { marketCount: snapshots.length, timestamp: new Date(nowMs).toISOString() },
+    };
   });
 
-  // ─────────────────────────────────────────────────────────────
-  // Internal Trigger Route (§4)
-  // Called by backend to force a rebalance decision evaluation
-  // ─────────────────────────────────────────────────────────────
+  // GET /v1/policy - The frozen artifact currently deciding, and its hash
+  server.get('/v1/policy', async () => {
+    // "Active" operationally means: the PolicyVersion the most recent recorded
+    // Decision was produced under. `PolicyVersion.activatedAt` is carried
+    // through verbatim (persistDecisionOutput never sets it, so it reads null
+    // today) rather than being synthesised into a plausible-looking timestamp.
+    const latestDecision = await prisma.decision.findFirst({
+      orderBy: { timestamp: 'desc' },
+    });
 
-  // POST /v1/internal/trigger - Trigger manual decision cycle
-  server.post('/v1/internal/trigger', async (request, reply) => {
-    const { force = false } = request.body as { force?: boolean } ?? {};
+    const version = latestDecision
+      ? await prisma.policyVersion.findUnique({ where: { version: latestDecision.policyVersion } })
+      : await prisma.policyVersion.findFirst({ orderBy: { createdAt: 'desc' } });
 
-    if (!scheduler) {
-      return reply.status(503).send({
-        error: { code: 'SCHEDULER_NOT_INITIALIZED', message: 'Scheduler not available' },
-      });
+    if (!version) {
+      return {
+        data: null,
+        meta: { reason: 'NO_POLICY_VERSION_RECORDED', timestamp: new Date().toISOString() },
+      };
     }
 
-    try {
-      const result = await scheduler.trigger(force);
-      if (result.triggered) {
-        return { triggered: true, message: result.message };
-      } else {
-        return reply.status(429).send({ triggered: false, message: result.message });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return reply.status(500).send({
-        error: { code: 'TRIGGER_FAILED', message },
-      });
+    return {
+      data: {
+        version: version.version,
+        artifactHash: version.artifactHash,
+        payload: version.payload,
+        createdAt: version.createdAt.toISOString(),
+        activatedAt: version.activatedAt?.toISOString() ?? null,
+        deactivatedAt: version.deactivatedAt?.toISOString() ?? null,
+        decidingSince: latestDecision?.timestamp.toISOString() ?? null,
+      },
+      meta: {
+        source: latestDecision ? 'LATEST_DECISION' : 'LATEST_RECORDED_VERSION',
+        timestamp: new Date().toISOString(),
+      },
+    };
+  });
+
+  // GET /v1/reserve - Required reserve of the latest decision, with its
+  // per-scenario stress components (§8.1)
+  server.get('/v1/reserve', async () => {
+    const decision = await prisma.decision.findFirst({
+      orderBy: { timestamp: 'desc' },
+    });
+
+    if (!decision) {
+      return {
+        data: null,
+        meta: { reason: 'NO_DECISION_RECORDED', timestamp: new Date().toISOString() },
+      };
     }
+
+    const stress = await prisma.stressCalculation.findMany({
+      where: { decisionHash: decision.decisionHash },
+      orderBy: { scenario: 'asc' },
+    });
+
+    return {
+      data: {
+        decisionHash: decision.decisionHash,
+        timestamp: decision.timestamp.toISOString(),
+        requiredReserveBase: decision.reserveBase,
+        // Empty when the decision predates stress persistence, or when no
+        // scenario row was written for it. It is not padded with zeros.
+        stress: stress.map((s) => ({
+          scenario: s.scenario,
+          demandBase: s.demandBase,
+          exitsBase: s.exitsBase,
+          shortfallBase: s.shortfallBase,
+          feasible: s.feasible,
+        })),
+      },
+      meta: { stressCount: stress.length, timestamp: new Date().toISOString() },
+    };
+  });
+
+  // GET /v1/emergencies - Recorded incidents and emergency exit actions
+  server.get('/v1/emergencies', async (request) => {
+    const { limit = '50' } = request.query as { limit?: string };
+    const take = Math.min(parseInt(limit, 10) || 50, 200);
+
+    const [incidents, exits] = await Promise.all([
+      prisma.incident.findMany({ take, orderBy: { detectedAt: 'desc' } }),
+      prisma.planAction.findMany({
+        where: { kind: 'emergency' },
+        take,
+        orderBy: { actionIndex: 'asc' },
+      }),
+    ]);
+
+    return {
+      data: {
+        incidents: incidents.map((i) => ({
+          id: i.id,
+          kind: i.kind,
+          marketId: i.marketId,
+          detail: i.detail,
+          detectedAt: i.detectedAt.toISOString(),
+        })),
+        emergencyExits: exits.map((a) => ({
+          planId: a.planId,
+          actionIndex: a.actionIndex,
+          adapter: a.adapter,
+          amountBase: a.amountBase,
+          status: a.status,
+          txHash: a.txHash,
+          error: a.error,
+        })),
+      },
+      meta: {
+        incidentCount: incidents.length,
+        emergencyExitCount: exits.length,
+        timestamp: new Date().toISOString(),
+      },
+    };
   });
 }

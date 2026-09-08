@@ -137,6 +137,11 @@ export const ConfigSchema = z.object({
   httpHost: z.string().default('0.0.0.0'),
   httpPort: z.number().int().min(1).max(65535).default(3100),
 
+  // Operator (mutation) listener. Only the PORT is configurable -- the host is
+  // the OPERATOR_HTTP_HOST constant in src/http/server.ts (127.0.0.1), so no
+  // env var can expose the mutation routes off-box.
+  operatorHttpPort: z.number().int().min(1).max(65535).default(3101),
+
   // Scheduler
   collectorEnabled: z.boolean().default(true),
   collectorIntervalMs: z.number().int().min(60000).default(900000), // 15 min
@@ -201,6 +206,7 @@ export function loadConfig(): Config {
     databaseUrl: process.env.DATABASE_URL ?? '',
     httpHost: process.env.HTTP_HOST ?? '0.0.0.0',
     httpPort: parseInt(process.env.HTTP_PORT ?? '3100', 10),
+    operatorHttpPort: parseInt(process.env.OPERATOR_HTTP_PORT ?? '3101', 10),
     collectorEnabled: process.env.COLLECTOR_ENABLED !== 'false',
     collectorIntervalMs: parseInt(process.env.COLLECTOR_INTERVAL_MS ?? '900000', 10),
     controllerEnabled: process.env.CONTROLLER_ENABLED !== 'false',
