@@ -444,11 +444,16 @@ contract NavyVaultSRCLACoreTest is Test {
     }
 
     function test_executeNextAction_executesPlanAction() public {
-        // Setup plan with harvest action
+        // This exercises the generic executeNextActionWithProof plan-completion
+        // mechanics, not harvesting itself — a Harvest action can no longer be
+        // routed through here (5c71032a): it must go through executeHarvestAction,
+        // which additionally binds a HarvestRequest. EmergencyExit with a
+        // zero-balance adapter is a legitimate no-op action kind that still
+        // exercises the same submit -> execute -> plan-completed path.
         NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: uint256(keccak256("plan-1")),
             index: 0,
-            kind: NavyVaultSRCLA.ActionKind.Harvest,
+            kind: NavyVaultSRCLA.ActionKind.EmergencyExit,
             adapter: address(adapter),
             amount: 0,
             minOut: 0,

@@ -490,6 +490,14 @@ contract VaultPolicyTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 75e6);
     }
 
+    /// @dev 5c71032a made executeNextActionWithProof reject every Harvest-kind
+    ///      action outright (HarvestRequiresExecuteHarvestAction) instead of
+    ///      silently completing the plan without claiming anything. Harvest
+    ///      actions must go through executeHarvestAction, which performs
+    ///      these same pause/adapter checks (via _executeHarvestWithRequest)
+    ///      before binding the HarvestRequest — so that is the entry point
+    ///      this test now exercises. The zero-valued request is never reached
+    ///      by the dataHash check: pause is validated first.
     function test_pausedDirectAndPlanHarvestRevert() public {
         vault.pause();
 
@@ -500,17 +508,23 @@ contract VaultPolicyTest is Test {
 
         NavyVaultSRCLA.Action memory action = _action(25, NavyVaultSRCLA.ActionKind.Harvest, address(adapterA), 0);
         _submit(action, 0);
+        VaultTypes.HarvestRequest memory request;
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.DepositPaused.selector);
-        vault.executeNextActionWithProof(new bytes32[](0), action);
+        vault.executeHarvestAction(new bytes32[](0), action, request);
     }
 
+    /// @dev See test_pausedDirectAndPlanHarvestRevert: harvest lifecycle
+    ///      checks now live behind executeHarvestAction, not the generic
+    ///      executeNextActionWithProof.
     function test_planHarvestEnforcesRegisteredAndActiveAdapterLifecycle() public {
+        VaultTypes.HarvestRequest memory request;
+
         NavyVaultSRCLA.Action memory unregistered = _action(26, NavyVaultSRCLA.ActionKind.Harvest, address(0xBAD), 0);
         _submit(unregistered, 0);
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.AdapterNotFound.selector);
-        vault.executeNextActionWithProof(new bytes32[](0), unregistered);
+        vault.executeHarvestAction(new bytes32[](0), unregistered, request);
         vm.prank(allocator);
         vault.cancelPlan();
 
@@ -519,7 +533,7 @@ contract VaultPolicyTest is Test {
         _submit(disabled, 0);
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
-        vault.executeNextActionWithProof(new bytes32[](0), disabled);
+        vault.executeHarvestAction(new bytes32[](0), disabled, request);
         vm.prank(allocator);
         vault.cancelPlan();
 
@@ -528,7 +542,7 @@ contract VaultPolicyTest is Test {
         _submit(impaired, 0);
         vm.prank(allocator);
         vm.expectRevert(NavyVaultSRCLA.AdapterNotActive.selector);
-        vault.executeNextActionWithProof(new bytes32[](0), impaired);
+        vault.executeHarvestAction(new bytes32[](0), impaired, request);
     }
 
     function test_withdrawAggregatesLossAcrossAdaptersAndPaysExactAssets() public {
