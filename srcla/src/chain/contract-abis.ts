@@ -36,13 +36,15 @@
  *   RewardExecutor          contract/src/reward/RewardExecutor.sol
  *   RewardAccountant        contract/src/reward/RewardAccountant.sol
  *
- * NOTE ON srcla/src/chain/abis/reward-executor.json: that file is STALE. Its
- * `routes(bytes32)` getter declares 12 outputs; the deployed struct
- * (IRewardExecutor.Route) has 14 non-array fields, because `maxRewardFeedAge`
- * and `maxUsdcFeedAge` were added. It is referenced by nothing in this package
- * and has deliberately NOT been regenerated here — see the task report. Read
- * route data through `REWARD_EXECUTOR_IFACE.getRoute` below, which returns the
- * whole named struct and cannot drift positionally.
+ * REMOVED 2026-09-08: `src/chain/abis/{vault,reward-accountant,reward-executor}.json`.
+ * All three were imported by nothing in this package — every interface here is
+ * built from the string fragments below — and `reward-executor.json` had
+ * already drifted from the deployed contract: its `routes(bytes32)` getter
+ * declared 12 outputs where `IRewardExecutor.Route` has 14 non-array fields
+ * (`maxRewardFeedAge` and `maxUsdcFeedAge` were added). A stale ABI sitting
+ * next to a live one is a positional-decoding bug waiting to be reintroduced.
+ * Read route data through `REWARD_EXECUTOR_IFACE.getRoute` below, which
+ * returns the whole named struct and cannot drift positionally.
  */
 import { ethers } from 'ethers';
 
@@ -191,7 +193,7 @@ export const REWARD_EXECUTOR_IFACE = new ethers.Interface([
  * event that exists nowhere in contract/src — so the filter matched zero logs
  * forever and the paper's §8.1 withdrawal-demand quantile `Q_beta(W_H)` was
  * identically zero. Verified against contract/lib/openzeppelin-contracts/
- * contracts/interfaces/IERC4626.sol:16 and srcla/src/chain/abis/vault.json.
+ * contracts/interfaces/IERC4626.sol:16.
  */
 export const VAULT_EVENTS_IFACE = new ethers.Interface([
   'event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)',
