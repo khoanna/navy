@@ -29,7 +29,8 @@
 export type VaultPreconditionCode =
   | 'INVALID_AMOUNT'
   | 'INSUFFICIENT_USDC_BALANCE'
-  | 'EXCEEDS_MAX_REDEEM';
+  | 'EXCEEDS_MAX_REDEEM'
+  | 'EXCEEDS_MAX_WITHDRAW';
 
 /** Unit tag carried on every failure so a client never has to infer the scale. */
 export type VaultAmountUnit = 'usdc-6dp' | 'shares-12dp';
@@ -51,7 +52,7 @@ export interface VaultInvalidAmountFailure {
  * `shortfallBase = requiredBase - availableBase` (always > 0).
  */
 export interface VaultShortfallFailure {
-  code: 'INSUFFICIENT_USDC_BALANCE' | 'EXCEEDS_MAX_REDEEM';
+  code: 'INSUFFICIENT_USDC_BALANCE' | 'EXCEEDS_MAX_REDEEM' | 'EXCEEDS_MAX_WITHDRAW';
   unit: VaultAmountUnit;
   requiredBase: string;
   availableBase: string;
@@ -155,5 +156,38 @@ export function checkRedeemLiquidity(
     message:
       `Insufficient synchronous liquidity: can redeem up to ${maxRedeemShares} shares, ` +
       `requested ${requestedShares}`,
+  };
+}
+
+/**
+ * Withdraw liquidity guard — the asset-denominated twin of
+ * `checkRedeemLiquidity`. `maxWithdrawAssets` is ERC-4626 `maxWithdraw(owner)`,
+ * which this vault caps at its *synchronous* exit capacity, and
+ * `requestedAssets` is what the user asked for, both 6-dp USDC base units.
+ *
+ * This one has no ancestor in the deleted relayed service — that service never
+ * exposed a withdraw path at all, so there were no semantics to carry over.
+ * It mirrors the redeem guard deliberately: same strict `>`, so withdrawing
+ * exactly `maxWithdraw` passes. It exists because `withdraw` is a live route
+ * with the identical failure mode — an on-chain revert the user has paid for.
+ *
+ * A separate code from EXCEEDS_MAX_REDEEM because the amounts are in different
+ * units (assets 6 dp vs shares 12 dp); a client that conflated them would
+ * render a shortfall off by 10^6.
+ */
+export function checkWithdrawLiquidity(
+  maxWithdrawAssets: bigint,
+  requestedAssets: bigint,
+): VaultShortfallFailure | null {
+  if (requestedAssets <= maxWithdrawAssets) return null;
+  return {
+    code: 'EXCEEDS_MAX_WITHDRAW',
+    unit: 'usdc-6dp',
+    requiredBase: requestedAssets.toString(),
+    availableBase: maxWithdrawAssets.toString(),
+    shortfallBase: (requestedAssets - maxWithdrawAssets).toString(),
+    message:
+      `Insufficient synchronous liquidity: can withdraw up to ${maxWithdrawAssets} USDC ` +
+      `base units, requested ${requestedAssets}`,
   };
 }

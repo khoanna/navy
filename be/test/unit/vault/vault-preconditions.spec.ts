@@ -15,6 +15,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   checkDepositBalance,
   checkRedeemLiquidity,
+  checkWithdrawLiquidity,
   parseBaseAmount,
   preconditionBody,
   type VaultPreconditionBody,
@@ -59,6 +60,38 @@ describe('checkDepositBalance (USDC, 6 dp base units)', () => {
     const f = checkDepositBalance(available, required)!;
     expect(f.shortfallBase).toBe('1');
     expect(f.requiredBase).toBe(required.toString());
+  });
+});
+
+describe('checkWithdrawLiquidity (USDC assets, 6 dp)', () => {
+  it('passes a withdraw of exactly maxWithdraw (boundary, exact equality)', () => {
+    expect(checkWithdrawLiquidity(1_000_000n, 1_000_000n)).toBeNull();
+  });
+
+  it('passes one base unit below maxWithdraw', () => {
+    expect(checkWithdrawLiquidity(1_000_000n, 999_999n)).toBeNull();
+  });
+
+  it('fails one base unit above maxWithdraw and reports the shortfall', () => {
+    const f = checkWithdrawLiquidity(1_000_000n, 1_000_001n);
+    expect(f).not.toBeNull();
+    expect(f!.code).toBe('EXCEEDS_MAX_WITHDRAW');
+    expect(f!.shortfallBase).toBe('1');
+  });
+
+  it('reports the ASSET unit, not the share unit — conflating them is off by 10^6', () => {
+    const f = checkWithdrawLiquidity(0n, 5n)!;
+    expect(f.unit).toBe('usdc-6dp');
+    // Distinct code from redeem, precisely so a client cannot render an
+    // asset shortfall against a share scale.
+    expect(f.code).not.toBe('EXCEEDS_MAX_REDEEM');
+  });
+
+  it('reports a fully illiquid vault as the whole request being short', () => {
+    const f = checkWithdrawLiquidity(0n, 250_000n)!;
+    expect(f.availableBase).toBe('0');
+    expect(f.shortfallBase).toBe('250000');
+    expect(f.requiredBase).toBe('250000');
   });
 });
 
@@ -154,6 +187,7 @@ describe('VaultService proposal preconditions', () => {
   let balanceOf: jest.Mock;
   let allowance: jest.Mock;
   let maxRedeem: jest.Mock;
+  let maxWithdraw: jest.Mock;
 
   beforeEach(() => {
     const config = {
@@ -167,6 +201,7 @@ describe('VaultService proposal preconditions', () => {
     balanceOf = jest.fn();
     allowance = jest.fn();
     maxRedeem = jest.fn();
+    maxWithdraw = jest.fn();
 
     // Swap the chain reads for fakes while keeping the REAL ethers Interfaces,
     // so the encoded calldata under test is still the production encoding.
@@ -175,7 +210,7 @@ describe('VaultService proposal preconditions', () => {
       configurable: true,
     });
     Object.defineProperty(service, 'vault', {
-      value: { interface: service.vault.interface, maxRedeem },
+      value: { interface: service.vault.interface, maxRedeem, maxWithdraw },
       configurable: true,
     });
   });
@@ -274,6 +309,55 @@ describe('VaultService proposal preconditions', () => {
       expect(body.reason.code).toBe('INVALID_AMOUNT');
       if (body.reason.code === 'INVALID_AMOUNT') expect(body.reason.field).toBe('sharesBase');
       expect(maxRedeem).not.toHaveBeenCalled();
+    });
+  });
+  describe('buildWithdrawTransactions', () => {
+    it('refuses a withdraw beyond the vault synchronous exit liquidity', async () => {
+      maxWithdraw.mockResolvedValue(750_000n);
+      const body = await bodyOf(service.buildWithdrawTransactions(WALLET, '1000000'));
+
+      expect(body.reason.code).toBe('EXCEEDS_MAX_WITHDRAW');
+      if (body.reason.code === 'EXCEEDS_MAX_WITHDRAW') {
+        expect(body.reason.shortfallBase).toBe('250000');
+        expect(body.reason.availableBase).toBe('750000');
+        expect(body.reason.unit).toBe('usdc-6dp');
+      }
+    });
+
+    it('allows a withdraw of exactly maxWithdraw (boundary, exact equality)', async () => {
+      maxWithdraw.mockResolvedValue(750_000n);
+      const txs = await service.buildWithdrawTransactions(WALLET, '750000');
+      expect(txs).toHaveLength(1);
+      expect(txs[0]!.to.toLowerCase()).toBe(VAULT.toLowerCase());
+    });
+
+    it('refuses one base unit above maxWithdraw', async () => {
+      maxWithdraw.mockResolvedValue(750_000n);
+      const body = await bodyOf(service.buildWithdrawTransactions(WALLET, '750001'));
+      expect(body.reason.code).toBe('EXCEEDS_MAX_WITHDRAW');
+      if (body.reason.code === 'EXCEEDS_MAX_WITHDRAW') expect(body.reason.shortfallBase).toBe('1');
+    });
+
+    it('rejects a malformed amount without touching the chain', async () => {
+      const body = await bodyOf(service.buildWithdrawTransactions(WALLET, '1.5'));
+      expect(body.reason.code).toBe('INVALID_AMOUNT');
+      if (body.reason.code === 'INVALID_AMOUNT') expect(body.reason.field).toBe('assetsBase');
+      expect(maxWithdraw).not.toHaveBeenCalled();
+    });
+
+    it('rejects a zero withdraw without touching the chain', async () => {
+      const body = await bodyOf(service.buildWithdrawTransactions(WALLET, '0'));
+      expect(body.reason.code).toBe('INVALID_AMOUNT');
+      expect(maxWithdraw).not.toHaveBeenCalled();
+    });
+
+    it('still encodes the production withdraw calldata when the guard passes', async () => {
+      maxWithdraw.mockResolvedValue(1_000_000n);
+      const txs = await service.buildWithdrawTransactions(WALLET, '1000000');
+      const decoded = service.vault.interface.decodeFunctionData('withdraw', txs[0]!.data);
+      expect(decoded[0]).toBe(1_000_000n);
+      expect((decoded[1] as string).toLowerCase()).toBe(WALLET.toLowerCase());
+      expect((decoded[2] as string).toLowerCase()).toBe(WALLET.toLowerCase());
     });
   });
 });

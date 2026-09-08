@@ -10,6 +10,7 @@ import { TransactionProposal, VaultPositionDto, VaultLimitsDto, HarvestRecordDto
 import {
   checkDepositBalance,
   checkRedeemLiquidity,
+  checkWithdrawLiquidity,
   parseBaseAmount,
   preconditionBody,
 } from './vault-preconditions';
@@ -251,13 +252,26 @@ export class VaultService {
   }
 
   /**
-   * Build withdraw transaction calldata for wallet signing
+   * Build withdraw transaction calldata for wallet signing.
+   *
+   * Guarded like redeem: `maxWithdraw(owner)` is this vault's *synchronous*
+   * exit capacity in assets, so a request above it reverts on-chain. Refuse it
+   * here, before the user pays gas.
+   *
+   * @throws BadRequestException INVALID_AMOUNT / EXCEEDS_MAX_WITHDRAW
    */
   async buildWithdrawTransactions(
     walletAddress: string,
     assetsBase: string,
   ): Promise<TransactionProposal[]> {
-    const assets = BigInt(assetsBase);
+    const parsed = parseBaseAmount(assetsBase, 'assetsBase', 'usdc-6dp');
+    if (!parsed.ok) throw new BadRequestException(preconditionBody(parsed.failure));
+    const assets = parsed.value; // USDC base units, 6 dp
+
+    const maxWithdraw = (await this.vault.maxWithdraw(walletAddress)) as bigint;
+    const overLimit = checkWithdrawLiquidity(maxWithdraw, assets);
+    if (overLimit) throw new BadRequestException(preconditionBody(overLimit));
+
     const withdrawData = this.vault.interface.encodeFunctionData('withdraw', [
       assets,
       walletAddress,
