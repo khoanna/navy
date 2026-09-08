@@ -110,8 +110,25 @@ contract NavyVaultSimple is ERC20, ERC4626, AccessControl, EIP712 {
         return paused ? 0 : type(uint256).max;
     }
 
+    /// @dev Paper 5.2: "`maxWithdraw` AND `maxRedeem` are capped by Q^sync and
+    ///      the user's share claim."
     function maxWithdraw(address owner_) public view override(ERC4626) returns (uint256) {
         return Math.min(convertToAssets(balanceOf(owner_)), synchronousLiquidity());
+    }
+
+    /// @dev Paper 5.2, the other half. Without this override ERC4626's default
+    ///      `maxRedeem` returns the owner's ENTIRE share balance regardless of
+    ///      synchronous liquidity, so `redeem` advertises capacity this vault
+    ///      cannot honour: `_withdraw` transfers native USDC out of the idle
+    ///      balance only, and there is no divest-on-withdraw path here. A
+    ///      caller that pre-checks `maxRedeem` (be's EXCEEDS_MAX_REDEEM guard
+    ///      does exactly that) would be waved through into a transaction that
+    ///      reverts after the user has already paid gas.
+    ///
+    ///      Round DOWN when converting liquidity to shares: rounding up would
+    ///      advertise one share more than the idle balance can pay for.
+    function maxRedeem(address owner_) public view override(ERC4626) returns (uint256) {
+        return Math.min(balanceOf(owner_), _convertToShares(synchronousLiquidity(), Math.Rounding.Floor));
     }
 
     function synchronousLiquidity() public view returns (uint256) {
@@ -128,11 +145,18 @@ contract NavyVaultSimple is ERC20, ERC4626, AccessControl, EIP712 {
         return super.mint(shares, receiver);
     }
 
-    function _withdraw(address owner, address receiver, address, uint256 assets, uint256 shares)
+    /// @dev The parameter order is ERC4626's: (caller, receiver, owner, ...).
+    ///      This override previously named them (owner, receiver, _) and burned
+    ///      from the FIRST argument - i.e. from the caller, not the owner - so
+    ///      `redeem(shares, receiver, owner)` with an approved third-party
+    ///      caller spent the owner's allowance and then destroyed the CALLER's
+    ///      shares. It also dropped ERC4626's `Withdraw` event, which the
+    ///      backend's vault watcher reconciles against. Delegate instead:
+    ///      OpenZeppelin burns from `owner`, transfers to `receiver` and emits.
+    function _withdraw(address caller, address receiver, address owner_, uint256 assets, uint256 shares)
         internal override
     {
-        _burn(owner, shares);
-        IERC20(asset()).safeTransfer(receiver, assets);
+        super._withdraw(caller, receiver, owner_, assets, shares);
     }
 
     // ---- Admin ----
