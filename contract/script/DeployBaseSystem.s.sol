@@ -11,6 +11,7 @@ import {CompoundAdapter} from "../src/adapters/CompoundAdapter.sol";
 import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
 import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
+import {VaultGuardrails} from "./VaultGuardrails.sol";
 
 /// @notice Deploys the Base vault and lending adapters with production identity checks.
 /// @dev Reward routes are configured even when inactive - the route manifest encodes
@@ -29,12 +30,12 @@ contract DeployBaseSystem is Script {
     address internal constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
     uint256 internal constant RECOVERY_GRACE = 3600;
 
-    // Chainlink feeds for reward accounting.
-    // WARNING: USDC_USD_FEED is NOT referenced by run() - reward feeds are an
-    // admin post-deploy step (see script/POST_DEPLOY.md), and this constant
-    // does not appear in Chainlink's published Base feed directory. Verify the
-    // address against that directory before passing it to setUsdcUsdFeed.
-    address internal constant USDC_USD_FEED = 0x7E8600988E4eB2Bf8a7e70082037cf5a2B3A9b56;
+    // Chainlink feeds for reward accounting are an admin post-deploy step
+    // (see script/POST_DEPLOY.md), not a constant here: the accountant's
+    // REWARD_ADMIN_ROLE is held only by `admin`, so this script cannot set
+    // them. A USDC_USD_FEED constant that lived here and was referenced by
+    // nothing has been removed -- it did not appear in Chainlink's published
+    // Base feed directory and was a trap for anyone who copied it.
     address internal constant WETH_USD_FEED = 0x7105EC27F7f0ad0fec6FF5cAAc52d34B8cd6d10e;
 
     error WrongChain();
@@ -89,6 +90,18 @@ contract DeployBaseSystem is Script {
         vault.registerAdapter(address(moonwell), 2_000, 150, "Moonwell Base USDC");
         vault.setRewardExecutor(address(rewards));
         vault.setRewardAccountant(address(accountant));
+
+        // Paper 5.2 / 6.1 / 8.1 on-chain guardrails. Without this call the
+        // vault ships with liquidityFloorBps = 0 (P5 inactive on chain),
+        // maxSynchronousLossBps = 0 (any dust loss reverts a redemption), no
+        // admin reserve, a non-deterministic divestment order and no
+        // dependency groups. Divestment order: Aave, Compound, Moonwell --
+        // see VaultGuardrails.applyTo.
+        address[] memory ordered = new address[](3);
+        ordered[0] = address(aave);
+        ordered[1] = address(compound);
+        ordered[2] = address(moonwell);
+        VaultGuardrails.applyTo(vault, ordered);
 
         // Admin gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE only
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), admin);

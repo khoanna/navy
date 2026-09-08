@@ -11,6 +11,7 @@ import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
 import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
 import {IAaveV3Pool} from "../src/interfaces/IAaveV3.sol";
+import {VaultGuardrails} from "./VaultGuardrails.sol";
 
 /// @notice End-to-end Anvil fork test for SRCLA algorithm
 /// @dev This script:
@@ -165,6 +166,14 @@ contract AnvilE2ETest is Script {
         vault.setRewardExecutor(address(rewardExecutor));
         vault.setRewardAccountant(address(accountant));
         accountant.setVault(address(vault));
+
+        // Same on-chain guardrails the Base deploy sets, so the Anvil bring-up
+        // exercises the configuration production actually runs.
+        address[] memory ordered = new address[](3);
+        ordered[0] = address(aaveAdapter);
+        ordered[1] = address(compoundAdapter);
+        ordered[2] = address(moonwellAdapter);
+        VaultGuardrails.applyTo(vault, ordered);
         vault.grantRole(vault.ADMIN_ROLE(), deployer);
         vault.grantRole(vault.ALLOCATOR_ROLE(), deployer);
 

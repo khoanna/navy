@@ -9,6 +9,7 @@ import {CompoundAdapter} from "../src/adapters/CompoundAdapter.sol";
 import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
 import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
+import {VaultGuardrails} from "./VaultGuardrails.sol";
 
 /// @notice Deploys tier vaults with USDC funding in one script
 contract DeployAndFund is Script {
@@ -120,6 +121,16 @@ contract DeployAndFund is Script {
         _vault.setRewardExecutor(address(rewardExecutor));
         _vault.setRewardAccountant(address(accountant));
         accountant.setVault(address(_vault));
+
+        // Paper 5.2 / 6.1 / 8.1 on-chain guardrails. Without this the vault
+        // ships with the liquidity floor and the synchronous-loss allowance
+        // both at zero - the first makes P5 inert, the second makes any
+        // rounding loss revert a redemption.
+        address[] memory ordered = new address[](3);
+        ordered[0] = info.aave;
+        ordered[1] = info.compound;
+        ordered[2] = info.moonwell;
+        VaultGuardrails.applyTo(_vault, ordered);
 
         _vault.grantRole(_vault.ADMIN_ROLE(), deployer);
         _vault.grantRole(_vault.ALLOCATOR_ROLE(), deployer);
