@@ -13,6 +13,8 @@ interface IRewardExecutor {
         address[] pools; /// @dev Canonical pool addresses; pools.length == path.length - 1
         address rewardFeed; /// @dev Chainlink feed for reward/USD price
         address usdcFeed; /// @dev Chainlink feed for USDC/USD price (rate sanity check)
+        uint256 maxRewardFeedAge; /// @dev Max seconds since the reward feed's updatedAt (must be nonzero)
+        uint256 maxUsdcFeedAge; /// @dev Max seconds since the USDC feed's updatedAt (must be nonzero)
         uint256 maxInput; /// @dev Maximum input amount per swap
         uint256 minOutputBps; /// @dev Minimum output as basis points of input (e.g., 9900 = 99%)
         uint256 maxPriceImpactBps; /// @dev Max price impact in basis points (e.g., 100 = 1%)
@@ -61,11 +63,10 @@ interface IRewardExecutor {
     /// @param routeId The route to revoke
     function revokeRoute(bytes32 routeId) external;
 
-    /// @notice Set daily volume for testing purposes (admin only)
-    /// @param routeId The route ID
-    /// @param day The day number
-    /// @param volume The volume to set
-    function setDailyVolume(bytes32 routeId, uint256 day, uint256 volume) external;
+    /// @notice Get the number of swaps executed against a route (replay/evidence counter)
+    /// @param routeId The route identifier
+    /// @return uint256 The number of completed swaps
+    function swapCount(bytes32 routeId) external view returns (uint256);
 
     /// @notice Get route configuration by ID
     /// @param routeId The route identifier
@@ -116,8 +117,11 @@ interface IRewardExecutor {
     function isRouteApproved(bytes32 routeId) external view returns (bool);
 
     /// @notice Compute the canonical route digest
+    /// @dev Binds block.chainid and pools (in addition to every other route
+    ///      field) so a route approved on one chain, or with a substituted
+    ///      pool set, cannot produce the same digest.
     /// @param routeId The route ID (should match digest output)
     /// @param route_ The route configuration
     /// @return bytes32 The computed digest
-    function computeDigest(bytes32 routeId, Route calldata route_) external pure returns (bytes32);
+    function computeDigest(bytes32 routeId, Route calldata route_) external view returns (bytes32);
 }

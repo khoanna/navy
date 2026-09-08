@@ -129,6 +129,13 @@ contract MockChainlinkFeed {
     function setStartedAt(uint256 startedAt_) external {
         _startedAt = startedAt_;
     }
+
+    /// @dev Directly sets the round's updatedAt without touching price/round,
+    ///      so a test can make a feed's own reported age stale or fresh
+    ///      independent of setStalePrice's price-plus-age helper.
+    function setUpdatedAt(uint256 updatedAt_) external {
+        _updatedAt = updatedAt_;
+    }
 }
 
 /// @title Mock Uniswap V3 Factory for testing
@@ -342,6 +349,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -373,6 +382,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -409,6 +420,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](2),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9800,
             maxPriceImpactBps: 300,
@@ -538,6 +551,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -571,6 +586,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](0),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -605,6 +622,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](3),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -639,6 +658,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -673,6 +694,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -708,6 +731,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -742,6 +767,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -776,6 +803,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -810,6 +839,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -846,6 +877,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -880,6 +913,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
@@ -923,6 +958,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(wellFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9500,
             maxPriceImpactBps: 500,
@@ -1004,20 +1041,28 @@ contract RewardExecutorTest is Test {
         assertGt(out, 0, "swap should succeed when sequencer is up");
     }
 
+    /// @dev The original fixture captured `deadline` before warping forward
+    ///      past it, so it always reverted on DeadlineExpired (checked before
+    ///      any oracle read) regardless of feed staleness — it never actually
+    ///      exercised the stale-round path its name claims. Fixed to keep the
+    ///      deadline valid and assert the real StaleChainlinkPrice revert.
     function test_swap_rejectsStaleFeedRound() public {
+        // Establish a safe "now" first: block.timestamp starts at 1 in this
+        // suite, and setStalePrice's fallback branch for
+        // block.timestamp <= age would otherwise mask real staleness.
+        vm.warp(30 days);
         uint256 amountIn = 10e18;
-        uint256 deadline = block.timestamp + 3600;
 
-        // Set stale price
+        // Stale beyond compDirectRoute's maxRewardFeedAge (3600s).
         compFeed.setStalePrice(90_000_000, 7200);
-        vm.warp(block.timestamp + 7201);
+        uint256 deadline = block.timestamp + 3600;
 
         comp.mint(vault, amountIn);
         vm.prank(vault);
         comp.approve(address(executor), amountIn);
 
         vm.prank(vault);
-        vm.expectRevert();
+        vm.expectRevert(RewardExecutor.StaleChainlinkPrice.selector);
         executor.swap(compRouteId, amountIn, 0, deadline);
     }
 
@@ -1112,26 +1157,55 @@ contract RewardExecutorTest is Test {
         executor.swap(compRouteId, amountIn, 0, deadline);
     }
 
+    /// @dev setDailyVolume was an admin backdoor removed in favor of genuine
+    ///      cap enforcement (paper 9.4): rather than pre-seeding volume, this
+    ///      approves a fresh route whose maxDailyNotional is smaller than a
+    ///      single swap's output, so the very first swap against it already
+    ///      exceeds the cap through the real enforcement path.
     function test_swap_enforcesDailyCap() public {
+        address[] memory path = new address[](2);
+        path[0] = address(comp);
+        path[1] = CANONICAL_USDC;
+        uint24[] memory fees = new uint24[](1);
+        fees[0] = 3000;
+
+        bytes32 routeId = keccak256("daily-cap-route");
+        IRewardExecutor.Route memory route = IRewardExecutor.Route({
+            inputToken: address(comp),
+            outputToken: CANONICAL_USDC,
+            path: path,
+            fees: fees,
+            pools: new address[](1),
+            rewardFeed: address(compFeed),
+            usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
+            maxInput: type(uint256).max,
+            minOutputBps: 1,
+            maxPriceImpactBps: 10000,
+            maxDailyNotional: 1, // essentially zero cap: any real swap output exceeds it
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            activationBlockHash: blockhash(block.number - 1),
+            routeDigest: bytes32(0)
+        });
+        route.routeDigest = executor.computeDigest(routeId, route);
+        vm.prank(admin);
+        executor.approveRoute(routeId, route);
+
         uint256 amountIn = 10e18;
+        uint256 expectedOut = 9_000_000;
         uint256 deadline = block.timestamp + 3600;
 
-        // Set daily volume to max
-        uint256 currentDay = block.timestamp / 86400;
-        vm.prank(admin);
-        executor.setDailyVolume(compRouteId, currentDay, type(uint256).max);
-
+        usdc.mint(address(executor), expectedOut);
         comp.mint(vault, amountIn);
         vm.prank(vault);
         comp.approve(address(executor), amountIn);
+        router.setSwapOutput(expectedOut);
 
         vm.prank(vault);
-        vm.expectRevert();
-        executor.swap(compRouteId, amountIn, 0, deadline);
-
-        // Reset
-        vm.prank(admin);
-        executor.setDailyVolume(compRouteId, currentDay, 0);
+        vm.expectRevert(RewardExecutor.DailyVolumeLimitExceeded.selector);
+        executor.swap(routeId, amountIn, 0, deadline);
     }
 
     function test_swap_enforcesMinOutput() public {
@@ -1195,6 +1269,10 @@ contract RewardExecutorTest is Test {
         assertEq(executor.dailyVolume(compRouteId, currentDay), expectedOut, "daily volume should be updated");
     }
 
+    /// @dev The original fixture only asserted `true`, so it passed
+    ///      regardless of whether Swapped was ever emitted — exactly the gap
+    ///      this task closes (the event was declared but never emitted).
+    ///      Now asserts the exact topics and data.
     function test_swap_emitsEvent() public {
         uint256 amountIn = 10e18;
         uint256 expectedOut = 9_000_000;
@@ -1209,10 +1287,164 @@ contract RewardExecutorTest is Test {
         router.setSwapOutput(expectedOut);
 
         vm.prank(vault);
+        vm.expectEmit(true, true, true, true);
+        emit IRewardExecutor.Swapped(compRouteId, address(comp), CANONICAL_USDC, amountIn, expectedOut, 0);
         executor.swap(compRouteId, amountIn, 0, deadline);
+    }
 
-        // Event emitted - verified by test completion without revert
-        assertTrue(true, "swap should emit Swapped event");
+    // ============================================
+    // PAPER 9.4 CONFORMANCE TESTS
+    // ============================================
+
+    /// @dev §9.4 requires each route to fix Chainlink feeds and their maximum
+    ///      ages. _validateChainlinkPrice checked round completeness and a
+    ///      nonzero updatedAt but never compared it to block.timestamp, so a
+    ///      feed frozen for a week passed. compDirectRoute's maxRewardFeedAge
+    ///      is 1 hour (3600s); 2 hours must revert.
+    function test_swapRevertsOnAStaleRewardFeed() public {
+        // block.timestamp starts at 1 in this suite; warp to a safe "now"
+        // first so `block.timestamp - 2 hours` below cannot underflow.
+        vm.warp(30 days);
+        compFeed.setUpdatedAt(block.timestamp - 2 hours);
+
+        uint256 amountIn = 10e18;
+        comp.mint(vault, amountIn);
+        vm.prank(vault);
+        comp.approve(address(executor), amountIn);
+
+        vm.prank(vault);
+        vm.expectRevert(RewardExecutor.StaleChainlinkPrice.selector);
+        executor.swap(compRouteId, amountIn, 0, block.timestamp + 3600);
+    }
+
+    function test_swapSucceedsOnAFreshFeed() public {
+        vm.warp(30 days);
+        compFeed.setUpdatedAt(block.timestamp - 1 minutes);
+        usdcFeed.setPrice(1_000_000_000); // keep the route's other feed fresh too
+
+        uint256 amountIn = 10e18;
+        uint256 expectedOut = 9_000_000;
+        usdc.mint(address(executor), expectedOut);
+        comp.mint(vault, amountIn);
+        vm.prank(vault);
+        comp.approve(address(executor), amountIn);
+        router.setSwapOutput(expectedOut);
+
+        vm.prank(vault);
+        uint256 out = executor.swap(compRouteId, amountIn, 0, block.timestamp + 3600);
+        assertGt(out, 0, "swap should succeed on a fresh feed");
+    }
+
+    /// @dev Same route parameters must not produce the same digest on another
+    ///      chain — the digest previously omitted block.chainid entirely.
+    function test_routeDigestBindsChainId() public {
+        bytes32 here = executor.computeDigest(compRouteId, compDirectRoute);
+        vm.chainId(999);
+        assertTrue(here != executor.computeDigest(compRouteId, compDirectRoute), "digest must bind chain id");
+    }
+
+    /// @dev The Swapped event was declared but never emitted, leaving
+    ///      harvests with no on-chain evidence.
+    function test_swapEmitsSwappedEvidence() public {
+        uint256 amountIn = 10e18;
+        uint256 expectedOut = 9_000_000;
+        usdc.mint(address(executor), expectedOut);
+        comp.mint(vault, amountIn);
+        vm.prank(vault);
+        comp.approve(address(executor), amountIn);
+        router.setSwapOutput(expectedOut);
+
+        vm.prank(vault);
+        vm.expectEmit(true, true, true, false);
+        emit IRewardExecutor.Swapped(compRouteId, address(comp), CANONICAL_USDC, 0, 0, 0);
+        executor.swap(compRouteId, amountIn, 0, block.timestamp + 3600);
+    }
+
+    /// @dev swapCount is the replay/evidence counter that did not exist before.
+    function test_swapCountIncrements() public {
+        uint256 amountIn = 10e18;
+        uint256 expectedOut = 9_000_000;
+        usdc.mint(address(executor), expectedOut);
+        comp.mint(vault, amountIn);
+        vm.prank(vault);
+        comp.approve(address(executor), amountIn);
+        router.setSwapOutput(expectedOut);
+
+        uint256 before = executor.swapCount(compRouteId);
+        vm.prank(vault);
+        executor.swap(compRouteId, amountIn, 0, block.timestamp + 3600);
+        assertEq(executor.swapCount(compRouteId), before + 1, "swapCount must increment per completed swap");
+    }
+
+    /// @dev approveRoute must reject a zero maxRewardFeedAge — an unbounded
+    ///      age is the exact defect this task fixes, so it cannot be
+    ///      reintroduced through configuration.
+    function test_approveRoute_rejectsZeroMaxRewardFeedAge() public {
+        bytes32 routeId = keccak256("zero-reward-age");
+        address[] memory path = new address[](2);
+        path[0] = address(comp);
+        path[1] = CANONICAL_USDC;
+        uint24[] memory fees = new uint24[](1);
+        fees[0] = 3000;
+
+        IRewardExecutor.Route memory route = IRewardExecutor.Route({
+            inputToken: address(comp),
+            outputToken: CANONICAL_USDC,
+            path: path,
+            fees: fees,
+            pools: new address[](1),
+            rewardFeed: address(compFeed),
+            usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 0,
+            maxUsdcFeedAge: 3600,
+            maxInput: type(uint256).max,
+            minOutputBps: 9850,
+            maxPriceImpactBps: 200,
+            maxDailyNotional: 1_000_000_000_000,
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            activationBlockHash: blockhash(block.number - 1),
+            routeDigest: bytes32(0)
+        });
+        route.routeDigest = executor.computeDigest(routeId, route);
+
+        vm.prank(admin);
+        vm.expectRevert(RewardExecutor.InvalidMaxFeedAge.selector);
+        executor.approveRoute(routeId, route);
+    }
+
+    function test_approveRoute_rejectsZeroMaxUsdcFeedAge() public {
+        bytes32 routeId = keccak256("zero-usdc-age");
+        address[] memory path = new address[](2);
+        path[0] = address(comp);
+        path[1] = CANONICAL_USDC;
+        uint24[] memory fees = new uint24[](1);
+        fees[0] = 3000;
+
+        IRewardExecutor.Route memory route = IRewardExecutor.Route({
+            inputToken: address(comp),
+            outputToken: CANONICAL_USDC,
+            path: path,
+            fees: fees,
+            pools: new address[](1),
+            rewardFeed: address(compFeed),
+            usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 0,
+            maxInput: type(uint256).max,
+            minOutputBps: 9850,
+            maxPriceImpactBps: 200,
+            maxDailyNotional: 1_000_000_000_000,
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            activationBlockHash: blockhash(block.number - 1),
+            routeDigest: bytes32(0)
+        });
+        route.routeDigest = executor.computeDigest(routeId, route);
+
+        vm.prank(admin);
+        vm.expectRevert(RewardExecutor.InvalidMaxFeedAge.selector);
+        executor.approveRoute(routeId, route);
     }
 
     // ============================================
@@ -1283,6 +1515,8 @@ contract RewardExecutorTest is Test {
             pools: new address[](1),
             rewardFeed: address(compFeed),
             usdcFeed: address(usdcFeed),
+            maxRewardFeedAge: 3600,
+            maxUsdcFeedAge: 3600,
             maxInput: type(uint256).max,
             minOutputBps: 9850,
             maxPriceImpactBps: 200,
