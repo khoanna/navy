@@ -21,18 +21,54 @@ describe('SrclaClient', () => {
     client = module.get(SrclaClient);
   });
 
-  it('should get current allocation', async () => {
+  it('unwraps the envelope srcla actually sends', async () => {
+    // The previous version of this test mocked a FLAT body, which srcla has
+    // never returned - routes.ts wraps this route in `{ data: ... }`. The test
+    // encoded the wrong contract, which is why the mismatch survived.
     const mockFetch = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ totalAssets: '1000000' }),
+      json: () =>
+        Promise.resolve({
+          data: {
+            totalAssets: '1000000',
+            allocations: [
+              { adapter: '0xaave', name: 'Aave V3', assets: '600000', percentage: 60 },
+            ],
+          },
+        }),
     } as any);
 
     const result = await client.getCurrentAllocation();
     expect(result.totalAssets).toBe('1000000');
+    expect(result.allocations).toHaveLength(1);
+    expect(result.allocations[0]!.name).toBe('Aave V3');
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/v1/allocation'),
       expect.any(Object),
     );
+    mockFetch.mockRestore();
+  });
+
+  it('still accepts a bare body, so an unwrapped route does not break it', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ totalAssets: '42', allocations: [] }),
+    } as any);
+
+    const result = await client.getCurrentAllocation();
+    expect(result.totalAssets).toBe('42');
+    mockFetch.mockRestore();
+  });
+
+  it('returns a usable shape rather than undefined fields when the body is empty', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({}),
+    } as any);
+
+    const result = await client.getCurrentAllocation();
+    expect(result.totalAssets).toBe('0');
+    expect(result.allocations).toEqual([]);
     mockFetch.mockRestore();
   });
 

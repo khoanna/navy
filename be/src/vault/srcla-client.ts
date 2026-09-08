@@ -78,7 +78,24 @@ export class SrclaClient {
   }
 
   async getCurrentAllocation(): Promise<StrategyAllocation> {
-    return this.get<StrategyAllocation>('/v1/allocation');
+    // srcla wraps this one in an envelope: `{ data: { totalAssets, allocations } }`
+    // (srcla/src/http/routes.ts). `get<T>` returns the parsed body verbatim, so
+    // casting straight to StrategyAllocation left every field undefined and
+    // `/vault/strategy` served nulls to the fe and expo clients.
+    const body = await this.get<{ data: StrategyAllocation } | StrategyAllocation>(
+      '/v1/allocation',
+    );
+    const payload =
+      body && typeof body === 'object' && 'data' in body
+        ? (body as { data: StrategyAllocation }).data
+        : (body as StrategyAllocation);
+
+    // Never hand a half-shaped object upward - a missing field here surfaces as
+    // a broken admin dashboard rather than an error anyone can trace.
+    return {
+      totalAssets: payload?.totalAssets ?? '0',
+      allocations: payload?.allocations ?? [],
+    };
   }
 
   async getDecision(hash: string): Promise<Decision> {
