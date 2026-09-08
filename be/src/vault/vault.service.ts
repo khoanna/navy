@@ -7,10 +7,17 @@ import { ethers } from 'ethers';
 import { NavyConfigService } from '../config/config.service';
 import { SrclaClient, StrategyAllocation } from './srcla-client';
 import { TransactionProposal, VaultPositionDto, VaultLimitsDto, HarvestRecordDto, HarvestsResponseDto, RebalanceStatusDto } from './vault.types';
+import {
+  checkDepositBalance,
+  checkRedeemLiquidity,
+  parseBaseAmount,
+  preconditionBody,
+} from './vault-preconditions';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address owner) view returns (uint256)',
 ] as const;
 
 /** Known adapter addresses → human-readable protocol names (lowercase keys for case-insensitive lookup) */
@@ -154,14 +161,28 @@ export class VaultService {
   }
 
   /**
-   * Build deposit transaction calldata for wallet signing
+   * Build deposit transaction calldata for wallet signing.
+   *
+   * The user now pays their own gas (paper §2.1), so an unfundable deposit must
+   * be refused *here* rather than reverting on-chain after they have paid for
+   * it. Both refusals carry a structured `reason` the client branches on — see
+   * `vault-preconditions.ts`.
+   *
+   * @throws BadRequestException INVALID_AMOUNT / INSUFFICIENT_USDC_BALANCE
    */
   async buildDepositTransactions(
     walletAddress: string,
     assetsBase: string,
   ): Promise<TransactionProposal[]> {
-    const assets = BigInt(assetsBase);
+    const parsed = parseBaseAmount(assetsBase, 'assetsBase', 'usdc-6dp');
+    if (!parsed.ok) throw new BadRequestException(preconditionBody(parsed.failure));
+    const assets = parsed.value; // USDC base units, 6 dp
     const proposals: TransactionProposal[] = [];
+
+    // Restored guard: the wallet must actually hold the USDC it is depositing.
+    const balance = (await this.usdc.balanceOf(walletAddress)) as bigint;
+    const shortfall = checkDepositBalance(balance, assets);
+    if (shortfall) throw new BadRequestException(preconditionBody(shortfall));
 
     const allowance = await this.getAllowance(walletAddress);
 
@@ -192,13 +213,26 @@ export class VaultService {
   }
 
   /**
-   * Build redeem transaction calldata for wallet signing
+   * Build redeem transaction calldata for wallet signing.
+   *
+   * Restored guard: `maxRedeem(owner)` is this vault's *synchronous* exit
+   * capacity, so a request above it reverts on-chain. Refuse it here instead,
+   * before the user pays gas.
+   *
+   * @throws BadRequestException INVALID_AMOUNT / EXCEEDS_MAX_REDEEM
    */
   async buildRedeemTransactions(
     walletAddress: string,
     sharesBase: string,
   ): Promise<TransactionProposal[]> {
-    const shares = BigInt(sharesBase);
+    const parsed = parseBaseAmount(sharesBase, 'sharesBase', 'shares-12dp');
+    if (!parsed.ok) throw new BadRequestException(preconditionBody(parsed.failure));
+    const shares = parsed.value; // navUSDC share units, 12 dp
+
+    const maxRedeem = (await this.vault.maxRedeem(walletAddress)) as bigint;
+    const overLimit = checkRedeemLiquidity(maxRedeem, shares);
+    if (overLimit) throw new BadRequestException(preconditionBody(overLimit));
+
     const redeemData = this.vault.interface.encodeFunctionData('redeem', [
       shares,
       walletAddress,
