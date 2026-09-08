@@ -22,7 +22,6 @@ execution. `be` is a **read-only** consumer: it never computes allocations and n
 | `getHarvests(params?)` | `GET /v1/harvests` | Paginated harvest records |
 | `getMarkets()` | `GET /v1/markets` | Available yield markets |
 | `getHealth()` | `GET /v1/health` | Service health status |
-| `reviewProposal(req)` | `POST /v1/proposals/review` | Submit a proposal for policy review (currently unreferenced by `be`) |
 
 `triggerRebalance()` was removed: paper §10.2 says `be` "does not relay farming transactions,
 possess the allocator key, or execute rebalances". Composing srcla *history* over HTTP is
