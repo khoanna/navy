@@ -1,3 +1,36 @@
+/**
+ * §7.2 label persistence: recording the realized return for a forecast once
+ * its horizon has elapsed, so calibration has a held-out target.
+ *
+ * UNWIRED, AND DELIBERATELY KEPT. `persistForecastLabel`,
+ * `persistForecastLabels`, `getAvailableLabels` and `createLabelFromForecast`
+ * have no caller anywhere in src/, scripts/ or test/, and this is the ONLY
+ * code in the repo that writes a `ForecastLabel` row (verified by grep for
+ * `forecastLabel.create`/`createMany`). It duplicates nothing: the live
+ * READER, `runtime/decision-driver.ts#buildRawOriginFromCollector`, only
+ * reads those rows.
+ *
+ * This gap is already recorded from the reader's side — see
+ * `policy/artifact.ts`'s "Whole-branch review, MEDIUM 7" note, which lists
+ * it as one of three independent reasons the kernel admits nothing end to
+ * end in production.
+ *
+ * WHAT IS MISSING TO WIRE IT, and it is more than a caller:
+ *   1. A caller. Nothing schedules label creation when a horizon elapses;
+ *      the natural home is the weekly walk-forward step in
+ *      `runtime/scheduler.ts`.
+ *   2. The §10.2 provenance columns. These writers set only the legacy
+ *      `originTimestamp`/`horizonSeconds`/`realizedReturnE18`/`availableAt`
+ *      fields. The live reader filters on `where: { horizonEndsAt: { not:
+ *      null } }` and orders by `horizonEndsAt`, and the policy needs
+ *      `realizedReturnWad` and `realizedMinCashBase` (prisma/schema.prisma
+ *      ForecastLabel). A row written by this file as it stands would be
+ *      invisible to the reader.
+ *   3. `createLabelFromForecast` stamps `originTimestamp: new Date()` —
+ *      the time the label is CREATED, not the origin the forecast was made
+ *      at. That is a look-ahead bug and must be fixed, not carried forward,
+ *      when a caller supplies the real origin.
+ */
 import { PrismaClient, ForecastLabel } from '@prisma/client';
 import type { ForecastResult } from './types.js';
 

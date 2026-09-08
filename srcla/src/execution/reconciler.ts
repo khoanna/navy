@@ -1,3 +1,30 @@
+/**
+ * §10.3's balance-delta reconciliation: after each submitted action,
+ * "reconcile receipt and balance deltas, then advance or stop".
+ *
+ * UNWIRED, AND DELIBERATELY KEPT. `reconcile`, `reconcilePlan`,
+ * `reconcileExact`, `reconciliationSummary` and `allReconciled` have no
+ * caller in src/ — only test/unit/execution/executor.spec.ts. (The
+ * `VaultState` type declared here IS live: `execution/executor.ts` imports
+ * it.)
+ *
+ * It is NOT a duplicate of the live reconciliation step. What
+ * `execution/keeper-executor.ts` supplies as `SubmissionDeps.reconcile`
+ * reads the vault's PLAN CURSOR (`getPlanState().nextActionIndex`, or the
+ * plan no longer being active on the final action) and asserts it advanced.
+ * That catches "the receipt claimed success but the vault did not consume
+ * the action"; it does not compare the adapter/idle balance delta against
+ * the amount the action asked for, which is the half §10.3 names and this
+ * module implements. Deleting it would leave that half with no
+ * implementation.
+ *
+ * WHAT IS MISSING TO WIRE IT: a before/after `VaultState` read.
+ * `IPlanExecutor` exposes no adapter-balance or idle read today, so
+ * keeper-executor cannot build the `vaultState` argument. Once it can, the
+ * call belongs alongside the existing plan-cursor check in that same
+ * `reconcile` dep, with a failure halting the plan exactly as the cursor
+ * check already does.
+ */
 import type { PlanAction } from './plan-builder.js';
 
 /**

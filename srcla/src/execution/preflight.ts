@@ -1,3 +1,26 @@
+/**
+ * Per-ACTION preflight: is this adapter registered, unpaused, and is the gas
+ * price and vault code/configuration state sane enough to send this action?
+ *
+ * UNWIRED, AND DELIBERATELY KEPT. Nothing in src/ imports this module — its
+ * only importer is test/unit/execution/executor.spec.ts.
+ *
+ * It is NOT a duplicate of `execution/keeper-executor.ts`'s inline preflight,
+ * which is a different check at a different granularity: that one validates
+ * the PLAN HEADER (zero planId/merkleRoot/snapshotHash, actionCount vs
+ * actions.length, createdAt/expiresAt vs now) against the conditions
+ * `NavyVaultSRCLA.submitPlan` reverts on, and deliberately performs no RPC.
+ * Nothing on the live path checks a per-action adapter's registration or
+ * pause state, or the gas price, before submitting — so this is the only
+ * implementation of that check.
+ *
+ * WHAT IS MISSING TO WIRE IT: the live adapter registry and pause set. A
+ * caller needs `registeredAdapters`/`pausedAdapters` read from the vault
+ * (`NavyVaultSRCLA`'s adapter lifecycle state) plus the current gas price,
+ * and `IPlanExecutor` exposes neither today. Once those reads exist, the
+ * call belongs in `keeper-executor.ts`'s `simulate` SubmissionDeps entry,
+ * which currently does no per-action validation of its own.
+ */
 import { ethers } from 'ethers';
 
 /**
