@@ -53,7 +53,9 @@ export function calculateForecastMetrics(
   const n = Math.min(predictions.length, realized.length);
   const mae = totalAbsError / n;
   const rmse = Math.sqrt(totalSquaredError / n);
-  const coverage = belowCount / n;
+  // `belowCount` counts BREACHES of the lower bound; coverage is the
+  // complement — the share of periods the bound actually held.
+  const coverage = (n - belowCount) / n;
   const sharpness = totalSharpness / n;
 
   // MASE = MAE / MAE of naive (random walk) forecast

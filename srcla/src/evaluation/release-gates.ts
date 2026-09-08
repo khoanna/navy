@@ -110,11 +110,14 @@ export function evaluatePolicyGate(
   });
 
   // 2. Statistical indistinguishability from baselines
-  const statPass = comparison.pValue >= 0.05;
+  // Paper 11.5 fails the policy gate ON statistical indistinguishability, so
+  // the gate passes only when the difference IS significant. `>= 0.05` passed
+  // exactly the null it was meant to reject.
+  const statPass = comparison.pValue < 0.05;
   checks.push({
-    name: 'Statistical Indistinguishability',
+    name: 'Statistically Distinguishable from Baseline',
     passed: statPass,
-    details: `p-value ${comparison.pValue.toFixed(3)} >= 0.05`,
+    details: `p-value ${comparison.pValue.toFixed(3)} ${statPass ? '<' : '>='} 0.05`,
     metrics: { pValue: comparison.pValue },
   });
 

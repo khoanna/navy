@@ -68,8 +68,16 @@ export class RollingForecast {
     }
 
     const mae = errors / predictions.length;
-    const coverage = belowCount / predictions.length;
-    const loss = mae + Math.max(0, (0.05 - coverage) * 1000);
+    // `belowCount` counts breaches; empirical coverage is the complement, on
+    // the same convention as the `coverage` field emitted at forecast time
+    // (`1 - quantile`, i.e. P[actual >= lowerReturn]).
+    const coverage = (predictions.length - belowCount) / predictions.length;
+    // Penalise UNDER-coverage against the nominal level this forecaster was
+    // configured for. The previous form subtracted coverage from a hardcoded
+    // 0.05, so it penalised a bound for holding and charged nothing for one
+    // breached half the time.
+    const nominalCoverage = 1 - this.config.quantile;
+    const loss = mae + Math.max(0, nominalCoverage - coverage) * 1000;
 
     return { loss, coverage };
   }

@@ -109,7 +109,7 @@ describe('Release Gates', () => {
     it('should pass when SRCLA outperforms B0 with good Sharpe', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -123,7 +123,7 @@ describe('Release Gates', () => {
     it('should fail when safety violations occur', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 2,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -134,10 +134,13 @@ describe('Release Gates', () => {
       expect(result.blockedReason).toBe('No Safety Violations');
     });
 
-    it('should fail when p-value below 0.05', () => {
+    it('should fail when the difference is not significant (p >= 0.05)', () => {
+      // Paper 11.5 fails the policy gate ON statistical indistinguishability.
+      // This test previously asserted the inverse - p = 0.03 was expected to
+      // FAIL - which is how the inverted `pValue >= 0.05` survived review.
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.03,
+        pValue: 0.20,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -145,13 +148,13 @@ describe('Release Gates', () => {
 
       const result = evaluatePolicyGate(comparison);
       expect(result.passed).toBe(false);
-      expect(result.blockedReason).toBe('Statistical Indistinguishability');
+      expect(result.blockedReason).toBe('Statistically Distinguishable from Baseline');
     });
 
     it('should fail when SRCLA does not outperform B0', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 4.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -165,7 +168,7 @@ describe('Release Gates', () => {
     it('should fail when Sharpe ratio below 0.5', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.3,
@@ -179,7 +182,7 @@ describe('Release Gates', () => {
     it('should have 4 checks', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -192,7 +195,7 @@ describe('Release Gates', () => {
     it('should include metrics in checks', () => {
       const comparison: PolicyComparison = {
         safetyViolations: 0,
-        pValue: 0.10,
+        pValue: 0.01,
         srclaAPY: 5.5,
         b0APY: 5.0,
         srclaSharpe: 0.8,
@@ -223,7 +226,8 @@ describe('Release Gates', () => {
       };
       expect(evaluateForecastGate(eval99).passed).toBe(true);
 
-      // Test exact p-value 0.05
+      // Exact p = 0.05 is the EXCLUSIVE boundary: the gate requires p < 0.05,
+      // so a result sitting exactly on alpha does not clear it.
       const comp05: PolicyComparison = {
         safetyViolations: 0,
         pValue: 0.05,
@@ -231,7 +235,10 @@ describe('Release Gates', () => {
         b0APY: 5.0,
         srclaSharpe: 0.5,
       };
-      expect(evaluatePolicyGate(comp05).passed).toBe(true);
+      expect(evaluatePolicyGate(comp05).passed).toBe(false);
+
+      // One step inside alpha clears it, with every other input unchanged.
+      expect(evaluatePolicyGate({ ...comp05, pValue: 0.049 }).passed).toBe(true);
     });
   });
 });

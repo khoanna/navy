@@ -121,7 +121,8 @@ export class DirectARXForecast {
 
     return {
       loss: errors / predictions.length,
-      coverage: belowCount / predictions.length,
+      // Complement of the breach count — see rolling.ts.
+      coverage: (predictions.length - belowCount) / predictions.length,
     };
   }
 }

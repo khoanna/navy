@@ -222,7 +222,11 @@ export class CoverageTracker {
       rmse: Math.sqrt(totalSquaredError / n),
       sharpness: totalSharpness / n,
       pinballLoss: totalAbsError / n,
-      coverage: belowCount / n,
+      // Complement of the breach count. This value feeds
+      // `evaluateReleaseGates`, which fails when coverage < minCoverage; the
+      // inverted form made that gate pass only when coverage was BAD. The
+      // sibling at :158 already computed it correctly as covered/total.
+      coverage: (n - belowCount) / n,
     };
   }
 
