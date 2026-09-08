@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { UsdcDomain, Eip712Types } from '../evm/payment-authorization';
 
-export const TRANSFER_WITH_AUTHORIZATION_TYPES: Eip712Types = {
+const TRANSFER_WITH_AUTHORIZATION_TYPES: Eip712Types = {
   TransferWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },

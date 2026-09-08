@@ -34,7 +34,7 @@ export function isSameOrigin(req: Request): boolean {
   return false;
 }
 
-export class OriginError extends Error {
+class OriginError extends Error {
   constructor() {
     super('Cross-origin request rejected');
     this.name = 'OriginError';

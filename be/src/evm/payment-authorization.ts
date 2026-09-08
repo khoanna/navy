@@ -9,7 +9,7 @@ export interface UsdcDomain {
 
 export type Eip712Types = Record<string, Array<{ name: string; type: string }>>;
 
-export const RECEIVE_WITH_AUTHORIZATION_TYPES: Eip712Types = {
+const RECEIVE_WITH_AUTHORIZATION_TYPES: Eip712Types = {
   ReceiveWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },

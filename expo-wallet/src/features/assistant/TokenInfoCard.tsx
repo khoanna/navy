@@ -140,7 +140,7 @@ export function formatUsd(n: number | null): string {
 }
 
 /** Format a large USD figure compactly: `$1.3T` / `$45.2B` / `$12.7M` / `$3,400` (or `—`). */
-export function formatCompactUsd(n: number | null): string {
+function formatCompactUsd(n: number | null): string {
   if (n == null || !isFinite(n)) return '—';
   const abs = Math.abs(n);
   if (abs >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;

@@ -99,7 +99,7 @@ const ITALIC = /^(?:\*([^*\s][^*]*?)\*|_([^_\s][^_]*?)_)/;
 const LINK = /^\[([^\]]+)\]\(([^)]+)\)/;
 
 /** Parse a single line/segment into flat inline spans. Never throws. */
-export function parseInline(src: string): Inline[] {
+function parseInline(src: string): Inline[] {
   const spans: Inline[] = [];
   let buf = '';
   let i = 0;
