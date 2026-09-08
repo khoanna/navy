@@ -49,7 +49,7 @@ function input(markets: MarketObservation[]): DecisionInput {
     withdrawals: [],
     gas: { l2BaseFeeWei: 1n, l1BaseFeeWei: 1n, l1BlobBaseFeeWei: 1n, ethUsdE8: 350_000_000_000n, usdcUsdE8: 100_000_000n },
     history: [],
-    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
   };
 }
 

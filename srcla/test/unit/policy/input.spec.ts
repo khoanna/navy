@@ -144,7 +144,7 @@ describe('buildDecisionInput', () => {
         usdcUsdE8: 100000000n,
       } as GasObservation,
       allLabels: [] as CompletedLabel[],
-      lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+      lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
     };
     return { ...base, ...over };
   }

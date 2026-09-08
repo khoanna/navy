@@ -1,4 +1,10 @@
-import { MOVE_COST_TERMS, movementCostBase, noTradeBandBase, costGate } from '../../../src/policy/steps/cost.js';
+import {
+  MOVE_COST_TERMS,
+  movementCostBase,
+  noTradeBandBase,
+  costGate,
+  reversalChurnBase,
+} from '../../../src/policy/steps/cost.js';
 import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
 import type { DecisionInput, MarketObservation, PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
 
@@ -17,7 +23,11 @@ function market(id: string, over: Partial<MarketObservation> = {}): MarketObserv
   };
 }
 
-function input(markets: MarketObservation[], lastActionSeconds: number | null = null): DecisionInput {
+function input(
+  markets: MarketObservation[],
+  lastActionSeconds: number | null = null,
+  lastAction: Partial<DecisionInput['lastAction']> = {}
+): DecisionInput {
   return {
     origin: { blockNumber: 1, blockHash: '0xb', timestampSeconds: 1_000_000, finalized: true },
     vault: {
@@ -44,7 +54,13 @@ function input(markets: MarketObservation[], lastActionSeconds: number | null = 
       ethUsdE8: 350_000_000_000n,        // $3,500
       usdcUsdE8: 100_000_000n,           // $1.00
     },
-    history: [], lastAction: { timestampSeconds: lastActionSeconds, turnoverWindowBase: 0n },
+    history: [],
+    lastAction: {
+      timestampSeconds: lastActionSeconds,
+      turnoverWindowBase: 0n,
+      recentMoves: [],
+      ...lastAction,
+    },
   };
 }
 
@@ -62,6 +78,9 @@ const PARAMS = {
   cooldownSeconds: 3600,
   minTurnoverBps: 10,
   maxTurnoverBps: 5000,
+  turnoverWindowSeconds: 86_400,
+  reversalWindowSeconds: 86_400,
+  reversalAllowanceBps: 200,
   slippageBps: 5,
   mevBps: 1,
   impactBps: 2,
@@ -306,5 +325,179 @@ describe('noTradeBandBase', () => {
     const i = input([market('a')]);
     const a = { ...artifact(), noTradeBandK: 0 };
     expect(noTradeBandBase(i, [curve('a', WAD / 10n)], a, Q * 5n)).toBe(0n);
+  });
+});
+
+/**
+ * §9.1's third churn brake (readiness audit NEW-19: "Reversal allowance does
+ * not exist at all — grep for `reversal` returns nothing in src or test").
+ *
+ * The defining property is that it must NOT be a second turnover cap: a
+ * policy that keeps building one position is not churning and must pay
+ * nothing here, while a round trip of the same notional must pay twice it.
+ */
+describe('reversalChurnBase', () => {
+  const proposed = (entries: Array<[string, bigint]>) => new Map(entries);
+
+  it('is zero for a monotone build-up, however many steps', () => {
+    const churn = reversalChurnBase(
+      [
+        { marketId: 'a', deltaBase: 100n, timestampSeconds: 999_000 },
+        { marketId: 'a', deltaBase: 200n, timestampSeconds: 999_500 },
+      ],
+      proposed([['a', 300n]]),
+      1_000_000,
+      86_400
+    );
+    expect(churn).toBe(0n);
+  });
+
+  it('is zero for a monotone wind-down', () => {
+    const churn = reversalChurnBase(
+      [{ marketId: 'a', deltaBase: -100n, timestampSeconds: 999_000 }],
+      proposed([['a', -400n]]),
+      1_000_000,
+      86_400
+    );
+    expect(churn).toBe(0n);
+  });
+
+  it('charges twice the reversed amount for a round trip', () => {
+    // +500 then -500: gross 1000, net 0 -> churn 1000 = 2 * 500.
+    const churn = reversalChurnBase(
+      [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 999_000 }],
+      proposed([['a', -500n]]),
+      1_000_000,
+      86_400
+    );
+    expect(churn).toBe(1000n);
+  });
+
+  it('charges only the reversed part of a partial reversal', () => {
+    // +500 then -200: gross 700, |net| 300 -> churn 400 = 2 * 200.
+    const churn = reversalChurnBase(
+      [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 999_000 }],
+      proposed([['a', -200n]]),
+      1_000_000,
+      86_400
+    );
+    expect(churn).toBe(400n);
+  });
+
+  it('does not net one venue against another', () => {
+    // Divesting `a` to fund `b` is a rotation, not a reversal of either.
+    const churn = reversalChurnBase(
+      [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 999_000 }],
+      proposed([['a', 100n], ['b', -100n]]),
+      1_000_000,
+      86_400
+    );
+    expect(churn).toBe(0n);
+  });
+
+  it('accumulates across the window rather than resetting each decision', () => {
+    // Two prior round trips already sit in the window; the proposal adds a
+    // third. A per-decision measure would report only the newest one.
+    const history = [
+      { marketId: 'a', deltaBase: 100n, timestampSeconds: 999_000 },
+      { marketId: 'a', deltaBase: -100n, timestampSeconds: 999_100 },
+      { marketId: 'a', deltaBase: 100n, timestampSeconds: 999_200 },
+    ];
+    expect(reversalChurnBase(history, proposed([['a', -100n]]), 1_000_000, 86_400)).toBe(400n);
+    expect(reversalChurnBase(history, proposed([]), 1_000_000, 86_400)).toBe(200n);
+  });
+
+  it('forgets history that has aged out of the window', () => {
+    const old = [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 1_000_000 - 86_400 }];
+    expect(reversalChurnBase(old, proposed([['a', -500n]]), 1_000_000, 86_400)).toBe(0n);
+    const fresh = [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 1_000_000 - 86_399 }];
+    expect(reversalChurnBase(fresh, proposed([['a', -500n]]), 1_000_000, 86_400)).toBe(1000n);
+  });
+
+  it('ignores a record stamped after the origin', () => {
+    const future = [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 1_000_001 }];
+    expect(reversalChurnBase(future, proposed([['a', -500n]]), 1_000_000, 86_400)).toBe(0n);
+  });
+});
+
+describe('costGate churn brakes read persisted history (NEW-19)', () => {
+  // Every case here supplies REAL history. The bug was that the production
+  // driver supplied none, so a gate that only ever saw an empty history was
+  // indistinguishable from a gate that did not exist.
+  const profitable = () => ({ ...artifact(), noTradeBandK: 0 });
+
+  it('MAX_TURNOVER fires on turnover already spent in the rolling window', () => {
+    // Vault 10,000 USDC; maxTurnoverBps 5000 -> 5,000 USDC allowed. A move
+    // of 4,000 alone passes; with 2,000 already spent it must not.
+    const alone = costGate(
+      input([market('a')]),
+      [curve('a', WAD / 2n)],
+      profitable(),
+      new Map([['a', 0n]]),
+      new Map([['a', Q * 4n]]),
+      PARAMS
+    );
+    expect(alone.passed).toBe(true);
+
+    const withHistory = costGate(
+      input([market('a')], null, { turnoverWindowBase: Q * 2n }),
+      [curve('a', WAD / 2n)],
+      profitable(),
+      new Map([['a', 0n]]),
+      new Map([['a', Q * 4n]]),
+      PARAMS
+    );
+    expect(withHistory.passed).toBe(false);
+    expect(withHistory.reason).toContain('MAX_TURNOVER');
+    // The message names the window it applied, so a rejection is never
+    // attributed to a bound the gate did not use.
+    expect(withHistory.reason).toContain(String(PARAMS.turnoverWindowSeconds));
+  });
+
+  it('REVERSAL_ALLOWANCE blocks undoing a recent move, and only that', () => {
+    // Vault 10,000 USDC; reversalAllowanceBps 200 -> 200 USDC of churn.
+    // A recent +2,000 into `a` followed by a proposed exit is 4,000 of churn.
+    const reversing = costGate(
+      input([market('a', { positionBase: Q * 2n })], null, {
+        recentMoves: [{ marketId: 'a', deltaBase: Q * 2n, timestampSeconds: 999_000 }],
+      }),
+      [curve('a', WAD / 2n)],
+      profitable(),
+      new Map([['a', Q * 2n]]),
+      new Map([['a', 0n]]),
+      PARAMS
+    );
+    expect(reversing.passed).toBe(false);
+    expect(reversing.reason).toContain('REVERSAL_ALLOWANCE');
+
+    // The SAME history with a move in the SAME direction is not a reversal
+    // and must not be charged: this is what separates the allowance from a
+    // second turnover cap.
+    const continuing = costGate(
+      input([market('a', { positionBase: Q * 2n })], null, {
+        recentMoves: [{ marketId: 'a', deltaBase: Q * 2n, timestampSeconds: 999_000 }],
+      }),
+      [curve('a', WAD / 2n)],
+      profitable(),
+      new Map([['a', Q * 2n]]),
+      new Map([['a', Q * 4n]]),
+      PARAMS
+    );
+    expect(continuing.passed).toBe(true);
+  });
+
+  it('the reversal gate is inert only because there is no history', () => {
+    // Same reversal, empty recentMoves: nothing to reverse, so it passes.
+    // Stated explicitly so a future regression to a permanently-empty
+    // history cannot masquerade as "the gate approves this move".
+    const r = costGate(
+      input([market('a', { positionBase: Q * 2n })]),
+      [curve('a', WAD / 2n)],
+      profitable(),
+      new Map([['a', Q * 2n]]),
+      new Map([['a', 0n]]),
+      PARAMS
+    );
+    expect(r.reason).not.toContain('REVERSAL_ALLOWANCE');
   });
 });

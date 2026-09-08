@@ -20,6 +20,14 @@ const GAS = {
   usdcUsdE8: 100_000_000n,
 };
 
+/** §9.1 churn windows. Real values, not zeros: a zero window would make
+ *  loadLastAction's query degenerate and hide a regression in it. */
+const CHURN = {
+  cooldownSeconds: 3600,
+  turnoverWindowSeconds: 86_400,
+  reversalWindowSeconds: 86_400,
+};
+
 function fakeSnapshot(): CollectedSnapshot {
   return {
     blockNumber: 12345,
@@ -46,7 +54,7 @@ function fakeCollector(snap: CollectedSnapshot | null): SnapshotCollector {
 /** Records the `orderBy`/`take` args each findMany call received, and always
  *  resolves to an empty page — this test only cares about what was asked
  *  for, not about row shaping (covered elsewhere). */
-function fakePrisma(): { prisma: PrismaClient; calls: { model: string; args: unknown }[] } {
+function fakePrisma(decisions: unknown[] = []): { prisma: PrismaClient; calls: { model: string; args: unknown }[] } {
   const calls: { model: string; args: unknown }[] = [];
   const prisma = {
     forecastLabel: {
@@ -61,13 +69,19 @@ function fakePrisma(): { prisma: PrismaClient; calls: { model: string; args: unk
         return [];
       },
     },
+    decision: {
+      findMany: async (args: unknown) => {
+        calls.push({ model: 'decision', args });
+        return decisions;
+      },
+    },
   } as unknown as PrismaClient;
   return { prisma, calls };
 }
 
 describe('buildRawOriginFromCollector', () => {
   it('returns null when the collector has no finalized snapshot', async () => {
-    const out = await buildRawOriginFromCollector(fakeCollector(null), fakePrisma().prisma, GAS, {});
+    const out = await buildRawOriginFromCollector(fakeCollector(null), fakePrisma().prisma, GAS, {}, CHURN);
     expect(out).toBeNull();
   });
 
@@ -77,7 +91,7 @@ describe('buildRawOriginFromCollector', () => {
     // and ethers throws on a 0-length value there. This test fails under
     // the pre-fix `?? '0x'` fallback (66 chars expected, 2 chars produced).
     const { prisma } = fakePrisma();
-    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {});
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {}, CHURN);
     expect(out).not.toBeNull();
     expect(out!.vault.configurationDigest).toBe('0x' + '00'.repeat(32));
     expect(out!.vault.configurationDigest).toHaveLength(66); // '0x' + 64 hex chars = a real bytes32
@@ -86,7 +100,7 @@ describe('buildRawOriginFromCollector', () => {
   it('uses the supplied vault digest when chainConfigDigests provides one, instead of the zero sentinel', async () => {
     const { prisma } = fakePrisma();
     const realDigest = '0x' + 'cd'.repeat(32);
-    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, { vault: realDigest });
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, { vault: realDigest }, CHURN);
     expect(out!.vault.configurationDigest).toBe(realDigest);
   });
 
@@ -96,7 +110,7 @@ describe('buildRawOriginFromCollector', () => {
     // opposite of what a rolling window needs. This test fails under the
     // pre-fix `orderBy: { horizonEndsAt: 'asc' }`.
     const { prisma, calls } = fakePrisma();
-    await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {});
+    await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {}, CHURN);
     const call = calls.find((c) => c.model === 'forecastLabel');
     expect(call).toBeDefined();
     expect((call!.args as { orderBy: { horizonEndsAt: string } }).orderBy).toEqual({ horizonEndsAt: 'desc' });
@@ -105,7 +119,7 @@ describe('buildRawOriginFromCollector', () => {
 
   it('requests the most recent 5000 withdrawal events (desc), not the oldest', async () => {
     const { prisma, calls } = fakePrisma();
-    await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {});
+    await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), prisma, GAS, {}, CHURN);
     const call = calls.find((c) => c.model === 'withdrawalEvent');
     expect(call).toBeDefined();
     expect((call!.args as { orderBy: { timestamp: string } }).orderBy).toEqual({ timestamp: 'desc' });
@@ -118,14 +132,14 @@ describe('buildRawOriginFromCollector', () => {
     // vault across a silently truncated market set. Before the collector
     // carried this flag there was no way for any consumer to tell.
     const snap = { ...fakeSnapshot(), incomplete: true, missingMarkets: ['Moonwell'] };
-    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {});
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {}, CHURN);
     expect(out).toBeNull();
   });
 
   it('does not even query the database for an incomplete snapshot', async () => {
     const snap = { ...fakeSnapshot(), incomplete: true, missingMarkets: ['Aave'] };
     const db = fakePrisma();
-    await buildRawOriginFromCollector(fakeCollector(snap), db.prisma, GAS, {});
+    await buildRawOriginFromCollector(fakeCollector(snap), db.prisma, GAS, {}, CHURN);
     expect(db.calls).toHaveLength(0);
   });
 
@@ -152,12 +166,79 @@ describe('buildRawOriginFromCollector', () => {
       ],
     };
 
-    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {});
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {}, CHURN);
 
     expect(out!.markets[0]!.borrows).toBe(700_000_000n);
     expect(out!.markets[0]!.reserves).toBe(100_000_000n);
     expect(out!.markets[0]!.cash).toBe(300_000_000n);
     expect(out!.markets[0]!.supplyRateWad).toBe(33_000_000_000_000_000n);
     expect(out!.markets[0]!.utilizationWad).toBe(777_777_777_777_777_777n);
+  });
+});
+
+/**
+ * Readiness audit NEW-19. `buildRawOriginFromCollector` hardcoded
+ * `lastAction: { timestampSeconds: null, turnoverWindowBase: 0n }`, so
+ * §9.1's cooldown (guarded on `timestampSeconds !== null`) never fired in
+ * production and the rolling max-turnover window was permanently empty.
+ * These are the tests a return to that hardcode has to survive, and cannot.
+ */
+describe('buildRawOriginFromCollector feeds §9.1 churn state from persisted decisions', () => {
+  const snapshotSeconds = Math.floor(new Date(1_000_000_000).getTime() / 1000);
+
+  const rebalanceRow = (ageSeconds: number, moves: Array<[string, string]>) => ({
+    timestamp: new Date((snapshotSeconds - ageSeconds) * 1000),
+    actionDecision: {
+      action: 'rebalance',
+      planId: '0x' + 'a'.repeat(64),
+      reasons: ['REBALANCE'],
+      moves: moves.map(([marketId, deltaBase]) => ({ marketId, deltaBase })),
+    },
+  });
+
+  it('derives a non-null cooldown timestamp from a past rebalance', async () => {
+    const db = fakePrisma([rebalanceRow(600, [['Aave', '2000000000']])]);
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), db.prisma, GAS, {}, CHURN);
+    expect(out!.lastAction.timestampSeconds).toBe(snapshotSeconds - 600);
+  });
+
+  it('derives the rolling turnover window from those rows', async () => {
+    const db = fakePrisma([
+      rebalanceRow(600, [['Aave', '2000000000'], ['Compound', '-500000000']]),
+      rebalanceRow(7200, [['Moonwell', '1000000000']]),
+    ]);
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), db.prisma, GAS, {}, CHURN);
+    expect(out!.lastAction.turnoverWindowBase).toBe(3_500_000_000n);
+  });
+
+  it('derives the signed recent moves the reversal allowance reads', async () => {
+    const db = fakePrisma([rebalanceRow(600, [['Aave', '-2000000000']])]);
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), db.prisma, GAS, {}, CHURN);
+    expect(out!.lastAction.recentMoves).toEqual([
+      { marketId: 'Aave', deltaBase: -2_000_000_000n, timestampSeconds: snapshotSeconds - 600 },
+    ]);
+  });
+
+  it('leaves the state neutral when the only history is a HOLD', async () => {
+    const db = fakePrisma([
+      { timestamp: new Date((snapshotSeconds - 600) * 1000), actionDecision: { action: 'hold', planId: null } },
+    ]);
+    const out = await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), db.prisma, GAS, {}, CHURN);
+    expect(out!.lastAction).toEqual({ timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] });
+  });
+
+  it('queries the longest of the three churn horizons, not the shortest', async () => {
+    // A cooldown longer than either rolling window must still see its own
+    // history; querying the shortest horizon would silently truncate it.
+    const db = fakePrisma();
+    await buildRawOriginFromCollector(fakeCollector(fakeSnapshot()), db.prisma, GAS, {}, {
+      cooldownSeconds: 7 * 86_400,
+      turnoverWindowSeconds: 3600,
+      reversalWindowSeconds: 3600,
+    });
+    const call = db.calls.find((c) => c.model === 'decision');
+    const where = (call!.args as { where: { timestamp: { gt: Date; lte: Date } } }).where;
+    expect(where.timestamp.gt).toEqual(new Date((snapshotSeconds - 7 * 86_400) * 1000));
+    expect(where.timestamp.lte).toEqual(new Date(snapshotSeconds * 1000));
   });
 });

@@ -107,7 +107,44 @@ export interface DecisionInput {
   gas: GasObservation;
   /** Only completed and availability-lagged labels reach here. */
   history: CompletedLabel[];
-  lastAction: { timestampSeconds: number | null; turnoverWindowBase: bigint };
+  lastAction: LastActionState;
+}
+
+/**
+ * One venue's signed exposure change from a past decision that actually
+ * emitted a plan. `deltaBase` is positive for a deploy into the venue and
+ * negative for a divest out of it — the SIGN is what makes a reversal
+ * detectable, so it must never be stored as a magnitude.
+ */
+export interface MoveRecord {
+  marketId: string;
+  deltaBase: bigint;
+  timestampSeconds: number;
+}
+
+/**
+ * §9.1's three churn brakes need state that outlives one decision:
+ * cooldown, the rolling turnover window, and the reversal allowance.
+ *
+ * Every field here is DERIVED FROM PERSISTED HISTORY by
+ * `runtime/decision-driver.ts#loadLastAction`. The production driver used to
+ * hardcode `{ timestampSeconds: null, turnoverWindowBase: 0n }`, which is a
+ * permanently neutral input: `cost.ts` guards the cooldown on
+ * `timestampSeconds !== null`, so the cooldown never fired, and a
+ * permanently-zero `turnoverWindowBase` left the rolling window always
+ * empty. Both gates were live code that could not restrain anything
+ * (readiness audit NEW-19). `recentMoves` is required, not optional, for the
+ * same reason: an omitted field would silently re-neutralise the reversal
+ * allowance.
+ */
+export interface LastActionState {
+  /** Origin timestamp of the most recent decision that emitted a plan. */
+  timestampSeconds: number | null;
+  /** Notional already moved inside the rolling max-turnover window. */
+  turnoverWindowBase: bigint;
+  /** Signed per-venue moves inside the reversal window, oldest-to-newest
+   *  order not required — `reversalChurnBase` aggregates them. */
+  recentMoves: MoveRecord[];
 }
 
 /** Piecewise-linear conservative rate curve over allocation x. */

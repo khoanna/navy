@@ -1,6 +1,7 @@
 import { buildDecisionInput, type RawOrigin } from '../policy/input.js';
 import { protocolOf } from '../domain/protocol.js';
 import { decide, type DecideOpts } from '../policy/decide.js';
+import { parseActionDecision, signedMovesFor, summariseLastAction } from '../policy/last-action.js';
 import type { HorizonSeconds } from '../policy/registered.js';
 import type {
   CompletedLabel,
@@ -100,6 +101,68 @@ export function assertExecutionAllowed(guard: PricingGuardStatus): void {
   }
 }
 
+/**
+ * The three window lengths §9.1's churn brakes are measured over. Taken
+ * from the SAME `DecideOpts['cost']` the gate is then evaluated with
+ * (src/index.ts passes `decideOpts.cost`), so the window that is measured
+ * and the window the gate enforces cannot drift apart.
+ */
+export interface LastActionChurnParams {
+  cooldownSeconds: number;
+  turnoverWindowSeconds: number;
+  reversalWindowSeconds: number;
+}
+
+/**
+ * §9.1's cooldown / max-turnover / reversal state, read from persisted
+ * decisions.
+ *
+ * SOURCE, AND ITS LIMIT. The only table the live service writes on the
+ * decision path is `Decision` (verified by grep: `ExecutionPlan`,
+ * `PlanAction` and `SubmissionReceipt` have writers in
+ * `db/repositories/decision-repository.ts` but that class has no caller
+ * anywhere in `src/`). So this reconstructs churn from decisions that
+ * EMITTED A PLAN, not from actions confirmed on chain. A plan that was
+ * built and then failed preflight or reverted still counts as an action
+ * here.
+ *
+ * That direction is the safe one — it can only make the brakes fire more
+ * often than reality warrants, never less — but it is a real approximation
+ * and must be replaced by confirmed `PlanAction` rows once something
+ * actually writes them.
+ *
+ * The query window is the LONGEST of the three horizons: the cooldown may
+ * legitimately be longer than either rolling window, and a row outside the
+ * query window can affect none of the three.
+ */
+export async function loadLastAction(
+  prisma: PrismaClient,
+  originSeconds: number,
+  p: LastActionChurnParams
+): Promise<DecisionInput['lastAction']> {
+  const horizonSeconds = Math.max(p.cooldownSeconds, p.turnoverWindowSeconds, p.reversalWindowSeconds);
+  const rows = await prisma.decision.findMany({
+    where: {
+      timestamp: {
+        gt: new Date((originSeconds - horizonSeconds) * 1000),
+        lte: new Date(originSeconds * 1000),
+      },
+    },
+    orderBy: { timestamp: 'desc' },
+    take: 1000,
+    select: { timestamp: true, actionDecision: true },
+  });
+
+  const records = rows.map((r) =>
+    parseActionDecision(Math.floor(r.timestamp.getTime() / 1000), r.actionDecision)
+  );
+
+  return summariseLastAction(records, originSeconds, {
+    turnoverWindowSeconds: p.turnoverWindowSeconds,
+    reversalWindowSeconds: p.reversalWindowSeconds,
+  });
+}
+
 const REGISTERED_HORIZON_SECONDS = new Set<number>([86_400, 604_800, 1_209_600]);
 
 /**
@@ -129,7 +192,8 @@ export async function buildRawOriginFromCollector(
   collector: SnapshotCollector,
   prisma: PrismaClient,
   gas: RawOrigin['gas'],
-  chainConfigDigests: Record<string, string>
+  chainConfigDigests: Record<string, string>,
+  churn: LastActionChurnParams
 ): Promise<RawOrigin | null> {
   const snap = await collector.collect();
   if (snap === null) return null;
@@ -232,11 +296,13 @@ export async function buildRawOriginFromCollector(
     assetsBase: BigInt(w.assets),
   }));
 
+  const originSeconds = Math.floor(snap.timestamp.getTime() / 1000);
+
   return {
     origin: {
       blockNumber: snap.blockNumber,
       blockHash: snap.blockHash,
-      timestampSeconds: Math.floor(snap.timestamp.getTime() / 1000),
+      timestampSeconds: originSeconds,
       finalized: true,
     },
     vault: {
@@ -279,7 +345,7 @@ export async function buildRawOriginFromCollector(
     withdrawals,
     gas,
     allLabels,
-    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    lastAction: await loadLastAction(prisma, originSeconds, churn),
   };
 }
 
@@ -329,11 +395,50 @@ export async function persistDecisionOutput(
       allocation: Object.fromEntries(
         [...out.target.entries()].map(([marketId, amount]) => [marketId, amount.toString()])
       ) as unknown as Prisma.InputJsonValue,
+      // `moves` is what makes §9.1's cooldown, rolling turnover window and
+      // reversal allowance readable on a LATER cycle (loadLastAction above).
+      // Nothing else in the schema records a realised exposure change, so
+      // dropping this field silently re-neutralises all three gates.
+      // Written only for a decision that actually emitted a plan: a HOLD
+      // moved nothing and must not start a cooldown.
       actionDecision: {
         action: out.action,
         reasons: out.reasons,
         planId: out.plan?.planId ?? null,
+        moves:
+          out.plan === null
+            ? []
+            : signedMovesFor(input.markets, out.target).map((m) => ({
+                marketId: m.marketId,
+                deltaBase: m.deltaBase.toString(),
+              })),
       } as unknown as Prisma.InputJsonValue,
     },
   });
+
+  // §8.2: "its output is checked against exhaustive enumeration at the same
+  // quantum and its approximation regret is persisted"; §10.2 lists the
+  // stored records. `model EnumerationResult` had no writer anywhere in
+  // `src/` (readiness audit NEW-18) — the regret existed only on the
+  // in-memory DecisionOutput and was discarded with it.
+  //
+  // A null enumeration writes NOTHING rather than a zero-regret row: "the
+  // universe was too large to enumerate" and "enumerated, regret zero" are
+  // different claims, and a zero row would make the second unfalsifiable.
+  if (out.enumeration !== null) {
+    await prisma.enumerationResult.upsert({
+      where: { decisionHash: out.decisionHash },
+      update: {
+        enumerated: out.enumeration.enumerated,
+        regretBps: out.enumeration.regretBps.toString(),
+        passed: out.enumeration.passed,
+      },
+      create: {
+        decisionHash: out.decisionHash,
+        enumerated: out.enumeration.enumerated,
+        regretBps: out.enumeration.regretBps.toString(),
+        passed: out.enumeration.passed,
+      },
+    });
+  }
 }

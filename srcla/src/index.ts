@@ -146,7 +146,14 @@ async function main(): Promise<void> {
       // chainConfigDigests is empty: no per-venue/vault configuration-digest
       // oracle is wired yet either. buildRawOriginFromCollector falls back
       // to each market's live on-chain configDigest when a key is absent.
-      return buildRawOriginFromCollector(collector, prisma, gas, {});
+      // §9.1's churn windows come from the SAME cost params decide() then
+      // evaluates the gate with — see loadLastAction's comment on why the
+      // measured window and the enforced window must be one value.
+      return buildRawOriginFromCollector(collector, prisma, gas, {}, {
+        cooldownSeconds: decideOpts.cost.cooldownSeconds,
+        turnoverWindowSeconds: decideOpts.cost.turnoverWindowSeconds,
+        reversalWindowSeconds: decideOpts.cost.reversalWindowSeconds,
+      });
     },
     persist: (out, input) => persistDecisionOutput(prisma, artifact, out, input),
   });

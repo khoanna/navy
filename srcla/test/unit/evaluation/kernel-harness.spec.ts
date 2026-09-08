@@ -735,6 +735,7 @@ describe('buildDecisionInput headroom fields', () => {
     const input = buildDecisionInput(state(), snapshot(), [], [], harnessConfig(), {
       timestampSeconds: null,
       turnoverWindowBase: 0n,
+      recentMoves: [],
     });
     const aave = input.markets.find((m) => m.marketId === 'aave-usdc')!;
     const moonwell = input.markets.find((m) => m.marketId === 'moonwell-usdc')!;
@@ -753,6 +754,7 @@ describe('buildDecisionInput headroom fields', () => {
     const input = buildDecisionInput(state(), snapshot(), [], [], harnessConfig(), {
       timestampSeconds: null,
       turnoverWindowBase: 0n,
+      recentMoves: [],
     });
     const aave = input.markets.find((m) => m.marketId === 'aave-usdc')!;
 

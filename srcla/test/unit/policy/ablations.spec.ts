@@ -86,7 +86,7 @@ function input(over: Partial<DecisionInput> = {}): DecisionInput {
       usdcUsdE8: 100_000_000n,
     },
     history: [...history('aa'), ...history('bb')],
-    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
     ...over,
   };
 }

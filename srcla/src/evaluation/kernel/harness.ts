@@ -28,6 +28,7 @@ import {
   type HarnessConfig,
 } from './decision-input.js';
 import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
+import { summariseLastAction, type PersistedActionRecord } from '../../policy/last-action.js';
 import {
   REGISTERED_POLICIES,
   SRCLA_POLICY,
@@ -36,6 +37,7 @@ import {
   targetToActions,
   type RegisteredPolicy,
 } from './registry.js';
+import type { BaselineAction } from '../replay/replay.js';
 
 const SECONDS_PER_YEAR = 31_557_600n;
 
@@ -308,8 +310,25 @@ export function createKernelPolicyFn(
   },
 ): PolicyFn {
   let frozen: Map<string, bigint> | null = null;
-  let lastActionSeconds: number | null = null;
-  let turnoverWindowBase = 0n;
+  // §9.1 churn history for this policy's run. The replay driver keeps it in
+  // memory where the live driver reads it from `Decision` rows, but BOTH
+  // reduce it through the same `summariseLastAction`, so the cooldown,
+  // turnover window and reversal allowance a policy is evaluated under are
+  // the ones it would face in production. The previous version tracked only
+  // `lastActionSeconds` plus a `turnoverWindowBase` that was OVERWRITTEN on
+  // every rebalance — a one-decision window, not a rolling one — and had no
+  // reversal state at all.
+  const actionHistory: PersistedActionRecord[] = [];
+  const recordAction = (originSeconds: number, actions: BaselineAction[]): void => {
+    actionHistory.push({
+      timestampSeconds: originSeconds,
+      isAction: true,
+      moves: actions.map((a) => ({
+        marketId: a.adapter,
+        deltaBase: a.kind === 'divest' ? -a.amount : a.amount,
+      })),
+    });
+  };
 
   return (state, snapshot) => {
     if (policy.shape === 'idle') return [];
@@ -318,10 +337,17 @@ export function createKernelPolicyFn(
     const visible = labelsAvailableAt(ctx.labels, originSeconds);
     const seenWithdrawals = ctx.withdrawals.filter((w) => w.timestampSeconds <= originSeconds);
 
-    let input = buildDecisionInput(state, snapshot, visible, seenWithdrawals, ctx.config, {
-      timestampSeconds: lastActionSeconds,
-      turnoverWindowBase,
-    });
+    let input = buildDecisionInput(
+      state,
+      snapshot,
+      visible,
+      seenWithdrawals,
+      ctx.config,
+      summariseLastAction(actionHistory, originSeconds, {
+        turnoverWindowSeconds: ctx.opts.cost.turnoverWindowSeconds,
+        reversalWindowSeconds: ctx.opts.cost.reversalWindowSeconds,
+      }),
+    );
 
     if (policy.shape === 'hindsight') {
       // B5 only: replace each venue's displayed rate with its realized mean
@@ -345,7 +371,7 @@ export function createKernelPolicyFn(
       if (frozen === null) return [];
       const actions = targetToActions(frozen, state.strategyBalances);
       if (actions.length > 0) {
-        lastActionSeconds = originSeconds;
+        recordAction(originSeconds, actions);
         ctx.onRebalance();
       }
       return actions;
@@ -358,8 +384,7 @@ export function createKernelPolicyFn(
     const actions = targetToActions(out.target, state.strategyBalances);
     if (actions.length === 0) return [];
 
-    lastActionSeconds = originSeconds;
-    turnoverWindowBase = actions.reduce((s, a) => s + a.amount, 0n);
+    recordAction(originSeconds, actions);
     ctx.onRebalance();
     return actions;
   };

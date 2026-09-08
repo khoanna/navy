@@ -1,6 +1,6 @@
 import { portfolioLowerBound } from './optimize.js';
 import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
-import type { CostGateResult, DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
+import type { CostGateResult, DecisionInput, MoveRecord, PolicyArtifact, RateCurve } from '../types.js';
 
 const WAD = 10n ** 18n;
 const WEI_PER_ETH = 10n ** 18n;
@@ -36,6 +36,29 @@ export interface CostParams {
   cooldownSeconds: number;
   minTurnoverBps: number;
   maxTurnoverBps: number;
+  /**
+   * Length of the rolling window `lastAction.turnoverWindowBase` is summed
+   * over. It lives on CostParams rather than only in the loader so exactly
+   * one value governs BOTH the window that is measured
+   * (`runtime/decision-driver.ts#loadLastAction`, which reads this same
+   * `CostParams`) and the window the gate's rejection message names. A
+   * loader window that disagreed with the gate's would produce a
+   * `MAX_TURNOVER` rejection quoting a bound it did not actually apply.
+   */
+  turnoverWindowSeconds: number;
+  /**
+   * §9.1's "reversal allowance", the third churn brake. Over
+   * `reversalWindowSeconds`, the ROUND-TRIP churn a venue may accumulate —
+   * `sum |delta| - |sum delta|`, which is exactly zero for a monotone
+   * build-up or wind-down and `2*min(up,down)` for a round trip — is capped
+   * at this many basis points of total assets. See `reversalChurnBase`.
+   *
+   * This measure is deliberately not "notional moved": a policy that keeps
+   * adding to a venue is not churning, and capping it on notional would
+   * duplicate MAX_TURNOVER rather than add anything.
+   */
+  reversalWindowSeconds: number;
+  reversalAllowanceBps: number;
   slippageBps: number;
   mevBps: number;
   impactBps: number;
@@ -240,11 +263,81 @@ function movesFrom(current: Map<string, bigint>, target: Map<string, bigint>, in
   return moves;
 }
 
+const abs = (v: bigint): bigint => (v < 0n ? -v : v);
+
 /**
- * §9.1 - the action rule G_H > max(C_move, k*sigma), gated by cooldown and
- * turnover bounds. Each gate is checked independently and returns its own
- * `reason` so a caller can tell which constraint actually blocked the move
- * (constraint 4) - a move is never rejected for an unstated reason.
+ * §9.1's reversal allowance, as a measurable quantity.
+ *
+ * ROUND-TRIP CHURN over a window, per venue:
+ *
+ *     churn_i = sum_t |delta_{i,t}|  -  | sum_t delta_{i,t} |
+ *
+ * summed over venues. The identity that makes this the right statistic:
+ * a monotone series (only deploys, or only divests) has
+ * `sum|delta| == |sum delta|` and therefore contributes ZERO, while a
+ * perfect round trip of size `a` contributes `2a`. So the allowance
+ * restrains repeated entry and exit — which §9.1 says execution cost alone
+ * does not suppress on a low-fee chain — without taxing a policy that
+ * simply keeps building one position.
+ *
+ * The proposed move is folded in as one more delta at the origin, so the
+ * budget is CUMULATIVE across the window rather than per-decision: a policy
+ * cannot reverse the allowance once per cycle forever.
+ *
+ * Only records strictly inside `(originSeconds - windowSeconds,
+ * originSeconds]` are counted. A record stamped after the origin is
+ * discarded rather than counted, because it cannot be evidence available at
+ * the origin (the same no-look-ahead rule `policy/input.ts` enforces on
+ * labels).
+ */
+export function reversalChurnBase(
+  recentMoves: readonly MoveRecord[],
+  proposed: ReadonlyMap<string, bigint>,
+  originSeconds: number,
+  windowSeconds: number
+): bigint {
+  const windowStart = originSeconds - windowSeconds;
+  const gross = new Map<string, bigint>();
+  const net = new Map<string, bigint>();
+
+  const add = (marketId: string, delta: bigint): void => {
+    if (delta === 0n) return;
+    gross.set(marketId, (gross.get(marketId) ?? 0n) + abs(delta));
+    net.set(marketId, (net.get(marketId) ?? 0n) + delta);
+  };
+
+  for (const r of recentMoves) {
+    if (r.timestampSeconds <= windowStart) continue;
+    if (r.timestampSeconds > originSeconds) continue;
+    add(r.marketId, r.deltaBase);
+  }
+  for (const [marketId, delta] of proposed) add(marketId, delta);
+
+  let churn = 0n;
+  for (const [marketId, g] of gross) churn += g - abs(net.get(marketId) ?? 0n);
+  return churn;
+}
+
+/** Signed per-venue exposure deltas of a candidate, keyed by market id. */
+function signedDeltas(current: ReadonlyMap<string, bigint>, target: ReadonlyMap<string, bigint>): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+  for (const id of new Set([...current.keys(), ...target.keys()])) {
+    const delta = (target.get(id) ?? 0n) - (current.get(id) ?? 0n);
+    if (delta !== 0n) out.set(id, delta);
+  }
+  return out;
+}
+
+/**
+ * §9.1 - the action rule G_H > max(C_move, k*sigma), gated by cooldown,
+ * turnover bounds and the reversal allowance. Each gate is checked
+ * independently and returns its own `reason` so a caller can tell which
+ * constraint actually blocked the move (constraint 4) - a move is never
+ * rejected for an unstated reason.
+ *
+ * All four churn brakes read `input.lastAction`, which
+ * `runtime/decision-driver.ts#loadLastAction` derives from persisted
+ * decisions. They are inert only when there genuinely is no history.
  */
 export function costGate(
   input: DecisionInput,
@@ -281,7 +374,24 @@ export function costGate(
 
   const maxTurnover = (input.vault.totalAssetsBase * BigInt(p.maxTurnoverBps)) / 10_000n;
   if (input.lastAction.turnoverWindowBase + notional > maxTurnover) {
-    return fail(`MAX_TURNOVER: ${notional} would push the rolling window above ${maxTurnover}`);
+    return fail(
+      `MAX_TURNOVER: ${notional} would push the ${p.turnoverWindowSeconds}s rolling window ` +
+        `(${input.lastAction.turnoverWindowBase} already moved) above ${maxTurnover}`
+    );
+  }
+
+  const churn = reversalChurnBase(
+    input.lastAction.recentMoves,
+    signedDeltas(current, target),
+    input.origin.timestampSeconds,
+    p.reversalWindowSeconds
+  );
+  const reversalAllowance = (input.vault.totalAssetsBase * BigInt(p.reversalAllowanceBps)) / 10_000n;
+  if (churn > reversalAllowance) {
+    return fail(
+      `REVERSAL_ALLOWANCE: round-trip churn ${churn} over ${p.reversalWindowSeconds}s ` +
+        `exceeds the allowance ${reversalAllowance}`
+    );
   }
 
   const threshold = moveCostBase > bandBase ? moveCostBase : bandBase;

@@ -37,6 +37,21 @@ export const DEFAULT_DECIDE_OPTS: DecideOpts = {
     cooldownSeconds: 3600,
     minTurnoverBps: 10,
     maxTurnoverBps: 5000,
+    // The rolling window MAX_TURNOVER's 50%-of-TVL bound is measured over.
+    // One day: decisions run hourly (runtime/scheduler.ts) while the
+    // forecast horizon is days, so a window shorter than the cadence would
+    // measure nothing and one longer than the horizon would still be
+    // rejecting a move on turnover incurred before the current forecast.
+    turnoverWindowSeconds: 86_400,
+    // §9.1's reversal allowance. Round-trip churn (see reversalChurnBase)
+    // of at most 2% of TVL per day: enough to unwind and re-enter a single
+    // meaningful position once, not enough to do it repeatedly.
+    //
+    // NOT CALIBRATED. Like `noTradeBandK`, this is a registered-by-default
+    // value, not one swept on held-out data; §9.1 does not fix a number for
+    // it. Sweeping it needs the same turnover-vs-return dataset k does.
+    reversalWindowSeconds: 86_400,
+    reversalAllowanceBps: 200,
     slippageBps: 5,
     mevBps: 1,
     impactBps: 2,

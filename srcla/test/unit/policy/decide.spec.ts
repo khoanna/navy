@@ -68,7 +68,7 @@ function input(): DecisionInput {
       realizedReturnWad: WAD,
       realizedMinCashBase: 1n,
     })),
-    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
   };
 }
 

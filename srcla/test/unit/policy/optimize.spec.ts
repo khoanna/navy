@@ -30,7 +30,7 @@ function input(markets: MarketObservation[], groups: DecisionInput['dependencyGr
     },
     markets, dependencyGroups: groups, withdrawals: [],
     gas: { l2BaseFeeWei: 1n, l1BaseFeeWei: 1n, l1BlobBaseFeeWei: 1n, ethUsdE8: 350_000_000_000n, usdcUsdE8: 100_000_000n },
-    history: [], lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    history: [], lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
   };
 }
 

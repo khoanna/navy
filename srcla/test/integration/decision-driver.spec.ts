@@ -25,7 +25,7 @@ const rawOrigin = {
     marketId: 'aa', regimeId: 'r1', originSeconds: 1, horizonSeconds: 604_800 as const,
     horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
   })),
-  lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+  lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
 };
 
 describe('DecisionDriver', () => {

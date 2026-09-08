@@ -44,7 +44,7 @@ function input(): DecisionInput {
       usdcUsdE8: 100_000_000n, // $1.00
     },
     history: [],
-    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n },
+    lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
   };
 }
 
@@ -64,6 +64,9 @@ const COST: CostParams = {
   cooldownSeconds: 3600,
   minTurnoverBps: 10,
   maxTurnoverBps: 5000,
+  turnoverWindowSeconds: 86_400,
+  reversalWindowSeconds: 86_400,
+  reversalAllowanceBps: 200,
   slippageBps: 400,
   mevBps: 300,
   impactBps: 300,
