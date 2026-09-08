@@ -21,6 +21,26 @@
  * UNITS. Money is bigint USDC base units (6 dp) throughout. Reward amounts are
  * raw token units and are converted in `reward-admission.ts`; nothing in this
  * file touches raw token units.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * UNWIRED, AND DELIBERATELY KEPT (readiness audit NEW-26's adjudication).
+ * `evaluateHarvest` is referenced only by its own unit test.
+ *
+ * It is the ONLY §9.3-conformant implementation in the repo, and it is not a
+ * duplicate of anything live — `src/rewards/reward-processor.ts` carried a
+ * weaker rival rule (`(estimatedOutput - costs) > minValueThreshold` with a
+ * hardcoded 5% haircut, no admission conjunction, no eleven-term cost model)
+ * and was deleted for that reason, not this one.
+ *
+ * WHAT IS MISSING TO WIRE IT: a reward-observation collector. `HarvestParams`
+ * needs `rewards: RewardObservation[]` and per-token `policies`, and nothing
+ * in `src/` produces either — see `rewards/chainlink-oracle.ts`'s header for
+ * the field-by-field list of what has a source and what does not. A harvest
+ * SUBMISSION path is missing too: `NavyVaultSRCLA` routes a Harvest action
+ * through `executeHarvestAction` with a `HarvestRequest` the caller supplies
+ * (a generic `executeNextActionWithProof` on kind 2 reverts by design), and
+ * `execution/keeper-executor.ts` has no such call.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
 import { movementCostBase, type CostParams, type Move } from './steps/cost.js';

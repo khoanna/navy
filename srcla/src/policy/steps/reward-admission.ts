@@ -45,6 +45,27 @@ export interface RewardObservation {
   claimSimulationSucceeded: boolean;
   /** Distribution end from the reward controller, unix seconds. */
   emissionEndSeconds: number;
+  /**
+   * §9.2's DENOMINATOR: the total supply the reward controller divides its
+   * emission across when it advances the distribution index, in that
+   * controller's own units.
+   *
+   * Every venue's controller accrues per-unit as
+   * `emissionPerSecond * dt / totalSupply` - Aave's RewardsController over
+   * the scaled aToken supply, Compound III's CometRewards over the tracked
+   * base supply, Moonwell's comptroller over the mToken supply. If that
+   * figure is zero the per-unit rate is undefined (the controller is
+   * dividing by zero) and ANY claimable amount read against it is not
+   * attributable to this adapter.
+   */
+  distributionDenominatorAmount: bigint;
+  /**
+   * This adapter's own share of `distributionDenominatorAmount`, same units.
+   * A share exceeding the denominator means the two figures were read from
+   * different indexes or one of them is stale, so the accrual again cannot
+   * be attributed.
+   */
+  adapterShareAmount: bigint;
   /** Reward balance the controller still holds to pay claims, raw token units. */
   controllerFundedAmount: bigint;
   /** Chainlink reward/USD answer, 8 dp. Non-positive => the feed is invalid. */
@@ -91,8 +112,15 @@ interface Rule {
 }
 
 /**
- * §9.2's eligibility list, in the paper's own order. Every rule runs on every
- * call so a caller sees all failures, not just the first.
+ * §9.2's eligibility list, in the paper's own order - all EIGHT named
+ * criteria: token, emission, denominator, remaining horizon, funding, claim
+ * simulation, Chainlink price feeds, approved Uniswap V3 route. Every rule
+ * runs on every call so a caller sees all failures, not just the first.
+ *
+ * `EMISSION_ENDED` carries both "emission" and "remaining horizon" (a
+ * distribution whose end has passed has neither); `FEED_INVALID` and
+ * `FEED_STALE` split the single "Chainlink price feeds" criterion into its
+ * two independent failure modes.
  */
 const RULES: Rule[] = [
   {
@@ -120,6 +148,42 @@ const RULES: Rule[] = [
         detail: live
           ? `${o.emissionEndSeconds - o.observedAtSeconds}s of distribution horizon remaining`
           : `distribution ended at ${o.emissionEndSeconds}, observed at ${o.observedAtSeconds}`,
+      };
+    },
+  },
+  {
+    // §9.2's eighth named criterion - "its token, emission, DENOMINATOR,
+    // remaining horizon, funding, claim simulation, Chainlink price feeds,
+    // and approved Uniswap V3 route all pass admission" - and the one this
+    // module was missing (readiness audit NEW-26).
+    //
+    // It is a distinct failure from EMISSION_ENDED. A distribution can be
+    // live, funded and inside its horizon while its denominator is zero or
+    // inconsistent, and in that state the controller's own index arithmetic
+    // is undefined: the claimable figure is not evidence of anything the
+    // vault owns. The other seven rules all pass in exactly that state,
+    // which is why its absence was invisible.
+    code: 'DENOMINATOR_INVALID',
+    check: (o) => {
+      if (o.distributionDenominatorAmount <= 0n) {
+        return {
+          passed: false,
+          detail:
+            `distribution denominator is ${o.distributionDenominatorAmount}: the controller's per-unit ` +
+            'accrual is undefined, so no claimable amount is attributable',
+        };
+      }
+      if (o.adapterShareAmount < 0n || o.adapterShareAmount > o.distributionDenominatorAmount) {
+        return {
+          passed: false,
+          detail:
+            `adapter share ${o.adapterShareAmount} is outside the distribution denominator ` +
+            `${o.distributionDenominatorAmount}: the two figures cannot come from one consistent index`,
+        };
+      }
+      return {
+        passed: true,
+        detail: `adapter holds ${o.adapterShareAmount} of a ${o.distributionDenominatorAmount} distribution base`,
       };
     },
   },

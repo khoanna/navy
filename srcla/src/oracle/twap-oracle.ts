@@ -7,6 +7,31 @@
  * TWAP Window: 300 seconds (5 minutes)
  * Max Deviation: 500 bps (5%)
  * Formula: TWAP = Σ(tickDelta × timeDelta) / Σ(timeDelta)
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * UNWIRED, AND DELIBERATELY KEPT (readiness audit NEW-26's adjudication).
+ * Nothing in `src/` imports this; its unit test does.
+ *
+ * It is NOT a duplicate. There is no other TWAP or oracle-deviation
+ * arithmetic anywhere in `srcla/src`: `execution/preflight.ts` reads a
+ * `routeStatus` flag the collector lifted off the RewardExecutor
+ * (ROUTE_INACTIVE / ROUTE_STALE) and computes nothing itself.
+ *
+ * Nor is it an unimplemented srcla requirement. §9.4 assigns the deviation
+ * check to the IMMUTABLE ON-CHAIN executor — "The executor checks a short
+ * deadline, independent oracle floor, `minOut`, input and output balance
+ * deltas" — so the authoritative check is not srcla's to make, and an
+ * off-chain figure that disagreed with it would be a divergence, not a
+ * safeguard.
+ *
+ * What it would be FOR: §12's "Simulation failure | Do not submit" row —
+ * refusing to submit a harvest the on-chain executor is going to reject, so
+ * the keeper does not burn gas discovering it. Wiring it needs (a) a harvest
+ * execution path, which does not exist (nothing in `src/` submits a
+ * Harvest action), and (b) a route registry read that yields the pool
+ * address and fee tier per route id; `chain/contract-abis.ts` has
+ * `getRoute`, but no caller maps its result onto a pool.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
 import { ethers, type Contract, type Provider } from 'ethers';

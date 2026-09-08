@@ -5,15 +5,79 @@
  * - Validates staleness (max 24 hours)
  * - Validates deviation from last known price (max 50%)
  * - Caches prices to reduce chain calls
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * UNWIRED, AND DELIBERATELY KEPT. Nothing in `src/` imports this today.
+ *
+ * It is NOT a duplicate of anything live: `policy/steps/reward-admission.ts`
+ * implements §9.2's `FEED_INVALID` / `FEED_STALE` RULES, but it takes the
+ * feed answers and round ages as inputs on `RewardObservation` and nothing
+ * supplies them. This file is the only Chainlink reader in the repo — the
+ * collector reads reward freshness through the on-chain `RewardAccountant`'s
+ * `tokenCache` (`collector/snapshot-collector.ts#collectOracleState`), which
+ * gives `lastUpdated`/`isStale` but not the raw answers §9.2's admission
+ * needs. Deleting this would remove the only implementation of that read and
+ * hide the gap rather than close it.
+ *
+ * WHAT IS MISSING TO WIRE IT, exactly — a reward-observation collector.
+ * `RewardObservation` (reward-admission.ts) has seventeen fields; this file
+ * can supply four (`rewardUsdE8`, `rewardFeedUpdatedAtSeconds`, `usdcUsdE8`,
+ * `usdcFeedUpdatedAtSeconds`). The rest have no source in `src/`:
+ *   - claimable and held reward amounts per adapter,
+ *   - `emissionEndSeconds` and `controllerFundedAmount` from each venue's
+ *     reward controller,
+ *   - `claimSimulationSucceeded` (an `eth_call` against the live claim),
+ *   - `distributionDenominatorAmount` / `adapterShareAmount` (§9.2's
+ *     denominator, added with the rule itself),
+ *   - `routeId` / `routeApproved` from the RewardExecutor's route registry —
+ *     `chain/contract-abis.ts` has `getRoute`, the collector reads a
+ *     `routeDigest`/`routeStatus`, but neither is mapped onto an observation.
+ * Until that collector exists, `policy/harvest.ts#evaluateHarvest` has no
+ * input and no harvest is ever evaluated, let alone submitted.
+ *
+ * Its sibling `uniswap-executor.ts` was NOT kept: it built
+ * `exactInputSingle` calldata and signed it with an off-chain wallet,
+ * recipient set to the allocator's own address. §9.4 gives the allocator
+ * "only an active route ID and bounded amount" and forbids it choosing
+ * calldata, recipient, spender, path or output token, so that file was a
+ * prohibited capability rather than dead weight.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
 import { ethers } from 'ethers';
 import type { ChainClient } from '../chain/client.js';
-import type {
-  ChainlinkPrice,
-  ChainlinkOracleConfig,
-  OracleValidation,
-} from './types.js';
+
+/** Chainlink price data from an on-chain feed. */
+export interface ChainlinkPrice {
+  /** Price in USD with feed decimals (e.g., 1e8 = $1) */
+  price: bigint;
+  /** Number of decimals in the price feed */
+  decimals: number;
+  /** Unix timestamp of last update */
+  updatedAt: Date;
+  /** Whether the price is stale (older than maxStalenessSeconds) */
+  isStale: boolean;
+}
+
+/** Result of validating one feed reading. */
+export interface OracleValidation {
+  valid: boolean;
+  price?: bigint;
+  updatedAt?: Date;
+  isStale?: boolean;
+  /** Deviation from the supplied reference price, basis points. */
+  deviationBps?: bigint;
+  reason?: string;
+}
+
+export interface ChainlinkOracleConfig {
+  /** Maximum staleness in seconds (default: 86400 = 24 hours) */
+  maxStalenessSeconds: number;
+  /** Maximum price deviation in basis points (default: 5000 = 50%) */
+  maxDeviationBps: bigint;
+  /** Cache duration for prices in seconds */
+  cacheDurationSeconds: number;
+}
 
 // Chainlink Aggregator ABI - minimal interface for price reading
 const CHAINLINK_ABI = [

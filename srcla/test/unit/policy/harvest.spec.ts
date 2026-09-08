@@ -112,6 +112,10 @@ function obs(over: Partial<RewardObservation> = {}): RewardObservation {
     heldAmount: 0n,
     claimSimulationSucceeded: true,
     emissionEndSeconds: NOW + 30 * 86_400,
+    /** §9.2's denominator: the supply the controller divides emission across */
+    distributionDenominatorAmount: 1_000_000n * 10n ** 18n,
+    /** this adapter's share of that denominator */
+    adapterShareAmount: 10_000n * 10n ** 18n,
     /** raw token units the reward controller still holds */
     controllerFundedAmount: 10n ** 30n,
     /** reward/USD, Chainlink 8 dp */
