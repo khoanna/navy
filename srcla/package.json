@@ -36,7 +36,8 @@
     "cli:collect": "tsx src/cli/index.ts collect",
     "cli:evaluate": "tsx src/cli/index.ts evaluate",
     "cli:regime": "tsx src/cli/index.ts regime",
-    "cli:health": "tsx src/cli/index.ts health"
+    "cli:health": "tsx src/cli/index.ts health",
+    "backfill:history": "tsx scripts/backfill-history.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
