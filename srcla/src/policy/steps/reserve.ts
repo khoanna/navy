@@ -88,10 +88,37 @@ export function demandQuantileBase(
  * could ever be flagged infeasible, silently defeating the "reject before
  * comparing returns" gate the next task's optimiser relies on.
  */
+export interface ReserveOpts {
+  quantile: number;
+  horizonSeconds: number;
+  /**
+   * P3 netting of the withdrawal quantile against executable venue exits.
+   * Default `true` (the registered policy). Baseline B3 (paper §11.2 — "omit
+   * the dependency policy and the P3 netting of the withdrawal quantile")
+   * sets this to `false`, which makes the demand term the RAW quantile
+   * Q_beta(W_H) in USDC base units rather than `Q_beta(W_H) - sum_i
+   * min(x_i, e_i^cons)`. Only the demand term is affected; the stress term
+   * keeps netting against `E_s(x)` because §8.1 states it that way
+   * independently of P3.
+   */
+  netting?: boolean;
+  /**
+   * H4 (paper §11.3 — "remove the dynamic reserve and stress feasibility;
+   * admin floor only"). When `true`, `requiredBase` is exactly `floorBase`
+   * (max of adminReserve, minIdleBps floor and any activated dynamic
+   * reserve), the demand and stress terms are reported as 0 base units, and
+   * `scenarioFeasible` is EMPTY — an empty list is what makes optimize.ts's
+   * `scenarioFeasible.some(s => !s.feasible)` rejection inert, which is the
+   * "no stress feasibility" half of the hypothesis. It is NOT the same as
+   * `disable.reserve`, which removes the floor as well (that is B2u).
+   */
+  floorOnly?: boolean;
+}
+
 export function requiredReserve(
   input: DecisionInput,
   target: Map<string, bigint>,
-  opts: { quantile: number; horizonSeconds: number }
+  opts: ReserveOpts
 ): ReserveResult {
   const { totalAssetsBase, adminReserveBase, dynamicReserveBase, minIdleBps } = input.vault;
 
@@ -136,7 +163,10 @@ export function requiredReserve(
   const exec0 = executable(0);
   // Guard: demand netted against executable exits can go negative when a
   // venue can absorb more than currently observed demand.
-  const netDemand = demand > exec0 ? demand - exec0 : 0n;
+  // `netting === false` (B3) keeps the raw quantile instead. Both branches
+  // are USDC base units (6 dp).
+  const netting = opts.netting ?? true;
+  const netDemand = netting ? (demand > exec0 ? demand - exec0 : 0n) : demand;
 
   let stressShortfall = 0n;
   const scenarioFeasible: ReserveResult['scenarioFeasible'] = [];
@@ -158,6 +188,17 @@ export function requiredReserve(
       feasible: idleAfterAllocationBase + exitsS >= demandS,
       shortfallBase: shortfall,
     });
+  }
+
+  if (opts.floorOnly === true) {
+    // H4: admin floor only. Every quantity below is USDC base units (6 dp).
+    return {
+      requiredBase: floorBase,
+      floorBase,
+      netDemandQuantileBase: 0n,
+      stressShortfallBase: 0n,
+      scenarioFeasible: [],
+    };
   }
 
   let requiredBase = floorBase;

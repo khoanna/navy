@@ -13,13 +13,68 @@ const SECONDS_PER_YEAR = 31_536_000n;
 /** Utilisation at which the structural liquidity cap begins to bind. */
 const LIQUIDITY_KINK_WAD = (WAD * 80n) / 100n;
 
+/**
+ * The registered ablation/baseline switch set. Each key removes EXACTLY the
+ * one named component; every other constraint stays live (paper §11.3: "Each
+ * hypothesis removes only its named component while holding other
+ * information, delays, costs, and rules fixed").
+ *
+ * Paper mapping — the evaluation harness must drive H1-H7 through these and
+ * nothing else:
+ *
+ *   H1 capacity            -> capacityCurves   (decide.ts: flat displayed-rate curves)
+ *   H2 uncertainty         -> uncertainty      (drop the calibrated residual quantile)
+ *   H3 cost                -> costGate         (decide.ts: skip the gate AND the band)
+ *   H4 liquidity           -> dynamicReserve   (reserve.ts floorOnly: admin floor only)
+ *   H5 dependency          -> dependencyCaps
+ *   H6 structural liq. cap -> liquidityCap
+ *   H7 phi weighting       -> exitableWeight
+ *
+ * Two further keys are NOT hypotheses; they exist because §11.2's baselines
+ * need them:
+ *   reserve        -> B2u ("B2 without any reserve"): removes the floor too.
+ *   netting        -> B3 ("omit ... the P3 netting of the withdrawal quantile").
+ * And one is a diagnostic on P2's aggregation, not an H:
+ *   portfolioBound -> sum per-venue lower bounds instead of one portfolio bound.
+ */
+export type PolicyAblation =
+  | 'capacityCurves'
+  | 'uncertainty'
+  | 'costGate'
+  | 'dynamicReserve'
+  | 'dependencyCaps'
+  | 'liquidityCap'
+  | 'exitableWeight'
+  | 'reserve'
+  | 'netting'
+  | 'portfolioBound';
+
+export type PolicyAblations = Partial<Record<PolicyAblation, boolean>>;
+
 export interface OptimizeOpts {
   quantumBase: bigint;
   reserveQuantile: number;
   reserveHorizonSeconds: number;
   /** Disable individual components for the H1-H7 ablations. Each switch
    *  removes ONLY its named component; every other constraint stays live. */
-  disable?: Partial<Record<'liquidityCap' | 'dependencyCaps' | 'reserve' | 'exitableWeight' | 'portfolioBound', boolean>>;
+  disable?: PolicyAblations;
+}
+
+/** The reserve-shaping half of the switch set, in the shape reserve.ts takes.
+ *  Kept here so decide.ts and optimize.ts cannot derive it differently — a
+ *  candidate scored against one reserve rule and then executed against
+ *  another is exactly the divergence §11.1's equal-information requirement
+ *  forbids. */
+export function reserveOptsFrom(
+  disable: PolicyAblations,
+  opts: { reserveQuantile: number; reserveHorizonSeconds: number }
+): import('./reserve.js').ReserveOpts {
+  return {
+    quantile: opts.reserveQuantile,
+    horizonSeconds: opts.reserveHorizonSeconds,
+    netting: disable.netting !== true,
+    floorOnly: disable.dynamicReserve === true,
+  };
 }
 
 /**
@@ -96,14 +151,22 @@ export function portfolioLowerBound(
     if (x === 0n) continue;
     const m = input.markets.find((k) => k.marketId === c.marketId)!;
 
-    const perVenue = disable.portfolioBound
-      ? lowerBoundAt(c, artifact, c.marketId, x, artifact.horizonSeconds)
-      : pointForecastAt(c, x, artifact.horizonSeconds);
+    // H2 (`disable.uncertainty`) removes the calibrated lower bound entirely
+    // and scores on the point forecast — including inside the
+    // `portfolioBound` branch, whose per-venue `lowerBoundAt` IS a
+    // calibrated bound. Rate units: WAD, already converted to the horizon.
+    const perVenue =
+      disable.portfolioBound && disable.uncertainty !== true
+        ? lowerBoundAt(c, artifact, c.marketId, x, artifact.horizonSeconds)
+        : pointForecastAt(c, x, artifact.horizonSeconds);
 
     const phi = disable.exitableWeight ? 1 : exitableFraction(x, m.maxWithdrawableBase);
     mu += (perVenue * x * BigInt(Math.round(phi * 1_000_000))) / (WAD * 1_000_000n);
   }
 
+  // H2: no residual quantile at any level — the objective is the raw
+  // exitable-weighted point forecast (USDC base units over the horizon).
+  if (disable.uncertainty === true) return mu;
   if (disable.portfolioBound) return mu;
   const notional = [...target.values()].reduce((s, v) => s + v, 0n);
   return mu + (artifact.portfolioResidualQuantileWad * notional) / WAD;
@@ -169,10 +232,7 @@ export function optimize(
     }
 
     if (!disable.reserve) {
-      const r = requiredReserve(input, candidate, {
-        quantile: opts.reserveQuantile,
-        horizonSeconds: opts.reserveHorizonSeconds,
-      });
+      const r = requiredReserve(input, candidate, reserveOptsFrom(disable, opts));
       // Guard: deployed can equal totalAssetsBase exactly (idle 0), never
       // exceed it (checked above), so this subtraction cannot underflow.
       if (totalAssetsBase - deployed < r.requiredBase) return false;

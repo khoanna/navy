@@ -216,3 +216,36 @@ export function rateAt(curve: RateCurve, xBase: bigint): bigint {
   // lo >= hi by construction, so the interpolated value walks down from lo.
   return lo - ((lo - hi) * remainder) / curve.quantumBase;
 }
+
+/**
+ * H1 (paper §11.3 — "remove post-deposit simulation; rank on displayed
+ * rate"). Produces a curve of the SAME shape as `simulateCurves` — same
+ * marketId set, same quantum, same point count, same `maxXBase` — whose
+ * every point is the venue's currently displayed `supplyRateWad`. Rate unit:
+ * WAD annualized, identical to `simulateCurves`'s output, so nothing
+ * downstream (forecast, optimize, cost) needs an H1-specific branch.
+ *
+ * A flat curve is exactly the ablation: the optimiser still searches over x
+ * and still obeys every cap and the reserve, but marginal rate no longer
+ * decays with the size of the vault's own deposit, so ranking collapses onto
+ * the displayed rate.
+ */
+export function flatDisplayedRateCurves(
+  input: DecisionInput,
+  eligible: string[],
+  quantumBase: bigint,
+  maxPoints: number
+): RateCurve[] {
+  const eligibleSet = new Set(eligible);
+  const curves: RateCurve[] = [];
+  for (const m of input.markets) {
+    if (!eligibleSet.has(m.marketId)) continue;
+    curves.push({
+      marketId: m.marketId,
+      quantumBase,
+      points: Array.from({ length: maxPoints }, () => m.supplyRateWad),
+      maxXBase: quantumBase * BigInt(maxPoints - 1),
+    });
+  }
+  return curves;
+}

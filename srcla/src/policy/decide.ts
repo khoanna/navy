@@ -1,9 +1,9 @@
 import { computeDecisionHashV2, hashData } from '../domain/hashing.js';
 import { admit } from './steps/admit.js';
-import { simulateCurves } from './steps/simulate.js';
+import { simulateCurves, flatDisplayedRateCurves } from './steps/simulate.js';
 import { forecastMarkets } from './steps/forecast.js';
 import { requiredReserve } from './steps/reserve.js';
-import { optimize, type OptimizeOpts } from './steps/optimize.js';
+import { optimize, reserveOptsFrom, type PolicyAblations } from './steps/optimize.js';
 import { costGate, type CostParams } from './steps/cost.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
 import type { DecisionInput, DecisionOutput, PolicyArtifact } from './types.js';
@@ -16,7 +16,15 @@ export interface DecideOpts {
   reserveHorizonSeconds: number;
   cost: CostParams;
   plan: Omit<BuildPlanOpts, 'snapshotHash'>;
-  disable?: OptimizeOpts['disable'];
+  /**
+   * The registered baseline/ablation switch set (optimize.ts's
+   * `PolicyAblations`). This is the ONLY sanctioned way to express B0-B5,
+   * B2u and H1-H7: every policy in the evaluation runs this same `decide`
+   * with a different `disable` (and, for H2/B*, a different artifact), so
+   * §11.1's equal-information requirement holds structurally rather than by
+   * two code paths agreeing to agree.
+   */
+  disable?: PolicyAblations;
 }
 
 export const DEFAULT_DECIDE_OPTS: DecideOpts = {
@@ -171,22 +179,50 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
     return finish({ admission });
   }
 
-  const curves = simulateCurves(input, admission.eligible, opts.quantumBase, opts.maxCurvePoints);
+  const disable: PolicyAblations = opts.disable ?? {};
+
+  // H1: rank on the displayed rate instead of the post-deposit curve. Same
+  // curve shape and same WAD-annualized rate unit either way (see
+  // flatDisplayedRateCurves) so no consumer needs an H1 branch.
+  const curves =
+    disable.capacityCurves === true
+      ? flatDisplayedRateCurves(input, admission.eligible, opts.quantumBase, opts.maxCurvePoints)
+      : simulateCurves(input, admission.eligible, opts.quantumBase, opts.maxCurvePoints);
   const lowerBounds = forecastMarkets(input, curves, artifact);
 
   const { target, enumeration } = optimize(input, curves, artifact, {
     quantumBase: opts.quantumBase,
     reserveQuantile: opts.reserveQuantile,
     reserveHorizonSeconds: opts.reserveHorizonSeconds,
-    ...(opts.disable !== undefined ? { disable: opts.disable } : {}),
+    disable,
   });
 
-  const reserve = requiredReserve(input, target, {
-    quantile: opts.reserveQuantile,
-    horizonSeconds: opts.reserveHorizonSeconds,
-  });
+  // Same derivation the optimiser scored candidates with (reserveOptsFrom),
+  // so the reported reserve cannot disagree with the one the search obeyed.
+  const reserve = requiredReserve(
+    input,
+    target,
+    reserveOptsFrom(disable, {
+      reserveQuantile: opts.reserveQuantile,
+      reserveHorizonSeconds: opts.reserveHorizonSeconds,
+    })
+  );
 
-  const gate = costGate(input, curves, artifact, current, target, opts.cost);
+  // H3: remove the complete-cost gate AND the no-trade band. The gate is
+  // reported as passed with an explicit reason so a result can never be read
+  // as "the gate was evaluated and cleared"; every amount below is USDC base
+  // units (6 dp).
+  const gate =
+    disable.costGate === true
+      ? {
+          passed: true,
+          reason: 'COST_GATE_ABLATED',
+          gainBase: 0n,
+          moveCostBase: 0n,
+          bandBase: 0n,
+          terms: {},
+        }
+      : costGate(input, curves, artifact, current, target, opts.cost);
   if (!gate.passed) {
     reasons.push(`COST_GATE: ${gate.reason}`);
     return finish({ admission, curves, lowerBounds, reserve, target, enumeration, costGate: gate });
