@@ -119,6 +119,15 @@ export interface RegisteredEvaluationOptions {
    * a 1%-of-NAV quantum at every tier.
    */
   quantumStepsPerTier?: number;
+  /**
+   * Restrict the run to these registered policy ids.
+   *
+   * For CALIBRATION-TIME sweeps only (choosing P8's `k`, say), never for a
+   * registered result: `missingPolicyIds` still reports every (policy, tier)
+   * the protocol requires, so a filtered run cannot pass §11.5's completeness
+   * check by simply not running the policies it would have failed on.
+   */
+  policyIds?: readonly string[];
 }
 
 /**
@@ -481,7 +490,11 @@ export function runRegisteredEvaluation(
 
     const opts = decideOptsForTier(baseOpts, tier, quantumSteps);
     const perTier: PolicyRunResult[] = [];
-    for (const policy of REGISTERED_POLICIES) {
+    const policies =
+      options.policyIds === undefined
+        ? REGISTERED_POLICIES
+        : REGISTERED_POLICIES.filter((p) => options.policyIds!.includes(p.id));
+    for (const policy of policies) {
       const decisionHashes: string[] = [];
       let rebalances = 0;
       const policyFn = createKernelPolicyFn(policy, {

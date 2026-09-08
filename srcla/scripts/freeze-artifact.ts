@@ -25,6 +25,7 @@
 import { writeFileSync } from 'fs';
 import { PrismaClient } from '@prisma/client';
 import { loadEra } from '../src/evaluation/dataset.js';
+import { parseArtifact } from '../src/policy/artifact.js';
 import { REGISTERED_ERAS, eraBounds, eraFor } from '../src/evaluation/eras.js';
 import {
   deriveCompletedLabels,
@@ -38,6 +39,13 @@ import {
 } from '../src/forecast/grid-sweep.js';
 import { buildResidualPanel } from '../src/policy/steps/portfolio-quantile.js';
 import { buildIdentityPin, regimeOf } from '../src/domain/config-digest.js';
+import { runRegisteredEvaluation } from '../src/evaluation/kernel/harness.js';
+import { SRCLA_POLICY } from '../src/evaluation/kernel/registry.js';
+import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
+import { loadGasSeries } from '../src/evaluation/gas-series.js';
+import type { HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
+import type { EvaluationDataset } from '../src/evaluation/dataset.js';
+import type { PolicyArtifact } from '../src/policy/types.js';
 import type { CompletedLabel } from '../src/policy/types.js';
 import type { HorizonSeconds } from '../src/policy/registered.js';
 
@@ -59,48 +67,107 @@ const AVAILABILITY_LAG_SECONDS = 900;
 const K_CANDIDATES = [0, 0.25, 0.5, 1, 2, 4] as const;
 
 /**
- * Score one `k` on the calibration era.
+ * Score each candidate `k` by RUNNING THE POLICY, on the calibration era.
  *
- * A wider band suppresses churn and forfeits the return the suppressed moves
- * would have earned. The proxy scored here is the share of origins whose
- * forecast dispersion would have blocked a move at that `k`: the band is
- * `G_H > max(C_move, k * sigma)`, so a `k` that blocks nothing and a `k` that
- * blocks everything are both visible, and a flat sweep is visible as flat.
+ * The first version of this scored a proxy -- how many consecutive-label gaps
+ * fell under `k * sigma` -- and produced a step function: 0% blocked at k=0,
+ * 99.28% at k=0.25, 100% at k>=1. It then reported "k RESOLVED to 0" because
+ * the spread was wide, which is a value chosen because the sweep moved rather
+ * than because the sweep was informative, and disabling the no-trade band
+ * outright would quietly change what H3 measures.
+ *
+ * The proxy was wrong in scale: it compared a horizon-return-magnitude sigma
+ * against gaps between consecutive labels. What §9.1 actually asks -- and what
+ * `config/bootstrap-artifact.json` says is needed, "a held-out
+ * turnover-vs-return sweep" -- is the realised trade-off, so this runs SRCLA
+ * through the real replay once per candidate and reads net APY and turnover
+ * off it.
+ *
+ * A sweep whose net APY varies by less than `MIN_APY_SPREAD` across every
+ * candidate is INCONCLUSIVE and is reported as such. An inconclusive sweep
+ * honestly reported is a result; a value picked from noise is not.
  */
+const MIN_APY_SPREAD = 1e-5; // 0.001 pp
+
+interface KSweepRow {
+  k: number;
+  realizedNetApy: number;
+  totalTurnoverBase: string;
+  rebalances: number;
+}
+
 function sweepNoTradeBandK(
-  labels: readonly CompletedLabel[],
-  quantileByMarket: Record<string, bigint>,
-): Array<{ k: number; blockedShare: number; medianGapWad: string }> {
-  const gaps: bigint[] = [];
-  const byMarket = new Map<string, bigint[]>();
-  for (const l of labels) {
-    const list = byMarket.get(l.marketId) ?? [];
-    list.push(l.realizedReturnWad);
-    byMarket.set(l.marketId, list);
-  }
-  for (const [, series] of byMarket) {
-    for (let i = 1; i < series.length; i++) {
-      const d = series[i]! - series[i - 1]!;
-      gaps.push(d < 0n ? -d : d);
-    }
-  }
-  gaps.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const median = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)]! : 0n;
+  dataset: EvaluationDataset,
+  baseArtifact: PolicyArtifact,
+  config: HarnessConfig,
+): { rows: KSweepRow[]; resolved: boolean; selected: number; reason: string } {
+  const rows: KSweepRow[] = [];
+  // ONE tier and SRCLA only: this is choosing a scalar, not producing a
+  // registered result, and the full grid would cost 68x more for a number
+  // that does not depend on the tier.
+  const tier = 1_000_000_000_000n;
 
-  // sigma proxy: the mean magnitude of the solved per-venue quantiles, which
-  // is the dispersion the band is scaled against in steps/cost.ts.
-  const qs = Object.values(quantileByMarket).map((q) => (q < 0n ? -q : q));
-  const sigma = qs.length > 0 ? qs.reduce((a, b) => a + b, 0n) / BigInt(qs.length) : 0n;
-
-  return K_CANDIDATES.map((k) => {
-    const threshold = (sigma * BigInt(Math.round(k * 1000))) / 1000n;
-    const blocked = gaps.filter((g) => g <= threshold).length;
-    return {
+  for (const k of K_CANDIDATES) {
+    const artifact: PolicyArtifact = { ...baseArtifact, noTradeBandK: k };
+    const out = runRegisteredEvaluation({
+      dataset,
+      config,
+      artifact,
+      tiers: [tier],
+      decideOpts: DEFAULT_DECIDE_OPTS,
+      calibrationFraction: 1.0,
+      policyIds: [SRCLA_POLICY.id],
+    });
+    const r = out.results.find((x) => x.policy.id === SRCLA_POLICY.id);
+    if (r === undefined) continue;
+    rows.push({
       k,
-      blockedShare: gaps.length === 0 ? 0 : blocked / gaps.length,
-      medianGapWad: median.toString(),
+      realizedNetApy: r.replay.realizedNetApy,
+      totalTurnoverBase: r.replay.totalTurnover.toString(),
+      rebalances: r.rebalances,
+    });
+    console.log(
+      `    k=${String(k).padEnd(5)} net APY ${(r.replay.realizedNetApy * 100).toFixed(4)}%  ` +
+        `turnover ${(Number(r.replay.totalTurnover) / 1e6).toFixed(0)}  rebalances ${r.rebalances}`,
+    );
+  }
+
+  if (rows.length === 0) {
+    return {
+      rows,
+      resolved: false,
+      selected: 1.0,
+      reason: 'the sweep produced no scorable run; k is unregistered and stays at 1.0',
     };
-  });
+  }
+
+  const apys = rows.map((r) => r.realizedNetApy);
+  const spread = Math.max(...apys) - Math.min(...apys);
+  if (spread < MIN_APY_SPREAD) {
+    return {
+      rows,
+      resolved: false,
+      selected: 1.0,
+      reason:
+        `INCONCLUSIVE: net APY varies by only ${(spread * 100).toFixed(6)} pp across ` +
+        `k in {${K_CANDIDATES.join(', ')}}. k stays at the registered default 1.0 and every ` +
+        `P8 result is provisional. Picking a winner from this spread would be picking noise.`,
+    };
+  }
+
+  // Best net APY; ties broken toward the SMALLER band, which is the weaker
+  // claim -- a wide band that merely matched a narrow one has not earned it.
+  const best = rows.reduce((a, b) =>
+    b.realizedNetApy > a.realizedNetApy + MIN_APY_SPREAD ? b : a,
+  );
+  return {
+    rows,
+    resolved: true,
+    selected: best.k,
+    reason:
+      `k=${best.k} realised ${(best.realizedNetApy * 100).toFixed(4)}% against a spread of ` +
+      `${(spread * 100).toFixed(4)} pp over the calibration era`,
+  };
 }
 
 async function main(): Promise<void> {
@@ -190,25 +257,6 @@ async function main(): Promise<void> {
       `[freeze] P2 residual panel: ${panel === undefined ? 'NOT BUILT (insufficient aligned history)' : 'built'}`,
     );
 
-    const kSweep = sweepNoTradeBandK(horizonLabels, chosen.row.quantileWadByMarket);
-    console.log('[freeze] P8 noTradeBandK sweep:');
-    for (const r of kSweep) {
-      console.log(`    k=${String(r.k).padEnd(5)} blocks ${(r.blockedShare * 100).toFixed(2)}% of moves`);
-    }
-    const spread = Math.max(...kSweep.map((r) => r.blockedShare)) - Math.min(...kSweep.map((r) => r.blockedShare));
-    // A flat sweep is a RESULT, not a licence to pick a convenient value.
-    const kResolved = spread > 0.02;
-    const selectedK = kResolved
-      ? kSweep.reduce((best, r) => (Math.abs(r.blockedShare - 0.25) < Math.abs(best.blockedShare - 0.25) ? r : best)).k
-      : 1.0;
-    console.log(
-      kResolved
-        ? `[freeze] k RESOLVED to ${selectedK} (sweep spread ${(spread * 100).toFixed(2)} pp)`
-        : `[freeze] k UNRESOLVED: the sweep is flat (spread ${(spread * 100).toFixed(2)} pp < 2 pp). ` +
-            `Keeping 1.0 and recording the table as evidence. A value chosen because it moves a ` +
-            `gate is not a registration.`,
-    );
-
     // Pinned IDENTITIES, from every one observed during calibration.
     //
     // Not the first digest seen, and not the whole digest: pinning the whole
@@ -236,25 +284,35 @@ async function main(): Promise<void> {
       );
     }
 
+    // P8's k, scored by RUNNING THE POLICY on the calibration era.
+    //
+    // The artifact this replaces said k=1.0 "carries no such registration and
+    // was never swept", and that calibrating it needs a turnover-vs-return
+    // sweep over a real collected dataset. This is that sweep: SRCLA at one
+    // tier, once per candidate, through the same replay the registered run
+    // uses. Everything it reads is calibration-era.
     // Portfolio scalar fallback: the most conservative solved per-venue
     // quantile. It governs only when no residual panel can be built, and
     // taking the most conservative rather than the mean keeps the fallback on
     // the safe side of the panel it substitutes for.
-    const solved = Object.values(chosen.row.quantileWadByMarket);
-    const portfolioFallback = solved.length > 0 ? solved.reduce((a, b) => (a < b ? a : b)) : 0n;
+    const solvedQuantiles = Object.values(chosen.row.quantileWadByMarket);
+    const portfolioFallback =
+      solvedQuantiles.length > 0 ? solvedQuantiles.reduce((a, b) => (a < b ? a : b)) : 0n;
 
-    const artifact = {
+    /** The artifact JSON for a given `k`. One builder, so the swept artifact
+     *  and the written one cannot diverge in any field but `k`. */
+    const artifactJsonFor = (k: number): Record<string, unknown> => ({
       policyVersion: 5,
       horizonSeconds: horizon,
       coverageTarget: chosen.row.point.coverageTarget,
       method: chosen.row.point.method === 'direct-arx' ? 'arx' : chosen.row.point.method,
       methodParams: chosen.row.point.methodParams,
       residualQuantileWadByMarket: Object.fromEntries(
-        Object.entries(chosen.row.quantileWadByMarket).map(([k, v]) => [k, v.toString()]),
+        Object.entries(chosen.row.quantileWadByMarket).map(([m, v]) => [m, v.toString()]),
       ),
       portfolioResidualQuantileWad: portfolioFallback.toString(),
       cashResidualQuantileWadByMarket: Object.fromEntries(
-        Object.entries(cashQuantiles).map(([k, v]) => [k, v.toString()]),
+        Object.entries(cashQuantiles).map(([m, v]) => [m, v.toString()]),
       ),
       // The §7.2 relative cash bound's fallback, used only for a venue with
       // too few usable labels. Kept at the registered conservative default
@@ -263,9 +321,44 @@ async function main(): Promise<void> {
       cashLowerBoundQuantileWad: '-100000000000000000',
       minObservations,
       availabilityLagSeconds: AVAILABILITY_LAG_SECONDS,
-      noTradeBandK: selectedK,
+      noTradeBandK: k,
       pinnedConfigDigests,
       configDigest: 'registered-2026-09-08',
+    });
+
+    const kBaseArtifact: PolicyArtifact = {
+      ...parseArtifact(artifactJsonFor(1.0), { requireProvisional: false }),
+      ...(panel !== undefined ? { residualPanel: panel } : {}),
+    };
+
+    const gas = await loadGasSeries(
+      prisma,
+      dataset.snapshots[0]!.timestamp,
+      dataset.snapshots[dataset.snapshots.length - 1]!.timestamp,
+    );
+    const kConfig: HarnessConfig = {
+      vault: { adminReserveBase: 0n, minIdleBps: 500, configurationDigest: '0x' + '00'.repeat(32) },
+      markets: {},
+      defaultMarket: { capBps: 5_000, absoluteCapBase: 10n ** 15n, maxLossBps: 50, dependencyGroupIds: [] },
+      dependencyGroups: [],
+      gas,
+      horizonSeconds: horizon,
+      availabilityLagSeconds: AVAILABILITY_LAG_SECONDS,
+    };
+
+    console.log('[freeze] P8 noTradeBandK sweep (SRCLA through the real replay):');
+    const kOutcome = sweepNoTradeBandK(dataset, kBaseArtifact, kConfig);
+    const kSweep = kOutcome.rows;
+    const kResolved = kOutcome.resolved;
+    const selectedK = kOutcome.selected;
+    console.log(
+      kResolved
+        ? `[freeze] k RESOLVED: ${kOutcome.reason}`
+        : `[freeze] k UNRESOLVED: ${kOutcome.reason}`,
+    );
+
+    const artifact = {
+      ...artifactJsonFor(selectedK),
 
       // ---- Registration record. Not read by parseArtifact; present so the
       // artifact testifies to how it was produced.
@@ -296,8 +389,11 @@ async function main(): Promise<void> {
     writeFileSync(outPath, JSON.stringify(artifact, null, 2) + '\n');
     console.log('');
     console.log(`[freeze] wrote ${outPath}`);
-    console.log(`[freeze] method=${artifact.method} horizon=${horizon / 86_400}d ` +
-      `coverage=${artifact.coverageTarget} k=${selectedK}`);
+    console.log(
+      `[freeze] method=${chosen.row.point.method} horizon=${horizon / 86_400}d ` +
+        `coverage=${chosen.row.point.coverageTarget} k=${selectedK}` +
+        `${kResolved ? '' : ' (UNRESOLVED — every P8 result is provisional)'}`,
+    );
     console.log('[freeze] NO _provisional field: this artifact is citable.');
     if (era.sealed) throw new Error('unreachable: the calibration era must not be sealed');
   } finally {
