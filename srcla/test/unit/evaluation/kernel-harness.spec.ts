@@ -394,11 +394,14 @@ describe('ablation inertness is measured, not assumed', () => {
   });
 
   it('H2 bites when the calibrated bound is what excludes a venue', () => {
-    // The portfolio residual quantile is a flat per-notional hurdle, so it
-    // changes the TOTAL deployed, not the composition — it can only bite
-    // where a venue's marginal horizon return sits below it. Moonwell is put
-    // at 5% utilisation (a very low simulated rate) and the quantile is
-    // sized between the two venues' marginal returns.
+    // The portfolio residual quantile is a flat per-notional hurdle here —
+    // the fixture's rates are constant, so the calibration split observes no
+    // dispersion, `buildResidualPanel` reports NO CALIBRATION rather than a
+    // fabricated zero, and the artifact's registered conservative quantile
+    // governs. It can only bite where a venue's marginal horizon return sits
+    // below it. Moonwell is put at 5% utilisation (a very low simulated
+    // rate) and the quantile is sized between the two venues' marginal
+    // returns.
     const out = run({
       dataset: makeDataset(40, undefined, (venue) =>
         venue === 'moonwell-usdc'
@@ -410,10 +413,39 @@ describe('ablation inertness is measured, not assumed', () => {
     const srcla = out.results.find((r) => r.policy.id === 'srcla')!;
     const h2 = out.results.find((r) => r.policy.id === 'h2')!;
 
+    // The fallback really is the operative path here, not the panel.
+    expect(out.artifact.residualPanel).toBeUndefined();
+
     // Non-vacuity: SRCLA must still be deploying something, or "H2 differs"
     // would just mean "SRCLA held and H2 did not".
     expect(srcla.rebalances).toBeGreaterThan(0);
     expect(h2.inertVsSrcla).toBe(false);
+  });
+
+  it('builds a calibrated residual panel when the calibration split shows dispersion', () => {
+    // The same harness over a dataset whose rates actually move: the panel
+    // exists, is drawn from the calibration split only, and carries a
+    // non-zero residual for the venue that moved.
+    const out = run({
+      dataset: makeDataset(40, (venue, day) =>
+        venue === 'aave-usdc' ? (day < 20 ? (WAD * 8n) / 100n : (WAD * 2n) / 100n) : (WAD * 4n) / 100n,
+      ),
+    });
+
+    const panel = out.artifact.residualPanel!;
+    expect(panel).toBeDefined();
+    expect(panel.marketIds).toContain('aave-usdc');
+    expect(panel.rows.length).toBeGreaterThan(0);
+
+    const aaveIdx = panel.marketIds.indexOf('aave-usdc');
+    expect(panel.rows.some((r) => r[aaveIdx] !== 0n)).toBe(true);
+
+    // §7.3's no-look-ahead boundary: every origin in the panel is inside the
+    // calibration split, not the held-out remainder.
+    const splitSeconds = Math.floor(
+      out.results[0]!.replay.snapshots[Math.floor(40 * 0.7)]!.timestamp.getTime() / 1000,
+    );
+    for (const t of panel.originsSeconds) expect(t).toBeLessThanOrEqual(splitSeconds);
   });
 
   it('H6 bites when a venue is past its utilisation kink', () => {

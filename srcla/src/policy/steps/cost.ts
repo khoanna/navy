@@ -1,4 +1,5 @@
 import { portfolioLowerBound } from './optimize.js';
+import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
 import type { CostGateResult, DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
 const WAD = 10n ** 18n;
@@ -182,11 +183,29 @@ export function movementCostBase(
 }
 
 /**
- * P8 - the no-trade band k*sigma_hat. sigma_hat is the calibrated dispersion
- * of portfolio horizon residuals - the same `portfolioResidualQuantileWad`
- * the frozen artifact already carries (it is <= 0 by convention; the band
- * uses its magnitude). k is the artifact's registered `noTradeBandK`,
- * scaled by 1e6 for integer bigint arithmetic since it is a float.
+ * P8 - the no-trade band k*sigma_hat.
+ *
+ * sigma_hat is "the calibrated dispersion of portfolio horizon residuals"
+ * (§9.1), i.e. the magnitude of the SAME `q^p_alpha(w)` the P2 objective
+ * uses - computed from the artifact's residual panel under the TARGET
+ * weights, so a concentrated or higher-dispersion target widens the band
+ * and a diversified one narrows it. It falls back to the frozen
+ * `portfolioResidualQuantileWad` only when the artifact carries no panel.
+ *
+ * Why weight-dependent matters here: with the Phase 1 placeholder scalar
+ * (sigma = 1e13 WAD, k = 1.0) a $1M move gave a band of about 10 USDC
+ * against a C_move of roughly 800 USDC, so `max(C_move, k*sigma)` was
+ * ALWAYS C_move and P8 was decorative - the number had been chosen to "stay
+ * out of the way of any realistically-yielding venue" (readiness audit
+ * NEW-8). A dispersion read off real residuals is on the same order as
+ * C_move rather than 80x below it.
+ *
+ * k is the artifact's `noTradeBandK`, scaled by 1e6 for integer bigint
+ * arithmetic since it is a float. CAVEAT: k itself is still uncalibrated -
+ * §9.1 requires "a registered scalar multiplier fixed before held-out
+ * evaluation" and the shipped 1.0 carries no registration note. Calibrating
+ * it needs a held-out turnover/return sweep over a real dataset; it is not
+ * something to pick so a gate passes.
  *
  * On a low-fee chain C_move alone does not suppress churn (paper §9.1); this
  * term is what actually does, so it must scale with the notional being
@@ -196,11 +215,11 @@ export function noTradeBandBase(
   _input: DecisionInput,
   _curves: RateCurve[],
   artifact: PolicyArtifact,
-  notionalBase: bigint
+  notionalBase: bigint,
+  target: ReadonlyMap<string, bigint> = new Map()
 ): bigint {
-  const sigma = artifact.portfolioResidualQuantileWad < 0n
-    ? -artifact.portfolioResidualQuantileWad
-    : artifact.portfolioResidualQuantileWad;
+  const q = portfolioResidualQuantileFor(artifact, target);
+  const sigma = q < 0n ? -q : q;
   const kFixed = BigInt(Math.round(artifact.noTradeBandK * 1_000_000));
   return (sigma * notionalBase * kFixed) / (WAD * 1_000_000n);
 }
@@ -238,7 +257,7 @@ export function costGate(
   const moves = movesFrom(current, target, input);
   const notional = moves.reduce((s, m) => s + m.amountBase, 0n);
   const { totalBase: moveCostBase, terms } = movementCostBase(input, moves, p);
-  const bandBase = noTradeBandBase(input, curves, artifact, notional);
+  const bandBase = noTradeBandBase(input, curves, artifact, notional, target);
 
   // Signed difference of two conservative lower bounds: legitimately
   // negative when the target is worse than the status quo (a loss), which

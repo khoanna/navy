@@ -27,6 +27,7 @@ import {
   calibrateResidualQuantiles,
   type HarnessConfig,
 } from './decision-input.js';
+import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
 import {
   REGISTERED_POLICIES,
   SRCLA_POLICY,
@@ -264,7 +265,15 @@ export function prepareArtifact(
       : Number.POSITIVE_INFINITY;
   const calibrationLabels = labels.filter((l) => l.availableAtSeconds <= splitSeconds);
 
-  return {
+  // P2: the aligned residual panel, from the CALIBRATION labels only. This
+  // is what makes `q^p_alpha(w)` depend on w — without it the portfolio
+  // quantile is a frozen scalar times notional, invariant to the mix, and
+  // P2 cannot change a ranking (readiness audit NEW-7). `undefined` when
+  // there is not enough aligned history: the frozen scalar is then used and
+  // the run says so, rather than a panel being fabricated.
+  const residualPanel = buildResidualPanel(calibrationLabels, base.minObservations);
+
+  const prepared: PolicyArtifact = {
     ...base,
     pinnedConfigDigests,
     residualQuantileWadByMarket: calibrateResidualQuantiles(
@@ -273,6 +282,8 @@ export function prepareArtifact(
       base.minObservations,
     ),
   };
+  if (residualPanel !== undefined) prepared.residualPanel = residualPanel;
+  return prepared;
 }
 
 /**

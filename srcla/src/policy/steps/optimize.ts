@@ -1,6 +1,7 @@
 import { rateAt } from './simulate.js';
 import { lowerBoundAt, exitableFraction } from './forecast.js';
 import { requiredReserve } from './reserve.js';
+import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
 const WAD = 10n ** 18n;
@@ -169,7 +170,13 @@ export function portfolioLowerBound(
   if (disable.uncertainty === true) return mu;
   if (disable.portfolioBound) return mu;
   const notional = [...target.values()].reduce((s, v) => s + v, 0n);
-  return mu + (artifact.portfolioResidualQuantileWad * notional) / WAD;
+  // q^p_alpha(w): a lower quantile of the PORTFOLIO residual series under
+  // THIS candidate's weights, not a frozen scalar. Applied once to total
+  // notional (the aggregation was already right); what changed is that the
+  // quantile now depends on the mix, so two candidates deploying the same
+  // total in different proportions no longer receive an identical term and
+  // P2 can actually change a ranking. See steps/portfolio-quantile.ts.
+  return mu + (portfolioResidualQuantileFor(artifact, target) * notional) / WAD;
 }
 
 /**

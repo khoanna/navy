@@ -144,6 +144,20 @@ export interface RateCurve {
   maxXBase: bigint;
 }
 
+/**
+ * Aligned per-venue horizon residuals. `rows[t][i]` is the residual of
+ * `marketIds[i]` at origin `originsSeconds[t]`, in WAD over the horizon.
+ *
+ * Rectangular by construction: a row exists only where every listed market
+ * has an observation, so a portfolio residual is always a sum over the same
+ * instant rather than over whatever happened to be present.
+ */
+export interface ResidualPanel {
+  marketIds: string[];
+  originsSeconds: number[];
+  rows: bigint[][];
+}
+
 export interface PolicyArtifact {
   artifactHash: string;
   policyVersion: number;
@@ -153,8 +167,27 @@ export interface PolicyArtifact {
   methodParams: Record<string, number>;
   /** P1: residual quantile per market id, all <= 0 in WAD. */
   residualQuantileWadByMarket: Record<string, bigint>;
-  /** P2: portfolio residual quantile, <= 0 in WAD. */
+  /**
+   * P2 fallback: a frozen portfolio residual quantile, <= 0 in WAD, used
+   * only when `residualPanel` is absent.
+   *
+   * On its own this term is invariant to the MIX (it multiplies total
+   * notional), so it cannot discriminate between candidate weightings and
+   * P2 can never change a ranking. `residualPanel` is what makes
+   * `q^p_alpha(w)` actually depend on w.
+   */
   portfolioResidualQuantileWad: bigint;
+  /**
+   * P2's calibration input: the aligned panel of per-venue horizon residuals
+   * from the CALIBRATION split, one row per origin at which every panel
+   * market has a completed label.
+   *
+   * Present only on a calibrated artifact. `steps/portfolio-quantile.ts`
+   * turns it into `q^p_alpha(w)` — a real lower quantile of the portfolio
+   * residual series under the candidate's own weights — and P8's band uses
+   * the same quantity as its dispersion.
+   */
+  residualPanel?: ResidualPanel;
   minObservations: number;
   availabilityLagSeconds: number;
   /** P8 band multiplier. */
