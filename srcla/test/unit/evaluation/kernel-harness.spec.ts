@@ -528,10 +528,78 @@ describe('buildWithdrawalSchedule', () => {
   });
 
   it('falls back to a labelled registered schedule when nothing was observed', () => {
-    const s = buildWithdrawalSchedule(makeDataset(30), TIER, { redemptionBps: 500, cadenceSnapshots: 7 });
+    // makeDataset is DAILY, so a 7-day cadence lands on indices 7/14/21/28 --
+    // which is exactly why the old snapshot-counted API looked correct here.
+    const s = buildWithdrawalSchedule(makeDataset(30), TIER, {
+      redemptionBps: 500,
+      cadenceSeconds: 7 * 86_400,
+    });
     expect(s.source).toBe('registered-schedule');
     expect(s.requests.map((r) => r.snapshotIndex)).toEqual([7, 14, 21, 28]);
     expect(s.requests.every((r) => r.assetsBase === TIER / 20n)).toBe(true);
+  });
+
+  it('holds its cadence in TIME, so an hourly dataset is not redeemed hourly', () => {
+    // The regression this exists for. The cadence used to be counted in
+    // SNAPSHOTS, so `7` meant "weekly" on this daily fixture and "every seven
+    // hours" on the hourly dataset the archive backfill produces: 5% of NAV
+    // seventeen times a day, ~240% of the vault demanded inside one 14-day
+    // reserve horizon. §8.1 then correctly required the whole vault in cash,
+    // nothing was ever deployable, and all seventeen policies realised
+    // exactly 0.000% net APY -- a total that reads like a policy result and
+    // is a unit error in the harness.
+    const start = Date.UTC(2026, 0, 1);
+    const hourly: EvaluationDataset = {
+      manifestId: 'm',
+      labels: [],
+      snapshots: Array.from({ length: 24 * 30 }, (_, i) => {
+        const timestamp = new Date(start + i * 3_600_000);
+        return {
+          index: i,
+          timestamp,
+          blockHash: `0x${i.toString(16).padStart(64, '0')}`,
+          snapshots: VENUES.map((v) => market(v, timestamp, {})),
+        };
+      }),
+    };
+
+    const s = buildWithdrawalSchedule(hourly, TIER, {
+      redemptionBps: 500,
+      cadenceSeconds: 7 * 86_400,
+    });
+    // 30 days at a 7-day cadence: four redemptions, not 102.
+    expect(s.requests).toHaveLength(4);
+    expect(s.requests.map((r) => r.snapshotIndex)).toEqual([168, 336, 504, 672]);
+    // Total demand over the window stays a small fraction of the tier.
+    const demanded = s.requests.reduce((a, r) => a + r.assetsBase, 0n);
+    expect(demanded).toBe((TIER * 4n) / 20n);
+    expect(demanded).toBeLessThan(TIER);
+  });
+
+  it('demands the same total from a daily and an hourly view of one window', () => {
+    // The invariant the snapshot-counted version broke: the schedule
+    // describes user behaviour over TIME and must not change because the
+    // observer sampled the market more often.
+    const start = Date.UTC(2026, 0, 1);
+    const hourly: EvaluationDataset = {
+      manifestId: 'm',
+      labels: [],
+      snapshots: Array.from({ length: 24 * 30 }, (_, i) => {
+        const timestamp = new Date(start + i * 3_600_000);
+        return {
+          index: i,
+          timestamp,
+          blockHash: `0x${i.toString(16).padStart(64, '0')}`,
+          snapshots: VENUES.map((v) => market(v, timestamp, {})),
+        };
+      }),
+    };
+    const opts = { redemptionBps: 500, cadenceSeconds: 7 * 86_400 };
+    const daily = buildWithdrawalSchedule(makeDataset(30), TIER, opts);
+    const perHour = buildWithdrawalSchedule(hourly, TIER, opts);
+    const total = (s: { requests: Array<{ assetsBase: bigint }> }): bigint =>
+      s.requests.reduce((a, r) => a + r.assetsBase, 0n);
+    expect(total(perHour)).toBe(total(daily));
   });
 });
 
@@ -610,14 +678,71 @@ describe('calibrateResidualQuantiles', () => {
 });
 
 describe('prepareArtifact', () => {
-  it('pins each market\'s FIRST observed configuration digest', () => {
+  it('pins every IDENTITY observed, not the first digest seen', () => {
+    // This test used to assert the opposite -- "pins the FIRST observed
+    // configuration digest" -- and that was the defect. Governance
+    // re-parameterises these venues routinely (the registered window holds 6
+    // Compound, 14 Aave and 11 Moonwell parameter regimes), so pinning day
+    // one's digest made every venue permanently inadmissible at its first
+    // rate change and all seventeen policies realised 0.000% net APY. The
+    // digest is `identity|parameters`; only the identity half is pinned, and
+    // every identity observed during calibration is registered.
     const ds = makeDataset(10);
-    // The venue re-configures halfway through; §6.2 pins at registration.
     for (let d = 5; d < 10; d++) {
-      ds.snapshots[d]!.snapshots[0]!.configDigest = 'changed';
+      ds.snapshots[d]!.snapshots[0]!.configDigest = 'aave:0xpool|different-params';
+    }
+    for (let d = 0; d < 5; d++) {
+      ds.snapshots[d]!.snapshots[0]!.configDigest = 'aave:0xpool|original-params';
     }
     const a = prepareArtifact(testArtifact(), ds, [], 0.7);
-    expect(a.pinnedConfigDigests['aave-usdc']).toBe('digest-aave-usdc');
+    // A re-parameterisation adds NO new identity: one pin, not two.
+    expect(a.pinnedConfigDigests['aave-usdc']).toBe('aave:0xpool');
+  });
+
+  it('registers BOTH identities when the market contract itself changes', () => {
+    const ds = makeDataset(10);
+    for (let d = 0; d < 5; d++) {
+      ds.snapshots[d]!.snapshots[0]!.configDigest = 'aave:0xold|p';
+    }
+    for (let d = 5; d < 10; d++) {
+      ds.snapshots[d]!.snapshots[0]!.configDigest = 'aave:0xnew|p';
+    }
+    const a = prepareArtifact(testArtifact(), ds, [], 0.7);
+    expect(a.pinnedConfigDigests['aave-usdc']!.split(',').sort()).toEqual([
+      'aave:0xnew',
+      'aave:0xold',
+    ]);
+  });
+
+  it('returns a REGISTERED artifact untouched — it is frozen', () => {
+    // Against a held-out era, re-fitting would train the policy on the data
+    // the run exists to test, which is the look-ahead §2.2 rejects. It would
+    // also discard the calibration era's registration, so the manifest's
+    // artifact hash would describe something the run did not use.
+    const registered = { ...testArtifact() };
+    delete (registered as { _provisional?: string })._provisional;
+
+    const ds = makeDataset(20, (venue, day) =>
+      venue === 'aave-usdc' ? (WAD * BigInt(1 + (day % 7))) / 100n : (WAD * 4n) / 100n,
+    );
+    const labels = deriveCompletedLabels(ds.snapshots, HORIZON, 0);
+    const out = prepareArtifact(registered, ds, labels, 0.5);
+
+    expect(out).toBe(registered);
+    expect(out.pinnedConfigDigests).toEqual(registered.pinnedConfigDigests);
+    expect(out.residualQuantileWadByMarket).toEqual(registered.residualQuantileWadByMarket);
+  });
+
+  it('still calibrates a PROVISIONAL artifact, which has nothing to preserve', () => {
+    const ds = makeDataset(20, (venue, day) =>
+      venue === 'aave-usdc' ? (WAD * BigInt(1 + (day % 7))) / 100n : (WAD * 4n) / 100n,
+    );
+    const labels = deriveCompletedLabels(ds.snapshots, HORIZON, 0);
+    const base = testArtifact();
+    expect(base._provisional).toBeDefined();
+    const out = prepareArtifact(base, ds, labels, 0.5);
+    expect(out).not.toBe(base);
+    expect(Object.keys(out.pinnedConfigDigests).length).toBeGreaterThan(0);
   });
 
   it('calibrates on the calibration split only', () => {

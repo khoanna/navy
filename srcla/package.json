@@ -37,7 +37,10 @@
     "cli:evaluate": "tsx src/cli/index.ts evaluate",
     "cli:regime": "tsx src/cli/index.ts regime",
     "cli:health": "tsx src/cli/index.ts health",
-    "backfill:history": "tsx scripts/backfill-history.ts"
+    "backfill:history": "tsx scripts/backfill-history.ts",
+    "phase4:freeze": "tsx scripts/freeze-artifact.ts",
+    "phase4:run": "tsx scripts/run-phase4.ts",
+    "digests:rewrite": "tsx scripts/rewrite-config-digests.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
