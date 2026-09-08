@@ -213,14 +213,6 @@ export interface ISimulator {
    * @returns Utilization ratio (RAY)
    */
   calculateUtilization(cash: bigint, borrows: bigint): bigint;
-
-  /**
-   * Verify simulation against on-chain data.
-   *
-   * Optional method for validating simulator accuracy against
-   * real protocol state. Returns true if simulation is accurate.
-   */
-  verifyFixtures?(): Promise<boolean>;
 }
 
 /**
