@@ -24,6 +24,10 @@ const rawOrigin = {
   allLabels: Array.from({ length: 40 }, () => ({
     marketId: 'aa', regimeId: 'r1', originSeconds: 1, horizonSeconds: 604_800 as const,
     horizonEndSeconds: 2, availableAtSeconds: 3, realizedReturnWad: WAD, realizedMinCashBase: 1n,
+    // §7.2's cash-bound denominator. Required on CompletedLabel; `null` is the
+    // live ForecastLabel table's honest value, and calibrateCashResidualQuantiles
+    // SKIPS such a label rather than folding it in as a zero residual.
+    originCashBase: null,
   })),
   lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
 };
@@ -59,7 +63,7 @@ describe('DecisionDriver', () => {
       allLabels: [...rawOrigin.allLabels, {
         marketId: 'aa', regimeId: 'r1', originSeconds: 1, horizonSeconds: 604_800 as const,
         horizonEndSeconds: 2_000_000, availableAtSeconds: 2_000_000,
-        realizedReturnWad: WAD * 1000n, realizedMinCashBase: 1n,
+        realizedReturnWad: WAD * 1000n, realizedMinCashBase: 1n, originCashBase: null,
       }],
     };
     const artifact = { ...loadBootstrapArtifact(), pinnedConfigDigests: { aa: '0xd' }, residualQuantileWadByMarket: { aa: 0n } };

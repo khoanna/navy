@@ -1,0 +1,27 @@
+# The srcla strategy service's own Postgres.
+#
+# `be/docker-compose.yml` serves `be`'s `navy` database on :5432; this one
+# serves srcla's `srcla` database on :5433. They are separate instances on
+# separate Prisma major versions (be is Prisma 7, srcla is Prisma 5), so they
+# must not be merged into one compose project.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: srcla-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: srcla
+    ports:
+      - '5433:5432'
+    volumes:
+      - srcla-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U user -d srcla']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  srcla-pgdata:
