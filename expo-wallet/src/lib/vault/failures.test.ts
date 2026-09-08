@@ -138,3 +138,41 @@ describe('describeVaultReason', () => {
     expect(describeVaultReason(null)).toBeNull();
   });
 });
+
+describe('EXCEEDS_MAX_WITHDRAW (asset-denominated twin of EXCEEDS_MAX_REDEEM)', () => {
+  const body = (over: Record<string, unknown> = {}) => ({
+    reason: {
+      code: 'EXCEEDS_MAX_WITHDRAW',
+      unit: 'usdc-6dp',
+      requiredBase: '1000000',
+      availableBase: '750000',
+      shortfallBase: '250000',
+      message: 'Insufficient synchronous liquidity',
+      ...over,
+    },
+  });
+
+  it('is recognised rather than falling through to null', () => {
+    const r = readVaultReason(body());
+    expect(r).not.toBeNull();
+    expect(r!.code).toBe('EXCEEDS_MAX_WITHDRAW');
+  });
+
+  it('renders the available amount in USDC, not shares', () => {
+    const d = describeVaultReason(readVaultReason(body()))!;
+    expect(d.detail).toContain('0.75 USDC');
+    expect(d.detail).not.toContain('shares');
+  });
+
+  it('renders a 12-dp figure differently from a 6-dp one — the scales are not interchangeable', () => {
+    const asAssets = describeVaultReason(readVaultReason(body()))!;
+    const asShares = describeVaultReason(
+      readVaultReason(body({ unit: 'shares-12dp' })),
+    )!;
+    expect(asAssets.detail).not.toEqual(asShares.detail);
+  });
+
+  it('rejects a non-numeric amount rather than rendering a wrong number', () => {
+    expect(readVaultReason(body({ availableBase: 'lots' }))).toBeNull();
+  });
+});

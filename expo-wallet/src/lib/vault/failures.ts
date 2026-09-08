@@ -29,7 +29,7 @@ export interface VaultInvalidAmountReason {
 }
 
 export interface VaultShortfallReason {
-  code: 'INSUFFICIENT_USDC_BALANCE' | 'EXCEEDS_MAX_REDEEM';
+  code: 'INSUFFICIENT_USDC_BALANCE' | 'EXCEEDS_MAX_REDEEM' | 'EXCEEDS_MAX_WITHDRAW';
   unit: VaultFailureUnit;
   requiredBase: string;
   availableBase: string;
@@ -66,7 +66,11 @@ export function readVaultReason(body: unknown): VaultFailureReason | null {
     return { code: 'INVALID_AMOUNT', unit, field: r.field, received: r.received, message: r.message };
   }
 
-  if (r.code === 'INSUFFICIENT_USDC_BALANCE' || r.code === 'EXCEEDS_MAX_REDEEM') {
+  if (
+    r.code === 'INSUFFICIENT_USDC_BALANCE' ||
+    r.code === 'EXCEEDS_MAX_REDEEM' ||
+    r.code === 'EXCEEDS_MAX_WITHDRAW'
+  ) {
     if (!isDigits(r.requiredBase) || !isDigits(r.availableBase) || !isDigits(r.shortfallBase)) {
       return null;
     }
@@ -112,6 +116,18 @@ export function describeVaultReason(
         title: 'Vault liquidity is limited right now',
         detail:
           `The vault can pay out up to ${available} shares immediately. ` +
+          `Withdraw that much now, or try the rest again shortly.`,
+      };
+    }
+    case 'EXCEEDS_MAX_WITHDRAW': {
+      // Asset-denominated twin of EXCEEDS_MAX_REDEEM. Rendered in USDC rather
+      // than shares — the two arrive on different scales (6 dp vs 12 dp), which
+      // is exactly why the backend gives them separate codes.
+      const available = formatBaseCeil(BigInt(reason.availableBase), DECIMALS[reason.unit], 2);
+      return {
+        title: 'Vault liquidity is limited right now',
+        detail:
+          `The vault can pay out up to ${available} USDC immediately. ` +
           `Withdraw that much now, or try the rest again shortly.`,
       };
     }
