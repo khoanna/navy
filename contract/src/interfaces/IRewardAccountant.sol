@@ -74,7 +74,19 @@ interface IRewardAccountant {
     function recognizedRewardAssets() external view returns (uint256);
 
     /// @notice Sync before share actions for conservative NAV adjustment
+    /// @dev Non-view: lazily refreshes stale material token caches (paper
+    ///      9.2) rather than merely returning the last cached total. Callable
+    ///      by the vault (see setVault) or REWARD_ADMIN_ROLE. A stale or
+    ///      invalid source can never raise the recognized total.
     /// @param issuingShares True if minting shares (reduces available), false if redeeming
     /// @return recognizedAssets The recognized asset value for this action
     function syncForShareAction(bool issuingShares) external returns (uint256 recognizedAssets);
+
+    /// @notice The vault authorised to call syncForShareAction directly
+    /// @return address The authorised vault, or address(0) if unset
+    function vault() external view returns (address);
+
+    /// @notice Authorise the vault to call syncForShareAction (REWARD_ADMIN_ROLE only)
+    /// @param vault_ The vault address, or address(0) to revoke
+    function setVault(address vault_) external;
 }

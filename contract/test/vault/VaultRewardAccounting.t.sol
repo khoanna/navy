@@ -154,6 +154,8 @@ contract VaultRewardAccountingTest is Test {
     function test_setRewardAccountant() public {
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         assertEq(vault.rewardAccountant(), address(accountant));
     }
@@ -178,6 +180,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure accountant
         vm.prank(admin);
@@ -222,6 +226,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with material threshold and short cache lifetime
         vm.prank(admin);
@@ -274,6 +280,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with material threshold and short cache lifetime
         vm.prank(admin);
@@ -328,6 +336,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with material threshold
         vm.prank(admin);
@@ -385,6 +395,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with material threshold
         vm.prank(admin);
@@ -446,6 +458,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with material threshold
         vm.prank(admin);
@@ -500,6 +514,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant with cached rewards
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure accountant
         vm.prank(admin);
@@ -576,6 +592,8 @@ contract VaultRewardAccountingTest is Test {
         // Set accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Digest should change
         bytes32 digest2 = vault.currentConfigurationDigest();
@@ -587,6 +605,8 @@ contract VaultRewardAccountingTest is Test {
         // Set accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         bytes32 digest1 = vault.currentConfigurationDigest();
 
@@ -630,6 +650,8 @@ contract VaultRewardAccountingTest is Test {
         // Set up accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Configure with non-material threshold so deposit works
         vm.prank(admin);
@@ -704,6 +726,8 @@ contract VaultRewardAccountingTest is Test {
         // Set initial accountant
         vm.prank(admin);
         vault.setRewardAccountant(address(accountant));
+        vm.prank(admin);
+        accountant.setVault(address(vault));
 
         // Deploy new accountant
         RewardAccountant newAccountant = new RewardAccountant(admin);

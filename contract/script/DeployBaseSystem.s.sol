@@ -80,6 +80,11 @@ contract DeployBaseSystem is Script {
         vault.registerAdapter(address(moonwell), 2_000, 150, "Moonwell Base USDC");
         vault.setRewardExecutor(address(rewards));
         vault.setRewardAccountant(address(accountant));
+        // NOTE: accountant.setVault(address(vault)) authorises the vault to
+        // call syncForShareAction (paper 9.2's lazy refresh). It is deployer's
+        // (admin) responsibility as a post-deploy step: RewardAccountant's
+        // constructor grants REWARD_ADMIN_ROLE only to `admin`, not to this
+        // script's broadcaster, which may be a different key.
 
         // Admin gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE only
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), admin);

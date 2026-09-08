@@ -123,6 +123,7 @@ contract RewardAccountantTest is Test {
 
     address public admin;
     address public user;
+    address public vault;
 
     // USDC has 6 decimals, typical Chainlink ETH/USD has 8 decimals
     uint256 public constant USDC_DECIMALS = 6;
@@ -139,8 +140,11 @@ contract RewardAccountantTest is Test {
     function setUp() public {
         admin = address(uint160(0xA11CE));
         user = address(uint160(0xB0B));
+        vault = address(uint160(0x11A17));
 
         accountant = new RewardAccountant(admin);
+        vm.prank(admin);
+        accountant.setVault(vault);
 
         usdcFeed = new MockPriceFeed();
         usdcFeed.setPrice(USDC_USD_PRICE);
@@ -618,9 +622,97 @@ contract RewardAccountantTest is Test {
         accountant.refresh(adapters);
 
         // Sync should return the cached value
+        vm.prank(vault);
         uint256 syncValue = accountant.syncForShareAction(true);
         assertGt(syncValue, 0, "Sync should return cached value");
         assertEq(syncValue, accountant.cachedRewardAssets(), "Sync should return same as cached");
+    }
+
+    /// @dev Seeds a single material token policy, refreshes it, and asserts
+    ///      the seed is genuinely material and issuance-ready so the tests
+    ///      that build on it are meaningful. maxAge is set far longer than
+    ///      cacheLifetime so the *cache* (not the underlying feed) is what
+    ///      goes stale after a warp — the scenario paper 9.2 targets.
+    function _seedMaterialToken() internal {
+        address[] memory allowedAdapters = new address[](0);
+        IRewardAccountant.TokenPolicy memory policy = IRewardAccountant.TokenPolicy({
+            token: address(rewardToken),
+            feed: address(rewardFeed),
+            description: "Test",
+            decimals: 18,
+            maxAge: 30 days,
+            lowerBound: 0,
+            upperBound: type(uint256).max,
+            haircutBps: 500,
+            contributionCap: type(uint256).max,
+            materialityThreshold: 1e6, // 1 USDC — comfortably below the seeded value
+            cacheLifetime: 1 hours,
+            allowedAdapters: allowedAdapters,
+            exists: true
+        });
+
+        vm.prank(admin);
+        accountant.setTokenPolicy(address(rewardToken), policy);
+        vm.prank(admin);
+        accountant.setUsdcUsdFeed(address(usdcFeed));
+
+        address[] memory adapters = new address[](0);
+        vm.prank(admin);
+        accountant.refresh(adapters);
+
+        (,, bool isMaterial) = accountant.tokenCache(address(rewardToken));
+        assertTrue(isMaterial, "seed precondition: token must be material");
+        assertTrue(accountant.issuanceReady(), "seed precondition: cache must start fresh");
+    }
+
+    /// @dev Paper 9.2's lazy refresh. syncForShareAction was `view` and did
+    ///      nothing, so a stale cache closed deposits permanently with no
+    ///      on-chain remedy: refresh() is role-gated and nothing calls it.
+    function test_syncForShareActionRefreshesAStaleCache() public {
+        _seedMaterialToken();
+        vm.warp(block.timestamp + 2 days); // cache now stale (cacheLifetime is 1 hour)
+        // The USDC/USD feed heartbeats independently of our own refresh
+        // cadence; touch it here to reflect that, isolating "our cache is
+        // stale" from "the oracle itself went stale" (a different failure
+        // mode, covered separately below).
+        usdcFeed.setPrice(USDC_USD_PRICE);
+        assertFalse(accountant.issuanceReady(), "precondition: stale");
+
+        vm.prank(vault);
+        accountant.syncForShareAction(true);
+
+        assertTrue(accountant.issuanceReady(), "sync must clear staleness");
+    }
+
+    /// @dev Paper 9.2: "A stale or invalid source cannot increase NAV."
+    function test_syncForShareActionDoesNotRaiseValueFromAnInvalidFeed() public {
+        _seedMaterialToken();
+        rewardFeed.setPrice(-1); // invalid: latestAnswer <= 0 fails validation
+        vm.warp(block.timestamp + 2 days);
+        usdcFeed.setPrice(USDC_USD_PRICE); // keep USDC healthy; isolate the reward feed's invalidity
+        uint256 before = accountant.cachedRewardAssets();
+
+        vm.prank(vault);
+        accountant.syncForShareAction(true);
+
+        assertLe(accountant.cachedRewardAssets(), before, "an invalid source must never raise NAV");
+    }
+
+    /// @dev syncForShareAction must reject a caller that is neither the
+    ///      authorised vault nor REWARD_ADMIN_ROLE — the paper 9.4-style
+    ///      lesson applied here: an unauthorised caller should not be able to
+    ///      force cache mutations.
+    function test_syncForShareAction_rejectsUnauthorizedCaller() public {
+        vm.prank(user);
+        vm.expectRevert(RewardAccountant.Unauthorized.selector);
+        accountant.syncForShareAction(true);
+    }
+
+    /// @dev setVault is REWARD_ADMIN_ROLE-gated, not open to an arbitrary caller.
+    function test_setVault_requiresAdmin() public {
+        vm.prank(user);
+        vm.expectRevert();
+        accountant.setVault(user);
     }
 
     // ============================================

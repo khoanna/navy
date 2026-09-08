@@ -119,6 +119,7 @@ contract DeployAndFund is Script {
         _vault.registerAdapter(info.moonwell, 2000, 100, "Moonwell Base USDC");
         _vault.setRewardExecutor(address(rewardExecutor));
         _vault.setRewardAccountant(address(accountant));
+        accountant.setVault(address(_vault));
 
         _vault.grantRole(_vault.ADMIN_ROLE(), deployer);
         _vault.grantRole(_vault.ALLOCATOR_ROLE(), deployer);

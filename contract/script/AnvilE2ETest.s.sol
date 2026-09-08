@@ -164,6 +164,7 @@ contract AnvilE2ETest is Script {
         // Configure vault
         vault.setRewardExecutor(address(rewardExecutor));
         vault.setRewardAccountant(address(accountant));
+        accountant.setVault(address(vault));
         vault.grantRole(vault.ADMIN_ROLE(), deployer);
         vault.grantRole(vault.ALLOCATOR_ROLE(), deployer);
 

@@ -29,6 +29,12 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     /// @notice Admin-controlled USDC/USD feed (set via setUsdcUsdFeed)
     address public usdcUsdFeed;
 
+    /// @notice The vault authorised to trigger a lazy reward sync on its own
+    ///         share-changing actions (set via setVault). Paper 9.2: this is
+    ///         a narrow, single-purpose authorisation distinct from
+    ///         REWARD_ADMIN_ROLE, which also grants policy/feed control.
+    address public vault;
+
     /// @notice Token policies (token => policy)
     mapping(address => IRewardAccountant.TokenPolicy) internal _tokenPolicies;
 
@@ -104,6 +110,14 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     function setUsdcUsdFeed(address feed) external onlyRole(REWARD_ADMIN_ROLE) {
         if (feed == address(0)) revert InvalidFeed();
         usdcUsdFeed = feed;
+    }
+
+    /// @notice Authorise the vault to call syncForShareAction directly,
+    ///         without widening REWARD_ADMIN_ROLE (which also controls
+    ///         policies and feeds) to a contract address. Pass address(0) to
+    ///         revoke.
+    function setVault(address vault_) external onlyRole(REWARD_ADMIN_ROLE) {
+        vault = vault_;
     }
 
     /// @notice Set or update a token policy
@@ -512,15 +526,78 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     }
 
     /// @notice Sync before share actions
-    /// @dev For conservative NAV, we acknowledge rewards before share issuance
-    ///      so new share price reflects expected value.
-    ///      Reward value is NEVER added to synchronous liquidity.
-    /// @dev No access control needed - this is a read-only function.
-    function syncForShareAction(bool) external view returns (uint256 recognizedAssets) {
-        recognizedAssets = lastSafeValue;
+    /// @dev Paper 9.2: "share-changing ... transactions refresh material
+    ///      reward values lazily when cache-age or material-change rules
+    ///      require it." Refreshes only tokens whose cache is both material
+    ///      and older than their policy's cacheLifetime; everything else is
+    ///      carried forward unchanged. Reward value is NEVER added to
+    ///      synchronous liquidity, and a stale or invalid source can never
+    ///      raise the recognized total (it contributes nothing that round
+    ///      rather than reusing a possibly-stale figure), matching refresh().
+    /// @dev Callable by the vault (set via setVault) or REWARD_ADMIN_ROLE —
+    ///      deliberately not widened to REWARD_ADMIN_ROLE itself, which also
+    ///      controls policies and feeds.
+    function syncForShareAction(bool) external returns (uint256 recognizedAssets) {
+        if (msg.sender != vault && !hasRole(REWARD_ADMIN_ROLE, msg.sender)) revert Unauthorized();
         // issuingShares = true: acknowledge reward NAV for share price
         // issuingShares = false: redeem path (rewards already recognized)
-        return recognizedAssets;
+        recognizedAssets = _lazyRefreshStaleMaterialTokens();
+    }
+
+    /// @dev One pass over policy tokens: non-stale entries carry their
+    ///      existing cache.value forward untouched; a stale material entry
+    ///      is refreshed exactly as refresh() would refresh it, and only if
+    ///      both the USDC feed and the token's own feed validate. An
+    ///      unrefreshable USDC feed or token feed leaves that token's cache
+    ///      untouched and contributes nothing this round — the identical
+    ///      "invalid source contributes zero" rule refresh() already applies.
+    function _lazyRefreshStaleMaterialTokens() internal returns (uint256 totalValue) {
+        if (usdcUsdFeed == address(0)) return lastSafeValue;
+
+        (bool usdcValid, int256 usdcPrice) = _getValidatedPrice(usdcUsdFeed, 1 hours);
+        if (!usdcValid) {
+            emit SequencerValidationFailed("usdc_feed_invalid");
+            return lastSafeValue;
+        }
+
+        uint256 tokenCount = _policyTokens.length;
+        if (tokenCount == 0) return lastSafeValue;
+
+        for (uint256 i = 0; i < tokenCount; i++) {
+            address token = _policyTokens[i];
+            IRewardAccountant.TokenPolicy storage policy = _tokenPolicies[token];
+            IRewardAccountant.TokenCache storage cache = tokenCaches[token];
+
+            bool stale = cache.isMaterial
+                && (cache.lastUpdated == 0 || block.timestamp - cache.lastUpdated > policy.cacheLifetime);
+
+            if (!stale) {
+                totalValue += cache.value;
+                continue;
+            }
+
+            (bool feedValid, int256 rewardPrice) = _getValidatedPrice(policy.feed, policy.maxAge);
+            if (!feedValid) {
+                // Cannot safely refresh: leave the cache exactly as it is and
+                // contribute nothing this round rather than reusing a
+                // possibly-stale figure. A stale or invalid source must
+                // never raise NAV.
+                emit SequencerValidationFailed("feed_invalid_for_material_token");
+                continue;
+            }
+
+            uint256 tokenValue = _computeTokenValue(token, policy, rewardPrice, usdcPrice);
+            bool isMaterial = tokenValue >= policy.materialityThreshold;
+            cache.value = tokenValue;
+            cache.lastUpdated = block.timestamp;
+            cache.isMaterial = isMaterial;
+            emit CacheRefreshed(token, tokenValue, block.timestamp, isMaterial);
+
+            totalValue += tokenValue;
+        }
+
+        lastSafeValue = totalValue;
+        return totalValue;
     }
 
     // ---- Adapter Claim Integration ----

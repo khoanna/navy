@@ -360,6 +360,7 @@ contract PaperEdgeCasesTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
         accountant.setUsdcUsdFeed(address(usdcFeed));
         vault.setRewardAccountant(address(accountant));
+        accountant.setVault(address(vault));
         vm.stopPrank();
 
         vm.prank(alice);

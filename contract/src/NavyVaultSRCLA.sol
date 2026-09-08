@@ -292,23 +292,27 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
 
     function deposit(uint256 assets_, address receiver) public override(ERC4626) returns (uint256 shares) {
         if (paused) revert DepositPaused();
-        if (_cacheStale()) revert MaterialCacheRequired();
         _syncAllStrategies();
-        // Sync reward NAV for conservative share pricing
+        // Paper 9.2: attempt a lazy refresh of a stale material reward cache
+        // before gating on staleness, so a cache that a live oracle can
+        // still safely refresh does not permanently close deposits.
         if (rewardAccountant != address(0)) {
             IRewardAccountant(rewardAccountant).syncForShareAction(true);
         }
+        if (_cacheStale()) revert MaterialCacheRequired();
         return super.deposit(assets_, receiver);
     }
 
     function mint(uint256 shares, address receiver) public override(ERC4626) returns (uint256 assets) {
         if (paused) revert DepositPaused();
-        if (_cacheStale()) revert MaterialCacheRequired();
         _syncAllStrategies();
-        // Sync reward NAV for conservative share pricing
+        // Paper 9.2: attempt a lazy refresh of a stale material reward cache
+        // before gating on staleness, so a cache that a live oracle can
+        // still safely refresh does not permanently close deposits.
         if (rewardAccountant != address(0)) {
             IRewardAccountant(rewardAccountant).syncForShareAction(true);
         }
+        if (_cacheStale()) revert MaterialCacheRequired();
         return super.mint(shares, receiver);
     }
 
