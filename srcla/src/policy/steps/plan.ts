@@ -27,11 +27,13 @@ const HEADER_TUPLE =
   'uint256 reserve,uint256 minFinalAssets,uint256 maxRecognizedLoss,uint256 turnoverLimit)';
 
 /**
- * `NavyVaultSRCLA.ActionKind`. NOTE: `VaultTypes.ActionKind` (Divest=0,
- * Deploy=1) is a stale, inverted duplicate declared elsewhere in the contract
- * tree — it is never used by `planDomain`/`hashPlanAction`/
- * `executeNextActionWithProof`, all of which take the vault's own
- * `ActionKind`. Do not use `VaultTypes.ActionKind`'s ordering here.
+ * `NavyVaultSRCLA.ActionKind` — the vault's own ordering, which is what
+ * `planDomain`, `hashPlanAction` and `executeNextActionWithProof` all take.
+ *
+ * There used to be an inverted duplicate (`VaultTypes.ActionKind`, Divest=0,
+ * Deploy=1) in the contract tree; anything reaching for it silently encoded a
+ * deploy as a divest. It was deleted in 71958a21, so this ordering is now the
+ * only one that exists.
  */
 export const ActionKind = {
   Deploy: 0,

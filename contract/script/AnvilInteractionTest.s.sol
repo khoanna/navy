@@ -106,7 +106,7 @@ contract AnvilInteractionTest is Script {
 
         uint256 deployAmount = DEPOSIT * 38 / 100; // 38% of deposit to winner (within 40% capBps)
 
-        // Build the action struct (matches VaultTypes.Action exactly)
+        // Build the action struct the vault's plan encoding expects.
         NavyVaultSRCLA.Action memory action = NavyVaultSRCLA.Action({
             planId: 1,
             index: 0,
