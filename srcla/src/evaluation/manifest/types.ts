@@ -65,6 +65,26 @@ export interface EvaluationManifest {
     ethPrice: string;
     slippageBps: number;
     mevBps: number;
+    /**
+     * Present when the run priced §9.1 from MEASURED per-origin observations
+     * rather than the three registered constants above (which are then the
+     * series' value at the first origin, recorded for continuity).
+     *
+     * `digest` is load-bearing: the manifest's dataset hash covers snapshots
+     * and withdrawals only, so without it a swapped gas series over the same
+     * window would reproduce the same dataset hash while changing every
+     * cost-gate decision.
+     */
+    measuredSeries?: {
+      digest: string;
+      observations: number;
+      firstIso: string;
+      lastIso: string;
+      minL2BaseFeeWei: string;
+      maxL2BaseFeeWei: string;
+      minEthUsdE8: string;
+      maxEthUsdE8: string;
+    };
   };
 
   /** Content hashes for reproducibility */
@@ -110,6 +130,16 @@ export interface ManifestConfig {
     ethPrice: string;
     slippageBps: number;
     mevBps: number;
+    measuredSeries?: {
+      digest: string;
+      observations: number;
+      firstIso: string;
+      lastIso: string;
+      minL2BaseFeeWei: string;
+      maxL2BaseFeeWei: string;
+      minEthUsdE8: string;
+      maxEthUsdE8: string;
+    };
   };
   codeCommit?: string;
 }

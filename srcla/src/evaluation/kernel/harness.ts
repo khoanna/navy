@@ -29,6 +29,7 @@ import {
   type HarnessConfig,
 } from './decision-input.js';
 import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
+import { gasAt } from '../gas-series.js';
 import { summariseLastAction, type PersistedActionRecord } from '../../policy/last-action.js';
 import {
   REGISTERED_POLICIES,
@@ -422,6 +423,11 @@ export function runRegisteredEvaluation(
     options.calibrationFraction ?? 0.7,
   );
   const hindsightRates = buildHindsightRates(dataset.snapshots, config.horizonSeconds);
+  const firstOriginSeconds =
+    dataset.snapshots.length > 0
+      ? Math.floor(dataset.snapshots[0]!.timestamp.getTime() / 1000)
+      : 0;
+  const replayGas = gasAt(config.gas, firstOriginSeconds);
 
   const results: PolicyRunResult[] = [];
   let withdrawalSource: WithdrawalSchedule['source'] = 'registered-schedule';
@@ -457,8 +463,13 @@ export function runRegisteredEvaluation(
         tier,
         policy: policyFn,
         withdrawals: schedule.requests,
-        gasPriceWei: config.gas.l2BaseFeeWei,
-        ethUsdE8: config.gas.ethUsdE8,
+        // The replay books realized gas per action at a single price. It is
+        // resolved at the FIRST origin of the window rather than taken from a
+        // constant, so a run over a cheap period is not charged a dear
+        // period's fees. Per-action pricing lives inside the kernel's own
+        // cost model, which sees the full series through DecisionInput.gas.
+        gasPriceWei: replayGas.l2BaseFeeWei,
+        ethUsdE8: replayGas.ethUsdE8,
       });
 
       perTier.push({ policy, tier, replay, decisionHashes, rebalances, inertVsSrcla: false });

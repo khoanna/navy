@@ -29,6 +29,7 @@ import type {
 } from '../../policy/types.js';
 import type { TimeOrderedSnapshot } from '../dataset.js';
 import type { VaultState } from '../replay/state.js';
+import { gasAt, type GasSeries } from '../gas-series.js';
 
 const WAD = 10n ** 18n;
 /** Matches protocols/math.ts and replay.ts (365.25 days). */
@@ -60,12 +61,19 @@ export interface HarnessConfig {
   defaultMarket: HarnessMarketConfig;
   dependencyGroups: DecisionInput['dependencyGroups'];
   /**
-   * REGISTERED CONSTANT, NOT OBSERVED. srcla persists no gas/oracle snapshot
-   * — there is no Prisma model for one, and the live service fills three of
-   * these five fields from `config.srcla.placeholder*` (see config.ts). Any
-   * cost-gate number produced from this is only as good as this constant.
+   * Gas and oracle inputs to §9.1's cost model.
+   *
+   * A `GasSeries` is MEASURED: `ChainCostSnapshot` now holds the L2 base fee,
+   * both L1 fee parameters and both Chainlink answers at every backfilled
+   * origin, and the series resolves them per decision. A bare
+   * `GasObservation` is the older registered-constant form, retained for
+   * hand-built test datasets and for a live driver that has no series.
+   *
+   * H3 ablates the cost gate, so a constant-priced gate makes H3's measured
+   * contribution a statement about the constant rather than about the
+   * mechanism -- which is why the registered evaluation passes a series.
    */
-  gas: GasObservation;
+  gas: GasObservation | GasSeries;
   horizonSeconds: HorizonSeconds;
   /** §7.3: an outcome is usable only once it is readable off-chain. */
   availabilityLagSeconds: number;
@@ -77,9 +85,13 @@ export interface HarnessConfig {
  * from `HarnessConfig` as a REGISTERED constant, never inferred from data.
  */
 export const NOT_OBSERVED = [
-  // No Prisma model holds l1BaseFeeWei / l1BlobBaseFeeWei / ethUsdE8 /
-  // usdcUsdE8, and MarketSnapshot has no gas columns.
-  'gas and oracle observation (GasObservation)',
+  // NOTE: 'gas and oracle observation' USED to head this list. It is now
+  // MEASURED per origin -- ChainCostSnapshot carries the L2 base fee, both L1
+  // fee parameters and both Chainlink answers at every backfilled origin, and
+  // `evaluation/gas-series.ts` resolves them per decision. Leaving it listed
+  // after it became observable would be the same class of defect as a gate
+  // that passes on absence: a caveat nobody can act on because it is no
+  // longer true.
   // MarketSnapshot has capBps, but no absolute cap, no maxLossBps and no
   // dependency-group membership. The live driver hardcodes the same three.
   'per-venue absoluteCapBase / maxLossBps / dependencyGroupIds',
@@ -192,7 +204,7 @@ export function buildDecisionInput(
     markets,
     dependencyGroups: config.dependencyGroups,
     withdrawals,
-    gas: config.gas,
+    gas: gasAt(config.gas, originSeconds),
     history: labels,
     lastAction,
   };

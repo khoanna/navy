@@ -25,6 +25,7 @@ import { writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 import { loadDataset } from '../src/evaluation/dataset.js';
+import { loadGasSeries } from '../src/evaluation/gas-series.js';
 import { loadBootstrapArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import {
@@ -80,13 +81,18 @@ function required(name: string): string {
 }
 
 /**
- * NOT OBSERVED. Every field here is a registered constant, because srcla
- * persists no gas/oracle snapshot and no dependency-group registry. See
- * `NOT_OBSERVED` in decision-input.ts; the same caveat the live service
- * documents on `config.srcla.placeholder*` applies to the cost terms these
- * feed.
+ * The harness configuration.
+ *
+ * `gas` is now MEASURED: `loadGasSeries` reads `ChainCostSnapshot`, which the
+ * archive backfill fills at every origin from the block header, the OP-Stack
+ * GasPriceOracle and the two Chainlink feeds. It is passed in rather than
+ * asserted here.
+ *
+ * The remaining fields ARE registered constants, because srcla persists no
+ * dependency-group registry, no absolute caps and no protocol supply-cap
+ * headroom. See the surviving entries in `NOT_OBSERVED`.
  */
-function harnessConfig(): HarnessConfig {
+function harnessConfig(gas: HarnessConfig['gas']): HarnessConfig {
   return {
     vault: {
       adminReserveBase: 0n,
@@ -106,13 +112,7 @@ function harnessConfig(): HarnessConfig {
     // H5 (remove shared-dependency caps) has nothing to remove and the
     // harness will report it INERT rather than emit a number for it.
     dependencyGroups: [],
-    gas: {
-      l2BaseFeeWei: 30_000_000n, // 0.03 gwei, Base
-      l1BaseFeeWei: 8_000_000_000n,
-      l1BlobBaseFeeWei: 10_000_000n,
-      ethUsdE8: 350_000_000_000n,
-      usdcUsdE8: 100_000_000n,
-    },
+    gas,
     horizonSeconds: 604_800,
     availabilityLagSeconds: 900,
   };
@@ -171,7 +171,18 @@ async function main(): Promise<void> {
     }
 
     const commit = codeCommit();
-    const config = harnessConfig();
+    // Measured, per origin. `loadGasSeries` THROWS on an empty
+    // ChainCostSnapshot rather than substituting the constants this script
+    // used to assert -- a run priced from an assumption is a run whose H3
+    // number describes the assumption.
+    const gas = await loadGasSeries(prisma, startDate, endDate);
+    console.error(
+      `[evaluation] gas series: ${gas.summary.observations} measured observations, ` +
+        `${gas.summary.firstIso} -> ${gas.summary.lastIso}, L2 base fee ` +
+        `${gas.summary.minL2BaseFeeWei}..${gas.summary.maxL2BaseFeeWei} wei, ETH ` +
+        `${gas.summary.minEthUsdE8}..${gas.summary.maxEthUsdE8} (1e8), digest ${gas.digest}`,
+    );
+    const config = harnessConfig(gas);
     const artifact = loadBootstrapArtifact();
 
     const out = runRegisteredEvaluation({

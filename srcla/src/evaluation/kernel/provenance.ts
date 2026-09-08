@@ -32,6 +32,7 @@ import type { EvaluationDataset } from '../dataset.js';
 import type { PolicyArtifact } from '../../policy/types.js';
 import { DEFAULT_DECIDE_OPTS } from '../../policy/decide.js';
 import type { HarnessConfig } from './decision-input.js';
+import { gasAt, isGasSeries } from '../gas-series.js';
 import { REGISTERED_BASELINES, REGISTERED_ABLATIONS } from './registry.js';
 import { verifyManifest, type VerificationResult } from '../manifest/verifier.js';
 import type { PolicyRunResult, RegisteredEvaluationResult } from './harness.js';
@@ -330,6 +331,10 @@ export function manifestConfigForRun(args: {
     ...new Set(dataset.snapshots.flatMap((s) => s.snapshots.map((m) => m.marketId))),
   ].sort();
 
+  // The manifest's three cost scalars are the observation in force at the
+  // run's FIRST origin, so a series and a constant record the same shape.
+  const firstGas = gasAt(args.config.gas, Math.floor(first.timestamp.getTime() / 1000));
+
   const splitIndex = Math.floor(dataset.snapshots.length * args.calibrationFraction);
   const boundary =
     splitIndex > 0 && splitIndex < dataset.snapshots.length
@@ -368,12 +373,21 @@ export function manifestConfigForRun(args: {
       ablations: REGISTERED_ABLATIONS.map((p) => p.id),
       srcla: true,
     },
+    // The three scalars are the observation in force at the run's FIRST
+    // origin. When the run used a measured series they under-describe it by
+    // construction, so `measuredSeries` carries its digest and range -- the
+    // dataset hash covers snapshots and withdrawals only, and a swapped gas
+    // series would otherwise be invisible while changing every cost-gate
+    // decision.
     costs: {
-      l2GasPrice: args.config.gas.l2BaseFeeWei.toString(),
-      l1GasPrice: args.config.gas.l1BaseFeeWei.toString(),
-      ethPrice: args.config.gas.ethUsdE8.toString(),
+      l2GasPrice: firstGas.l2BaseFeeWei.toString(),
+      l1GasPrice: firstGas.l1BaseFeeWei.toString(),
+      ethPrice: firstGas.ethUsdE8.toString(),
       slippageBps: DEFAULT_DECIDE_OPTS.cost.slippageBps,
       mevBps: DEFAULT_DECIDE_OPTS.cost.mevBps,
+      ...(isGasSeries(args.config.gas)
+        ? { measuredSeries: { digest: args.config.gas.digest, ...args.config.gas.summary } }
+        : {}),
     },
     codeCommit: args.codeCommit,
   };
