@@ -14,7 +14,25 @@ export interface MarketObservation {
   positionBase: bigint;
   /** Live protocol headroom: max additional assets deployable. */
   maxDeployableBase: bigint;
-  /** Conservative same-transaction exit, min(position, protocol cash). */
+  /**
+   * The venue's synchronous exit CAPACITY at this origin — how much the vault
+   * could pull out in one transaction if it wanted to — in USDC base units.
+   *
+   * NOT `min(position, cash)`. Both consumers evaluate this against a
+   * CANDIDATE allocation x, never against the current position:
+   *   - optimize.ts's P4 weighting, `exitableFraction(x, maxWithdrawableBase)`
+   *   - reserve.ts's e_i^cons, `min(x_i, maxWithdrawableBase)`
+   * A value frozen at the current position's exit is identically 0 for a
+   * venue the vault has not entered yet, and `exitableFraction(x, 0) = 0`
+   * zeroes the objective for every positive candidate — so the optimiser can
+   * never make a first deployment into an empty venue, a cold-start deadlock
+   * with no error. (`admit.ts`'s NO_SYNC_LIQUIDITY rule already special-cases
+   * the zero-position branch for the same reason.)
+   *
+   * The right quantity is the protocol's available cash, which is the
+   * `availableInComet`/equivalent term the on-chain adapters' own
+   * `maxWithdrawable()` mins against.
+   */
   maxWithdrawableBase: bigint;
   configDigest: string;
   regimeId: string;

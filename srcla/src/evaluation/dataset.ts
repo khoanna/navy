@@ -3,6 +3,7 @@
  */
 import type { PrismaClient } from '@prisma/client';
 import type { MarketSnapshot } from '../domain/snapshots.js';
+import type { WithdrawalObservation } from '../policy/types.js';
 
 export interface TimeOrderedSnapshot {
   index: number;
@@ -23,6 +24,13 @@ export interface EvaluationDataset {
   manifestId: string;
   snapshots: TimeOrderedSnapshot[];
   labels: ForecastLabel[];
+  /**
+   * The vault's real ERC-4626 `Withdraw` series over the window (§8.1's
+   * W_H). Without it Q_beta(W_H) is identically zero and the reserve's
+   * demand term can never bind, so the replay's redemptions have nothing to
+   * be sized against. Optional only for hand-built test datasets.
+   */
+  withdrawals?: WithdrawalObservation[];
 }
 
 /**
@@ -85,9 +93,19 @@ export async function loadDataset(
     grouped.get(key)!.snapshots.push(marketSnapshot);
   });
 
+  const rawWithdrawals = await prisma.withdrawalEvent.findMany({
+    where: { timestamp: { gte: startDate, lte: endDate } },
+    orderBy: { timestamp: 'asc' },
+  });
+
   return {
     manifestId,
     snapshots: Array.from(grouped.values()),
+    withdrawals: rawWithdrawals.map((w) => ({
+      timestampSeconds: Math.floor(w.timestamp.getTime() / 1000),
+      // The column is `assets` (a decimal string), in USDC base units.
+      assetsBase: BigInt(w.assets),
+    })),
     labels: rawLabels.map((l) => ({
       marketId: l.marketId,
       originTimestamp: l.originTimestamp,

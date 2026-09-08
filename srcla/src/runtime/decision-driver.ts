@@ -1,4 +1,5 @@
 import { buildDecisionInput, type RawOrigin } from '../policy/input.js';
+import { protocolOf } from '../domain/protocol.js';
 import { decide, type DecideOpts } from '../policy/decide.js';
 import type { HorizonSeconds } from '../policy/registered.js';
 import type {
@@ -99,18 +100,6 @@ export function assertExecutionAllowed(guard: PricingGuardStatus): void {
   }
 }
 
-const PROTOCOL_BY_NAME: Record<string, MarketObservation['protocol']> = {
-  aave: 'aave',
-  compound: 'compound',
-  moonwell: 'moonwell',
-};
-
-function protocolOf(name: string): MarketObservation['protocol'] {
-  const key = Object.keys(PROTOCOL_BY_NAME).find((k) => name.toLowerCase().includes(k));
-  if (!key) throw new Error(`cannot classify strategy "${name}" as a known protocol`);
-  return PROTOCOL_BY_NAME[key]!;
-}
-
 const REGISTERED_HORIZON_SECONDS = new Set<number>([86_400, 604_800, 1_209_600]);
 
 /**
@@ -169,10 +158,17 @@ export async function buildRawOriginFromCollector(
     positionBase: s.totalAssets,
     // StrategySnapshot (src/collector/types.ts) exposes only one
     // same-transaction headroom figure (maxWithdrawable) — until the
-    // collector distinguishes deployable vs withdrawable headroom, both
-    // DecisionInput fields read the same on-chain value.
+    // collector distinguishes deployable vs withdrawable headroom, this
+    // reads that on-chain value.
     maxDeployableBase: s.maxWithdrawable,
-    maxWithdrawableBase: s.maxWithdrawable,
+    // NOT `s.maxWithdrawable`: the adapter's `maxWithdrawable()` is
+    // `min(ourBalance, protocolCash)`, so it is 0 for a venue the vault has
+    // not entered — and `exitableFraction(x, 0) = 0` then zeroes the
+    // objective for every candidate, so the optimiser could never make a
+    // first deployment into an empty venue. The kernel needs the venue's
+    // exit CAPACITY (the `availableInComet` half of that min), which the
+    // collector now reports as `s.cash`. See MarketObservation's doc comment.
+    maxWithdrawableBase: s.cash,
     configDigest: s.configDigest,
     regimeId: chainConfigDigests[s.name] ?? s.configDigest,
     paused: s.paused,

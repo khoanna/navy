@@ -395,3 +395,35 @@ describe('decide: the reported reserve obeys the same switches the search did', 
     expect(raw.reserve.netDemandQuantileBase).toBeGreaterThan(netted.reserve.netDemandQuantileBase);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cold start: P4's phi must not make a first deployment impossible.
+// ---------------------------------------------------------------------------
+
+describe('decide: cold start into an empty venue', () => {
+  /** The value the on-chain adapter's maxWithdrawable() returns for a venue
+   *  the vault has not entered: min(ourBalance = 0, protocolCash) = 0. */
+  const coldStart = (maxWithdrawableBase: bigint) =>
+    input({ markets: [market('aa', { positionBase: 0n, maxWithdrawableBase })] });
+
+  it('deploys when maxWithdrawableBase is the venue exit CAPACITY', () => {
+    const out = decide(coldStart(100_000_000_000n), artifact(), OPTS);
+    const deployed = [...out.target.values()].reduce((s, v) => s + v, 0n);
+    expect(out.admission.eligible).toEqual(['aa']);
+    expect(deployed).toBeGreaterThan(0n);
+  });
+
+  it('deploys NOTHING if it is fed min(position, cash) instead — the deadlock', () => {
+    const out = decide(coldStart(0n), artifact(), OPTS);
+    // Admission still passes (admit.ts special-cases the zero-position
+    // branch), so this is not a rejection: exitableFraction(x, 0) = 0 zeroes
+    // the objective for every candidate and the optimiser silently holds.
+    expect(out.admission.eligible).toEqual(['aa']);
+    expect([...out.target.values()].reduce((s, v) => s + v, 0n)).toBe(0n);
+  });
+
+  it('is the phi weighting that does it: H7 deploys even from the bad input', () => {
+    const out = decide(coldStart(0n), artifact(), { ...OPTS, disable: { exitableWeight: true } });
+    expect([...out.target.values()].reduce((s, v) => s + v, 0n)).toBeGreaterThan(0n);
+  });
+});

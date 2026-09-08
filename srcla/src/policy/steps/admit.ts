@@ -61,10 +61,13 @@ const RULES: Rule[] = [
     check: (m) => {
       // At zero position there is nothing to withdraw yet, so the gate is
       // whether the protocol has room to accept a deposit (cash > 0); once a
-      // position exists, maxWithdrawableBase (= min(position, cash)) is the
-      // operative synchronous-exit figure. maxWithdrawableBase is always 0 at
-      // zero position, so gating on it unconditionally would make first entry
-      // into any venue permanently impossible — the branch is intentional.
+      // position exists, maxWithdrawableBase (the venue's synchronous exit
+      // capacity) is the operative figure. The branch predates
+      // maxWithdrawableBase being a capacity rather than min(position, cash)
+      // and is now redundant rather than load-bearing, but it is kept: it
+      // still states the intended rule, and it is the only thing standing
+      // between a caller that supplies the old min(position, cash) reading
+      // and a permanently un-enterable venue.
       const ok = m.positionBase === 0n ? m.cash > 0n : m.maxWithdrawableBase > 0n;
       return {
         passed: ok,
