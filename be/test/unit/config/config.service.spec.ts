@@ -41,16 +41,6 @@ const BASE = {
   ADMIN_MAX_TOTP_FAILS: '5',
 } as NodeJS.ProcessEnv;
 
-describe('NavyConfigService.privyAuthorizationKey', () => {
-  it('is undefined when the env var is absent', () => {
-    const cfg = new NavyConfigService({ ...BASE });
-    expect(cfg.privyAuthorizationKey).toBeUndefined();
-  });
-  it('returns the key when present', () => {
-    const cfg = new NavyConfigService({ ...BASE, PRIVY_AUTHORIZATION_KEY: 'wallet-auth-priv' });
-    expect(cfg.privyAuthorizationKey).toBe('wallet-auth-priv');
-  });
-});
 
 describe('NavyConfigService EVM getters', () => {
   it('exposes EVM getters with sensible defaults', () => {
@@ -67,5 +57,40 @@ describe('NavyConfigService EVM getters', () => {
     expect(cfg.usdcEip712Name).toBe('USD Coin'); // Default from Circle USDC on Base
     expect(cfg.usdcEip712Version).toBe('2');
     expect(cfg.relayerMinBalanceWei).toBe(20000000000000000n); // 0.02 ETH
+  });
+});
+
+describe('vault share EIP-712 domain', () => {
+  const base = {
+    NAVY_JWT_SECRET: 'x'.repeat(32),
+    NAVY_JWT_ACCESS_TTL: '900',
+    NAVY_JWT_REFRESH_TTL: '2592000',
+    SUBWALLET_MASTER_KEY: '00'.repeat(32),
+    PRIVY_APP_ID: 'app', PRIVY_APP_SECRET: 'secret',
+    ADMIN_MAX_TOTP_FAILS: '5',
+  };
+
+  // The name below is read from NavyVaultSRCLA's ERC20Permit constructor
+  // (contract/src/NavyVaultSRCLA.sol). If the contract is ever renamed, this
+  // test must fail -- an EIP-712 domain mismatch makes the vault reject every
+  // redeem permit, and nothing else in the suite would notice.
+  const CONTRACT_PERMIT_NAME = 'Navy Vault SRCLA';
+
+  it('defaults to the name the deployed vault actually uses', () => {
+    const cfg = new NavyConfigService({ ...base } as any);
+    expect(cfg.vaultShareEip712Name).toBe(CONTRACT_PERMIT_NAME);
+  });
+
+  it('does not default to the retired NavyVaultSimple stub', () => {
+    // This was the live default: with NAVY_VAULT_EIP712_NAME unset, permits were
+    // signed against the test stub's domain and the real vault rejected them.
+    const cfg = new NavyConfigService({ ...base } as any);
+    expect(cfg.vaultShareEip712Name).not.toBe('Navy Vault Simple');
+    expect(cfg.vaultShareEip712Name).not.toBe('Navy Vault USDC');
+  });
+
+  it('still lets the environment override it', () => {
+    const cfg = new NavyConfigService({ ...base, NAVY_VAULT_EIP712_NAME: 'Custom' } as any);
+    expect(cfg.vaultShareEip712Name).toBe('Custom');
   });
 });

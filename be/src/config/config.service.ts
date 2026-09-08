@@ -54,7 +54,10 @@ export class NavyConfigService {
   get ownerPrivateKey(): string { return this.req('NAVY_OWNER_PRIVATE_KEY'); }
   // --- NavyVault (ERC-4626 farming vault) ---
   get vaultAddress(): string { return this.req('NAVY_VAULT_ADDRESS'); }
-  get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault Simple'; }
+  // Must match NavyVaultSRCLA's ERC20Permit name exactly (contract/src/NavyVaultSRCLA.sol
+  // constructor). It defaulted to 'Navy Vault Simple' -- the retired test stub -- so with
+  // this var unset every redeem permit was signed against a domain the vault rejects.
+  get vaultShareEip712Name(): string { return this.env.NAVY_VAULT_EIP712_NAME ?? 'Navy Vault SRCLA'; }
   get vaultShareEip712Version(): string { return this.env.NAVY_VAULT_EIP712_VERSION ?? '1'; }
   /** USDC EIP-712 domain name/version. Circle Base USDC (EIP-3009) uses name "USD Coin", version "2"; overridable + verify against chain. */
   get usdcEip712Name(): string { return this.env.NAVY_USDC_EIP712_NAME ?? 'USD Coin'; }
