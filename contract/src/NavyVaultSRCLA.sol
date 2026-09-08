@@ -650,7 +650,13 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         );
         recognizedRewards += usdcReceived;
         if (rewardAccountant != address(0)) {
-            IRewardAccountant(rewardAccountant).refresh(new address[](0));
+            // Paper 9.2: the accountant values held + claimable. Pass the live
+            // active-adapter set so the claimable leg has sources to read;
+            // an empty array would recognize held balances only. The
+            // just-claimed tokens are held HERE (HarvestLib is an internal
+            // library, so claimReward's recipient is this vault), which is the
+            // address the accountant reads as the reward holder.
+            IRewardAccountant(rewardAccountant).refresh(_activeAdapters);
         }
     }
 

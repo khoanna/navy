@@ -154,8 +154,14 @@ contract RewardAccountantTest is Test {
 
         rewardToken = new MockRewardToken(18);
 
-        // Fund the accountant with reward tokens
-        rewardToken.mint(address(accountant), 1000e18);
+        // Fund the REWARD HOLDER with reward tokens. That is the vault, not
+        // the accountant: HarvestLib is an internal library, so the vault's
+        // harvest path calls adapter.claimReward(token, max, address(this))
+        // with `this` == the vault, and every adapter pays that recipient.
+        // Crediting the accountant here would make these tests pass against a
+        // balance production never creates - the exact defect that kept the
+        // recognized reward value R_t identically zero.
+        rewardToken.mint(vault, 1000e18);
     }
 
     // ============================================
@@ -209,7 +215,7 @@ contract RewardAccountantTest is Test {
     function test_oracleMath_8Decimals() public {
         // Create 8-decimal token
         MockRewardToken token8 = new MockRewardToken(8);
-        token8.mint(address(accountant), 1000e8); // 1000 tokens with 8 decimals
+        token8.mint(vault, 1000e8); // 1000 tokens with 8 decimals
 
         MockPriceFeed feed8 = new MockPriceFeed();
         feed8.setPrice(REWARD_USD_PRICE_8); // $50 with 8 decimals
@@ -248,7 +254,7 @@ contract RewardAccountantTest is Test {
     function test_oracleMath_6Decimals() public {
         // Create 6-decimal token (like staked USDC)
         MockRewardToken token6 = new MockRewardToken(6);
-        token6.mint(address(accountant), 1000e6); // 1000 tokens with 6 decimals
+        token6.mint(vault, 1000e6); // 1000 tokens with 6 decimals
 
         MockPriceFeed feed6 = new MockPriceFeed();
         feed6.setPrice(1_000_000); // $1 with 6 decimals
@@ -292,10 +298,12 @@ contract RewardAccountantTest is Test {
         // Create token with precise calculation that would round differently
         MockRewardToken token = new MockRewardToken(18);
         // 1.5e18 tokens
-        token.mint(address(accountant), 1_500_000_000_000_000_000);
+        token.mint(vault, 1_500_000_000_000_000_000);
 
         MockPriceFeed feed = new MockPriceFeed();
-        // $33.33 with 18 decimals = 3333...e15
+        // 33_333_333_333_333_333 with 18 decimals is $0.033333333333333333
+        // per token (NOT $33.33 - the original comment here was wrong by
+        // three orders of magnitude).
         feed.setPrice(33_333_333_333_333_333);
 
         address[] memory allowedAdapters = new address[](0);
@@ -324,10 +332,22 @@ contract RewardAccountantTest is Test {
         vm.prank(admin);
         uint256 value = accountant.refresh(adapters);
 
-        // Expected: 1.5 * 33.33 * 0.10 = 4.9995 USDC
-        // Rounded down should be 4 USDC (not 5)
-        // Value should be less than or equal to the ceiling calculation
-        assertLe(value, 5e6 + 1, "Should round down");
+        // Exact expected value, derived by hand:
+        //   grossScaled = floor(1.5e18 * 33_333_333_333_333_333 / 1e18)
+        //               = 49_999_999_999_999_999          (the .5 is dropped)
+        //   value       = floor(49_999_999_999_999_999 * 1000 * 1e6
+        //                       / (1e18 * 10_000))
+        //               = 4_999                            USDC base units
+        // i.e. $0.004999 - the exact 10% haircut of 1.5 x $0.0333..., floored.
+        //
+        // The previous assertion here was `assertLe(value, 5e6 + 1)`, which is
+        // satisfied by ZERO. It was in fact satisfied by zero: the old
+        // whole-USDC formula (divide by SCALE twice, then by 10_000, only THEN
+        // multiply by 1e6) truncated this reward to exactly 0. Assert the
+        // value, and assert it is non-zero, so neither a regression to the
+        // whole-USDC quantum nor a regression to a zero balance can pass.
+        assertEq(value, 4_999, "haircut must round down at 6-decimal granularity");
+        assertGt(value, 0, "a sub-dollar reward must not value to zero");
     }
 
     // ============================================
@@ -338,7 +358,7 @@ contract RewardAccountantTest is Test {
     function test_contributionCap() public {
         // Create large holding
         MockRewardToken token = new MockRewardToken(18);
-        token.mint(address(accountant), 10000e18); // 10000 tokens at $50 = $500k
+        token.mint(vault, 10000e18); // 10000 tokens at $50 = $500k
 
         MockPriceFeed feed = new MockPriceFeed();
         feed.setPrice(REWARD_USD_PRICE_18); // $50
@@ -504,7 +524,7 @@ contract RewardAccountantTest is Test {
     function test_immaterialExpiredCache_allowsIssuance() public {
         // Create tiny holding that won't be material
         MockRewardToken tinyToken = new MockRewardToken(18);
-        tinyToken.mint(address(accountant), 1e18); // Just 1 token
+        tinyToken.mint(vault, 1e18); // Just 1 token
 
         address[] memory allowedAdapters = new address[](0);
         IRewardAccountant.TokenPolicy memory policy = IRewardAccountant.TokenPolicy({

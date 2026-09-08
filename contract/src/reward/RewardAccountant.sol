@@ -7,6 +7,7 @@ import {IPriceFeed} from "../interfaces/IPriceFeed.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title RewardAccountant - Conservative cached reward NAV accounting
 /// @notice Provides conservative cached valuations of harvestable rewards without
@@ -14,7 +15,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @dev Safety rules:
 ///      1. Validates sequencer health before feed reads
 ///      2. Validates both feed rounds (completeness + staleness)
-///      3. On invalid refresh: preserve last safe cache, mark material issuance unready
+///      3. On invalid refresh: the token's cache ENTRY is preserved but that
+///         token contributes nothing to the round's total - a stale or invalid
+///         source can never raise recognized NAV. The aggregate
+///         `lastSafeValue` is therefore the new (lower) total, not the prior
+///         one; it is conservative, not sticky.
 ///      4. Reward value NEVER increases synchronous withdrawal capacity
 ///      5. maxDeposit/maxMint revert to zero when material cache is stale
 contract RewardAccountant is IRewardAccountant, AccessControl {
@@ -91,6 +96,7 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     error MaterialCacheRequired();
     error ArrayLengthMismatch();
     error InvalidUsdcFeedMaxAge();
+    error RewardTokenIsVaultAsset();
 
     // ---- Events ----
 
@@ -161,7 +167,32 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     ///         policies and feeds) to a contract address. Pass address(0) to
     ///         revoke.
     function setVault(address vault_) external onlyRole(REWARD_ADMIN_ROLE) {
+        // The vault is also the reward HOLDER (see _rewardHolder), so a policy
+        // on the vault's own underlying asset would count that asset twice:
+        // once in NavyVaultSRCLA.totalAssets()'s idle balance and again as
+        // recognized reward NAV. Reject the wiring rather than silently
+        // inflating share price.
+        uint256 count = _policyTokens.length;
+        for (uint256 i = 0; i < count; i++) {
+            if (_isAssetOf(vault_, _policyTokens[i])) revert RewardTokenIsVaultAsset();
+        }
         vault = vault_;
+    }
+
+    /// @dev True when `token` is the ERC-4626 underlying of `vault_`. A vault_
+    ///      that is address(0), an EOA, or a contract without `asset()` yields
+    ///      false - there is nothing to double-count in those cases.
+    function _isAssetOf(address vault_, address token) internal view returns (bool) {
+        if (vault_ == address(0)) return false;
+        // try/catch does NOT catch Solidity's extcodesize guard on a call
+        // that returns data, so an EOA vault would revert here rather than
+        // fall through. An EOA has no asset() to double-count anyway.
+        if (vault_.code.length == 0) return false;
+        try IVaultAsset(vault_).asset() returns (address underlying) {
+            return underlying != address(0) && underlying == token;
+        } catch {
+            return false;
+        }
     }
 
     /// @notice Set or update a token policy
@@ -170,6 +201,9 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
         if (policy.feed == address(0)) revert InvalidFeed();
         if (policy.lowerBound > policy.upperBound) revert InvalidFeed();
         if (policy.haircutBps > 10_000) revert InvalidFeed();
+        // See setVault: the reward holder is the vault, so a policy on the
+        // vault's own asset would be counted in NAV twice.
+        if (_isAssetOf(vault, token)) revert RewardTokenIsVaultAsset();
 
         IRewardAccountant.TokenPolicy storage stored = _tokenPolicies[token];
 
@@ -243,9 +277,18 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
     // ---- Core Valuation Functions ----
 
     /// @notice Refresh valuations for all policy tokens from given adapters
-    /// @dev Calculates: (balance × price × haircut) / (scale × usdcPrice)
-    ///      Values are ROUNDED DOWN at every step for conservatism.
-    function refresh(address[] calldata) external onlyRole(REWARD_ADMIN_ROLE) returns (uint256 totalValue) {
+    /// @dev Paper 9.2: the recognized quantity for a token is its HELD balance
+    ///      at the reward holder (the vault - see _rewardHolder) PLUS the
+    ///      amount still CLAIMABLE from the supplied adapters that the token's
+    ///      own policy allowlists. `adapters` is therefore load-bearing: an
+    ///      empty array recognizes held balances only. The vault passes its
+    ///      live active-adapter set.
+    /// @dev Values are ROUNDED DOWN at every step for conservatism.
+    /// @dev Callable by the vault (set via setVault) or REWARD_ADMIN_ROLE. The
+    ///      vault must be able to call this or its own harvest path - which
+    ///      calls refresh() after every claim - reverts.
+    function refresh(address[] calldata adapters) external returns (uint256 totalValue) {
+        if (msg.sender != vault && !hasRole(REWARD_ADMIN_ROLE, msg.sender)) revert Unauthorized();
         // Validate USDC feed if set
         if (usdcUsdFeed == address(0)) {
             emit SequencerValidationFailed("usdc_feed_not_set");
@@ -278,8 +321,10 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
             bool isMaterial;
 
             if (feedValid) {
-                // Valid feed - compute conservative value
-                tokenValue = _computeTokenValue(token, policy, rewardPrice, usdcPrice);
+                // Valid feed - compute conservative value over held + claimable
+                tokenValue = _computeTokenValue(
+                    policy, _rewardQuantity(token, policy, adapters), rewardPrice, usdcPrice
+                );
 
                 // Check materiality
                 isMaterial = tokenValue >= policy.materialityThreshold;
@@ -310,22 +355,23 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
         return totalValue;
     }
 
-    /// @notice Compute the conservative USDC value of a token's held balance
+    /// @notice Compute the conservative USDC value of a recognized reward quantity
+    /// @param policy   The token's policy (decimals, bounds, haircut, cap)
+    /// @param quantity Recognized token quantity - held at the reward holder
+    ///                 plus claimable from allowlisted adapters. Supplied by
+    ///                 the caller because reading claimable is a state-changing
+    ///                 adapter call and this function is a pure valuation.
     /// @dev Formula (all rounding down):
-    ///      1. balance = IERC20(token).balanceOf(this)
-    ///      2. value = balance × rewardPrice × USDC_SCALE × haircutBps
-    ///                  ÷ (10^decimals × usdcPrice × 10_000)
+    ///      value = quantity × rewardPrice × 1e6 × haircutBps
+    ///              ÷ (10^decimals × 10^decimals × 10_000)
     function _computeTokenValue(
-        address token,
         IRewardAccountant.TokenPolicy storage policy,
+        uint256 quantity,
         int256 rewardPrice,
         int256 usdcPrice
     ) internal view returns (uint256) {
         if (rewardPrice <= 0 || usdcPrice <= 0) return 0;
-
-        // Get held balance
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        if (balance == 0) return 0;
+        if (quantity == 0) return 0;
 
         // Bounds check (inclusive) - out-of-range prices result in zero valuation
         // lowerBound check is safe (always fits in int256 when < 2^255)
@@ -338,48 +384,40 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
             return 0;
         }
 
-        // Compute: balance × rewardPrice × haircutBps × USDC_DECIMALS
-        //                        ÷ (10^decimals)² × 10_000
+        // Compute: quantity × rewardPrice × haircutBps × 1e6
+        //                        ÷ ((10^decimals)² × 10_000)
         // Result in USDC base units (6 decimals).
         //
-        // balance: token quantity with token decimals (e.g., 1000 tokens = 1000e18)
-        // rewardPrice: USD per token with token decimals (e.g., $50 = 50e18)
+        // quantity:    token amount with token decimals (1000 tokens = 1000e18)
+        // rewardPrice: USD per token, ALSO expressed with token decimals
+        //              ($50 = 50e18 for an 18-decimal token). This is the
+        //              convention setTokenPolicy's `decimals` field carries;
+        //              it is NOT the Chainlink feed's own decimals.
         //
-        // balance × rewardPrice has 2×decimals of scale that must be removed.
-        // We divide by SCALE twice: once for each decimal in the product.
+        // quantity × rewardPrice therefore carries 2×decimals of scale, which
+        // is why SCALE appears squared in the denominator.
         //
-        // Formula derivation for 18-decimal token at $50 with 5% haircut:
-        //   balance = 1000e18, rewardPrice = 50e18, SCALE = 1e18, haircut = 500 bps
-        //   Step 1: 1000e18 × 50e18 × 500 = 25,000,000e36
-        //   Step 2: / 1e18 / 1e18 / 10_000 = 2,500 (USDC quantity)
-        //   Step 3: × 1e6 = 2,500e6 USDC base units ✓
+        // 18-decimal token, 1000 tokens at $50, 5% haircut (haircutBps = 500):
+        //   1000e18 × 50e18 × 500 × 1e6 / (1e18 × 1e18 × 10_000) = 2_500e6 ✓
+        // 6-decimal token, 1000 tokens at $1, 10% haircut:
+        //   1000e6 × 1e6 × 1000 × 1e6 / (1e6 × 1e6 × 10_000) = 100e6 ✓
         //
-        // Formula derivation for 6-decimal token at $1 with 10% haircut:
-        //   balance = 1000e6, rewardPrice = 1e6, SCALE = 1e6, haircut = 1000 bps
-        //   Step 1: 1000e6 × 1e6 × 1000 = 1000e15
-        //   Step 2: / 1e6 / 1e6 / 10_000 = 100 (USDC quantity)
-        //   Step 3: × 1e6 = 100e6 USDC base units ✓
+        // The division is performed ONCE, at full precision, via Math.mulDiv
+        // (512-bit intermediate, floor rounding). The previous implementation
+        // divided by SCALE twice and by 10_000 before multiplying by 1e6,
+        // which truncated the result to a WHOLE USDC: a $2.70 reward valued
+        // to $2.00 and anything under $1.00 valued to exactly zero, making
+        // every materialityThreshold below 1e6 unreachable.
         uint256 SCALE = 10 ** policy.decimals;
 
-        // Step 1: balance × rewardPrice × haircutBps (round down)
-        uint256 product = uint256(balance) * uint256(rewardPrice) * policy.haircutBps;
-        // Round down
+        // First leg: quantity × price / SCALE. Rounds down. Splitting the
+        // division here keeps the second mulDiv's numerator inside 256 bits
+        // for realistic balances while preserving 6-decimal granularity.
+        uint256 grossScaled = Math.mulDiv(quantity, uint256(rewardPrice), SCALE);
 
-        // Step 2: ÷ SCALE (remove first decimal scale)
-        uint256 afterFirstScale = product / SCALE;
-        // Round down
-
-        // Step 3: ÷ SCALE (remove second decimal scale)
-        uint256 afterSecondScale = afterFirstScale / SCALE;
-        // Round down
-
-        // Step 4: ÷ 10_000 (apply haircut)
-        uint256 usdcQuantity = afterSecondScale / 10_000;
-        // Round down
-
-        // Step 5: × USDC_DECIMALS (to USDC base units)
-        uint256 value = usdcQuantity * 1_000_000;
-        // Round down
+        // Second leg: apply the haircut and convert to USDC base units.
+        // Rounds down.
+        uint256 value = Math.mulDiv(grossScaled, uint256(policy.haircutBps) * 1_000_000, SCALE * 10_000);
 
         // Apply per-token cap
         if (policy.contributionCap > 0 && value > policy.contributionCap) {
@@ -387,6 +425,83 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
         }
 
         return value;
+    }
+
+    /// @notice The address whose reward-token balance counts as "held".
+    /// @dev Claimed reward tokens land in the VAULT, not here: HarvestLib is an
+    ///      `internal` library, so `harvestAtomic` is inlined into
+    ///      NavyVaultSRCLA and calls `adapter.claimReward(token, max,
+    ///      address(this))` with `this` == the vault. Every adapter's
+    ///      `_payPending` transfers to that caller-supplied recipient. Reading
+    ///      `balanceOf(address(this))` here therefore read an address that
+    ///      never receives a reward token, which is why the recognized reward
+    ///      value R_t was identically zero. Falls back to this contract only
+    ///      when no vault is wired, so an accountant used standalone (tests,
+    ///      a deployment that defers setVault) still values its own balance.
+    function _rewardHolder() internal view returns (address) {
+        address v = vault;
+        return v == address(0) ? address(this) : v;
+    }
+
+    /// @dev A token whose `balanceOf` reverts contributes nothing rather than
+    ///      bricking the whole refresh.
+    function _heldBalance(address token) internal view returns (uint256) {
+        if (token.code.length == 0) return 0;
+        try IERC20(token).balanceOf(_rewardHolder()) returns (uint256 balance) {
+            return balance;
+        } catch {
+            return 0;
+        }
+    }
+
+    /// @notice Recognized reward quantity for a token: held + claimable.
+    /// @dev Paper 9.2. `adapters` is the caller-supplied candidate set; each
+    ///      one is checked against the token policy's own allowlist before its
+    ///      `claimableReward` is read, so a caller cannot introduce an
+    ///      unadmitted source. A reverting adapter contributes nothing.
+    function _rewardQuantity(
+        address token,
+        IRewardAccountant.TokenPolicy storage policy,
+        address[] memory adapters
+    ) internal returns (uint256 quantity) {
+        quantity = _heldBalance(token);
+
+        uint256 allowedCount = policy.allowedAdapters.length;
+        if (allowedCount == 0) return quantity;
+
+        for (uint256 i = 0; i < adapters.length; i++) {
+            bool allowed = false;
+            for (uint256 j = 0; j < allowedCount; j++) {
+                if (policy.allowedAdapters[j] == adapters[i]) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed || adapters[i].code.length == 0) continue;
+
+            try IRewardSource(adapters[i]).claimableReward(token) returns (uint256 claimable) {
+                quantity += claimable;
+            } catch {
+                // A source that cannot be read contributes nothing.
+            }
+        }
+    }
+
+    /// @dev Copy a policy's allowlist into memory. Used by the lazy
+    ///      (share-action) refresh, which has no caller-supplied adapter set
+    ///      and therefore uses the admin-configured allowlist - the maximal
+    ///      set `refresh(adapters)` can ever filter down to. Bounded by the
+    ///      allowlist length, which only REWARD_ADMIN_ROLE can grow.
+    function _allowedAdapters(IRewardAccountant.TokenPolicy storage policy)
+        internal
+        view
+        returns (address[] memory list)
+    {
+        uint256 count = policy.allowedAdapters.length;
+        list = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            list[i] = policy.allowedAdapters[i];
+        }
     }
 
     /// @notice Get validated price from feed with full safety checks
@@ -630,7 +745,9 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
                 continue;
             }
 
-            uint256 tokenValue = _computeTokenValue(token, policy, rewardPrice, usdcPrice);
+            uint256 tokenValue = _computeTokenValue(
+                policy, _rewardQuantity(token, policy, _allowedAdapters(policy)), rewardPrice, usdcPrice
+            );
             bool isMaterial = tokenValue >= policy.materialityThreshold;
             cache.value = tokenValue;
             cache.lastUpdated = block.timestamp;
@@ -675,6 +792,11 @@ contract RewardAccountant is IRewardAccountant, AccessControl {
             }
         }
     }
+}
+
+/// @title IVaultAsset - Minimal ERC-4626 underlying-asset probe
+interface IVaultAsset {
+    function asset() external view returns (address);
 }
 
 /// @title AggregatorV3Interface - Minimal Chainlink aggregator interface

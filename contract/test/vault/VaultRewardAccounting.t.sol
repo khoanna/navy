@@ -256,7 +256,7 @@ contract VaultRewardAccountingTest is Test {
         // Mint rewards to accountant - need enough to exceed materiality threshold
         // With 100e18 tokens at $1 and 5% haircut, value = 0 due to rounding
         // So we use a very low materiality threshold
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh to populate cache
         address[] memory adapters = new address[](0);
@@ -308,7 +308,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh
         address[] memory adapters = new address[](0);
@@ -364,7 +364,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh
         address[] memory adapters = new address[](0);
@@ -423,7 +423,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh
         address[] memory adapters = new address[](0);
@@ -486,7 +486,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh - cache is fresh
         address[] memory adapters = new address[](0);
@@ -542,7 +542,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant and refresh
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
         address[] memory adapters = new address[](0);
         vm.prank(admin);
         accountant.refresh(adapters);
@@ -678,7 +678,7 @@ contract VaultRewardAccountingTest is Test {
         accountant.setTokenPolicy(address(rewardToken), policy);
 
         // Mint rewards to accountant
-        rewardToken.mint(address(accountant), 100e18);
+        rewardToken.mint(address(vault), 100e18);
 
         // Refresh
         address[] memory adapters = new address[](0);
@@ -865,7 +865,7 @@ contract VaultRewardAccountingTest is Test {
         vm.prank(admin);
         accountant.setTokenPolicy(address(rewardToken), policy);
 
-        rewardToken.mint(address(accountant), 10e18); // 10 x $50 x 95% = 475 USDC
+        rewardToken.mint(address(vault), 10e18); // 10 x $50 x 95% = 475 USDC
 
         address[] memory adapters = new address[](0);
         vm.prank(admin);
