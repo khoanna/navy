@@ -120,11 +120,3 @@ export function annualize(rate: bigint, periodSeconds: bigint): bigint {
   if (periodSeconds === 0n) return 0n;
   return (rate * SECONDS_PER_YEAR) / periodSeconds;
 }
-
-/**
- * Safe division with zero check
- */
-export function divPrecisely(a: bigint, b: bigint): bigint {
-  if (b === 0n) return 0n;
-  return (a * WAD) / b;
-}

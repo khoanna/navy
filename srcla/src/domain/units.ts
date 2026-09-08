@@ -39,12 +39,11 @@ export function calcBps(amount: bigint, bps: bigint): bigint {
 }
 
 /**
- * Safe BigInt comparison
+ * Safe BigInt comparison. Only `bigintGt` survives: `admission/rules.ts` uses
+ * it. `bigintLt`/`bigintLte`/`bigintGte` had no caller anywhere and were
+ * removed - use the operators directly rather than re-adding a wrapper.
  */
-export function bigintLt(a: bigint, b: bigint): boolean { return a < b; }
-export function bigintLte(a: bigint, b: bigint): boolean { return a <= b; }
 export function bigintGt(a: bigint, b: bigint): boolean { return a > b; }
-export function bigintGte(a: bigint, b: bigint): boolean { return a >= b; }
 
 /**
  * Clamp value between min and max
