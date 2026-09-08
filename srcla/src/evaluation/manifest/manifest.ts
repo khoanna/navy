@@ -773,7 +773,16 @@ export function validateManifest(manifest: EvaluationManifest): {
   if (manifest.calibration.heldOutStartDate <= manifest.dataset.startDate) {
     errors.push('Held-out start date must be after dataset start date');
   }
-  if (manifest.calibration.heldOutStartDate !== manifest.calibration.calibrationEndDate) {
+  // `!==` on two Dates is REFERENCE identity, so this check used to fire for
+  // every manifest that had been round-tripped through JSON (thaw builds two
+  // distinct Date objects) and never fire for one built by
+  // `createEvaluationManifest` (which assigns the same `boundaryDate` object
+  // to both fields). Either way it validated nothing about the boundary.
+  // Compare the instants.
+  if (
+    manifest.calibration.heldOutStartDate.getTime() !==
+    manifest.calibration.calibrationEndDate.getTime()
+  ) {
     errors.push('Held-out start date must equal calibration end date (boundary)');
   }
 

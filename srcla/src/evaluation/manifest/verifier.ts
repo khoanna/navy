@@ -1,10 +1,23 @@
 /**
  * Manifest Verifier
  *
- * Verifies manifest integrity and correctness for reproducibility.
+ * Verifies manifest integrity and correctness for reproducibility
+ * (paper §2.2, Appendix C).
+ *
+ * ABSENCE IS FAILURE. The previous version guarded both hash checks with
+ * `if (manifest.contentHashes.manifest && ...)`, and the generator emitted
+ * `manifest: ''` — so an unsigned manifest skipped every integrity check and
+ * came back `valid: true`. A manifest that pins nothing is not a valid
+ * manifest; it is an unverifiable one. The same rule applies to the dataset
+ * hash, to the recorded code commit, and to the observation series itself.
  */
 import type { EvaluationManifest } from './types.js';
-import { computeContentHash, computeDatasetHash } from './generator.js';
+import {
+  computeContentHash,
+  computeDatasetHash,
+  UNKNOWN_CODE_COMMIT,
+  type DatasetObservations,
+} from './generator.js';
 
 /**
  * Result of manifest verification
@@ -19,7 +32,7 @@ export interface VerificationResult {
 }
 
 /**
- * Verify an evaluation manifest
+ * Verify an evaluation manifest.
  *
  * Checks:
  * - Required fields are present
@@ -28,20 +41,27 @@ export interface VerificationResult {
  * - Held-out windows are valid
  * - Policy requirements are met
  * - Cost parameters are reasonable
- * - Content hashes match
+ * - The manifest is SIGNED, and both hashes match what the content and the
+ *   observations recompute to
+ * - The code commit was recorded
  *
  * @param manifest - The manifest to verify
- * @returns Verification result with any errors or warnings
+ * @param observations - The observation series the manifest claims to pin.
+ *   REQUIRED: without it the dataset hash cannot be recomputed, and a check
+ *   that cannot be performed must not be reported as a check that passed.
  *
  * @example
  * ```typescript
- * const result = await verifyManifest(manifest);
+ * const result = await verifyManifest(manifest, { snapshots: dataset.snapshots });
  * if (!result.valid) {
  *   console.error('Manifest invalid:', result.errors);
  * }
  * ```
  */
-export async function verifyManifest(manifest: EvaluationManifest): Promise<VerificationResult> {
+export async function verifyManifest(
+  manifest: EvaluationManifest,
+  observations: DatasetObservations,
+): Promise<VerificationResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -117,16 +137,33 @@ export async function verifyManifest(manifest: EvaluationManifest): Promise<Veri
     warnings.push('ETH price seems unusually high');
   }
 
-  // Compute and verify content hash
-  const computedHash = computeContentHash(manifest);
-  if (manifest.contentHashes.manifest && manifest.contentHashes.manifest !== computedHash) {
+  // The observation series must exist. Verifying a manifest against no data
+  // recomputes a dataset hash over emptiness, which would "match" any
+  // manifest signed over emptiness — absence agreeing with absence.
+  if (observations.snapshots.length === 0) {
+    errors.push('No observations supplied: the dataset hash cannot be verified against an empty series');
+  }
+
+  // The manifest must be SIGNED. An empty hash is a missing check, not a
+  // passing one.
+  if (!manifest.contentHashes.manifest) {
+    errors.push('Manifest is unsigned: contentHashes.manifest is empty');
+  } else if (manifest.contentHashes.manifest !== computeContentHash(manifest)) {
     errors.push('Manifest content hash mismatch - manifest may have been tampered with');
   }
 
-  // Verify dataset hash
-  const computedDatasetHash = computeDatasetHash(manifest);
-  if (manifest.contentHashes.dataset && manifest.contentHashes.dataset !== computedDatasetHash) {
+  if (!manifest.contentHashes.dataset) {
+    errors.push('Manifest is unsigned: contentHashes.dataset is empty');
+  } else if (
+    observations.snapshots.length > 0 &&
+    manifest.contentHashes.dataset !== computeDatasetHash(manifest, observations)
+  ) {
     errors.push('Dataset hash mismatch');
+  }
+
+  // §11.1 requires a result to be tied to the code that produced it.
+  if (!manifest.contentHashes.codeCommit || manifest.contentHashes.codeCommit === UNKNOWN_CODE_COMMIT) {
+    errors.push(`Code commit not recorded (got '${manifest.contentHashes.codeCommit}')`);
   }
 
   return {
@@ -137,17 +174,26 @@ export async function verifyManifest(manifest: EvaluationManifest): Promise<Veri
 }
 
 /**
- * Verify content hash only (synchronous, for quick checks)
+ * Verify content hash only (synchronous, for quick checks).
+ *
+ * An unsigned manifest returns FALSE, not true.
  */
 export function verifyContentHash(manifest: EvaluationManifest): boolean {
-  const computed = computeContentHash(manifest);
-  return manifest.contentHashes.manifest === computed;
+  if (!manifest.contentHashes.manifest) return false;
+  return manifest.contentHashes.manifest === computeContentHash(manifest);
 }
 
 /**
- * Verify dataset hash only (synchronous, for quick checks)
+ * Verify dataset hash only (synchronous, for quick checks).
+ *
+ * An unsigned manifest, or one checked against an empty observation series,
+ * returns FALSE.
  */
-export function verifyDatasetHash(manifest: EvaluationManifest): boolean {
-  const computed = computeDatasetHash(manifest);
-  return manifest.contentHashes.dataset === computed;
+export function verifyDatasetHash(
+  manifest: EvaluationManifest,
+  observations: DatasetObservations,
+): boolean {
+  if (!manifest.contentHashes.dataset) return false;
+  if (observations.snapshots.length === 0) return false;
+  return manifest.contentHashes.dataset === computeDatasetHash(manifest, observations);
 }
