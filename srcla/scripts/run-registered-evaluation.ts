@@ -22,6 +22,7 @@
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
  */
 import { writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 import { loadDataset } from '../src/evaluation/dataset.js';
 import { loadBootstrapArtifact } from '../src/policy/artifact.js';
@@ -33,6 +34,36 @@ import {
 } from '../src/evaluation/kernel/harness.js';
 import type { HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { NOT_OBSERVED } from '../src/evaluation/kernel/decision-input.js';
+import {
+  buildRunRecord,
+  manifestConfigForRun,
+} from '../src/evaluation/kernel/provenance.js';
+import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
+
+/** Schema version of the manifest this script emits. */
+const MANIFEST_VERSION = '1.0.0';
+/** Calibration split (§7.3's no-look-ahead boundary), shared with the manifest. */
+const CALIBRATION_FRACTION = 0.7;
+
+/**
+ * `git rev-parse HEAD`, or the `GIT_COMMIT_HASH` override.
+ *
+ * THROWS rather than defaulting to 'unknown'. A result nobody can tie to a
+ * revision is not reproducible, and `manifest/generator.ts` used to default
+ * that field silently.
+ */
+function codeCommit(): string {
+  const fromEnv = process.env.GIT_COMMIT_HASH;
+  if (fromEnv !== undefined && fromEnv.trim() !== '') return fromEnv.trim();
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch (err) {
+    throw new Error(
+      'Cannot determine the code commit (git rev-parse HEAD failed). Set GIT_COMMIT_HASH. ' +
+        `Underlying error: ${String(err)}`,
+    );
+  }
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -138,19 +169,58 @@ async function main(): Promise<void> {
       );
     }
 
+    const commit = codeCommit();
+    const config = harnessConfig();
+    const artifact = loadBootstrapArtifact();
+
     const out = runRegisteredEvaluation({
       dataset,
-      config: harnessConfig(),
-      artifact: loadBootstrapArtifact(),
+      config,
+      artifact,
       tiers,
       decideOpts: DEFAULT_DECIDE_OPTS,
+      calibrationFraction: CALIBRATION_FRACTION,
     });
 
-    const summary = summarize(out);
+    // The manifest is signed against the OBSERVATIONS, so it detects a
+    // swapped dataset over the same window; the run record adds a result
+    // hash, which the repo previously computed nowhere. `evaluation:verify`
+    // re-derives both.
+    const manifest = signManifest(
+      generateManifest(
+        manifestConfigForRun({
+          version: MANIFEST_VERSION,
+          dataset,
+          tiers,
+          artifact: out.artifact,
+          config,
+          calibrationFraction: CALIBRATION_FRACTION,
+          codeCommit: commit,
+        }),
+      ),
+      { snapshots: dataset.snapshots, withdrawals: dataset.withdrawals ?? [] },
+    );
+
+    const record = buildRunRecord({ codeCommit: commit, manifest, evaluation: out });
+
+    const summary = {
+      ...summarize(out),
+      provenance: {
+        codeCommit: record.codeCommit,
+        manifestHash: manifest.contentHashes.manifest,
+        datasetHash: manifest.contentHashes.dataset,
+        resultHash: record.resultHash,
+      },
+      record,
+    };
     const file = arg('out');
     if (file !== undefined) {
       writeFileSync(file, JSON.stringify(summary, null, 2));
       console.log(`[evaluation] wrote ${file}`);
+      console.log(`[evaluation] result hash   ${record.resultHash}`);
+      console.log(`[evaluation] manifest hash ${manifest.contentHashes.manifest}`);
+      console.log(`[evaluation] dataset hash  ${manifest.contentHashes.dataset}`);
+      console.log(`[evaluation] verify with:  pnpm run evaluation:verify ${file}`);
     } else {
       console.log(JSON.stringify(summary, null, 2));
     }

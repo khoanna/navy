@@ -25,6 +25,7 @@
     "collect:scheduled": "tsx scripts/collect-scheduled.ts",
     "collect:scheduled:daemon": "tsx scripts/collect-scheduled.ts --no-immediate",
     "evaluation:run": "tsx scripts/run-registered-evaluation.ts",
+    "evaluation:verify": "tsx scripts/verify-evaluation.ts",
     "evaluation:quarantined": "SRCLA_ALLOW_QUARANTINED_HARNESS=1 tsx scripts/quarantined/run-evaluation.ts",
     "evaluation:quarantined:synthetic": "SRCLA_ALLOW_QUARANTINED_HARNESS=1 tsx scripts/quarantined/run-evaluation.ts --synthetic",
     "evaluation:full": "tsx scripts/run-evaluation-full.ts",

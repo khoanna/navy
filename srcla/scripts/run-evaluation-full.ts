@@ -6,6 +6,7 @@
  * Tests with 3 tiers: 100k, 1M, 10M USDC
  */
 import { loadConfig } from '../src/config.js';
+import { hashData } from '../src/domain/hashing.js';
 import { ethers } from 'ethers';
 
 // Real market rates from on-chain (verified)
@@ -472,6 +473,7 @@ async function main(): Promise<void> {
   // Build final results
   const evaluationResults: EvaluationResults = {
     evaluationId: `eval-${Date.now()}`,
+    contentHash: '', // replaced below, once every reported figure is final
     generatedAt: new Date().toISOString(),
     chainId: chainInfo.chainId,
     blockNumber: chainInfo.blockNumber,
@@ -484,8 +486,22 @@ async function main(): Promise<void> {
       Object.entries(ablations).map(([k, v]) => [k, v[0]])
     ),
     releaseGate,
-    contentHash: `0x${Date.now().toString(16).padEnd(64, '0')}`,
   };
+  // A REAL content hash over the reported results. What was here before,
+  // `0x${Date.now().toString(16).padEnd(64,'0')}`, was a timestamp printed
+  // under the label "Content hash": it changed on every run, matched nothing,
+  // and could not detect an edit to any figure above it.
+  evaluationResults.contentHash = `0x${hashData({
+    chainId: evaluationResults.chainId,
+    blockNumber: evaluationResults.blockNumber,
+    marketRates: evaluationResults.marketRates,
+    tiers: evaluationResults.tiers,
+    policies: evaluationResults.policies,
+    baselines: evaluationResults.baselines,
+    srcla: evaluationResults.srcla,
+    ablations: evaluationResults.ablations,
+    releaseGate: evaluationResults.releaseGate,
+  })}`;
 
   // Format output
   let output: string;

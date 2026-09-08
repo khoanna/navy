@@ -39,10 +39,15 @@ export interface EvaluationManifest {
   /** Vault tiers evaluated */
   vaultTiers: string[];
 
-  /** Policies evaluated */
+  /**
+   * Policies evaluated. Ids are free-form strings, not a closed union: the
+   * registered set in `evaluation/kernel/registry.ts` includes B2u, H6 and
+   * H7, and a manifest that structurally could not name them would silently
+   * under-record what was run.
+   */
   policies: {
-    baselines: readonly ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
-    ablations: readonly ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
+    baselines: readonly string[];
+    ablations: readonly string[];
     srcla: boolean;
   };
 
@@ -100,8 +105,8 @@ export interface ManifestConfig {
     minObservations: number;
   }>;
   policies: {
-    baselines: readonly ('b0' | 'b1' | 'b2' | 'b3' | 'b4' | 'b5')[];
-    ablations: readonly ('h1' | 'h2' | 'h3' | 'h4' | 'h5')[];
+    baselines: readonly string[];
+    ablations: readonly string[];
     srcla: boolean;
   };
   costs: {
