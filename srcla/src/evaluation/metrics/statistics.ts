@@ -1,6 +1,16 @@
 /**
- * Statistical tests: Welch's t-test, bootstrap confidence intervals
+ * Statistical tests: Welch's t-test, bootstrap confidence intervals.
+ *
+ * SUPERSEDED for the §11.5 policy gate. `welchTTest` is UNPAIRED, and the
+ * two return series it was applied to are driven by the same venue rate
+ * paths over the same days, so nearly all of its variance is a common factor
+ * that cancels under differencing; it also applies no autocorrelation
+ * correction. Use `metrics/significance.ts#pairedHacTTest` (paired,
+ * Newey-West HAC, on after-cost per-period returns) for any release
+ * decision. This file is retained for the descriptive tables that quote it.
  */
+
+import { mulberry32, REGISTERED_BOOTSTRAP_SEED } from './significance.js';
 
 export interface TTestResult {
   tStatistic: number;
@@ -10,7 +20,9 @@ export interface TTestResult {
 }
 
 /**
- * Welch's t-test for unequal variances
+ * Welch's t-test for unequal variances.
+ *
+ * UNPAIRED and i.i.d.-assuming. See the file header: not for the §11.5 gate.
  */
 export function welchTTest(
   sample1: number[],
@@ -116,11 +128,24 @@ export interface BootstrapCI {
   std: number;
 }
 
+/**
+ * SEEDED i.i.d. bootstrap.
+ *
+ * The `seed` parameter is not optional decoration: this used bare
+ * `Math.random()`, so the interval it returned moved between two runs on
+ * identical data and no reported bound could be reproduced. The default is
+ * the registered evaluation seed.
+ *
+ * NOTE: this resamples INDEPENDENT observations. For an autocorrelated
+ * series (which daily venue returns are) use
+ * `metrics/significance.ts#movingBlockBootstrap`, which resamples blocks.
+ */
 export function bootstrapCI(
   data: number[],
   statistic: (sample: number[]) => number,
   alpha: number = 0.05,
   iterations: number = 10000,
+  seed: number = REGISTERED_BOOTSTRAP_SEED,
 ): BootstrapCI {
   if (data.length === 0) {
     return { lower: 0, upper: 0, mean: 0, std: 0 };
@@ -128,11 +153,12 @@ export function bootstrapCI(
 
   const estimates: number[] = [];
   const n = data.length;
+  const rng = mulberry32(seed);
 
   for (let i = 0; i < iterations; i++) {
     const sample: number[] = [];
     for (let j = 0; j < n; j++) {
-      sample.push(data[Math.floor(Math.random() * n)]!);
+      sample.push(data[Math.floor(rng() * n)]!);
     }
     estimates.push(statistic(sample));
   }
