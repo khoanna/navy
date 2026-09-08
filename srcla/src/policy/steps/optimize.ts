@@ -15,6 +15,83 @@ const SECONDS_PER_YEAR = 31_536_000n;
 const LIQUIDITY_KINK_WAD = (WAD * 80n) / 100n;
 
 /**
+ * §8.2's enumeration budget: the largest number of allocation quanta the
+ * exhaustive check will walk. For a three-venue universe the search visits
+ * every `(k_1, k_2, k_3)` with `sum k_i <= steps`, i.e. `C(steps+3, 3)`
+ * candidates — 47,905 at 64. This is the same ceiling `verifyExhaustively`
+ * already enforced; what changed is that the quantum now ADAPTS to it
+ * instead of the check silently switching itself off.
+ */
+export const ENUMERATION_MAX_STEPS = 64;
+
+/** Smallest value of the form {1,2,5} x 10^k that is >= `v`. */
+function roundUpToGrid(v: bigint): bigint {
+  if (v <= 1n) return 1n;
+  let p = 1n;
+  while (p * 10n <= v) p *= 10n;
+  for (const m of [1n, 2n, 5n, 10n]) {
+    if (m * p >= v) return m * p;
+  }
+  /* istanbul ignore next -- 10*p >= v always holds by construction of p. */
+  return p * 10n;
+}
+
+/**
+ * §8.2 - the allocation quantum, scaled so exhaustive enumeration stays
+ * reachable at every vault size.
+ *
+ * WHY THIS EXISTS. `verifyExhaustively` returned `null` whenever
+ * `totalAssets / quantumBase > 64`, and the production quantum is a FIXED
+ * 1,000 USDC (`decide.ts`), which caps enumeration at a 64,000 USDC vault.
+ * Three of the four registered tiers (100k, 1M, 10M) were therefore never
+ * checked against enumeration at all, and the harness's own
+ * `decideOptsForTier` made it worse by asking for 100 steps per tier.
+ * §8.2's check was unreachable everywhere it mattered. (Audit NEW-18.)
+ *
+ * WHAT WAS CHOSEN, AND WHY. The quantum scales with the vault rather than
+ * the enumeration running at a coarser grid than the greedy solver, because
+ * §8.2 requires the check to be "at the SAME quantum" — a regret measured on
+ * a different grid is not a bound on this solver's approximation error. So
+ * `decide()` resolves ONE quantum and hands it to `simulateCurves`, the
+ * greedy loop and the enumerator alike.
+ *
+ * The resolved quantum is rounded UP to the next {1,2,5} x 10^k so the grid
+ * is legible and stable: 100k -> 2,000 USDC, 1M -> 20,000 USDC,
+ * 10M -> 200,000 USDC, all at 50 steps, while a 10k vault keeps the
+ * requested 1,000 USDC at 10 steps. The cost is resolution: at the 10M tier
+ * the optimiser now allocates in 2%-of-TVL increments. That is the price of
+ * §8.2's check being real, and it is the trade the paper asks for.
+ *
+ * The requested quantum is never LOWERED — a caller that deliberately asks
+ * for a coarse grid keeps it.
+ */
+export function resolveQuantumBase(
+  totalAssetsBase: bigint,
+  requestedQuantumBase: bigint,
+  maxSteps: number = ENUMERATION_MAX_STEPS
+): bigint {
+  if (requestedQuantumBase <= 0n) {
+    throw new Error(`quantumBase must be positive, got ${requestedQuantumBase}`);
+  }
+  if (totalAssetsBase <= 0n) return requestedQuantumBase;
+  if (totalAssetsBase / requestedQuantumBase <= BigInt(maxSteps)) return requestedQuantumBase;
+
+  const steps = BigInt(maxSteps);
+  // Ceiling division: `steps` quanta must cover the whole vault.
+  const raw = (totalAssetsBase + steps - 1n) / steps;
+  // No max() against the requested quantum here, and it is not an omission.
+  // Reaching this line requires `floor(total/requested) > maxSteps`, i.e.
+  // `total >= (maxSteps+1) * requested`, which makes
+  // `raw = ceil(total/maxSteps) >= requested + ceil(requested/maxSteps) >
+  // requested`. The result is strictly coarser than what was asked for by
+  // construction, so a `rounded > requested ? rounded : requested` guard is
+  // dead code - it was written, and a mutation that deleted it survived the
+  // suite because no input can reach it. The "never lowers a deliberately
+  // coarse quantum" property is carried entirely by the early return above.
+  return roundUpToGrid(raw);
+}
+
+/**
  * The registered ablation/baseline switch set. Each key removes EXACTLY the
  * one named component; every other constraint stays live (paper §11.3: "Each
  * hypothesis removes only its named component while holding other
@@ -208,7 +285,11 @@ export function optimize(
 ): { target: Map<string, bigint>; enumeration: { regretBps: bigint; enumerated: number; passed: boolean } | null } {
   const disable = opts.disable ?? {};
   const { totalAssetsBase } = input.vault;
-  const q = opts.quantumBase;
+  // Idempotent: `decide()` has already resolved this, so the curves the
+  // objective reads and the grid the search walks share one quantum. Applied
+  // again here so a caller that reaches `optimize` directly cannot end up
+  // with an unenumerable grid.
+  const q = resolveQuantumBase(totalAssetsBase, opts.quantumBase);
 
   const caps = new Map<string, bigint>();
   for (const c of curves) {
@@ -298,9 +379,12 @@ function verifyExhaustively(
   const n = curves.length;
   if (n === 0 || n > 3) return null;
 
-  const q = opts.quantumBase;
+  const q = resolveQuantumBase(input.vault.totalAssetsBase, opts.quantumBase);
   const steps = Number(input.vault.totalAssetsBase / q);
-  if (steps > 64) return null; // enumeration is only a check, never the solver
+  // Retained as a hard ceiling on the walk, not as the reason enumeration is
+  // skipped: `resolveQuantumBase` keeps `steps` at or under the budget for
+  // ANY vault size, so this can only fire if a caller overrides the budget.
+  if (steps > ENUMERATION_MAX_STEPS) return null;
 
   const disable = opts.disable;
   const greedyValue = portfolioLowerBound(input, curves, artifact, greedy, disable);

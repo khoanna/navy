@@ -3,7 +3,7 @@ import { admit } from './steps/admit.js';
 import { simulateCurves, flatDisplayedRateCurves } from './steps/simulate.js';
 import { forecastMarkets } from './steps/forecast.js';
 import { requiredReserve } from './steps/reserve.js';
-import { optimize, reserveOptsFrom, type PolicyAblations } from './steps/optimize.js';
+import { optimize, reserveOptsFrom, resolveQuantumBase, type PolicyAblations } from './steps/optimize.js';
 import { costGate, type CostParams } from './steps/cost.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
 import { safetyUnwind } from './steps/unwind.js';
@@ -276,17 +276,26 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
 
   const disable: PolicyAblations = opts.disable ?? {};
 
+  // §8.2 - ONE quantum for the whole decision: the curves the objective
+  // reads, the grid the greedy loop walks, and the grid the exhaustive check
+  // enumerates. `resolveQuantumBase` raises the requested quantum when the
+  // vault is large enough that enumeration would otherwise be skipped, which
+  // is what made §8.2's check unreachable at three of the four registered
+  // tiers. Resolved here, before the curves, because a curve built on a
+  // different quantum than the search walks would be interpolated off-grid.
+  const quantumBase = resolveQuantumBase(input.vault.totalAssetsBase, opts.quantumBase);
+
   // H1: rank on the displayed rate instead of the post-deposit curve. Same
   // curve shape and same WAD-annualized rate unit either way (see
   // flatDisplayedRateCurves) so no consumer needs an H1 branch.
   const curves =
     disable.capacityCurves === true
-      ? flatDisplayedRateCurves(input, admission.eligible, opts.quantumBase, opts.maxCurvePoints)
-      : simulateCurves(input, admission.eligible, opts.quantumBase, opts.maxCurvePoints);
+      ? flatDisplayedRateCurves(input, admission.eligible, quantumBase, opts.maxCurvePoints)
+      : simulateCurves(input, admission.eligible, quantumBase, opts.maxCurvePoints);
   const lowerBounds = forecastMarkets(input, curves, artifact);
 
   const { target, enumeration } = optimize(input, curves, artifact, {
-    quantumBase: opts.quantumBase,
+    quantumBase,
     reserveQuantile: opts.reserveQuantile,
     reserveHorizonSeconds: opts.reserveHorizonSeconds,
     disable,
