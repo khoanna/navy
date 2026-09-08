@@ -140,6 +140,15 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     uint256 public activePlanTurnoverLimit;
     uint256 public activePlanTurnover;
 
+    /// @notice True once the active plan has executed a Deploy action.
+    /// @dev Paper 9.5: "divestment precedes deployment". `buildPlan` orders the
+    ///      actions correctly off chain, but the vault enforced only a
+    ///      SEQUENTIAL INDEX and never a kind ordering, so a compromised or
+    ///      buggy allocator could commit a deploy-then-divest plan and the
+    ///      vault would run it. The paper attributes this property to the
+    ///      immutable layer; it lived in replaceable software.
+    bool public activePlanDeployExecuted;
+
     /// @notice Tracks used plan IDs for replay protection
     mapping(bytes32 => bool) public usedPlanIds;
 
@@ -198,6 +207,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     error PlanExecutionExpired();
     error InvalidMerkleProof();
     error InvalidActionIndex();
+    error PlanActionOrderInvalid();
     error DepositPaused();
     error ZeroAddress();
     error ZeroAmount();
@@ -735,6 +745,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             revert InvalidMerkleProof();
         }
 
+        _enforceDivestBeforeDeploy(action.kind);
         _executeAction(action);
         activePlanTurnover += action.amount;
         _enforceActivePlanRiskLimits(false);
@@ -830,12 +841,39 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     }
 
     /// @notice Cancel the active plan
-    /// @dev Marks plan as used to prevent replay after cancellation
+    /// @dev Marks plan as used to prevent replay after cancellation.
+    /// @dev Paper 8.1: "an activated dynamic reserve persists after plan
+    ///      expiry; expiry stops actions but does not lower the reserve", and
+    ///      paper 4 forbids the allocator from lowering limits.
+    ///
+    ///      `requiredIdle()` is the max of adminReserve, dynamicReserve,
+    ///      activePlanReserve and minIdleBps*NAV. `activePlanReserve` is in
+    ///      force from `submitPlan`, but `dynamicReserve` was written only on
+    ///      plan COMPLETION - so `_clearActivePlan` used to drop the in-force
+    ///      reserve straight back to the last completed level. Two
+    ///      consequences: the allocator could cancel a live plan to instantly
+    ///      loosen the idle requirement, and an EXPIRED plan (which blocks
+    ///      every future plan with PlanAlreadyActive) could only be cleared by
+    ///      calling this - so expiry did lower the reserve, contrary to 8.1.
+    ///
+    ///      Ratchet instead: carry the cancelled plan's reserve into
+    ///      `dynamicReserve` if it is higher. This is bounded, not a bricking
+    ///      vector: a subsequently COMPLETED plan still writes its own
+    ///      (possibly lower) reserve, exactly as before, which is correct -
+    ///      8.1's required idle is candidate-dependent and must be able to
+    ///      fall on a new decision. What it may no longer do is fall on
+    ///      abandonment.
     function cancelPlan() external onlyRole(ALLOCATOR_ROLE) {
         if (activePlanId == bytes32(0)) revert PlanNotActive();
 
         bytes32 planId = activePlanId;
         usedPlanIds[planId] = true; // Prevent plan replay after cancellation
+
+        if (activePlanReserve > dynamicReserve) {
+            dynamicReserve = activePlanReserve;
+            emit DynamicReserveSet(activePlanReserve);
+        }
+
         _clearActivePlan();
 
         emit PlanCancelled(planId);
@@ -857,6 +895,7 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         delete activePlanStartingRecognizedLoss;
         delete activePlanTurnoverLimit;
         delete activePlanTurnover;
+        delete activePlanDeployExecuted;
     }
 
     /// @notice Digest of the vault and registered strategy configuration.
@@ -1008,6 +1047,19 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         _syncStrategyAssetsStrict(adapter);
     }
 
+    /// @dev Paper 9.5's ordering, enforced on chain. Once a Deploy has run in
+    ///      this plan, no Divest or EmergencyExit may follow it. Harvest is
+    ///      unconstrained: 9.5 orders divestment before deployment and says
+    ///      nothing about where a claim sits, and `executeHarvestAction` is a
+    ///      separate entry point.
+    function _enforceDivestBeforeDeploy(ActionKind kind) internal {
+        if (kind == ActionKind.Deploy) {
+            activePlanDeployExecuted = true;
+        } else if (kind == ActionKind.Divest || kind == ActionKind.EmergencyExit) {
+            if (activePlanDeployExecuted) revert PlanActionOrderInvalid();
+        }
+    }
+
     /// @notice Execute a single action
     function _executeAction(Action memory action) internal {
         if (action.kind == ActionKind.Deploy) {
@@ -1065,9 +1117,25 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         }
     }
 
-    /// @notice Require adapter is empty before removal
-    function _requireAdapterEmpty(address adapter) internal view {
+    /// @notice Require adapter is empty before removal.
+    /// @dev Paper 5.1: removal is allowed only when the accounted AND live
+    ///      position values are zero. This previously tested only the CACHED
+    ///      `strategyAssets[adapter]` with no preceding sync, so a cache that
+    ///      was stale-zero - registration's tolerant `_syncStrategyAssets`
+    ///      swallows a failing read and leaves the entry at 0 - let an adapter
+    ///      holding a live position be removed, at which point it left
+    ///      `_activeAdapters` and vanished from `totalAssets()` entirely.
+    ///
+    ///      Now: refresh the cache from the adapter STRICTLY (an unreadable
+    ///      adapter reverts rather than being treated as empty), then require
+    ///      both the refreshed cache and the adapter's own live `totalAssets()`
+    ///      to be zero. The second read is not redundant with the first - an
+    ///      adapter whose `sync()` and `totalAssets()` disagree must not be
+    ///      removable on the more convenient of the two.
+    function _requireAdapterEmpty(address adapter) internal {
+        _syncStrategyAssetsStrict(adapter);
         if (strategyAssets[adapter] != 0) revert AdapterNotEmpty();
+        if (IStrategyAdapter(adapter).totalAssets() != 0) revert AdapterNotEmpty();
     }
 
     /// @notice Calculate required idle balance
