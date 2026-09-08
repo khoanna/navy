@@ -607,12 +607,44 @@ contract VaultGasTest16Adapters is VaultGasTestBase {
         uint256 gasUsed = gasStart - gasleft();
 
         emit log_named_uint("Gas used (plan deploy, 16 adapters)", gasUsed);
-        // Budget raised from 900_000: totalAssets() now reads each active
-        // adapter's accountingCap (paper §5.1 impairment) in addition to its
-        // strategyAssets — one extra cold SLOAD per adapter, ~49k gas across
-        // 16 adapters (measured 855_374 before that field, 904_654 after).
-        // This is the cost of the new guardrail, not a regression.
-        assertLt(gasUsed, 950_000, "plan deploy gas should be under budget");
+        // Budget raised from 900_000 to 970_000. Measured 855_374 before the
+        // Paper §5.1 impairment fields existed at all; 945_876 with the full,
+        // durable implementation. The +90_502 delta was re-derived by
+        // toggling one code change at a time (via forge inspect
+        // storage-layout to confirm slot assignment, then re-measuring after
+        // each isolated edit) rather than assumed, and it fully accounts for
+        // the difference:
+        //   +38_217  AdapterConfig.accountingCap merely EXISTING as a struct
+        //            field, even before it's read anywhere: currentConfigurationDigest()
+        //            does `AdapterConfig memory config = adapters[adapter];`,
+        //            an implicit full-struct copy that SLOADs every declared
+        //            field regardless of whether the function later uses it.
+        //            That digest is computed twice per plan action (once in
+        //            submitPlan, once in executeNextActionWithProof) across
+        //            all 16 active adapters -> first pass cold, second warm.
+        //   + 2_201  encoding config.accountingCap into that digest's
+        //            abi.encode(...) tuple (one more 32-byte word to MSTORE
+        //            and hash, x2 calls x16 adapters).
+        //   + 8_862  totalAssets() reading adapters[adapter].accountingCap to
+        //            compute min(value, cap). totalAssets() is invoked THREE
+        //            times in this single-action, final-action plan: once via
+        //            requiredIdle() at the top of _deploy, once for the
+        //            explicit nav in _deploy, and once more via the
+        //            finalCheck in _enforceActivePlanRiskLimits -- so this
+        //            per-adapter read's cost is paid three times over.
+        //   +41_222  the durable adapterRecognizedLoss[adapter] mapping read
+        //            added to totalAssets() (Critical review fix: a loss
+        //            write-down to strategyAssets was reversed by the very
+        //            next _syncAllStrategies-triggering call, so the fix
+        //            reads a durable per-adapter mapping instead). It is a
+        //            brand-new mapping untouched elsewhere in the
+        //            transaction, so its first read per adapter is a cold
+        //            SLOAD, paid across the same three totalAssets() calls.
+        // 38_217 + 2_201 + 8_862 + 41_222 = 90_502, matching 945_876 - 855_374
+        // exactly. This is the confirmed cost of the guardrail, not a
+        // regression; 970_000 keeps real headroom above the measured value
+        // rather than passing by a hair's width.
+        assertLt(gasUsed, 970_000, "plan deploy gas should be under budget");
     }
 
     function test_gas_planDivest_16adapters() public {

@@ -155,6 +155,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     /// @notice Tracked strategy assets per adapter
     mapping(address => uint256) public strategyAssets;
 
+    /// @notice Per-adapter unrecoverable amount. Paper §5.1's "explicit
+    /// recognized loss". Durable: unlike a write-down to strategyAssets, it
+    /// is not erased by _syncAllStrategies overwriting strategyAssets from
+    /// the adapter's own sync() on the next deposit/mint/withdraw/redeem.
+    mapping(address => uint256) public adapterRecognizedLoss;
+
     /// @notice Bounded dependency-group policy records.
     mapping(bytes32 => VaultTypes.DependencyGroup) private _dependencyGroups;
     bytes32[] private _dependencyGroupIds;
@@ -234,7 +240,9 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
             address adapter = _activeAdapters[i];
             uint256 value = strategyAssets[adapter];
             uint256 cap = adapters[adapter].accountingCap;
-            assets_ += value < cap ? value : cap;
+            uint256 contribution = value < cap ? value : cap;
+            uint256 loss = adapterRecognizedLoss[adapter];
+            assets_ += contribution > loss ? contribution - loss : 0;
         }
 
         // Add conservative cached reward NAV from the accountant
@@ -398,19 +406,28 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         if (!registeredAdapters[adapter]) revert AdapterNotFound();
         if (amount == 0) revert ZeroAmount();
 
-        // Write down the tracked position so the loss actually leaves NAV.
-        // Without this, recognizedLosses is pure telemetry (as it already is
-        // for the pre-existing divest-shortfall accumulations, where the
-        // adapter's own reported balance has already dropped) and this
-        // function would silently do nothing to totalAssets().
-        uint256 current = strategyAssets[adapter];
-        uint256 writeDown = amount < current ? amount : current;
-        if (writeDown != 0) {
-            strategyAssets[adapter] = current - writeDown;
-        }
+        // Record the loss in the durable adapterRecognizedLoss mapping, NOT
+        // by writing down strategyAssets: every deposit/mint/withdraw/redeem
+        // calls _syncAllStrategies(), which overwrites strategyAssets from
+        // the adapter's own sync() value and would silently reverse a
+        // write-down there on the very next unrelated vault action.
+        //
+        // Cap the amount actually recognised at what remains of this
+        // adapter's current NAV contribution (its accountingCap-bounded
+        // value, less any loss already recognised against it) so the global
+        // recognizedLosses counter -- which gates plan execution via
+        // activePlanMaxRecognizedLoss -- reflects real NAV impact rather
+        // than an admin-supplied number that can overstate it.
+        uint256 cap = adapters[adapter].accountingCap;
+        uint256 value = strategyAssets[adapter];
+        uint256 contribution = value < cap ? value : cap;
+        uint256 alreadyRecognized = adapterRecognizedLoss[adapter];
+        uint256 remaining = contribution > alreadyRecognized ? contribution - alreadyRecognized : 0;
+        uint256 recognized = amount < remaining ? amount : remaining;
 
-        recognizedLosses += amount;
-        emit LossRecognized(adapter, amount);
+        adapterRecognizedLoss[adapter] = alreadyRecognized + recognized;
+        recognizedLosses += recognized;
+        emit LossRecognized(adapter, recognized);
     }
 
     /// @notice Configure a bounded, ordered dependency group.

@@ -731,6 +731,55 @@ contract VaultPolicyTest is Test {
         assertEq(vault.totalAssets(), navBefore - 350e6);
     }
 
+    /// @dev Paper §5.1's recognized loss must be durable: it must not be an
+    ///      artifact that the very next unrelated vault action silently
+    ///      erases. deposit()/mint()/withdraw()/redeem() all call
+    ///      _syncAllStrategies(), which overwrites strategyAssets[adapter]
+    ///      from the adapter's own sync() value — a write-down to
+    ///      strategyAssets alone would be reversed right here.
+    function test_recognizeLossSurvivesSyncTriggeredByNextDeposit() public {
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        vault.recognizeLoss(address(adapterA), 250e6);
+        uint256 navAfterLoss = vault.totalAssets();
+
+        _deposit(1e6);
+
+        assertEq(
+            vault.totalAssets(),
+            navAfterLoss + 1e6,
+            "recognized loss must survive a sync triggered by the next deposit"
+        );
+    }
+
+    /// @dev The global recognizedLosses counter gates plan execution via
+    ///      activePlanMaxRecognizedLoss (see _enforceActivePlanRiskLimits), so
+    ///      it must reflect actual NAV impact rather than whatever raw amount
+    ///      an admin passes in. Requesting a loss larger than the adapter's
+    ///      entire contribution must only accrue that contribution, floor the
+    ///      adapter's NAV contribution at zero (never wrap negative), and
+    ///      must not let a second, smaller call recognise anything further
+    ///      once the position is fully written off.
+    function test_recognizeLossClampsTheGlobalCounterToActualNavImpact() public {
+        _executePlanWithSingleDeploy(address(adapterA), 1_000e6);
+        uint256 navBefore = vault.totalAssets();
+        uint256 lossesBefore = vault.recognizedLosses();
+
+        vault.recognizeLoss(address(adapterA), 5_000e6); // far more than the 1,000e6 position
+
+        assertEq(
+            vault.recognizedLosses(),
+            lossesBefore + 1_000e6,
+            "global counter must accrue only the amount actually recognised, not the raw request"
+        );
+        assertEq(vault.totalAssets(), navBefore - 1_000e6, "adapter's NAV contribution must floor at zero");
+
+        // Already fully written off: a further recognition against the same
+        // adapter must be a no-op for both figures.
+        vault.recognizeLoss(address(adapterA), 100e6);
+        assertEq(vault.recognizedLosses(), lossesBefore + 1_000e6, "fully impaired adapter has nothing left to lose");
+        assertEq(vault.totalAssets(), navBefore - 1_000e6);
+    }
+
     function test_recognizeLossIsAdminOnly() public {
         vm.prank(address(0xBEEF));
         vm.expectRevert();
