@@ -993,6 +993,83 @@ Claude-Session: https://claude.ai/code/session_016KXi2riEacocX5ifipzS7f" -- srcl
 - [ ] `SRCLA-REPORT.{md,json}` regenerated from `src/evaluation/report/`, carrying the era table, both disclosures and every unverified gate line
 - [ ] `pnpm test:unit` green against its recorded baseline with every delta accounted for; `tsc --noEmit` and `typecheck:scripts` clean
 
+## Execution ledger — findings that changed the plan
+
+Recorded as they were found, with the evidence, because each one is a fact
+about the system that outlives this phase.
+
+### The dataset is deeper than the plan assumed
+
+Base archive state for all three venues reads back to at least **2024-09-03**
+on three independent free endpoints, verified by `eth_call` at block
+`19_300_000`. That is what makes 267 days of sealed held-out data available
+today rather than at some future date. Measured endpoint behaviour (16
+multicall3 batches at concurrency 3, 365-day depth):
+
+| Endpoint | rate | succeeded |
+|---|---|---|
+| `mainnet.base.org` | 1.6/s | 5/16 |
+| `base.drpc.org` | 8.3/s | 16/16 |
+| `base-mainnet.public.blastapi.io` | 7.5/s | 16/16 |
+| `gateway.tenderly.co/public/base` | 6.8/s | 16/16 |
+
+The official endpoint is the worst of the four and is kept last.
+
+### Reading the IRM was not optional
+
+`DEFAULT_COMPOUND_CONFIG` asserts an 80% kink and a 6.25% low slope. The chain
+says **90%** and **~3.60% annualized**. The optimiser was simulating a market
+that does not exist, and H1 (capacity simulation) was ablating a fiction.
+Aave's parameters changed inside the window too (`9000,0,650,6000` at block
+19.3M against `9000,175,625,4000` at 35.3M), as did Moonwell's rate-model
+address (`0x54dC..2445` → `0x0F70..6cab`).
+
+### Six defects that each produced "0.000% net APY for every policy"
+
+Every one of these was invisible until the evaluation ran against real
+collected data, and every one produces a total that reads like a policy result.
+
+1. **`export {}` of type-only declarations** in
+   `src/protocols/simulation/index.ts` made Node throw at import. `tsc
+   --noEmit` does not catch it (isolatedModules is off), so it surfaced only
+   when a script first imported the barrel.
+2. **One config digest answered two §6.2 questions.** Identity pinning and
+   regime keying shared a string, so the artifact pinned day one's parameters
+   and every venue was rejected from its first governance rate change. The
+   window holds 6 Compound, 14 Aave and 11 Moonwell parameter regimes.
+   Split into `identity|parameters`; see `src/domain/config-digest.ts`.
+3. **The turnover cap vetoed instead of trimming.** A cold start could never
+   resolve, and B0/B4 bypass the cost gate entirely — so the baselines
+   deployed freely while every gated policy was frozen out, breaking §11.1's
+   equal envelope.
+4. **`prepareArtifact` re-fit the registered artifact** on whatever dataset it
+   was handed. Against a held-out era that refits the policy on the data the
+   run exists to test.
+5. **The runner hardcoded a 7-day horizon** while the registered grid may
+   select 1, 7 or 14 days, so labels and quantiles described different
+   horizons.
+6. **The withdrawal schedule's cadence was counted in snapshots.** `7` meant
+   "weekly" on the daily dataset it was written for; on hourly origins it
+   meant every seven hours — ~240% of the vault demanded inside one 14-day
+   reserve horizon, so §8.1 correctly required the whole vault in cash.
+
+### Still open at the end of this phase
+
+- **§11.1's fork replay is unwired**, so the gate reports it `NOT PRODUCED`
+  and blocks. The honest verdict of the registered run is therefore very
+  likely `FAIL` on that check alone — which is the designed behaviour, not a
+  defect (spec §2 goal 3 asks for a reproducible `PASS` **or** `FAIL`).
+- **`noTradeBandK`'s sweep is a step function**, not an informative curve, so
+  the proxy scoring it is inadequate. It must be scored through the replay
+  (turnover against realised return) rather than against a dispersion proxy.
+- **Withdrawals are a registered schedule, not observed.** The Navy vault has
+  no Base mainnet history, so §8.1's `W_H` has no real series over this
+  window.
+- **`calibration.ts` still carries the F2/F3 shape** on the LIVE weekly
+  calibration path. `select.ts` was its dead duplicate and is deleted; the
+  live copy is out of this phase's scope and is recorded here rather than
+  silently left.
+
 ## Self-Review Notes
 
 - **Spec coverage:** spec §9 "Dataset" → Tasks 3–5; "Eras" → Task 6; "Corrections" → Tasks 7–8 (V2's artifact reproducibility; V3's tiers already correct in `REGISTERED_TIERS`); "Reporting" → Task 9 (V5). Spec §5.4's schema additions → Task 2. Phase 1 gaps #4 and #7 → Tasks 1 and 7.
