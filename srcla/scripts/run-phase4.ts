@@ -129,6 +129,7 @@ async function runEra(
   artifact: PolicyArtifact,
   tiers: readonly bigint[],
   commit: string,
+  outDir: string,
 ): Promise<RunSummary> {
   const b = eraBounds(era);
   console.error('');
@@ -194,6 +195,14 @@ async function runEra(
       : `    §11.5 release gate BLOCKED for ${era}: ${gate.blockedReasons.join(', ')}`,
   );
 
+  // The VERIFIABLE run record, one file per era. `evaluation:verify` re-derives
+  // the manifest, dataset and result hashes from it -- so the report's
+  // "reproduce with" line names a file that actually exists rather than
+  // describing a capability nothing exercises.
+  const recordPath = join(outDir, `evaluation-${era}.json`);
+  writeFileSync(recordPath, JSON.stringify({ record }, null, 2) + '\n');
+  console.error(`    run record -> ${recordPath} (verify: pnpm run evaluation:verify ${recordPath})`);
+
   return {
     era,
     evaluation,
@@ -253,7 +262,7 @@ async function main(): Promise<void> {
     const commit = codeCommit();
     const runs: RunSummary[] = [];
     for (const era of eras) {
-      runs.push(await runEra(prisma, era, artifact, tiers, commit));
+      runs.push(await runEra(prisma, era, artifact, tiers, commit, outDir));
     }
 
     const markdown = renderReport({
