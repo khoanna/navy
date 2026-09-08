@@ -212,21 +212,18 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     error ZeroAddress();
     error ZeroAmount();
     error RewardExecutorNotSet();
-    error RewardAccountantNotSet();
     error InvalidRewardRoute();
     error SlippageExceeded();
     error MaterialCacheRequired();
     error TooManyAdapters();
     error InvalidConfigurationDigest();
     error PlanRiskLimitExceeded();
-    error RewardNotClaimed();
     error InvalidSwapOutput();
     error ClaimedAmountMismatch();
     error ClaimExceedsMax();
     error DeadlinePassed();
     error InvalidDataHash();
     error TokenNotAdmitted();
-    error PlanExpired();
     error HarvestRequiresExecuteHarvestAction();
 
     // ---- ExecutionPlan Accessors ----

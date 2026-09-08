@@ -42,7 +42,6 @@ interface IRewardExecutor {
     );
 
     /// @notice Daily volume reset event
-    event DailyVolumeReset(bytes32 indexed routeId, uint256 indexed day, uint256 volume);
 
     /// @notice Execute a swap via an approved route
     /// @param routeId The route identifier

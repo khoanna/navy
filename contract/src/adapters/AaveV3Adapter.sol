@@ -25,7 +25,6 @@ contract AaveV3Adapter is IStrategyAdapter {
 
     error NotVault();
     error UnsupportedRewardToken();
-    error ProtocolPaused();
     error DepositFailed();
     error WithdrawFailed();
     error InvalidConfiguration();

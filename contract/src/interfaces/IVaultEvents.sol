@@ -25,7 +25,6 @@ interface IVaultEvents {
     event DynamicReserveSet(uint256 reserve);
     event MaxSynchronousLossBpsSet(uint16 maxLossBps);
 
-    event PlanCreated(bytes32 indexed planId, bytes32 indexed decisionHash, uint256 expiresAt);
 
     event PlanSubmitted(bytes32 indexed planId, bytes32 merkleRoot);
 

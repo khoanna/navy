@@ -37,7 +37,6 @@ contract MoonwellAdapter is IStrategyAdapter {
     error UnsupportedRewardToken();
     error MintFailed();
     error RedeemFailed();
-    error ProtocolPaused();
     error InvalidConfiguration();
     error SupplyCapExceeded();
     error InvalidRecipient();
