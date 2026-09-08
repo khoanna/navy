@@ -28,6 +28,7 @@
     "evaluation:full": "tsx scripts/run-evaluation-full.ts",
     "anvil:test": "tsx scripts/anvil-fork-test.ts",
     "phase1:check": "tsx scripts/phase1-fork-check.ts",
+    "probe:emissions": "tsx scripts/probe-emissions.ts",
     "cli": "tsx src/cli/index.ts",
     "cli:collect": "tsx src/cli/index.ts collect",
     "cli:evaluate": "tsx src/cli/index.ts evaluate",
