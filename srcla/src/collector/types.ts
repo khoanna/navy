@@ -25,12 +25,43 @@ export interface CollectorConfig {
   rewardTokenAddresses?: string[] | undefined;
 }
 
+/** Which protocol sits behind a strategy adapter. */
+export type VenueKind = 'aave' | 'compound' | 'moonwell';
+
+/**
+ * The protocol-level state read through an adapter's venue handle.
+ * Every field here used to be a hardcoded constant in `collectStrategy`
+ * (`utilization: 0n, cash: 0n, paused: false`).
+ */
+export interface VenueState {
+  /** Utilization, WAD (1e18) scaled. */
+  utilizationWad: bigint;
+  /** Underlying the venue can pay out right now, in asset base units. */
+  cash: bigint;
+  /** Outstanding borrows, in asset base units. */
+  borrows: bigint;
+  /** Protocol reserves, in asset base units (0 where the venue does not expose a comparable figure). */
+  reserves: bigint;
+  /** True when the venue will not currently accept a deposit. */
+  paused: boolean;
+}
+
 export interface CollectedSnapshot {
   blockNumber: number;
   blockHash: string;
   timestamp: Date;
   vault: VaultSnapshot;
   strategies: StrategySnapshot[];
+  /**
+   * True when at least one CONFIGURED venue could not be read at this block.
+   * Paper §12 row 1 requires "Mark snapshot incomplete; do not decide" — a
+   * failed venue read used to be logged and dropped, leaving the kernel to
+   * allocate across whatever subset happened to answer, with no way for any
+   * consumer to tell that a market was missing rather than absent.
+   */
+  incomplete: boolean;
+  /** Names of the configured venues whose reads failed. */
+  missingMarkets: string[];
 }
 
 export interface VaultSnapshot {
@@ -99,9 +130,17 @@ export interface StrategySnapshot {
   name: string;
   totalAssets: bigint;
   maxWithdrawable: bigint;
+  /** Annualized supply rate, WAD (1e18) scaled — adapter `supplyRatePerYear()`. */
   supplyRate: bigint;
+  /** Utilization, WAD (1e18) scaled. */
   utilization: bigint;
+  /** Underlying the venue can pay out right now, in asset base units. */
   cash: bigint;
+  /** Outstanding borrows at the venue, in asset base units. */
+  borrows: bigint;
+  /** Venue reserves, in asset base units (0 where the protocol exposes no comparable figure). */
+  reserves: bigint;
+  /** True when the venue will not currently accept a deposit. */
   paused: boolean;
   configDigest: string;
   /** Effective cap after cold-start constraints (optional) */

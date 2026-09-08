@@ -34,6 +34,8 @@ function fakeSnapshot(): CollectedSnapshot {
       reserve: { admin: 0n, dynamic: 0n },
     },
     strategies: [],
+    incomplete: false,
+    missingMarkets: [],
   };
 }
 
@@ -108,5 +110,54 @@ describe('buildRawOriginFromCollector', () => {
     expect(call).toBeDefined();
     expect((call!.args as { orderBy: { timestamp: string } }).orderBy).toEqual({ timestamp: 'desc' });
     expect((call!.args as { take: number }).take).toBe(5000);
+  });
+
+  it('refuses to build an origin from an INCOMPLETE snapshot (paper §12 row 1)', async () => {
+    // A configured venue that could not be read is not the same as a venue
+    // that is absent: deciding on the remainder would reallocate the whole
+    // vault across a silently truncated market set. Before the collector
+    // carried this flag there was no way for any consumer to tell.
+    const snap = { ...fakeSnapshot(), incomplete: true, missingMarkets: ['Moonwell'] };
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {});
+    expect(out).toBeNull();
+  });
+
+  it('does not even query the database for an incomplete snapshot', async () => {
+    const snap = { ...fakeSnapshot(), incomplete: true, missingMarkets: ['Aave'] };
+    const db = fakePrisma();
+    await buildRawOriginFromCollector(fakeCollector(snap), db.prisma, GAS, {});
+    expect(db.calls).toHaveLength(0);
+  });
+
+  it('carries each market\'s real borrows and reserves through to the origin', async () => {
+    // These two were hardcoded `0n` here regardless of what the collector
+    // reported, which is what admit.ts\'s NO_MARKET_DATA rule and the rate
+    // simulator\'s utilization denominator both read.
+    const snap: CollectedSnapshot = {
+      ...fakeSnapshot(),
+      strategies: [
+        {
+          address: '0x' + 'aa'.repeat(20),
+          name: 'Moonwell',
+          totalAssets: 3_000_000_000n,
+          maxWithdrawable: 2_700_000_000n,
+          supplyRate: 33_000_000_000_000_000n,
+          utilization: 777_777_777_777_777_777n,
+          cash: 300_000_000n,
+          borrows: 700_000_000n,
+          reserves: 100_000_000n,
+          paused: false,
+          configDigest: '0x' + 'd3'.repeat(32),
+        },
+      ],
+    };
+
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), fakePrisma().prisma, GAS, {});
+
+    expect(out!.markets[0]!.borrows).toBe(700_000_000n);
+    expect(out!.markets[0]!.reserves).toBe(100_000_000n);
+    expect(out!.markets[0]!.cash).toBe(300_000_000n);
+    expect(out!.markets[0]!.supplyRateWad).toBe(33_000_000_000_000_000n);
+    expect(out!.markets[0]!.utilizationWad).toBe(777_777_777_777_777_777n);
   });
 });

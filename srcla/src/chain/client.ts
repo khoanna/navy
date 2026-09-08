@@ -47,7 +47,11 @@ export class ChainClient {
   }
 
   /**
-   * Get balance for address
+   * Native ETH balance, in wei — `eth_getBalance`, NOT an ERC-20 balance.
+   * For a token balance (e.g. the vault's idle USDC) encode
+   * `balanceOf(address)` against the token and use `call`; the collector's
+   * `idleBase` once read this method and therefore reported wei of ETH where
+   * a 6-decimal USDC figure was expected.
    */
   async getBalance(address: string): Promise<bigint> {
     return this.provider.getBalance(address);

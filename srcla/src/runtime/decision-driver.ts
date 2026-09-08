@@ -145,13 +145,25 @@ export async function buildRawOriginFromCollector(
   const snap = await collector.collect();
   if (snap === null) return null;
 
+  // Paper §12 row 1: "Mark snapshot incomplete; do not decide." A configured
+  // venue that could not be read is NOT the same as a venue that is absent —
+  // deciding on the remainder would reallocate the whole vault across a
+  // silently truncated market set.
+  if (snap.incomplete) {
+    console.error(
+      `[DecisionDriver] Refusing to decide on an incomplete snapshot at block ${snap.blockNumber}: ` +
+        `could not read ${snap.missingMarkets.join(', ')}`
+    );
+    return null;
+  }
+
   const markets: MarketObservation[] = snap.strategies.map((s) => ({
     marketId: s.name,
     adapter: s.address,
     protocol: protocolOf(s.name),
     cash: s.cash,
-    borrows: 0n,
-    reserves: 0n,
+    borrows: s.borrows,
+    reserves: s.reserves,
     supplyRateWad: s.supplyRate,
     utilizationWad: s.utilization,
     positionBase: s.totalAssets,
