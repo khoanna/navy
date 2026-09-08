@@ -41,6 +41,3 @@ export function getHorizonConfig(
     h => h.horizonSeconds === horizonSeconds && h.coverageTarget === coverageTarget
   );
 }
-
-export type ForecastHorizonKey = keyof typeof FORECAST_HORIZONS;
-export type CoverageTargetKey = keyof typeof COVERAGE_TARGETS;

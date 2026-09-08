@@ -40,8 +40,6 @@ import {
 } from './registry.js';
 import type { BaselineAction } from '../replay/replay.js';
 
-const SECONDS_PER_YEAR = 31_557_600n;
-
 /** §11.1: "Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000
  *  USDC." All four, in USDC base units. The harness that produced
  *  SRCLA-REPORT.md ran three of them and its gates iterated only over the
@@ -499,10 +497,4 @@ export function runRegisteredEvaluation(
     missingPolicyIds,
     missingTiers: REGISTERED_TIERS.filter((t) => !seenTiers.has(t.toString())),
   };
-}
-
-/** Annualized horizon conversion used by the label derivation. Exported so
- *  its unit (WAD per year -> WAD per horizon) has one definition. */
-export function horizonRateWad(annualRateWad: bigint, horizonSeconds: number): bigint {
-  return (annualRateWad * BigInt(horizonSeconds)) / SECONDS_PER_YEAR;
 }

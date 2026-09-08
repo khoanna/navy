@@ -76,11 +76,6 @@ export interface EvaluationManifest {
 }
 
 /**
- * Content hash type (SHA-256 hex string)
- */
-export type ContentHash = string;
-
-/**
  * Configuration for manifest generation
  */
 export interface ManifestConfig {

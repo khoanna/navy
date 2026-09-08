@@ -444,11 +444,3 @@ export class ProposalEvaluator {
     this.chainClient.close();
   }
 }
-
-/**
- * Create a proposal evaluator instance
- */
-export function createProposalEvaluator(): ProposalEvaluator {
-  const config = loadConfig();
-  return new ProposalEvaluator(config);
-}

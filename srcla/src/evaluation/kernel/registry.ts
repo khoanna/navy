@@ -243,10 +243,6 @@ export const REGISTERED_POLICIES: readonly RegisteredPolicy[] = [
   ...REGISTERED_ABLATIONS,
 ];
 
-/** Every id the policy gate must see a result for (§11.5 fails on a
- *  missing baseline/ablation). */
-export const REQUIRED_POLICY_IDS: readonly string[] = REGISTERED_POLICIES.map((p) => p.id);
-
 /**
  * Turn a `DecisionOutput.target` into replay actions.
  *

@@ -253,21 +253,6 @@ export async function getSelectedMethod(
 }
 
 /**
- * Get calibration history for a specific method.
- */
-export async function getMethodCalibrations(
-  client: PrismaClient,
-  method: string,
-  limit = 10
-): Promise<ForecastCalibration[]> {
-  return client.forecastCalibration.findMany({
-    where: { method },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-  });
-}
-
-/**
  * Check if calibration is needed based on last calibration time.
  * Returns true if no calibration exists or if the last calibration
  * was older than the calibration interval.

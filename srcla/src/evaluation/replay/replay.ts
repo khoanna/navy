@@ -417,17 +417,3 @@ export function annualizedSharePriceGrowth(snapshots: ReplaySnapshot[]): number 
 
   return Math.pow(base, 1 / years) - 1;
 }
-
-/**
- * Compare two replay results
- */
-export function compareResults(a: ReplayResult, b: ReplayResult): {
-  apyDiff: number;
-  turnoverDiff: bigint;
-  winner: 'a' | 'b' | 'tie';
-} {
-  const apyDiff = a.realizedNetApy - b.realizedNetApy;
-  const turnoverDiff = a.totalTurnover - b.totalTurnover;
-  const winner = apyDiff > 0.0001 ? 'a' : apyDiff < -0.0001 ? 'b' : 'tie';
-  return { apyDiff, turnoverDiff, winner };
-}

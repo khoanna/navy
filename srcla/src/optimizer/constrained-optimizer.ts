@@ -56,16 +56,6 @@ export interface OptimizationResult {
 }
 
 /**
- * Constraint violation types
- */
-export enum ViolationType {
-  MARKET_CAP = 'MARKET_CAP',
-  GROUP_CAP = 'GROUP_CAP',
-  RESERVE = 'RESERVE',
-  CAPACITY = 'CAPACITY',
-}
-
-/**
  * Constrained Optimizer for SRCLA
  */
 export class ConstrainedOptimizer {

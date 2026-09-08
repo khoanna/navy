@@ -368,6 +368,3 @@ export function calibrateCashResidualQuantiles(
   }
   return out;
 }
-
-/** Rate scale helper kept next to its only consumer's unit documentation. */
-export const RATE_SCALE_WAD = WAD;

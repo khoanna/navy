@@ -812,58 +812,6 @@ export function validateManifest(manifest: EvaluationManifest): {
   };
 }
 
-// ============================================================================
-// Manifest Query Helpers
-// ============================================================================
-
-/**
- * Get calibration dataset boundary
- */
-export function getCalibrationBoundary(manifest: EvaluationManifest): {
-  calibrationEnd: Date;
-  heldOutStart: Date;
-  evaluationEnd: Date;
-} {
-  return {
-    calibrationEnd: manifest.calibration.calibrationEndDate,
-    heldOutStart: manifest.calibration.heldOutStartDate,
-    evaluationEnd: manifest.dataset.endDate,
-  };
-}
-
-/**
- * Get evaluation date range
- */
-export function getEvaluationRange(manifest: EvaluationManifest): {
-  start: Date;
-  end: Date;
-  durationDays: number;
-} {
-  const durationMs = manifest.dataset.endDate.getTime() - manifest.dataset.startDate.getTime();
-  const durationDays = durationMs / (24 * 60 * 60 * 1000);
-
-  return {
-    start: manifest.dataset.startDate,
-    end: manifest.dataset.endDate,
-    durationDays,
-  };
-}
-
-/**
- * Find market by ID
- */
-export function findMarket(manifest: EvaluationManifest, marketId: string): MarketConfig | undefined {
-  return manifest.markets.find((m) => m.marketId === marketId);
-}
-
-/**
- * Find tier by label
- */
-export function findTier(manifest: EvaluationManifest, label: string): bigint | undefined {
-  const index = manifest.tiers.labels.indexOf(label);
-  return index >= 0 ? manifest.tiers.amounts[index] : undefined;
-}
-
 /**
  * Get all deployable baselines
  */
@@ -880,6 +828,17 @@ export function getDeployableBaselines(manifest: EvaluationManifest): BaselineCo
  *
  * This should be called after all evaluation results are finalized
  * to complete the artifact hash chain for full reproducibility.
+ *
+ * UNWIRED, AND DELIBERATELY KEPT. It is the only writer of
+ * `artifactHashes.resultsHash` -- the field `computeManifestHash` and
+ * `freezeEvaluationManifest`/`thawEvaluationManifest` already fold into the
+ * content hash when it is set -- so deleting it would leave that half of the
+ * §11 hash chain permanently undefined with no implementation to restore.
+ * WHAT IS MISSING TO WIRE IT: a call at the end of a run of THIS manifest's
+ * evaluation path (scripts/quarantined/run-evaluation.ts) passing the hash of
+ * the finalized results. The registered kernel path does not use this
+ * manifest; it hashes results itself in
+ * `evaluation/kernel/provenance.ts#computeResultHash`.
  */
 export function setResultsHash(
   manifest: EvaluationManifest,
@@ -900,39 +859,4 @@ export function setResultsHash(
       },
     }),
   };
-}
-
-/**
- * Get code commit hash
- */
-export function getCodeCommitHash(manifest: EvaluationManifest): string {
-  return manifest.artifactHashes.codeCommit;
-}
-
-/**
- * Get dataset hash
- */
-export function getDatasetHash(manifest: EvaluationManifest): string {
-  return manifest.artifactHashes.datasetHash;
-}
-
-/**
- * Get config hash
- */
-export function getConfigHash(manifest: EvaluationManifest): string {
-  return manifest.artifactHashes.configHash;
-}
-
-/**
- * Get results hash (may be undefined if not yet set)
- */
-export function getResultsHash(manifest: EvaluationManifest): string | undefined {
-  return manifest.artifactHashes.resultsHash;
-}
-
-/**
- * Export all artifact hashes for external verification
- */
-export function exportArtifactHashes(manifest: EvaluationManifest): ArtifactHashes {
-  return { ...manifest.artifactHashes };
 }

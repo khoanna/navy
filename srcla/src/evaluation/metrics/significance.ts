@@ -30,7 +30,6 @@
  * UNITS: share prices are WAD (1e18); returns are dimensionless fractions.
  */
 
-const WAD = 10n ** 18n;
 /**
  * Fixed-point scale for the bigint -> float conversion in `periodReturns`.
  *
@@ -333,6 +332,3 @@ export function normalCdf(x: number): number {
 
 /** Registered default seed for every bootstrap in the evaluation. */
 export const REGISTERED_BOOTSTRAP_SEED = 20260908;
-
-/** Share-price WAD scale, exported so a caller converting prices has one source. */
-export const SHARE_PRICE_SCALE_WAD = WAD;

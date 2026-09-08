@@ -17,14 +17,6 @@ export interface Cohort {
   depositTimestamp: Date;
 }
 
-export interface ExecutionCost {
-  gasUsed: bigint;
-  gasPrice: bigint;
-  l1Fee: bigint;
-  swapCost: bigint;
-  totalCostBase: bigint;
-}
-
 /**
  * Create initial vault state
  */
@@ -44,23 +36,4 @@ export function createInitialState(initialDeposit: bigint): VaultState {
 export function sharePrice(state: VaultState): bigint {
   if (state.totalShares === 0n) return WAD;
   return (state.totalAssets * WAD) / state.totalShares;
-}
-
-/**
- * Serialize vault state for JSON export
- */
-export function serializeState(state: VaultState): Record<string, unknown> {
-  return {
-    totalAssets: state.totalAssets.toString(),
-    totalShares: state.totalShares.toString(),
-    idleBase: state.idleBase.toString(),
-    strategyBalances: Object.fromEntries(
-      Array.from(state.strategyBalances.entries()).map(([k, v]) => [k, v.toString()]),
-    ),
-    cohorts: Array.from(state.cohorts.values()).map((c) => ({
-      id: c.id,
-      shares: c.shares.toString(),
-      depositTimestamp: c.depositTimestamp.toISOString(),
-    })),
-  };
 }

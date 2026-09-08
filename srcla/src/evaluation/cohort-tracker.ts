@@ -486,10 +486,3 @@ export class CohortTracker {
     return new Date() > cohort.windowEnd;
   }
 }
-
-/**
- * Create a CohortTracker with default vault state provider
- */
-export function createCohortTracker(vaultStateProvider: VaultStateProvider): CohortTracker {
-  return new CohortTracker(vaultStateProvider);
-}

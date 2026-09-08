@@ -100,34 +100,3 @@ export function modelExecution(
     netAmount,
   };
 }
-
-/**
- * Calculate net return after execution costs.
- * All three arguments are USDC base units; the result is dimensionless.
- */
-export function calculateNetReturn(
-  grossReturn: bigint,
-  totalCosts: bigint,
-  initialInvestment: bigint,
-): number {
-  if (initialInvestment === 0n) return 0;
-  const netReturn = grossReturn - totalCosts;
-  return Number(netReturn) / Number(initialInvestment);
-}
-
-/**
- * Estimate breakeven APY for a deployment given fixed costs.
- * fixedCostBase/deployedAmount are USDC base units; the result is WAD.
- */
-export function breakevenApy(
-  fixedCostBase: bigint,
-  deployedAmount: bigint,
-  horizonSeconds: number,
-): bigint {
-  if (deployedAmount === 0n) return 0n;
-  // Breakeven rate: fixedCost / deployedAmount per horizon
-  // Expressed as WAD: breakeven = fixedCost * WAD / (deployedAmount * horizonSeconds / SECONDS_PER_YEAR)
-  const SECONDS_PER_YEAR = 31_557_600n;
-  const WAD = 1_000_000_000_000_000_000n;
-  return (fixedCostBase * WAD * SECONDS_PER_YEAR) / (deployedAmount * BigInt(horizonSeconds));
-}

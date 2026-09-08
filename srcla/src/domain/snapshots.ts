@@ -29,7 +29,3 @@ export interface ContractRegime {
 /**
  * Snapshot with regime information
  */
-export interface SnapshotWithRegime {
-  snapshot: MarketSnapshot;
-  regime: ContractRegime | null;
-}
