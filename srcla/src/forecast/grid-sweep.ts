@@ -243,6 +243,42 @@ const LOSS_TERMS = [
 ] as const;
 
 /**
+ * Linear-interpolated quantile (the R-7 / Excel definition): for sample
+ * position `idx = p * (n - 1)`, interpolate between the two bracketing order
+ * statistics rather than truncating to one of them.
+ *
+ * A `floor`-indexed quantile collapses Q1 and Q3 to the SAME order statistic
+ * for any `n <= 4` at the 25th/75th percentiles -- worst case `n = 2`, where
+ * `floor(0.25 * 1) === floor(0.75 * 1) === 0` makes IQR identically 0
+ * regardless of the sample's real spread. That would silently zero-weight
+ * every term whenever the grid passed in happens to have exactly two points,
+ * which must never be how "nothing discriminates" gets decided.
+ */
+function interpolatedQuantile(sorted: readonly number[], p: number): number {
+  const n = sorted.length;
+  if (n === 0) return 0;
+  if (n === 1) return sorted[0]!;
+  const idx = p * (n - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const frac = idx - lo;
+  const a = sorted[lo]!;
+  const b = sorted[hi]!;
+  return a + (b - a) * frac;
+}
+
+/**
+ * Interquartile range (Q3 - Q1) via `interpolatedQuantile`. Exported so its
+ * behaviour at small `n` -- the case that broke the old `floor`-indexed
+ * version -- can be tested directly rather than only inferred through
+ * `scoreGrid`'s zero-weighting.
+ */
+export function interquartileRange(xs: readonly number[]): number {
+  const sorted = xs.slice().sort((a, b) => a - b);
+  return interpolatedQuantile(sorted, 0.75) - interpolatedQuantile(sorted, 0.25);
+}
+
+/**
  * Standardize each term across the grid (z-score on the grid's own spread),
  * then weight. A term is standardized BEFORE weighting so a weight expresses
  * a preference rather than an accident of units.
@@ -261,9 +297,7 @@ export function scoreGrid(
     const xs = fits.map((f) => (f.fit.loss as unknown as Record<string, number>)[term] ?? 0);
     const mean = xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length);
     const sd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, xs.length - 1)) || 1;
-    const sorted = xs.slice().sort((a, b) => a - b);
-    const q = (p: number) => sorted[Math.floor(p * (sorted.length - 1))] ?? 0;
-    stats[term] = { mean, sd, iqr: q(0.75) - q(0.25) };
+    stats[term] = { mean, sd, iqr: interquartileRange(xs) };
   }
   const zeroWeighted = LOSS_TERMS.filter((t) => stats[t]!.iqr < opts.minIqr);
 
