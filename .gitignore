@@ -14,3 +14,9 @@ skills-lock.json
 .env.*
 !.env.example
 .worktrees/
+
+# Registered-evaluation run records. Machine-generated and large (heldout-c is
+# ~13 MB). SRCLA-REPORT.{md,json} IS tracked and carries the result, manifest and
+# dataset hashes, so a record can be re-derived with `pnpm phase4:run` and checked
+# against them. srcla/.gitignore has the same rule for runs written from srcla/.
+evaluation-heldout-*.json
