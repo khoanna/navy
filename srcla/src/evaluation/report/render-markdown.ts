@@ -36,6 +36,61 @@ export interface RunSummary {
   datasetOrigins: number;
 }
 
+/** One row of the DERIVED (measured) per-era coverage table — distinct from
+ * the STATIC registered-era table above: this one reports what the archive
+ * actually holds, not what was declared. */
+export interface EraProvenanceRow {
+  era: EraTag;
+  /** `—` when the era holds no rows yet (e.g. a growing open-ended era). */
+  firstDate: string;
+  lastDate: string;
+  firstBlock: string;
+  lastBlock: string;
+  origins: number;
+  days: number;
+  sealed: boolean;
+}
+
+/** One row of the venue registry, measured over the evaluated era(s). */
+export interface VenueProvenanceRow {
+  marketId: string;
+  displayName: string;
+  address: string;
+  apyMin: number;
+  apyMean: number;
+  apyMax: number;
+  configRegimes: number;
+  irmContracts: number;
+}
+
+/** Measured execution-cost inputs over one era's window. */
+export interface CostRangeRow {
+  era: EraTag;
+  observations: number;
+  l2BaseFeeMinWei: string;
+  l2BaseFeeMaxWei: string;
+  l1BaseFeeMinWei: string;
+  l1BaseFeeMaxWei: string;
+  ethUsdMinE8: string;
+  ethUsdMaxE8: string;
+  usdcUsdMinE8: string;
+  usdcUsdMaxE8: string;
+  gasSeriesDigest: string;
+}
+
+export interface DatasetProvenance {
+  chainId: number;
+  multicall3Address: string;
+  gasOracleAddress: string;
+  ethUsdFeedAddress: string;
+  usdcUsdFeedAddress: string;
+  usdcAddress: string;
+  usdcDecimals: number;
+  eras: readonly EraProvenanceRow[];
+  venues: readonly VenueProvenanceRow[];
+  costByEra: readonly CostRangeRow[];
+}
+
 export interface ReportParams {
   generatedAt: string;
   /** Primary run (held-out A) and any secondary runs (held-out B). */
@@ -52,11 +107,112 @@ export interface ReportParams {
     calibrationEra: { start: string; end: string; days: number };
     perVenueCoverage: Record<string, number>;
   };
+  /** Chain, collection method, block ranges, venue registry and measured
+   * cost inputs — derived from the dataset, never hardcoded here. */
+  provenance: DatasetProvenance;
 }
 
 const pct = (x: number, dp = 3): string => `${(x * 100).toFixed(dp)}%`;
 const usdc = (base: bigint): string =>
   (Number(base) / 1e6).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+/** Thousands-separate an integer given as a decimal string (block numbers,
+ * wei amounts) without routing it through `Number`, which loses precision
+ * well before a wei figure does. */
+const commas = (intStr: string): string => {
+  const neg = intStr.startsWith('-');
+  const digits = neg ? intStr.slice(1) : intStr;
+  const withSep = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return neg ? `-${withSep}` : withSep;
+};
+
+/** An 8-dp Chainlink answer (ETH/USD, USDC/USD) as a dollar figure. */
+const usdE8 = (e8: string): string =>
+  `$${(Number(BigInt(e8)) / 1e8).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+
+function datasetProvenanceSection(p: DatasetProvenance): string {
+  const out: string[] = [];
+  out.push('## Dataset and provenance');
+  out.push('');
+  out.push(
+    `Every figure below is read directly from **Base mainnet** (chainId **${p.chainId}**) at ` +
+      'historical blocks, never simulated or assumed. Each hourly origin is one Multicall3 ' +
+      `\`aggregate3\` batch against \`${p.multicall3Address}\`, calling Compound III Comet, the ` +
+      'Aave V3 Pool and the Moonwell mToken directly rather than through the Navy adapters, ' +
+      'which have no Base mainnet history of their own. **A venue that could not be read at an ' +
+      'origin is recorded as a gap and never interpolated** — a missing observation stays ' +
+      'missing rather than being filled from a neighbour.',
+  );
+  out.push('');
+
+  out.push('### Per-era dataset coverage (measured, not declared)');
+  out.push('');
+  out.push(
+    'The registered era boundaries above are what was *declared*; this table is what the ' +
+      'archive actually *holds* for each — derived from every `MarketSnapshot` row\'s own ' +
+      '`blockNumber` and `timestamp`, not from the boundary dates.',
+  );
+  out.push('');
+  out.push('| Era | First date | Last date | First block | Last block | Origins | Days | Sealed |');
+  out.push('|---|---|---|---|---|---|---|---|');
+  for (const e of p.eras) {
+    out.push(
+      `| \`${e.era}\` | ${e.firstDate} | ${e.lastDate} | ${e.firstBlock === '—' ? '—' : commas(e.firstBlock)} | ` +
+        `${e.lastBlock === '—' ? '—' : commas(e.lastBlock)} | ${e.origins.toLocaleString('en-US')} | ${e.days} | ` +
+        `${e.sealed ? '**sealed**' : '—'} |`,
+    );
+  }
+  out.push('');
+
+  out.push('### Venue registry');
+  out.push('');
+  out.push(
+    'The three allowlisted yield venues, and the asset moved between them. Addresses are ' +
+      'verified on-chain, not copied from memory. Rate figures are the observed Comet/Aave/' +
+      'Moonwell supply rate at every origin over the evaluated era(s), annualized.',
+  );
+  out.push('');
+  out.push('| Venue | Market ID | Contract address | APY min | APY mean | APY max | Config regimes | IRM contracts |');
+  out.push('|---|---|---|---|---|---|---|---|');
+  for (const v of p.venues) {
+    out.push(
+      `| ${v.displayName} | \`${v.marketId}\` | \`${v.address}\` | ${pct(v.apyMin, 2)} | ` +
+        `${pct(v.apyMean, 2)} | ${pct(v.apyMax, 2)} | ${v.configRegimes} | ${v.irmContracts} |`,
+    );
+  }
+  out.push('');
+  out.push(
+    `**Asset:** Circle native USDC \`${p.usdcAddress}\`, ${p.usdcDecimals} decimals — the one ` +
+      'unified USDC across every venue above.',
+  );
+  out.push('');
+
+  out.push('### Measured execution-cost inputs');
+  out.push('');
+  out.push(
+    'Gas and oracle values are **measured per origin, not assumed**: the L2 base fee comes ' +
+      `from each block's own header; L1 fee parameters come from the OP-Stack GasPriceOracle ` +
+      `predeploy at \`${p.gasOracleAddress}\`; ETH/USD and USDC/USD come from Chainlink at ` +
+      `\`${p.ethUsdFeedAddress}\` and \`${p.usdcUsdFeedAddress}\` respectively. Ranges below are ` +
+      'the min/max actually observed over each evaluated era, not a registered constant.',
+  );
+  out.push('');
+  out.push(
+    '| Era | Observations | L2 base fee (wei) | L1 base fee (wei) | ETH/USD | USDC/USD | Gas-series digest |',
+  );
+  out.push('|---|---|---|---|---|---|---|');
+  for (const c of p.costByEra) {
+    out.push(
+      `| \`${c.era}\` | ${c.observations.toLocaleString('en-US')} | ${commas(c.l2BaseFeeMinWei)}–` +
+        `${commas(c.l2BaseFeeMaxWei)} | ${commas(c.l1BaseFeeMinWei)}–${commas(c.l1BaseFeeMaxWei)} | ` +
+        `${usdE8(c.ethUsdMinE8)}–${usdE8(c.ethUsdMaxE8)} | ${usdE8(c.usdcUsdMinE8)}–${usdE8(c.usdcUsdMaxE8)} | ` +
+        `\`${c.gasSeriesDigest}\` |`,
+    );
+  }
+  out.push('');
+
+  return out.join('\n');
+}
 
 function eraTable(): string {
   const rows = ERAS_IN_ORDER.map((e) => {
@@ -243,6 +399,10 @@ export function renderReport(params: ReportParams): string {
           `${a.noTradeBandK} as a registered default and every P8 result is provisional. A value ` +
           `chosen because it moves a gate would not be a registration.`,
   );
+  out.push('');
+
+  // ---- Dataset and provenance, BEFORE the results. -------------------------
+  out.push(datasetProvenanceSection(params.provenance));
   out.push('');
 
   // ---- Results. -----------------------------------------------------------

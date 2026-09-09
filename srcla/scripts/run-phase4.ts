@@ -40,7 +40,7 @@ import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 import { loadEra, loadWarmup } from '../src/evaluation/dataset.js';
 import { loadGasSeries } from '../src/evaluation/gas-series.js';
-import { REGISTERED_ERAS, eraBounds, type EraTag } from '../src/evaluation/eras.js';
+import { REGISTERED_ERAS, ERAS_IN_ORDER, eraBounds, type EraTag } from '../src/evaluation/eras.js';
 import { loadRegisteredArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import {
@@ -51,11 +51,30 @@ import { NOT_OBSERVED, type HarnessConfig } from '../src/evaluation/kernel/decis
 import { buildRunRecord, manifestConfigForRun } from '../src/evaluation/kernel/provenance.js';
 import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
-import { renderReport, type RunSummary } from '../src/evaluation/report/render-markdown.js';
+import {
+  renderReport,
+  type RunSummary,
+  type DatasetProvenance,
+  type EraProvenanceRow,
+  type VenueProvenanceRow,
+  type CostRangeRow,
+} from '../src/evaluation/report/render-markdown.js';
+import { BASE, MARKET_IDS } from '../src/collector/archive/calls.js';
 import type { PolicyArtifact } from '../src/policy/types.js';
 
 const MANIFEST_VERSION = '1.0.0';
 const CALIBRATION_FRACTION = 0.7;
+/** Base mainnet. Not a deployment address -- this one is a global constant. */
+const BASE_CHAIN_ID = 8453;
+/** Matches `loadGasSeries`'s default -- so the L1/USDC ranges below describe
+ * exactly the row set the L2/ETH ranges and the digest were built from. */
+const GAS_LOOKBACK_SECONDS = 86_400;
+
+const VENUE_META: Record<string, { displayName: string; address: string }> = {
+  [MARKET_IDS.aave]: { displayName: 'Aave V3 Pool', address: BASE.aavePool },
+  [MARKET_IDS.compound]: { displayName: 'Compound III Comet', address: BASE.comet },
+  [MARKET_IDS.moonwell]: { displayName: 'Moonwell mUSDC', address: BASE.mToken },
+};
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -114,6 +133,162 @@ function worstTotalCashLiquidity(dataset: {
   return { worstTotalCashBase: worst.totalCashBase, observedAtIso: worst.timestamp.toISOString() };
 }
 
+/**
+ * The archive's ACTUAL per-era coverage -- distinct from `eraBounds()`,
+ * which reports what was DECLARED. Every figure comes from `MarketSnapshot`
+ * rows' own `blockNumber`/`timestamp`, denormalised `eraTag` included, never
+ * from the registered boundary dates.
+ */
+async function loadEraProvenance(prisma: PrismaClient): Promise<EraProvenanceRow[]> {
+  const rows = await prisma.marketSnapshot.findMany({
+    where: { eraTag: { not: null }, blockNumber: { not: null } },
+    distinct: ['eraTag', 'blockNumber'],
+    select: { eraTag: true, blockNumber: true, timestamp: true },
+    orderBy: [{ eraTag: 'asc' }, { blockNumber: 'asc' }],
+  });
+
+  const byEra = new Map<string, { blockNumber: bigint; timestamp: Date }[]>();
+  for (const r of rows) {
+    if (r.eraTag === null || r.blockNumber === null) continue;
+    const arr = byEra.get(r.eraTag) ?? [];
+    arr.push({ blockNumber: r.blockNumber, timestamp: r.timestamp });
+    byEra.set(r.eraTag, arr);
+  }
+
+  return ERAS_IN_ORDER.map((e): EraProvenanceRow => {
+    const originRows = (byEra.get(e.tag) ?? []).sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    );
+    if (originRows.length === 0) {
+      return {
+        era: e.tag,
+        firstDate: '—',
+        lastDate: '—',
+        firstBlock: '—',
+        lastBlock: '—',
+        origins: 0,
+        days: 0,
+        sealed: e.sealed,
+      };
+    }
+    const first = originRows[0]!;
+    const last = originRows[originRows.length - 1]!;
+    const days = Math.max(
+      1,
+      Math.round((last.timestamp.getTime() - first.timestamp.getTime()) / 86_400_000),
+    );
+    return {
+      era: e.tag,
+      firstDate: first.timestamp.toISOString().slice(0, 10),
+      lastDate: last.timestamp.toISOString().slice(0, 10),
+      firstBlock: first.blockNumber.toString(),
+      lastBlock: last.blockNumber.toString(),
+      origins: originRows.length,
+      days,
+      sealed: e.sealed,
+    };
+  });
+}
+
+/**
+ * The venue registry, with rates measured over the eras this run actually
+ * evaluated (`eraTag` is denormalised onto every row at write time, so this
+ * filters on the same predicate the sealing guard uses -- not a date range).
+ */
+async function loadVenueProvenance(
+  prisma: PrismaClient,
+  eras: readonly EraTag[],
+): Promise<VenueProvenanceRow[]> {
+  const marketIds = [MARKET_IDS.aave, MARKET_IDS.compound, MARKET_IDS.moonwell];
+  const out: VenueProvenanceRow[] = [];
+  for (const marketId of marketIds) {
+    const meta = VENUE_META[marketId]!;
+    const rows = await prisma.marketSnapshot.findMany({
+      where: { marketId, eraTag: { in: [...eras] } },
+      select: { supplyRateE18: true, configDigest: true, irmAddress: true },
+    });
+    if (rows.length === 0) {
+      out.push({
+        marketId,
+        displayName: meta.displayName,
+        address: meta.address,
+        apyMin: 0,
+        apyMean: 0,
+        apyMax: 0,
+        configRegimes: 0,
+        irmContracts: 0,
+      });
+      continue;
+    }
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+    const configs = new Set<string>();
+    const irms = new Set<string>();
+    for (const r of rows) {
+      // supplyRateE18 is already WAD-annualized (calls.ts); a display-only
+      // conversion, same lossy-Number convention as `pct()`/`usdc()` above.
+      const apy = Number(BigInt(r.supplyRateE18)) / 1e18;
+      if (apy < min) min = apy;
+      if (apy > max) max = apy;
+      sum += apy;
+      configs.add(r.configDigest);
+      if (r.irmAddress !== null) irms.add(r.irmAddress);
+    }
+    out.push({
+      marketId,
+      displayName: meta.displayName,
+      address: meta.address,
+      apyMin: min,
+      apyMean: sum / rows.length,
+      apyMax: max,
+      configRegimes: configs.size,
+      irmContracts: irms.size,
+    });
+  }
+  return out;
+}
+
+/**
+ * The L1 fee and USDC/USD ranges over exactly the row set `loadGasSeries`
+ * (called with its default lookback) built the L2/ETH ranges and the digest
+ * from -- so every column of the report's cost table describes one row set.
+ */
+async function loadL1AndUsdcRange(
+  prisma: PrismaClient,
+  start: Date,
+  end: Date,
+): Promise<{ l1BaseFeeMinWei: bigint; l1BaseFeeMaxWei: bigint; usdcUsdMinE8: bigint; usdcUsdMaxE8: bigint }> {
+  const rows = await prisma.chainCostSnapshot.findMany({
+    where: {
+      timestamp: {
+        gte: new Date(start.getTime() - GAS_LOOKBACK_SECONDS * 1000),
+        lte: end,
+      },
+    },
+    select: { l1BaseFeeWei: true, usdcUsdE8: true },
+  });
+  if (rows.length === 0) {
+    throw new Error(
+      `loadL1AndUsdcRange: no ChainCostSnapshot rows between ${start.toISOString()} and ` +
+        `${end.toISOString()}`,
+    );
+  }
+  let l1Min = BigInt(rows[0]!.l1BaseFeeWei);
+  let l1Max = l1Min;
+  let usdcMin = BigInt(rows[0]!.usdcUsdE8);
+  let usdcMax = usdcMin;
+  for (const r of rows) {
+    const l1 = BigInt(r.l1BaseFeeWei);
+    if (l1 < l1Min) l1Min = l1;
+    if (l1 > l1Max) l1Max = l1;
+    const usdc = BigInt(r.usdcUsdE8);
+    if (usdc < usdcMin) usdcMin = usdc;
+    if (usdc > usdcMax) usdcMax = usdc;
+  }
+  return { l1BaseFeeMinWei: l1Min, l1BaseFeeMaxWei: l1Max, usdcUsdMinE8: usdcMin, usdcUsdMaxE8: usdcMax };
+}
+
 /** Everything the JSON sidecar records for one era. */
 function serialisableRun(run: RunSummary): Record<string, unknown> {
   return {
@@ -156,7 +331,7 @@ async function runEra(
   tiers: readonly bigint[],
   commit: string,
   outDir: string,
-): Promise<RunSummary> {
+): Promise<{ run: RunSummary; costRow: CostRangeRow }> {
   const b = eraBounds(era);
   console.error('');
   console.error(`=== ERA ${era}: ${b.start} -> ${b.end} (${b.days}d) ===`);
@@ -247,18 +422,36 @@ async function runEra(
   writeFileSync(recordPath, JSON.stringify({ record }, null, 2) + '\n');
   console.error(`    run record -> ${recordPath} (verify: pnpm run evaluation:verify ${recordPath})`);
 
-  return {
+  const l1AndUsdc = await loadL1AndUsdcRange(prisma, start, end);
+  const costRow: CostRangeRow = {
     era,
-    evaluation,
-    gate,
-    datasetOrigins: dataset.snapshots.length,
-    provenance: {
-      codeCommit: record.codeCommit,
-      manifestHash: manifest.contentHashes.manifest,
-      datasetHash: manifest.contentHashes.dataset,
-      resultHash: record.resultHash,
-      gasSeriesDigest: gas.digest,
+    observations: gas.summary.observations,
+    l2BaseFeeMinWei: gas.summary.minL2BaseFeeWei,
+    l2BaseFeeMaxWei: gas.summary.maxL2BaseFeeWei,
+    l1BaseFeeMinWei: l1AndUsdc.l1BaseFeeMinWei.toString(),
+    l1BaseFeeMaxWei: l1AndUsdc.l1BaseFeeMaxWei.toString(),
+    ethUsdMinE8: gas.summary.minEthUsdE8,
+    ethUsdMaxE8: gas.summary.maxEthUsdE8,
+    usdcUsdMinE8: l1AndUsdc.usdcUsdMinE8.toString(),
+    usdcUsdMaxE8: l1AndUsdc.usdcUsdMaxE8.toString(),
+    gasSeriesDigest: gas.digest,
+  };
+
+  return {
+    run: {
+      era,
+      evaluation,
+      gate,
+      datasetOrigins: dataset.snapshots.length,
+      provenance: {
+        codeCommit: record.codeCommit,
+        manifestHash: manifest.contentHashes.manifest,
+        datasetHash: manifest.contentHashes.dataset,
+        resultHash: record.resultHash,
+        gasSeriesDigest: gas.digest,
+      },
     },
+    costRow,
   };
 }
 
@@ -309,14 +502,35 @@ async function main(): Promise<void> {
   try {
     const commit = codeCommit();
     const runs: RunSummary[] = [];
+    const costByEra: CostRangeRow[] = [];
     for (const era of eras) {
-      runs.push(await runEra(prisma, era, artifact, tiers, commit, outDir));
+      const { run, costRow } = await runEra(prisma, era, artifact, tiers, commit, outDir);
+      runs.push(run);
+      costByEra.push(costRow);
     }
+
+    console.error('');
+    console.error('[phase4] deriving dataset provenance (measured, not declared)...');
+    const eraProvenance = await loadEraProvenance(prisma);
+    const venueProvenance = await loadVenueProvenance(prisma, eras);
+    const provenance: DatasetProvenance = {
+      chainId: BASE_CHAIN_ID,
+      multicall3Address: BASE.multicall3,
+      gasOracleAddress: BASE.gasOracle,
+      ethUsdFeedAddress: BASE.ethUsdFeed,
+      usdcUsdFeedAddress: BASE.usdcUsdFeed,
+      usdcAddress: BASE.usdc,
+      usdcDecimals: 6,
+      eras: eraProvenance,
+      venues: venueProvenance,
+      costByEra,
+    };
 
     const markdown = renderReport({
       generatedAt: new Date().toISOString(),
       runs,
       notObserved: NOT_OBSERVED,
+      provenance,
       artifactSummary: {
         hash: artifact.artifactHash,
         method: artifact.method,

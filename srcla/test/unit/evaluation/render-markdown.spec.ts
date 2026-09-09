@@ -79,6 +79,108 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
   };
 }
 
+const provenance = {
+  chainId: 8453,
+  multicall3Address: '0xcA11bde05977b3631167028862bE2a173976CA11',
+  gasOracleAddress: '0x420000000000000000000000000000000000000F',
+  ethUsdFeedAddress: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
+  usdcUsdFeedAddress: '0x7e860098F58bBFC8648a4311b374B1D669a2bc6B',
+  usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  usdcDecimals: 6,
+  eras: [
+    {
+      era: 'calibration' as const,
+      firstDate: '2024-03-15',
+      lastDate: '2025-05-31',
+      firstBlock: '11707031',
+      lastBlock: '19999999',
+      origins: 10632,
+      days: 443,
+      sealed: false,
+    },
+    {
+      era: 'heldout-c' as const,
+      firstDate: '2026-03-01',
+      lastDate: '2026-05-25',
+      firstBlock: '25000000',
+      lastBlock: '26234567',
+      origins: 2064,
+      days: 86,
+      sealed: true,
+    },
+    {
+      era: 'heldout-b' as const,
+      firstDate: '2026-08-24',
+      lastDate: '2026-09-08',
+      firstBlock: '27000000',
+      lastBlock: '27123456',
+      origins: 384,
+      sealed: true,
+      days: 16,
+    },
+  ],
+  venues: [
+    {
+      marketId: 'aave-v3-usdc',
+      displayName: 'Aave V3 Pool',
+      address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
+      apyMin: 0.021,
+      apyMean: 0.034,
+      apyMax: 0.051,
+      configRegimes: 3,
+      irmContracts: 1,
+    },
+    {
+      marketId: 'compound-v3-usdc',
+      displayName: 'Compound III Comet',
+      address: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
+      apyMin: 0.018,
+      apyMean: 0.029,
+      apyMax: 0.047,
+      configRegimes: 2,
+      irmContracts: 1,
+    },
+    {
+      marketId: 'moonwell-usdc',
+      displayName: 'Moonwell mUSDC',
+      address: '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22',
+      apyMin: 0.015,
+      apyMean: 0.026,
+      apyMax: 0.044,
+      configRegimes: 4,
+      irmContracts: 2,
+    },
+  ],
+  costByEra: [
+    {
+      era: 'heldout-c' as const,
+      observations: 2064,
+      l2BaseFeeMinWei: '714160',
+      l2BaseFeeMaxWei: '3869277',
+      l1BaseFeeMinWei: '10000000',
+      l1BaseFeeMaxWei: '55000000',
+      ethUsdMinE8: '245000000000',
+      ethUsdMaxE8: '429000000000',
+      usdcUsdMinE8: '99980000',
+      usdcUsdMaxE8: '100020000',
+      gasSeriesDigest: '0xgas',
+    },
+    {
+      era: 'heldout-b' as const,
+      observations: 384,
+      l2BaseFeeMinWei: '800000',
+      l2BaseFeeMaxWei: '2900000',
+      l1BaseFeeMinWei: '12000000',
+      l1BaseFeeMaxWei: '40000000',
+      ethUsdMinE8: '250000000000',
+      ethUsdMaxE8: '410000000000',
+      usdcUsdMinE8: '99990000',
+      usdcUsdMaxE8: '100010000',
+      gasSeriesDigest: '0xgas2',
+    },
+  ],
+};
+
 const params = {
   generatedAt: '2026-09-08T00:00:00.000Z',
   runs: [fakeRun('heldout-c', false), fakeRun('heldout-b', false)],
@@ -93,6 +195,7 @@ const params = {
     calibrationEra: { start: '2024-09-01T00:00:00.000Z', end: '2025-08-31T23:59:59.000Z', days: 365 },
     perVenueCoverage: { 'aave-v3-usdc': 0.95, 'compound-v3-usdc': 0.95 },
   },
+  provenance,
 };
 
 describe('renderReport — mandatory disclosures', () => {
@@ -164,6 +267,52 @@ describe('renderReport — mandatory disclosures', () => {
 
   it('refuses to render with no run at all', () => {
     expect(() => renderReport({ ...params, runs: [] })).toThrow(/no run to report/i);
+  });
+
+  it('places dataset and provenance before the results', () => {
+    expect(md.indexOf('## Dataset and provenance')).toBeGreaterThan(-1);
+    expect(md.indexOf('## Dataset and provenance')).toBeLessThan(md.indexOf('## Results'));
+  });
+
+  it('states the chain, chainId and Multicall3 collection method, and the gap policy', () => {
+    expect(md).toMatch(/Base mainnet/);
+    expect(md).toContain('8453');
+    expect(md).toContain('aggregate3');
+    expect(md).toContain('0xcA11bde05977b3631167028862bE2a173976CA11');
+    expect(md).toMatch(/recorded as a gap and never interpolated/);
+  });
+
+  it('prints the measured per-era block range with thousands separators', () => {
+    expect(md).toContain('11,707,031');
+    expect(md).toContain('19,999,999');
+    expect(md).toContain('25,000,000');
+    expect(md).toContain('26,234,567');
+  });
+
+  it('prints the venue registry with contract addresses and market ids', () => {
+    expect(md).toContain('Aave V3 Pool');
+    expect(md).toContain('0xA238Dd80C259a72e81d7e4664a9801593F98d1c5');
+    expect(md).toContain('aave-v3-usdc');
+    expect(md).toContain('Compound III Comet');
+    expect(md).toContain('0xb125E6687d4313864e53df431d5425969c15Eb2F');
+    expect(md).toContain('Moonwell mUSDC');
+    expect(md).toContain('0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22');
+    expect(md).toContain('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+  });
+
+  it('shows per-venue observed APY range and regime/IRM-contract counts', () => {
+    expect(md).toMatch(/2\.10%/); // aave apyMin
+    expect(md).toMatch(/5\.10%/); // aave apyMax
+  });
+
+  it('states measured execution-cost inputs and their sources', () => {
+    expect(md).toMatch(/GasPriceOracle/);
+    expect(md).toContain('0x420000000000000000000000000000000000000F');
+    expect(md).toMatch(/Chainlink/);
+    expect(md).toContain('0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70');
+    expect(md).toContain('0x7e860098F58bBFC8648a4311b374B1D669a2bc6B');
+    expect(md).toContain('0xgas');
+    expect(md).toContain('0xgas2');
   });
 });
 
