@@ -1,8 +1,5 @@
-import { portfolioLowerBound } from './optimize.js';
-import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
 import type { CostGateResult, DecisionInput, MoveRecord, PolicyArtifact, RateCurve } from '../types.js';
 
-const WAD = 10n ** 18n;
 const WEI_PER_ETH = 10n ** 18n;
 
 /**
@@ -212,64 +209,6 @@ export function movementCostBase(
   return { totalBase, terms };
 }
 
-/**
- * P8 - the no-trade band k*sigma_hat.
- *
- * sigma_hat is "the calibrated dispersion of portfolio horizon residuals"
- * (§9.1), i.e. the magnitude of the SAME `q^p_alpha(w)` the P2 objective
- * uses - computed from the artifact's residual panel under the TARGET
- * weights, so a concentrated or higher-dispersion target widens the band
- * and a diversified one narrows it. It falls back to the frozen
- * `portfolioResidualQuantileWad` only when the artifact carries no panel.
- *
- * Why weight-dependent matters here: with the Phase 1 placeholder scalar
- * (sigma = 1e13 WAD, k = 1.0) a $1M move gave a band of about 10 USDC
- * against a C_move of roughly 800 USDC, so `max(C_move, k*sigma)` was
- * ALWAYS C_move and P8 was decorative - the number had been chosen to "stay
- * out of the way of any realistically-yielding venue" (readiness audit
- * NEW-8). A dispersion read off real residuals is on the same order as
- * C_move rather than 80x below it.
- *
- * k is the artifact's `noTradeBandK`, scaled by 1e6 for integer bigint
- * arithmetic since it is a float. CAVEAT: k itself is still uncalibrated -
- * §9.1 requires "a registered scalar multiplier fixed before held-out
- * evaluation" and the shipped 1.0 carries no registration note. Calibrating
- * it needs a held-out turnover/return sweep over a real dataset; it is not
- * something to pick so a gate passes.
- *
- * On a low-fee chain C_move alone does not suppress churn (paper §9.1); this
- * term is what actually does, so it must scale with the notional being
- * moved, not be a flat dollar constant.
- */
-export function noTradeBandBase(
-  _input: DecisionInput,
-  _curves: RateCurve[],
-  artifact: PolicyArtifact,
-  notionalBase: bigint,
-  target: ReadonlyMap<string, bigint> = new Map()
-): bigint {
-  const q = portfolioResidualQuantileFor(artifact, target);
-  const sigma = q < 0n ? -q : q;
-  const kFixed = BigInt(Math.round(artifact.noTradeBandK * 1_000_000));
-  return (sigma * notionalBase * kFixed) / (WAD * 1_000_000n);
-}
-
-/** Diffs `target` against `current` into the discrete moves the cost model prices. */
-function movesFrom(current: Map<string, bigint>, target: Map<string, bigint>, input: DecisionInput): Move[] {
-  const moves: Move[] = [];
-  const ids = [...new Set([...current.keys(), ...target.keys()])].sort();
-  for (const id of ids) {
-    // Signed by construction (a divest is negative); branched on sign below
-    // before ever being used as a magnitude, so this is never treated as an
-    // unsigned quantity that could silently go negative.
-    const delta = (target.get(id) ?? 0n) - (current.get(id) ?? 0n);
-    if (delta === 0n) continue;
-    const adapter = input.markets.find((m) => m.marketId === id)?.adapter ?? id;
-    moves.push({ adapter, amountBase: delta > 0n ? delta : -delta, kind: delta > 0n ? 'deploy' : 'divest' });
-  }
-  return moves;
-}
-
 const abs = (v: bigint): bigint => (v < 0n ? -v : v);
 
 /**
@@ -405,66 +344,23 @@ export function clampToTurnoverBudget(
   return clamped;
 }
 
+/**
+ * SUPERSEDED (P13/P15/P16). This compared a horizon-return gain against
+ * `max(C_move, k*sigma)` — a threshold that moved with the forecast horizon
+ * and double-charged forecast dispersion (once in the objective's lower
+ * bound, again as the band). `steps/hurdles.ts`'s `deployClears`/
+ * `rotateClears` are the replacement, stated in annualised rate units. Task
+ * 4 rewires every caller (`decide.ts` among them) onto those two functions
+ * and removes this stub entirely; until then it throws rather than silently
+ * returning a `CostGateResult` computed from logic that no longer exists.
+ */
 export function costGate(
-  input: DecisionInput,
-  curves: RateCurve[],
-  artifact: PolicyArtifact,
-  current: Map<string, bigint>,
-  target: Map<string, bigint>,
-  p: CostParams
+  _input: DecisionInput,
+  _curves: RateCurve[],
+  _artifact: PolicyArtifact,
+  _current: Map<string, bigint>,
+  _target: Map<string, bigint>,
+  _p: CostParams
 ): CostGateResult {
-  const moves = movesFrom(current, target, input);
-  const notional = moves.reduce((s, m) => s + m.amountBase, 0n);
-  const { totalBase: moveCostBase, terms } = movementCostBase(input, moves, p);
-  const bandBase = noTradeBandBase(input, curves, artifact, notional, target);
-
-  // Signed difference of two conservative lower bounds: legitimately
-  // negative when the target is worse than the status quo (a loss), which
-  // the threshold comparison below handles correctly without clamping.
-  const gainBase =
-    portfolioLowerBound(input, curves, artifact, target) -
-    portfolioLowerBound(input, curves, artifact, current);
-
-  const fail = (reason: string): CostGateResult =>
-    ({ passed: false, reason, gainBase, moveCostBase, bandBase, terms });
-
-  if (moves.length === 0) return fail('NO_MOVES: target equals current');
-
-  const last = input.lastAction.timestampSeconds;
-  if (last !== null && input.origin.timestampSeconds - last < p.cooldownSeconds) {
-    return fail(`COOLDOWN: ${input.origin.timestampSeconds - last}s < ${p.cooldownSeconds}s`);
-  }
-
-  const minTurnover = (input.vault.totalAssetsBase * BigInt(p.minTurnoverBps)) / 10_000n;
-  if (notional < minTurnover) return fail(`MIN_TURNOVER: ${notional} < ${minTurnover}`);
-
-  const maxTurnover = (input.vault.totalAssetsBase * BigInt(p.maxTurnoverBps)) / 10_000n;
-  if (input.lastAction.turnoverWindowBase + notional > maxTurnover) {
-    return fail(
-      `MAX_TURNOVER: ${notional} would push the ${p.turnoverWindowSeconds}s rolling window ` +
-        `(${input.lastAction.turnoverWindowBase} already moved) above ${maxTurnover}`
-    );
-  }
-
-  const churn = reversalChurnBase(
-    input.lastAction.recentMoves,
-    signedDeltas(current, target),
-    input.origin.timestampSeconds,
-    p.reversalWindowSeconds
-  );
-  const reversalAllowance = (input.vault.totalAssetsBase * BigInt(p.reversalAllowanceBps)) / 10_000n;
-  if (churn > reversalAllowance) {
-    return fail(
-      `REVERSAL_ALLOWANCE: round-trip churn ${churn} over ${p.reversalWindowSeconds}s ` +
-        `exceeds the allowance ${reversalAllowance}`
-    );
-  }
-
-  const threshold = moveCostBase > bandBase ? moveCostBase : bandBase;
-  if (gainBase <= threshold) {
-    const which = bandBase >= moveCostBase ? 'NO_TRADE_BAND' : 'MOVE_COST';
-    return fail(`${which}: gain ${gainBase} <= threshold ${threshold}`);
-  }
-
-  return { passed: true, reason: 'GAIN_EXCEEDS_THRESHOLD', gainBase, moveCostBase, bandBase, terms };
+  throw new Error('costGate superseded by hurdles.ts; see plan Task 4');
 }

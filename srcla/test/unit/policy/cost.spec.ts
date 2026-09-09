@@ -1,12 +1,9 @@
 import {
   MOVE_COST_TERMS,
   movementCostBase,
-  noTradeBandBase,
-  costGate,
   reversalChurnBase,
 } from '../../../src/policy/steps/cost.js';
-import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
-import type { DecisionInput, MarketObservation, PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
+import type { DecisionInput, MarketObservation } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
 const Q = 1_000_000_000n;
@@ -63,16 +60,6 @@ function input(
     },
   };
 }
-
-function curve(id: string, rate: bigint): RateCurve {
-  return { marketId: id, quantumBase: Q, points: [rate, rate, rate, rate, rate], maxXBase: Q * 4n };
-}
-
-const artifact = (): PolicyArtifact => ({
-  ...loadBootstrapArtifact(),
-  residualQuantileWadByMarket: { a: 0n, b: 0n },
-  noTradeBandK: 1.0,
-});
 
 const PARAMS = {
   cooldownSeconds: 3600,
@@ -248,90 +235,6 @@ describe('movementCostBase - pure-execution cost anchor', () => {
   });
 });
 
-describe('costGate', () => {
-  it('blocks while inside the cooldown window', () => {
-    const i = input([market('a', { positionBase: 0n })], 999_000); // 1000s ago, cooldown 3600
-    const r = costGate(i, [curve('a', WAD / 10n)], artifact(), new Map([['a', 0n]]), new Map([['a', Q * 4n]]), PARAMS);
-    expect(r.passed).toBe(false);
-    expect(r.reason).toContain('COOLDOWN');
-  });
-
-  it('blocks a move whose turnover is below the minimum', () => {
-    const i = input([market('a')]);
-    const r = costGate(i, [curve('a', WAD / 10n)], artifact(), new Map([['a', 0n]]), new Map([['a', 1n]]), PARAMS);
-    expect(r.passed).toBe(false);
-    expect(r.reason).toContain('MIN_TURNOVER');
-  });
-
-  it('blocks a move whose turnover exceeds the maximum', () => {
-    const i = input([market('a')]);
-    const r = costGate(i, [curve('a', WAD / 10n)], artifact(), new Map([['a', 0n]]), new Map([['a', 9_000_000_000n]]), PARAMS);
-    expect(r.passed).toBe(false);
-    expect(r.reason).toContain('MAX_TURNOVER');
-  });
-
-  // REPAIRED FIXTURE — see task-9-report.md "Fixture audit" for the full
-  // derivation. The brief's original numbers (portfolioResidualQuantileWad
-  // = -(WAD/100), curve rate WAD/1000, target Q*2) produce a NEGATIVE
-  // gainBase (~ -19.96M base units) that never clears moveCostBase (~2.53M
-  // base units) in the first place, so the test would pass vacuously — it
-  // would report NO_TRADE_BAND as the reason regardless of whether the band
-  // logic is correct, because MOVE_COST would have failed it too. This
-  // version uses a smaller quantile (WAD/100_000) and a higher curve rate
-  // (WAD/10) so gainBase (~3.82M) genuinely clears moveCostBase (~2.53M)
-  // while a large noTradeBandK (1000) still pushes bandBase (~20M) above
-  // both gainBase and moveCostBase — the band is what blocks it, and only
-  // the band.
-  it('blocks a gain that clears cost but not the uncertainty band (P8)', () => {
-    const i = input([market('a')]);
-    const a = { ...artifact(), portfolioResidualQuantileWad: -(WAD / 100_000n), noTradeBandK: 1000 };
-    const r = costGate(i, [curve('a', WAD / 10n)], a, new Map([['a', 0n]]), new Map([['a', Q * 2n]]), PARAMS);
-    expect(r.passed).toBe(false);
-    expect(r.reason).toContain('NO_TRADE_BAND');
-    expect(r.bandBase).toBeGreaterThan(r.moveCostBase);
-    // The defining property this test exists to prove: the gain clears
-    // C_move on its own. Without this, "blocked by NO_TRADE_BAND" would be
-    // consistent with the move also failing on cost alone.
-    expect(r.gainBase).toBeGreaterThan(r.moveCostBase);
-  });
-
-  it('passes a clearly profitable move outside cooldown', () => {
-    const i = input([market('a')]);
-    const a = { ...artifact(), noTradeBandK: 0 };
-    const r = costGate(i, [curve('a', WAD / 2n)], a, new Map([['a', 0n]]), new Map([['a', Q * 4n]]), PARAMS);
-    expect(r.passed).toBe(true);
-    expect(r.gainBase).toBeGreaterThan(r.moveCostBase);
-  });
-
-  it('is deterministic', () => {
-    const i = input([market('a')]);
-    const args: Parameters<typeof costGate> = [
-      i, [curve('a', WAD / 2n)], artifact(), new Map([['a', 0n]]), new Map([['a', Q * 4n]]), PARAMS,
-    ];
-    expect(costGate(...args)).toEqual(costGate(...args));
-  });
-});
-
-describe('noTradeBandBase', () => {
-  it('scales linearly with notional and with the artifact dispersion quantile', () => {
-    const i = input([market('a')]);
-    const a = { ...artifact(), portfolioResidualQuantileWad: -(WAD / 100n), noTradeBandK: 2 };
-
-    const base = noTradeBandBase(i, [curve('a', WAD / 10n)], a, Q);
-    const doubleNotional = noTradeBandBase(i, [curve('a', WAD / 10n)], a, Q * 2n);
-    expect(doubleNotional).toBe(base * 2n);
-
-    const wideDispersion = { ...a, portfolioResidualQuantileWad: -(WAD / 50n) }; // 2x |quantile|
-    expect(noTradeBandBase(i, [curve('a', WAD / 10n)], wideDispersion, Q)).toBe(base * 2n);
-  });
-
-  it('is zero when noTradeBandK is zero', () => {
-    const i = input([market('a')]);
-    const a = { ...artifact(), noTradeBandK: 0 };
-    expect(noTradeBandBase(i, [curve('a', WAD / 10n)], a, Q * 5n)).toBe(0n);
-  });
-});
-
 /**
  * §9.1's third churn brake (readiness audit NEW-19: "Reversal allowance does
  * not exist at all — grep for `reversal` returns nothing in src or test").
@@ -421,88 +324,6 @@ describe('reversalChurnBase', () => {
   it('ignores a record stamped after the origin', () => {
     const future = [{ marketId: 'a', deltaBase: 500n, timestampSeconds: 1_000_001 }];
     expect(reversalChurnBase(future, proposed([['a', -500n]]), 1_000_000, 86_400)).toBe(0n);
-  });
-});
-
-describe('costGate churn brakes read persisted history (NEW-19)', () => {
-  // Every case here supplies REAL history. The bug was that the production
-  // driver supplied none, so a gate that only ever saw an empty history was
-  // indistinguishable from a gate that did not exist.
-  const profitable = () => ({ ...artifact(), noTradeBandK: 0 });
-
-  it('MAX_TURNOVER fires on turnover already spent in the rolling window', () => {
-    // Vault 10,000 USDC; maxTurnoverBps 5000 -> 5,000 USDC allowed. A move
-    // of 4,000 alone passes; with 2,000 already spent it must not.
-    const alone = costGate(
-      input([market('a')]),
-      [curve('a', WAD / 2n)],
-      profitable(),
-      new Map([['a', 0n]]),
-      new Map([['a', Q * 4n]]),
-      PARAMS
-    );
-    expect(alone.passed).toBe(true);
-
-    const withHistory = costGate(
-      input([market('a')], null, { turnoverWindowBase: Q * 2n }),
-      [curve('a', WAD / 2n)],
-      profitable(),
-      new Map([['a', 0n]]),
-      new Map([['a', Q * 4n]]),
-      PARAMS
-    );
-    expect(withHistory.passed).toBe(false);
-    expect(withHistory.reason).toContain('MAX_TURNOVER');
-    // The message names the window it applied, so a rejection is never
-    // attributed to a bound the gate did not use.
-    expect(withHistory.reason).toContain(String(PARAMS.turnoverWindowSeconds));
-  });
-
-  it('REVERSAL_ALLOWANCE blocks undoing a recent move, and only that', () => {
-    // Vault 10,000 USDC; reversalAllowanceBps 200 -> 200 USDC of churn.
-    // A recent +2,000 into `a` followed by a proposed exit is 4,000 of churn.
-    const reversing = costGate(
-      input([market('a', { positionBase: Q * 2n })], null, {
-        recentMoves: [{ marketId: 'a', deltaBase: Q * 2n, timestampSeconds: 999_000 }],
-      }),
-      [curve('a', WAD / 2n)],
-      profitable(),
-      new Map([['a', Q * 2n]]),
-      new Map([['a', 0n]]),
-      PARAMS
-    );
-    expect(reversing.passed).toBe(false);
-    expect(reversing.reason).toContain('REVERSAL_ALLOWANCE');
-
-    // The SAME history with a move in the SAME direction is not a reversal
-    // and must not be charged: this is what separates the allowance from a
-    // second turnover cap.
-    const continuing = costGate(
-      input([market('a', { positionBase: Q * 2n })], null, {
-        recentMoves: [{ marketId: 'a', deltaBase: Q * 2n, timestampSeconds: 999_000 }],
-      }),
-      [curve('a', WAD / 2n)],
-      profitable(),
-      new Map([['a', Q * 2n]]),
-      new Map([['a', Q * 4n]]),
-      PARAMS
-    );
-    expect(continuing.passed).toBe(true);
-  });
-
-  it('the reversal gate is inert only because there is no history', () => {
-    // Same reversal, empty recentMoves: nothing to reverse, so it passes.
-    // Stated explicitly so a future regression to a permanently-empty
-    // history cannot masquerade as "the gate approves this move".
-    const r = costGate(
-      input([market('a', { positionBase: Q * 2n })]),
-      [curve('a', WAD / 2n)],
-      profitable(),
-      new Map([['a', Q * 2n]]),
-      new Map([['a', 0n]]),
-      PARAMS
-    );
-    expect(r.reason).not.toContain('REVERSAL_ALLOWANCE');
   });
 });
 

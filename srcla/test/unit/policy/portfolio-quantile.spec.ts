@@ -1,16 +1,14 @@
 /**
- * P2's `q^p_alpha(w)` and P8's band (paper §8.2, §9.1).
+ * P2's `q^p_alpha(w)` (paper §8.2).
  *
- * The two defects these exist to prevent coming back:
+ * NEW-7 — the portfolio quantile was `frozenScalar * notional`, invariant to
+ * the MIX. Two candidates deploying the same total in different proportions
+ * received an identical term, so P2 could never change a ranking. The tests
+ * below fail if the quantile stops depending on w.
  *
- *  NEW-7 — the portfolio quantile was `frozenScalar * notional`, invariant to
- *  the MIX. Two candidates deploying the same total in different proportions
- *  received an identical term, so P2 could never change a ranking. The tests
- *  below fail if the quantile stops depending on w.
- *
- *  NEW-8 — P8's band used the same frozen scalar, sized so it "stays out of
- *  the way", making `max(C_move, k*sigma)` always `C_move`. The band tests
- *  fail if the band stops responding to the target's dispersion.
+ * P8's no-trade band (`noTradeBandBase`, ex-NEW-8) lived here too until
+ * P13/P15/P16 replaced it with the two annualised hurdles in
+ * `steps/hurdles.ts` — see that module and `test/unit/policy/hurdles.spec.ts`.
  */
 import {
   buildResidualPanel,
@@ -20,7 +18,6 @@ import {
   portfolioWeightsWad,
 } from '../../../src/policy/steps/portfolio-quantile.js';
 import { portfolioLowerBound } from '../../../src/policy/steps/optimize.js';
-import { noTradeBandBase } from '../../../src/policy/steps/cost.js';
 import type {
   DecisionInput,
   PolicyArtifact,
@@ -329,58 +326,3 @@ describe('portfolioLowerBound with a calibrated quantile', () => {
   });
 });
 
-describe('noTradeBandBase', () => {
-  const NOTIONAL = 1_000_000_000_000n; // 1,000,000 USDC
-
-  // THE NEW-8 defect: the band was a constant fraction of notional, so it
-  // could never be the binding term and P8 was decorative.
-  it('widens for a concentrated high-dispersion target', () => {
-    const concentrated = noTradeBandBase(INPUT, CURVES, artifact(), NOTIONAL, mix(1000n, 0n));
-    const diversified = noTradeBandBase(INPUT, CURVES, artifact(), NOTIONAL, mix(700n, 300n));
-
-    expect(concentrated).toBeGreaterThan(diversified);
-  });
-
-  it('narrows for a target in the LOW-dispersion venue', () => {
-    // `b`'s worst residual is -1e14 against `a`'s -5e14, so the same
-    // notional moved into `b` faces a fifth of the band. A constant times
-    // notional cannot express this.
-    const inB = noTradeBandBase(INPUT, CURVES, artifact(), NOTIONAL, mix(0n, 1000n));
-    const inA = noTradeBandBase(INPUT, CURVES, artifact(), NOTIONAL, mix(1000n, 0n));
-
-    expect(inB).toBe(100_000_000n); // 100 USDC
-    expect(inA).toBe(inB * 5n);
-  });
-
-  it('scales linearly with k', () => {
-    const one = noTradeBandBase(INPUT, CURVES, artifact({ noTradeBandK: 1 }), NOTIONAL, mix(1000n, 0n));
-    const two = noTradeBandBase(INPUT, CURVES, artifact({ noTradeBandK: 2 }), NOTIONAL, mix(1000n, 0n));
-
-    expect(two).toBe(one * 2n);
-  });
-
-  it('is zero when k is zero', () => {
-    expect(
-      noTradeBandBase(INPUT, CURVES, artifact({ noTradeBandK: 0 }), NOTIONAL, mix(1000n, 0n)),
-    ).toBe(0n);
-  });
-
-  // The size claim. C_move on a $1M Base move is ~800 USDC (8 bps of
-  // notional from impact + slippage + MEV). With the shipped placeholder
-  // (sigma = 1e13 WAD, k = 1) the band was ~10 USDC — about 80x too small to
-  // ever bind. A dispersion read off real residuals is the same order as
-  // C_move.
-  it('is orders of magnitude larger than the Phase 1 placeholder band', () => {
-    const placeholder = artifact({ portfolioResidualQuantileWad: -1n * 10n ** 13n });
-    delete (placeholder as { residualPanel?: ResidualPanel }).residualPanel;
-
-    const placeholderBand = noTradeBandBase(INPUT, CURVES, placeholder, NOTIONAL, mix(1000n, 0n));
-    const calibratedBand = noTradeBandBase(INPUT, CURVES, artifact(), NOTIONAL, mix(1000n, 0n));
-
-    expect(placeholderBand).toBe(10_000_000n); // 10 USDC
-    expect(calibratedBand).toBeGreaterThan(placeholderBand * 20n);
-    // 500 USDC: the same order as C_move, so `max(C_move, k*sigma)` can
-    // actually be the band rather than always being C_move.
-    expect(calibratedBand).toBe(500_000_000n);
-  });
-});
