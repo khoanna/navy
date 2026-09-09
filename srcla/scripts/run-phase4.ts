@@ -25,7 +25,7 @@
  *   DATABASE_URL=... pnpm exec tsx scripts/run-phase4.ts \
  *     [--artifact config/registered-artifact.json] \
  *     [--tiers 10000,100000,1000000,10000000] \
- *     [--eras heldout-a,heldout-b] \
+ *     [--eras heldout-c,heldout-b] \
  *     [--out-dir .]
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
@@ -86,6 +86,28 @@ function harnessConfig(gas: HarnessConfig['gas'], artifact: PolicyArtifact): Har
     horizonSeconds: artifact.horizonSeconds,
     availabilityLagSeconds: artifact.availabilityLagSeconds,
   };
+}
+
+/**
+ * §11.4's stress demand is 50% of TVL; the venue universe can supply only
+ * what the three venues held in `cashBase`, summed, at their single worst
+ * origin. Computed from THIS era's own snapshots -- $3.6M is held-out A's
+ * number, not a constant, and a different era's worst moment differs.
+ */
+function worstTotalCashLiquidity(dataset: {
+  snapshots: readonly { timestamp: Date; snapshots: readonly { cashBase: bigint }[] }[];
+}): { worstTotalCashBase: bigint; observedAtIso: string } {
+  let worst: { totalCashBase: bigint; timestamp: Date } | undefined;
+  for (const origin of dataset.snapshots) {
+    const totalCashBase = origin.snapshots.reduce((sum, s) => sum + s.cashBase, 0n);
+    if (worst === undefined || totalCashBase < worst.totalCashBase) {
+      worst = { totalCashBase, timestamp: origin.timestamp };
+    }
+  }
+  if (worst === undefined) {
+    throw new Error('worstTotalCashLiquidity: dataset has no origins');
+  }
+  return { worstTotalCashBase: worst.totalCashBase, observedAtIso: worst.timestamp.toISOString() };
 }
 
 /** Everything the JSON sidecar records for one era. */
@@ -196,7 +218,12 @@ async function runEra(
     { snapshots: dataset.snapshots, withdrawals: dataset.withdrawals ?? [] },
   );
   const record = buildRunRecord({ codeCommit: commit, manifest, evaluation });
-  const gate = evaluateRegisteredRelease(evaluation);
+  const universeLiquidity = worstTotalCashLiquidity(dataset);
+  console.error(
+    `    worst-case venue universe: $${(universeLiquidity.worstTotalCashBase / 1_000_000n).toString()} ` +
+      `(observed ${universeLiquidity.observedAtIso})`,
+  );
+  const gate = evaluateRegisteredRelease(evaluation, { universeLiquidity });
 
   for (const c of gate.checks) {
     const mark = c.passed === true ? 'OK          ' : c.passed === false ? 'FAILED      ' : 'NOT PRODUCED';
@@ -238,7 +265,7 @@ async function main(): Promise<void> {
   // sitting beside a stale tracked one, which is the shape of mistake where
   // someone later cites the wrong file.
   const outDir = arg('out-dir') ?? '..';
-  const eras = (arg('eras') ?? 'heldout-a,heldout-b').split(',').map((e) => e.trim()) as EraTag[];
+  const eras = (arg('eras') ?? 'heldout-c,heldout-b').split(',').map((e) => e.trim()) as EraTag[];
   const tiers = arg('tiers')
     ? arg('tiers')!.split(',').map((t) => BigInt(t.trim()) * 1_000_000n)
     : REGISTERED_TIERS;

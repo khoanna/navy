@@ -272,6 +272,81 @@ describe('evaluateRegisteredRelease: safety', () => {
   });
 });
 
+describe('§11.4 capacity infeasibility', () => {
+  // srcla alone is sub-threshold at the 10,000,000 tier -- §11.4's 50%-of-TVL
+  // demand there ($5,000,000) exceeds the supplied worst-case venue universe
+  // ($3,617,388), so no policy could have satisfied it.
+  const resultWithLowCoverageAt10M: RegisteredEvaluationResult = evaluation({
+    results: completeResults((id, tier) =>
+      id === 'srcla' && tier === 10_000_000_000_000n ? { minStressed: 0.4 } : {},
+    ),
+  });
+
+  // Same shape, but at the 10,000 tier: 50% of TVL there is $5,000, trivially
+  // covered by any realistic venue universe -- so a low reading is a genuine
+  // policy defect, not a capacity ceiling.
+  const resultWithLowCoverageAt10k: RegisteredEvaluationResult = evaluation({
+    results: completeResults((id, tier) =>
+      id === 'srcla' && tier === 10_000_000_000n ? { minStressed: 0.4 } : {},
+    ),
+  });
+
+  it('names a tier whose stress demand exceeds the venue universe', () => {
+    const out = evaluateRegisteredRelease(resultWithLowCoverageAt10M, {
+      universeLiquidity: { worstTotalCashBase: 3_617_388_000_000n, observedAtIso: '2026-01-01T00:00:00Z' },
+    });
+    const check = out.checks.find((c) => c.name.includes('stressed liquid coverage'))!;
+    expect(check.detail).toMatch(/CAPACITY_INFEASIBLE/);
+    expect(check.detail).toContain('3617388');
+  });
+
+  it('does NOT pass — the gate still blocks', () => {
+    // P12 must not read as gate-softening. `passed: null` never rolls up.
+    const out = evaluateRegisteredRelease(resultWithLowCoverageAt10M, {
+      universeLiquidity: { worstTotalCashBase: 3_617_388_000_000n, observedAtIso: '2026-01-01T00:00:00Z' },
+    });
+    const check = out.checks.find((c) => c.name.includes('stressed liquid coverage'))!;
+    expect(check.passed).not.toBe(true);
+    expect(out.pass).toBe(false);
+    expect(out.blockedReasons).toContain('Safety: stressed liquid coverage');
+  });
+
+  it('still reports a plain FAIL where the tier IS satisfiable', () => {
+    // A small tier with poor coverage is a policy failure, not a capacity one.
+    const out = evaluateRegisteredRelease(resultWithLowCoverageAt10k, {
+      universeLiquidity: { worstTotalCashBase: 100_000_000_000_000n, observedAtIso: '2026-01-01T00:00:00Z' },
+    });
+    const check = out.checks.find((c) => c.name.includes('stressed liquid coverage'))!;
+    expect(check.passed).toBe(false);
+    expect(check.detail).not.toMatch(/CAPACITY_INFEASIBLE/);
+  });
+
+  it('behaves exactly as before when no universeLiquidity is supplied', () => {
+    const out = evaluateRegisteredRelease(resultWithLowCoverageAt10M);
+    const check = out.checks.find((c) => c.name.includes('stressed liquid coverage'))!;
+    expect(check.passed).toBe(false);
+  });
+
+  it('does not mask a genuine failure at a satisfiable tier with an infeasible tier elsewhere', () => {
+    // srcla is sub-threshold at BOTH the 10,000 tier (satisfiable) and the
+    // 10,000,000 tier (infeasible against this universe). One genuine
+    // failure anywhere in the batch must keep the whole check `false`.
+    const mixed = evaluation({
+      results: completeResults((id, tier) =>
+        id === 'srcla' && (tier === 10_000_000_000n || tier === 10_000_000_000_000n)
+          ? { minStressed: 0.4 }
+          : {},
+      ),
+    });
+    const out = evaluateRegisteredRelease(mixed, {
+      universeLiquidity: { worstTotalCashBase: 3_617_388_000_000n, observedAtIso: '2026-01-01T00:00:00Z' },
+    });
+    const check = out.checks.find((c) => c.name.includes('stressed liquid coverage'))!;
+    expect(check.passed).toBe(false);
+    expect(check.detail).not.toMatch(/CAPACITY_INFEASIBLE/);
+  });
+});
+
 describe('evaluateRegisteredRelease: attribution', () => {
   it('BLOCKS a provisional artifact', () => {
     const gate = evaluateRegisteredRelease(evaluation({ provisional: true, artifact: artifact(true) }), {

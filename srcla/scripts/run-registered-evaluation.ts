@@ -17,7 +17,7 @@
  *
  * Usage:
  *   DATABASE_URL=... tsx scripts/run-registered-evaluation.ts \
- *     --era heldout-a [--tiers 10000,100000] [--out file.json]
+ *     --era heldout-c [--tiers 10000,100000] [--out file.json]
  *   DATABASE_URL=... tsx scripts/run-registered-evaluation.ts \
  *     --start 2026-06-01 --end 2026-08-23 ...
  *

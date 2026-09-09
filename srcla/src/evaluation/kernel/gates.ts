@@ -99,6 +99,18 @@ export interface RegisteredGateOptions {
   /** Registered bootstrap seed; exposed so a report can restate it. */
   bootstrapSeed?: number;
   bootstrapIterations?: number;
+  /**
+   * §11.4's stress demand is `tier * 50%`. Some tiers ask for more
+   * instantly-withdrawable liquidity than the three venues, at their
+   * worst-observed moment, ever held simultaneously -- that is arithmetic
+   * about §2.1's locked venue set, not a property of the policy being
+   * gated. When supplied, a tier whose demand exceeds this worst-case
+   * venue total is partitioned out of "policy failed the coverage check"
+   * and into `CAPACITY_INFEASIBLE` (see the coverage check below). Omit it
+   * and every sub-threshold run is treated as a plain policy failure, same
+   * as before this option existed.
+   */
+  universeLiquidity?: { worstTotalCashBase: bigint; observedAtIso: string };
 }
 
 const check = (name: string, passed: boolean | null, detail: string): RegisteredGateCheck => ({
@@ -228,15 +240,7 @@ export function evaluateRegisteredRelease(
   );
 
   const squeezed = out.results.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
-  checks.push(
-    check(
-      'Safety: stressed liquid coverage',
-      squeezed.length === 0,
-      squeezed.length === 0
-        ? `>= ${minStressed} across ${out.results.length} runs`
-        : squeezed.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', '),
-    ),
-  );
+  checks.push(stressedLiquidCoverageCheck(squeezed, out.results.length, minStressed, opts.universeLiquidity));
 
   // 4. An INERT ablation removed nothing on this dataset: its decision
   //    sequence is byte-identical to SRCLA's, so any delta reported for it is
@@ -359,3 +363,80 @@ export function evaluateRegisteredRelease(
 }
 
 const label = (r: PolicyRunResult): string => `${r.policy.id}@${r.tier}`;
+
+/** §11.4's stress demand for a tier: 50% of TVL, in USDC base units. */
+const stressDemandBase = (tier: bigint): bigint => (tier * 5_000n) / 10_000n;
+
+/** Base units (6 dp) rendered as a whole-dollar figure, no separators -- matches how tests match it. */
+const usd = (base: bigint): string => (base / 1_000_000n).toString();
+
+/**
+ * §11.4 safety: every run's worst stressed-liquid coverage must clear
+ * `minStressed`. A sub-threshold run is either a genuine policy failure or,
+ * when `universeLiquidity` is supplied and the tier's stress demand exceeds
+ * what the three venues held at their worst moment, CAPACITY_INFEASIBLE --
+ * no policy could have satisfied it, because the shortfall is arithmetic
+ * about §2.1's locked venue set, not an allocation choice.
+ *
+ * ORDERING, load-bearing: a run only becomes CAPACITY_INFEASIBLE when EVERY
+ * sub-threshold run is at an infeasible tier. One genuine failure anywhere
+ * in the batch makes the whole check `false`, never `null` -- a real policy
+ * defect at a satisfiable tier must not be laundered by an infeasible tier
+ * elsewhere in the same run.
+ *
+ * CAPACITY_INFEASIBLE reports `passed: null`, exactly like NOT PRODUCED.
+ * `pass` downstream is `checks.every(c => c.passed === true)`, so `null`
+ * NEVER rolls up into a pass -- the gate still blocks. This function must
+ * never return `passed: true` for a batch that contains any sub-threshold
+ * run, capacity-infeasible or not.
+ */
+function stressedLiquidCoverageCheck(
+  squeezed: readonly PolicyRunResult[],
+  totalRuns: number,
+  minStressed: number,
+  universeLiquidity: RegisteredGateOptions['universeLiquidity'],
+): RegisteredGateCheck {
+  const name = 'Safety: stressed liquid coverage';
+  if (squeezed.length === 0) {
+    return check(name, true, `>= ${minStressed} across ${totalRuns} runs`);
+  }
+
+  if (universeLiquidity === undefined) {
+    return check(
+      name,
+      false,
+      squeezed.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', '),
+    );
+  }
+
+  const { worstTotalCashBase, observedAtIso } = universeLiquidity;
+  const isInfeasible = (tier: bigint): boolean => stressDemandBase(tier) > worstTotalCashBase;
+
+  const genuine = squeezed.filter((r) => !isInfeasible(r.tier));
+  const infeasible = squeezed.filter((r) => isInfeasible(r.tier));
+
+  if (genuine.length > 0) {
+    // At least one sub-threshold run is at a SATISFIABLE tier: a real policy
+    // failure. Report it as such even if other runs in the same batch are
+    // capacity-infeasible -- that never masks this.
+    return check(
+      name,
+      false,
+      genuine.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', '),
+    );
+  }
+
+  // Every sub-threshold run is at a tier no venue universe of this size
+  // could have satisfied. `passed: null`, same family as NOT PRODUCED --
+  // never `true`.
+  const infeasibleTiers = [...new Set(infeasible.map((r) => r.tier))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const detail = infeasibleTiers
+    .map(
+      (tier) =>
+        `tier ${tier.toString()} needs $${usd(stressDemandBase(tier))} stressed-liquid but the venue ` +
+        `universe held only $${usd(worstTotalCashBase)} at its worst (observed ${observedAtIso}): ` +
+        `CAPACITY_INFEASIBLE`,
+    )
+    .join('; ');
+  return check(name, null, detail);
+}
