@@ -162,13 +162,25 @@ function findDeployThreshold(
   let hi = WAD;
   for (let i = 0; i < 100; i++) {
     const mid = (lo + hi) / 2n;
-    const clears = deployClears(input, art, flatCurve(mid, marketId), marketId, amountBase, p).clears;
+    const clears = deployClears(input, art, flatCurve(mid, marketId), marketId, amountBase, amountBase, p).clears;
     if (clears) hi = mid;
     else lo = mid;
   }
   return hi;
 }
 
+/**
+ * P17 review I2 split `deployClears`/`rotateClears`'s single amount argument
+ * into a DELTA (which prices the movement cost) and the ABSOLUTE post-move
+ * LEVEL(S) the curve is read at. Every fixture in this file uses a FLAT curve,
+ * so `rateAt` returns the same rate at any level and none of the arithmetic
+ * below changes: the levels passed here (`AMOUNT` into the destination, `0n`
+ * out of the source — a source that held exactly `AMOUNT` and is fully exited)
+ * exist to make the calls type-correct and to state a coherent scenario, not
+ * to carry any of these assertions. The level-vs-delta behaviour itself is
+ * tested against a NON-flat curve in `legs.spec.ts`, which is where a
+ * decreasing curve actually distinguishes the two.
+ */
 const AMOUNT = 1_000_000_000_000n; // $1,000,000 USDC (6dp) — large enough that costHurdleWad is negligible next to the annualised quantile
 
 // --- tests -------------------------------------------------------------
@@ -176,7 +188,7 @@ const AMOUNT = 1_000_000_000_000n; // $1,000,000 USDC (6dp) — large enough tha
 describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
   it('1. costHurdleWad is horizon-free: identical across {1d, 7d, 14d} for the same move', () => {
     const at = (h: number) =>
-      deployClears(idleInput(), artifact({ horizonSeconds: h }), flatCurve(pct(5)), 'aave', AMOUNT, params())
+      deployClears(idleInput(), artifact({ horizonSeconds: h }), flatCurve(pct(5)), 'aave', AMOUNT, AMOUNT, params())
         .costHurdleWad;
     const oneDay = at(86_400);
     const week = at(604_800);
@@ -192,7 +204,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
 
     const q = MEASURED_QUANTILES['aave']!;
     const absAnnualQ = (-q * SECONDS_PER_YEAR) / BigInt(H);
-    const costHurdle = deployClears(idleInput(), art, flatCurve(0n), 'aave', AMOUNT, params()).costHurdleWad;
+    const costHurdle = deployClears(idleInput(), art, flatCurve(0n), 'aave', AMOUNT, AMOUNT, params()).costHurdleWad;
 
     const expected = absAnnualQ + costHurdle;
     const oldRuleThreshold = 2n * absAnnualQ;
@@ -216,8 +228,8 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     const threshold = findDeployThreshold(idleInput(), art, 'aave', AMOUNT, params());
     const tenBps = pct(0.1);
 
-    const above = deployClears(idleInput(), art, flatCurve(threshold + tenBps), 'aave', AMOUNT, params());
-    const below = deployClears(idleInput(), art, flatCurve(threshold - tenBps), 'aave', AMOUNT, params());
+    const above = deployClears(idleInput(), art, flatCurve(threshold + tenBps), 'aave', AMOUNT, AMOUNT, params());
+    const below = deployClears(idleInput(), art, flatCurve(threshold - tenBps), 'aave', AMOUNT, AMOUNT, params());
 
     expect(above.clears).toBe(true);
     expect(below.clears).toBe(false);
@@ -226,20 +238,20 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
   it('4. significanceWad strictly decreases as edgeWindowEffective grows', () => {
     const narrow = rotateClears(
       deployedInput(), artifact({ edgeWindowEffective: 4 }),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     const wide = rotateClears(
       deployedInput(), artifact({ edgeWindowEffective: 400 }),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     expect(wide.significanceWad).toBeLessThan(narrow.significanceWad);
   });
 
   it('5. significanceWad is zero for a deploy verdict, non-zero for a rotation verdict', () => {
-    const dep = deployClears(idleInput(), artifact(), flatCurve(pct(5), 'aave'), 'aave', AMOUNT, params());
+    const dep = deployClears(idleInput(), artifact(), flatCurve(pct(5), 'aave'), 'aave', AMOUNT, AMOUNT, params());
     const rot = rotateClears(
       deployedInput(), artifact(),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     expect(dep.significanceWad).toBe(0n);
     expect(rot.significanceWad).toBeGreaterThan(0n);
@@ -248,12 +260,12 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
   it('6. costHurdleWad falls as movement cost falls', () => {
     const cheap = rotateClears(
       deployedInput(), artifact(),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT,
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n,
       params({ gasPerAction: 1n }),
     );
     const dear = rotateClears(
       deployedInput(), artifact(),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT,
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n,
       params({ gasPerAction: 10_000_000n }),
     );
     expect(cheap.costHurdleWad).toBeLessThan(dear.costHurdleWad);
@@ -274,7 +286,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     // solving edge = (rTo - rFrom) + bias, where
     // bias = annualLowerBound(...,0) at rate 0 for each venue.
     const probe = rotateClears(
-      deployedInput(), art, flatCurve(0n, 'aave'), flatCurve(0n, 'compound'), 'aave', 'compound', AMOUNT, params(),
+      deployedInput(), art, flatCurve(0n, 'aave'), flatCurve(0n, 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     const hurdle = probe.hurdleWad;
     expect(hurdle).toBeGreaterThan(0n); // otherwise this test would prove nothing
@@ -286,11 +298,11 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
 
     const rToClear = rFrom + (hurdle + margin - bias);
     const big = rotateClears(
-      deployedInput(), art, flatCurve(rToClear, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, params(),
+      deployedInput(), art, flatCurve(rToClear, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     const rToBlock = rFrom + (hurdle - margin - bias);
     const tiny = rotateClears(
-      deployedInput(), art, flatCurve(rToBlock, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, params(),
+      deployedInput(), art, flatCurve(rToBlock, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
 
     expect(big.clears).toBe(true);
@@ -315,22 +327,28 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
   it('9. IMPORTANT 2: paybackSeconds <= 0 fails with a named error, not a bigint RangeError', () => {
     const zeroPayback = artifact({ paybackSeconds: 0 });
     expect(() =>
-      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', AMOUNT, params()),
+      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', AMOUNT, AMOUNT, params()),
     ).toThrow(/paybackSeconds must be > 0/);
     expect(() =>
       rotateClears(
         deployedInput(), zeroPayback,
-        flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+        flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
       ),
     ).toThrow(/paybackSeconds must be > 0/);
 
     // The zero-amount short-circuit (nothing to amortise a cost over) must
-    // still not throw, payback or no payback — this is the artifact
-    // `config/bootstrap-artifact.json` actually ships (paybackSeconds
-    // absent -> 0 on the provisional path), evaluated against a genuinely
-    // empty move.
+    // still not throw, payback or no payback: `costHurdleWad` has nothing to
+    // divide by and 0n is the right answer, so the guard must not fire ahead
+    // of it.
+    //
+    // NOTE (P17 review C1): `config/bootstrap-artifact.json` now DOES ship a
+    // provisional `paybackSeconds` (2592000, matching the freezer), so this
+    // zero case is reached through `parseArtifact`'s `?? 0` fallback for an
+    // artifact that omits the field, not through the shipped bootstrap. The
+    // guard still has to hold — the fallback is still reachable, and a
+    // `RangeError: Division by zero` is not a diagnosable failure.
     expect(() =>
-      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', 0n, params()),
+      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', 0n, 0n, params()),
     ).not.toThrow();
   });
 
@@ -339,7 +357,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     delete (noPanel as { residualPanel?: ResidualPanel }).residualPanel;
     const v1 = rotateClears(
       deployedInput(), noPanel,
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     expect(v1.significanceWad).toBe(0n);
     expect(v1.reason).toContain('SIGNIFICANCE_UNAVAILABLE');
@@ -355,7 +373,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     };
     const v2 = rotateClears(
       deployedInput(), partialPanel,
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     expect(v2.reason).toContain('SIGNIFICANCE_UNAVAILABLE');
 
@@ -363,7 +381,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     // (the default fixture) — this must never fire on a healthy artifact.
     const covered = rotateClears(
       deployedInput(), artifact(),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
     );
     expect(covered.reason).not.toContain('SIGNIFICANCE_UNAVAILABLE');
   });
@@ -377,7 +395,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     // in a ~1.2e7-wide band exactly here — this asserts the invariant that
     // makes that impossible: clears is ALWAYS `edgeWad > hurdleWad`.
     for (const delta of [-2_000_000n, -1n, 0n, 1n, 2_000_000n]) {
-      const v = deployClears(idleInput(), art, flatCurve(threshold + delta), 'aave', AMOUNT, params());
+      const v = deployClears(idleInput(), art, flatCurve(threshold + delta), 'aave', AMOUNT, AMOUNT, params());
       expect(v.clears).toBe(v.edgeWad > v.hurdleWad);
     }
   });

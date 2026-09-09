@@ -1,4 +1,12 @@
-import { planLegs, survivingTarget, partialAdjust } from '../../../src/policy/steps/legs.js';
+import {
+  chooseExecuted,
+  notionalBase,
+  partialAdjust,
+  partialAdjustAtLeast,
+  planLegs,
+  survivingTarget,
+} from '../../../src/policy/steps/legs.js';
+import { rateAt } from '../../../src/policy/steps/simulate.js';
 import type { CostParams } from '../../../src/policy/steps/cost.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
 
@@ -265,5 +273,188 @@ describe('P17 per-leg evaluation and partial adjustment', () => {
     expect(v.edgeWad).toBe(WAD / 5n);
     expect(v.hurdleWad).toBeGreaterThan(0n);
     expect(v.hurdleWad).toBeLessThan(v.edgeWad);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I2 — the curve is read at the ABSOLUTE post-move level, not at the delta.
+// ---------------------------------------------------------------------------
+
+/**
+ * A curve that pays 20% up to a 4,000 USDC total allocation and 0% at 8,000.
+ * `RateCurve.points[k]` is the rate at x = k*quantum where x is the vault's
+ * TOTAL position in the venue, so a vault already holding 4,000 that deploys
+ * another 4,000 earns the rate at 8,000 — not the rate at 4,000.
+ */
+function steppedCurve(marketId = 'a'): RateCurve {
+  const quantumBase = 1_000_000_000n;
+  const points = [0, 1, 2, 3, 4].map(() => pct(20)).concat([0, 1, 2, 3].map(() => 0n));
+  return { marketId, quantumBase, points, maxXBase: quantumBase * 8n };
+}
+
+describe('P17/I2 hurdles are priced at the absolute post-move level', () => {
+  it('a deploy on top of an existing position reads the curve at current + delta', () => {
+    const curve = steppedCurve();
+    // Non-vacuity: the two readings genuinely differ, and in the direction
+    // that makes the delta reading over-permissive.
+    expect(rateAt(curve, 4_000_000_000n)).toBe(pct(20));
+    expect(rateAt(curve, 8_000_000_000n)).toBe(0n);
+
+    const current = new Map([['a', 4_000_000_000n]]);
+    const target = new Map([['a', 8_000_000_000n]]);
+    const legs = planLegs(current, target, input(), artifact(), [curve], params());
+
+    expect(legs).toHaveLength(1);
+    const leg = legs[0]!;
+    expect(leg.kind).toBe('deploy');
+    // The delta prices the movement cost...
+    expect(leg.amountBase).toBe(4_000_000_000n);
+    // ...and the post-move LEVEL prices the curve. Reading at the delta would
+    // have given 20% here and cleared; the real post-move rate is 0%.
+    expect(leg.edgeWad).toBe(0n);
+    expect(leg.hurdleWad).toBeGreaterThan(0n);
+    expect(leg.clears).toBe(false);
+  });
+
+  it('a first deployment into an empty venue is unaffected — level equals delta there', () => {
+    const curve = steppedCurve();
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', 4_000_000_000n]]);
+    const leg = planLegs(current, target, input(), artifact(), [curve], params())[0]!;
+    expect(leg.amountBase).toBe(4_000_000_000n);
+    expect(leg.edgeWad).toBe(pct(20));
+    expect(leg.clears).toBe(true);
+  });
+
+  it('successive legs into one venue each see the level that leg reaches', () => {
+    // 'b' divests 2,000 into 'a', then idle funds another 2,000 into 'a'.
+    // 'a' starts at 4,000, so the rotation lands it at 6,000 and the deploy at
+    // 8,000 — the deploy must NOT be re-priced from 4,000.
+    const curve = steppedCurve();
+    const bCurve = flatCurve('b', pct(1));
+    const current = new Map([['a', 4_000_000_000n], ['b', 2_000_000_000n]]);
+    const target = new Map([['a', 8_000_000_000n], ['b', 0n]]);
+    const legs = planLegs(current, target, input(), artifact(), [curve, bCurve], params());
+
+    expect(legs.map((l) => l.kind)).toEqual(['rotate', 'deploy']);
+    // rotate: 'a' goes 4,000 -> 6,000 (curve reads 0% there), 'b' goes 2,000 -> 0.
+    expect(legs[0]!.amountBase).toBe(2_000_000_000n);
+    expect(rateAt(curve, 6_000_000_000n)).toBe(0n);
+    // deploy: 'a' goes 6,000 -> 8,000, still 0%.
+    expect(legs[1]!.amountBase).toBe(2_000_000_000n);
+    expect(legs[1]!.edgeWad).toBe(0n);
+    expect(legs[1]!.clears).toBe(false);
+  });
+
+  it('a rotation reads its SOURCE at the post-move level, not at zero', () => {
+    // 'src' pays 20% up to 4,000 and 0% at 8,000; the vault holds 8,000 and
+    // rotates 4,000 out, landing the source at 4,000 (a 20% reading). Pricing
+    // the source at 0n — which this used to do — would read 20% as well but
+    // for a level the position never occupies; the distinguishing case is the
+    // level the source actually reaches, asserted directly below.
+    const src = steppedCurve('src');
+    const dst = flatCurve('dst', pct(3));
+    const current = new Map([['src', 8_000_000_000n], ['dst', 0n]]);
+    const target = new Map([['src', 4_000_000_000n], ['dst', 4_000_000_000n]]);
+    const leg = planLegs(current, target, input(), artifact(), [src, dst], params())[0]!;
+
+    expect(leg.kind).toBe('rotate');
+    expect(leg.fromMarketId).toBe('src');
+    // edge = bound(dst @ 4,000) - bound(src @ post-move 4,000) = 3% - 20%.
+    expect(rateAt(src, 4_000_000_000n)).toBe(pct(20));
+    expect(leg.edgeWad).toBe(pct(3) - pct(20));
+    expect(leg.clears).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I4 — the adjustment rate is raised to the minimum-turnover floor, never
+// scaled under it.
+// ---------------------------------------------------------------------------
+
+describe('P17/I4 partialAdjustAtLeast', () => {
+  const cur = () => new Map([['a', 0n]]);
+  const sub = () => new Map([['a', 10_000_000n]]); // 10 USDC of notional
+
+  it('leaves lambda alone when the scaled notional already clears the floor', () => {
+    const out = partialAdjustAtLeast(cur(), sub(), 0.9, 5_000_000n);
+    expect(out.get('a')).toBe(9_000_000n);
+  });
+
+  it('raises lambda to exactly the floor when the scaled notional is under it', () => {
+    // lambda=0.1 alone would move 1 USDC, under a 5 USDC floor. The result is
+    // the SMALLEST vector that clears the floor, not the full sub-target.
+    const out = partialAdjustAtLeast(cur(), sub(), 0.1, 5_000_000n);
+    expect(out.get('a')).toBe(5_000_000n);
+    expect(notionalBase(cur(), out)).toBe(5_000_000n);
+  });
+
+  it('never exceeds the sub-target: at most lambda = 1', () => {
+    const out = partialAdjustAtLeast(cur(), sub(), 0.1, 10_000_000n);
+    expect(out.get('a')).toBe(10_000_000n);
+  });
+
+  it('leaves the vector at lambda when NO rate can clear the floor', () => {
+    // The full sub-target is itself under the floor, so the brake must refuse
+    // it — inflating the move past the sub-target to satisfy a floor would be
+    // moving money the optimiser never asked to move.
+    const out = partialAdjustAtLeast(cur(), sub(), 0.1, 20_000_000n);
+    expect(out.get('a')).toBe(1_000_000n);
+  });
+
+  it('raises a reduction to the floor too, and never past the sub-target', () => {
+    const from = new Map([['a', 10_000_000n]]);
+    const to = new Map([['a', 0n]]);
+    expect(partialAdjustAtLeast(from, to, 0.1, 5_000_000n).get('a')).toBe(5_000_000n);
+    expect(partialAdjustAtLeast(from, to, 0.1, 10_000_000n).get('a')).toBe(0n);
+  });
+
+  it('is deterministic', () => {
+    expect(partialAdjustAtLeast(cur(), sub(), 0.1, 3_333_333n)).toEqual(
+      partialAdjustAtLeast(cur(), sub(), 0.1, 3_333_333n),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I1 — the feasibility fallback backs off to the risk-reducing subset before
+// it holds.
+// ---------------------------------------------------------------------------
+
+describe('P17/I1 chooseExecuted', () => {
+  const current = () => new Map([['a', 5_000_000_000n], ['b', 0n]]);
+  const sub = () => new Map([['a', 5_000_000_000n], ['b', 3_000_000_000n]]);
+  const divestOnly = () => new Map([['a', 2_000_000_000n], ['b', 0n]]);
+  const identity = (c: Map<string, bigint>) => c;
+
+  it('takes the full surviving set when it commits', () => {
+    const out = chooseExecuted(current(), sub(), divestOnly(), true, identity);
+    expect(out.executed).toEqual(sub());
+    expect(out.backedOff).toBe(false);
+  });
+
+  it('backs off to the divest-only subset rather than discarding it', () => {
+    const commit = (c: Map<string, bigint>) => (c.get('b') === 0n ? c : null);
+    const out = chooseExecuted(current(), sub(), divestOnly(), true, commit);
+    expect(out.executed).toEqual(divestOnly());
+    expect(out.backedOff).toBe(true);
+  });
+
+  it('holds only when the divest-only subset is ALSO infeasible', () => {
+    const out = chooseExecuted(current(), sub(), divestOnly(), true, () => null);
+    expect(out.executed).toEqual(current());
+    expect(out.backedOff).toBe(false);
+  });
+
+  it('does not attempt the backoff when no divest leg cleared', () => {
+    let calls = 0;
+    const commit = (c: Map<string, bigint>) => {
+      calls++;
+      return c.get('b') === 0n ? c : null;
+    };
+    const out = chooseExecuted(current(), sub(), divestOnly(), false, commit);
+    expect(calls).toBe(1);
+    expect(out.executed).toEqual(current());
+    expect(out.backedOff).toBe(false);
   });
 });

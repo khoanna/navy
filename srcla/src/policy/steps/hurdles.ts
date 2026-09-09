@@ -195,6 +195,19 @@ function costHurdleWad(cost: bigint, amountBase: bigint, artifact: PolicyArtifac
  * annualised fields was ~1.2e7 WAD wide near the boundary - exactly where a
  * caller reading `clears` alongside `edgeWad`/`hurdleWad` most needs them to
  * agree.
+ *
+ * TWO DISTINCT QUANTITIES, and conflating them was a real over-permissiveness
+ * bug (P17 review I2). `amountBase` is the DELTA moved and prices the movement
+ * cost. `toLevelBase` is the vault's ABSOLUTE allocation to this venue AFTER
+ * the move and is what the curve must be read at: `RateCurve.points[k]` is the
+ * post-deposit rate at x = k*quantum where x is the TOTAL position, not an
+ * increment on top of it (see `simulate.ts#externalCash`, which excludes the
+ * vault's own position from the baseline precisely so that x = positionBase
+ * reproduces today's observed rate). Curves are monotonically non-increasing,
+ * so reading at the delta for a venue that already holds a position returns a
+ * rate the move will never actually earn - strictly too high, in the direction
+ * that makes a leg clear when it should not. They coincide only when the venue
+ * is empty.
  */
 export function deployClears(
   input: DecisionInput,
@@ -202,9 +215,10 @@ export function deployClears(
   curve: RateCurve,
   marketId: string,
   amountBase: bigint,
+  toLevelBase: bigint,
   p: CostParams,
 ): LegVerdict {
-  const ell = annualLowerBound(curve, artifact, marketId, amountBase);
+  const ell = annualLowerBound(curve, artifact, marketId, toLevelBase);
   const cost = lendingCost(input, [{ adapter: marketId, amountBase, kind: 'deploy' }], p);
   const hurdleWad = costHurdleWad(cost, amountBase, artifact);
   const clears = ell > hurdleWad;
@@ -218,6 +232,18 @@ export function deployClears(
 /**
  * §9.1.3 - a rotation clears when the annualised differential exceeds the
  * amortised round-trip cost plus k standard errors of the estimated edge.
+ *
+ * LEVELS, NOT DELTAS (P17 review I2), on BOTH sides. `toLevelBase` is the
+ * destination's absolute allocation after the move and `fromLevelBase` the
+ * source's - see `deployClears` above for why the curve cannot be read at the
+ * delta. The source is read at its POST-MOVE level rather than at `0n` (which
+ * this used to pass): `0n` is the rate the venue would pay if the vault held
+ * nothing there, which is not a level the counterfactual ever occupies. The
+ * true forgone yield of withdrawing `amountBase` from `x0` is the average of
+ * the curve over `[x0 - amountBase, x0]`; the post-move level is that
+ * interval's upper end, so this stays conservative (it overstates what is
+ * given up, making a rotation harder) while remaining a level the position
+ * actually reaches.
  *
  * IMPORTANT 3: when the artifact's residual panel does not cover BOTH
  * venues (absent panel, or either id missing from `marketIds`), the
@@ -238,10 +264,12 @@ export function rotateClears(
   toId: string,
   fromId: string,
   amountBase: bigint,
+  toLevelBase: bigint,
+  fromLevelBase: bigint,
   p: CostParams,
 ): LegVerdict {
-  const edge = annualLowerBound(curveTo, artifact, toId, amountBase)
-    - annualLowerBound(curveFrom, artifact, fromId, 0n);
+  const edge = annualLowerBound(curveTo, artifact, toId, toLevelBase)
+    - annualLowerBound(curveFrom, artifact, fromId, fromLevelBase);
   const cost = lendingCost(input, [
     { adapter: fromId, amountBase, kind: 'divest' },
     { adapter: toId, amountBase, kind: 'deploy' },

@@ -469,6 +469,74 @@ describe('decide', () => {
     expect(half.target.get('aa')).toBe(3_000_000_000n);
   });
 
+  // P17 review C1 — `scripts/phase1-fork-check.ts#buildPinnedArtifact` does
+  // exactly this: it takes the shipped bootstrap artifact and replaces its
+  // empty `pinnedConfigDigests` with live on-chain digests. Admission is then
+  // NOT empty, decide() reaches the movement hurdles, and `costHurdleWad`
+  // throws unless the artifact carries a payback period. The bootstrap now
+  // ships provisional values for all three of the fields `parseArtifact`
+  // otherwise defaults on the provisional path.
+  it('C1: the shipped bootstrap artifact can price a hurdle once its digests are pinned', () => {
+    const bootstrap = loadBootstrapArtifact();
+    expect(bootstrap.paybackSeconds).toBe(2_592_000);
+    expect(bootstrap.adjustmentRate).toBe(1);
+    expect(bootstrap.edgeWindowEffective).toBe(1);
+    // Still provisional, therefore still non-citable — adding the fields is
+    // not a registration.
+    expect(bootstrap._provisional).toBeDefined();
+
+    const pinned: PolicyArtifact = {
+      ...bootstrap,
+      pinnedConfigDigests: { aa: '0xd', bb: '0xd' },
+    };
+    const out = decide(rebalanceInput(), pinned, REBALANCE_OPTS);
+    // Non-vacuity: admission really did pass and legs really were priced, so
+    // this would have thrown before the fix rather than returning at all.
+    expect(out.admission.eligible.length).toBeGreaterThan(0);
+    expect(out.costGate.legs.length).toBeGreaterThan(0);
+  });
+
+  // P17 review I4 — the brakes see the FINAL executed vector (§9.1.4), so
+  // MIN_TURNOVER measures `lambda * notional`. A target whose full notional
+  // clears the floor and whose scaled notional does not used to HOLD, and a
+  // hold changes no state, so the next origin found the same target and held
+  // again — forever. The adjustment rate is raised to the floor instead.
+  it('P17/I4: a small adjustment rate is raised to the turnover floor, not held under it', () => {
+    const FLOOR_BPS = 100; // 1% of the 10,000 USDC vault = 100 USDC
+    const opts = {
+      ...REBALANCE_OPTS,
+      cost: { ...REBALANCE_OPTS.cost, minTurnoverBps: FLOOR_BPS },
+    };
+    const floorBase =
+      (rebalanceInput().vault.totalAssetsBase * BigInt(FLOOR_BPS)) / 10_000n;
+
+    const moved = (out: { target: Map<string, bigint> }): bigint => {
+      let n = 0n;
+      for (const v of out.target.values()) n += v; // current is all-idle here
+      return n;
+    };
+
+    const full = decide(rebalanceInput(), rebalanceArtifact(), opts);
+    expect(full.action).toBe('rebalance');
+    const fullNotional = moved(full);
+
+    const lambda = 0.001;
+    // Non-vacuity: at this rate the unraised move is far under the floor, so
+    // the old code held here.
+    expect((fullNotional * 1n) / 1000n).toBeLessThan(floorBase);
+
+    const slow = decide(
+      rebalanceInput(),
+      { ...rebalanceArtifact(), adjustmentRate: lambda },
+      opts,
+    );
+    expect(slow.action).toBe('rebalance');
+    // Raised to the boundary — the least it is allowed to move — not to the
+    // full target.
+    expect(moved(slow)).toBe(floorBase);
+    expect(moved(slow)).toBeLessThan(fullNotional);
+  });
+
   it('does not read the wall clock', () => {
     const spy = jest.spyOn(Date, 'now');
     decide(input(), artifact(), DEFAULT_DECIDE_OPTS);

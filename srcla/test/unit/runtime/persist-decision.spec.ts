@@ -105,7 +105,7 @@ function output(over: Partial<DecisionOutput> = {}): DecisionOutput {
     },
     target: new Map(),
     enumeration: null,
-    costGate: { passed: true, reason: 'X', gainBase: 0n, moveCostBase: 0n, bandBase: 0n, terms: {}, legs: [] },
+    costGate: { passed: true, reason: 'X', legs: [] },
     plan: null,
     action: 'hold',
     reasons: [],

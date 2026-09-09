@@ -359,11 +359,20 @@ describe('decide: H3 cost switch', () => {
     expect(ablated.action).toBe('rebalance');
   });
 
-  it('reports zeroed cost terms rather than a fabricated evaluated cost', () => {
+  // Was 'reports zeroed cost terms rather than a fabricated evaluated cost'.
+  // P17 removed `gainBase`/`moveCostBase`/`bandBase`/`terms` outright — they
+  // were the deleted single gate's comparison, written as literal zeros on
+  // every path afterwards and read by nothing. The property they encoded — an
+  // ablated gate must not report a cost it never computed — survives as: no
+  // leg was evaluated at all, and non-vacuously, the un-ablated kernel on the
+  // same input does evaluate legs.
+  it('reports no evaluated leg rather than a fabricated evaluated cost', () => {
     const ablated = decide(input(), artifact(), { ...OPTS, disable: { costGate: true } });
-    expect(ablated.costGate.moveCostBase).toBe(0n);
-    expect(ablated.costGate.bandBase).toBe(0n);
-    expect(ablated.costGate.terms).toEqual({});
+    expect(ablated.costGate.reason).toBe('COST_GATE_ABLATED');
+    expect(ablated.costGate.legs).toEqual([]);
+
+    const live = decide(input(), artifact(), OPTS);
+    expect(live.costGate.legs.length).toBeGreaterThan(0);
   });
 
   // P17 — H3d decomposes H3: §9.1.2's deployment hurdle is removed while

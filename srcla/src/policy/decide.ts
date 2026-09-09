@@ -16,7 +16,13 @@ import {
   remainingTurnoverBase,
   type CostParams,
 } from './steps/cost.js';
-import { planLegs, survivingTarget, partialAdjust } from './steps/legs.js';
+import {
+  chooseExecuted,
+  notionalBase,
+  partialAdjustAtLeast,
+  planLegs,
+  survivingTarget,
+} from './steps/legs.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
 import { safetyUnwind } from './steps/unwind.js';
 import type {
@@ -168,15 +174,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       },
       target: partial.target ?? current,
       enumeration: partial.enumeration ?? null,
-      costGate: partial.costGate ?? {
-        passed: false,
-        reason: 'NOT_EVALUATED',
-        gainBase: 0n,
-        moveCostBase: 0n,
-        bandBase: 0n,
-        terms: {},
-        legs: [],
-      },
+      costGate: partial.costGate ?? { passed: false, reason: 'NOT_EVALUATED', legs: [] },
       plan: partial.plan ?? null,
       action: partial.action ?? 'hold',
       reasons,
@@ -194,7 +192,12 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       reserve: base.reserve,
       target: [...base.target.entries()].sort(),
       enumeration: base.enumeration,
-      costs: base.costGate.terms,
+      // P17 - the per-leg verdicts, which are what the movement decision now
+      // consists of. This slot used to carry `costGate.terms`; once the single
+      // gate was replaced that map was permanently `{}`, so §10.2's "costs"
+      // component of the hash was a constant and the real information was
+      // outside the hash entirely.
+      legs: base.costGate.legs,
       reasons: base.reasons,
     });
     return base;
@@ -246,12 +249,10 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
     const bypassed: CostGateResult = {
       passed: true,
       reason: 'SAFETY_UNWIND_BYPASS',
-      gainBase: 0n,
-      moveCostBase: 0n,
-      bandBase: 0n,
-      terms: {},
       // No leg was evaluated: §9.1's unwind bypasses the economic gate
-      // wholesale, so an empty list is the honest report, not an omission.
+      // wholesale, so an empty list is the honest report, not an omission. A
+      // caller reading `passed === true` tells a bypass from a cleared gate by
+      // the reason AND by the fact that nothing was priced.
       legs: [],
     };
 
@@ -393,19 +394,42 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       reserveHorizonSeconds: opts.reserveHorizonSeconds,
     });
 
-  const feasibleSub = feasible(sub) ? sub : current;
-  const adjusted = partialAdjust(current, feasibleSub, artifact.adjustmentRate);
-  const executed = feasible(adjusted) ? adjusted : current;
+  // §9.1's minimum-turnover floor, needed here (not only inside `applyBrakes`)
+  // because the adjustment rate has to be raised to it rather than scaled
+  // under it - see `partialAdjustAtLeast`.
+  const minTurnoverBase =
+    (input.vault.totalAssetsBase * BigInt(opts.cost.minTurnoverBps)) / 10_000n;
+
+  // Divest-only backoff. An unpaired divest carries no economic hurdle (§9.1
+  // states none for reducing exposure) and is usually a constraint response, so
+  // discarding it because some OTHER surviving leg made the vector infeasible
+  // would be the all-or-nothing failure P17 removes, in the direction that
+  // raises risk. Try the full surviving set, then the risk-reducing subset of
+  // it, and only then hold.
+  const divestOnly =
+    disable.costGate === true
+      ? current
+      : survivingTarget(current, target, effective.filter((v) => v.kind === 'divest'));
+  const hasDivest = effective.some((v) => v.kind === 'divest' && v.clears);
+
+  const commit = (candidate: Map<string, bigint>): Map<string, bigint> | null => {
+    if (!feasible(candidate)) return null;
+    const moved = partialAdjustAtLeast(
+      current,
+      candidate,
+      artifact.adjustmentRate,
+      minTurnoverBase,
+    );
+    return feasible(moved) ? moved : null;
+  };
+
+  const { executed, backedOff } = chooseExecuted(current, sub, divestOnly, hasDivest, commit);
 
   // §9.1.4's brakes are evaluated on the FINAL executed vector, not the raw
   // target: they bound the policy's aggregate behaviour, so the quantity they
   // must see is the notional actually about to move.
-  let notionalBase = 0n;
-  for (const id of new Set([...current.keys(), ...executed.keys()])) {
-    const d = (executed.get(id) ?? 0n) - (current.get(id) ?? 0n);
-    notionalBase += d < 0n ? -d : d;
-  }
-  const brake = applyBrakes(input, notionalBase, current, executed, opts.cost);
+  const notional = notionalBase(current, executed);
+  const brake = applyBrakes(input, notional, current, executed, opts.cost);
 
   // `applyBrakes` reports `NO_MOVES: target equals current` for a zero
   // notional, which was exact when the executed vector WAS the target. It no
@@ -420,19 +444,14 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       brake === null
         ? disable.costGate === true
           ? 'COST_GATE_ABLATED'
-          : 'HURDLES_CLEARED'
-        : notionalBase === 0n && effective.length > 0
+          : backedOff
+            ? 'HURDLES_CLEARED_DIVEST_ONLY'
+            : 'HURDLES_CLEARED'
+        : notional === 0n && effective.length > 0
           ? anyCleared
             ? 'INFEASIBLE_AFTER_HURDLES'
             : 'ALL_LEGS_BLOCKED'
           : brake,
-    // Every amount here is USDC base units (6 dp). The gain/cost/band triple
-    // belonged to the single-threshold comparison P13/P15/P16 removed; the
-    // per-leg detail that replaced it is in `legs`, in annualised WAD.
-    gainBase: 0n,
-    moveCostBase: 0n,
-    bandBase: 0n,
-    terms: {},
     legs: effective,
   };
   if (!gate.passed) {
@@ -538,9 +557,14 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
  * candidate clears it, so enforcing it here as a hard constraint would reject
  * survivors the optimiser itself accepted.
  *
+ * Exported for direct testing: the monotone relaxations above are the part of
+ * this that is easy to get subtly wrong (P17 review I3 was exactly that), and
+ * reaching each branch through `decide()` needs a four-venue fixture tuned to
+ * flip one stress scenario. `decide` is its only caller in `src/`.
+ *
  * PURE.
  */
-function reFeasible(
+export function reFeasible(
   input: DecisionInput,
   artifact: PolicyArtifact,
   curves: RateCurve[],
@@ -596,17 +620,25 @@ function reFeasible(
       if (idle - r.requiredBase < currentIdle - currentRequired) return false;
     }
     // §8.1 — a candidate must not fail a stress scenario the current position
-    // passes. Scenario feasibility is a function of live venue cash, so the
-    // current position can already fail one; requiring the candidate to fix
-    // that in one step would strand the vault.
-    const failed = new Set(r.scenarioFeasible.filter((x) => !x.feasible).map((x) => x.scenario));
-    if (failed.size > 0) {
-      const currentFailed = new Set(
-        requiredReserve(input, artifact, current, reserveOpts)
-          .scenarioFeasible.filter((x) => !x.feasible)
-          .map((x) => x.scenario)
+    // passes, NOR fail one it already fails by a LARGER shortfall. Scenario
+    // feasibility is a function of live venue cash, so the current position can
+    // already fail one; requiring the candidate to fix that in one step would
+    // strand the vault. But comparing only WHICH scenarios fail (P17 review I3)
+    // let the shortfall grow without bound: a candidate failing today's
+    // scenario worse than today passed as "no worse", every origin, forever.
+    const failed = r.scenarioFeasible.filter((x) => !x.feasible);
+    if (failed.length > 0) {
+      const base = new Map(
+        requiredReserve(input, artifact, current, reserveOpts).scenarioFeasible.map((x) => [
+          x.scenario,
+          x,
+        ])
       );
-      for (const scenario of failed) if (!currentFailed.has(scenario)) return false;
+      for (const s of failed) {
+        const today = base.get(s.scenario);
+        if (today === undefined || today.feasible) return false;
+        if (s.shortfallBase > today.shortfallBase) return false;
+      }
     }
   }
 

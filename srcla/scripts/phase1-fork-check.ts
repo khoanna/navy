@@ -328,8 +328,20 @@ function classifyHold(
     };
   }
 
-  if (tag.startsWith('COST_GATE')) {
-    return { expected: true, detail: `cost gate rejected the move as not worth its cost (${tag}) -- a legitimate hold.` };
+  // P17 renamed the prefix when the single cost gate became §9.1's two
+  // per-leg movement hurdles plus §9.1.4's aggregate brakes. `COST_GATE` is
+  // still accepted so a record produced before that change still classifies
+  // rather than falling through to the terminal "unrecognized tag" branch.
+  if (tag.startsWith('HURDLES') || tag.startsWith('COST_GATE')) {
+    return {
+      expected: true,
+      detail:
+        `the movement hurdles or the churn brakes refused the move (${tag}) -- a legitimate ` +
+        'hold. ALL_LEGS_BLOCKED means no leg repaid its own movement cost within the ' +
+        "artifact's payback period; MIN_TURNOVER/COOLDOWN/MAX_TURNOVER/REVERSAL_ALLOWANCE are " +
+        'the §9.1.4 brakes; INFEASIBLE_AFTER_HURDLES means the surviving legs did not pass ' +
+        'the reserve/cap re-check.',
+    };
   }
 
   if (tag === 'NO_ACTIONS') {

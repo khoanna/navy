@@ -16,9 +16,20 @@ import type { CostParams } from './cost.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
 /**
- * Deploy legs are idle -> venue. Rotation legs pair each divest with the
- * largest remaining deploy, in descending amount then ascending market id -
- * the registered ordering, so two runs on the same input pair identically.
+ * Deploy legs are idle -> venue. Rotation legs walk the deploys in descending
+ * amount (ties broken on ascending market id) and pair each against the
+ * largest remaining divest under the same order - a deterministic ordering, so
+ * two runs on the same input pair identically. It is not a registered constant
+ * and nothing outside this function depends on the particular pairing; only
+ * that it is a function of the input.
+ *
+ * CURVES ARE READ AT ABSOLUTE LEVELS. `RateCurve.points[k]` is the rate at a
+ * TOTAL allocation of `k*quantum`, so every leg carries both its delta (which
+ * prices the movement cost) and the post-move level it reaches (which prices
+ * the curve). `level` below tracks that running position, so a venue fed by a
+ * rotation and then by idle sees each successive leg at the level that leg
+ * actually reaches. See `hurdles.ts#deployClears` for why the delta is the
+ * wrong x.
  *
  * VENUES OUTSIDE THE SIMULATED UNIVERSE ARE SKIPPED. `curves` covers only the
  * markets `admit` passed at this origin, while `current` covers every market
@@ -57,6 +68,10 @@ export function planLegs(
   ups.sort(byAmount);
   downs.sort(byAmount);
 
+  // Running absolute position, so each leg is priced at the level it reaches.
+  const level = new Map<string, bigint>();
+  for (const id of ids) level.set(id, current.get(id) ?? 0n);
+
   const out: LegVerdict[] = [];
 
   // Pair divests against deploys first: those are rotations.
@@ -66,6 +81,8 @@ export function planLegs(
     while (remaining > 0n && di < downs.length) {
       const down = downs[di]!;
       const m = remaining < down.amt ? remaining : down.amt;
+      const toLevel = (level.get(up.id) ?? 0n) + m;
+      const fromLevel = (level.get(down.id) ?? 0n) - m;
       out.push(
         rotateClears(
           input,
@@ -75,16 +92,22 @@ export function planLegs(
           up.id,
           down.id,
           m,
+          toLevel,
+          fromLevel,
           p,
         ),
       );
+      level.set(up.id, toLevel);
+      level.set(down.id, fromLevel);
       remaining -= m;
       down.amt -= m;
       if (down.amt === 0n) di++;
     }
     // Whatever is left is funded from idle: a deployment, not a rotation.
     if (remaining > 0n) {
-      out.push(deployClears(input, artifact, curveOf.get(up.id)!, up.id, remaining, p));
+      const toLevel = (level.get(up.id) ?? 0n) + remaining;
+      out.push(deployClears(input, artifact, curveOf.get(up.id)!, up.id, remaining, toLevel, p));
+      level.set(up.id, toLevel);
     }
   }
 
@@ -147,6 +170,56 @@ export function survivingTarget(
   return out;
 }
 
+/** `sum |b_i - a_i|` over the union of both vectors, in USDC base units. */
+export function notionalBase(
+  a: ReadonlyMap<string, bigint>,
+  b: ReadonlyMap<string, bigint>,
+): bigint {
+  let total = 0n;
+  for (const id of new Set([...a.keys(), ...b.keys()])) {
+    const d = (b.get(id) ?? 0n) - (a.get(id) ?? 0n);
+    total += d < 0n ? -d : d;
+  }
+  return total;
+}
+
+/** The adjustment rate's fixed-point denominator: lambda is carried as
+ *  `scale / SCALE_ONE` so the search below can step it exactly. */
+const SCALE_ONE = 1_000_000n;
+
+function adjustAtScale(
+  current: Map<string, bigint>,
+  sub: Map<string, bigint>,
+  scale: bigint,
+): Map<string, bigint> {
+  const ids = [...new Set([...current.keys(), ...sub.keys()])].sort();
+
+  let currentTotal = 0n;
+  let subTotal = 0n;
+  for (const id of ids) {
+    currentTotal += current.get(id) ?? 0n;
+    subTotal += sub.get(id) ?? 0n;
+  }
+  const intendedDrift = ((subTotal - currentTotal) * scale) / SCALE_ONE;
+
+  const out = new Map<string, bigint>();
+  let drift = 0n;
+  for (const id of ids) {
+    const c = current.get(id) ?? 0n;
+    const s = sub.get(id) ?? 0n;
+    const moved = c + ((s - c) * scale) / SCALE_ONE;
+    out.set(id, moved);
+    drift += moved - c;
+  }
+
+  const dust = drift - intendedDrift;
+  if (dust !== 0n && ids.length > 0) {
+    const fix = ids.find((id) => (out.get(id) ?? 0n) - dust >= 0n) ?? ids[0]!;
+    out.set(fix, (out.get(fix) ?? 0n) - dust);
+  }
+  return out;
+}
+
 /**
  * §9.1.4's partial adjustment: `x <- x + lambda*(sub - x)`, rounded so the
  * change in TOTAL DEPLOYMENT is exactly the scaled change the sub-target asked
@@ -170,31 +243,97 @@ export function partialAdjust(
   lambda: number,
 ): Map<string, bigint> {
   if (lambda >= 1) return new Map(sub);
-  const scale = BigInt(Math.round(lambda * 1_000_000));
-  const ids = [...new Set([...current.keys(), ...sub.keys()])].sort();
+  return adjustAtScale(current, sub, BigInt(Math.round(lambda * Number(SCALE_ONE))));
+}
 
-  let currentTotal = 0n;
-  let subTotal = 0n;
-  for (const id of ids) {
-    currentTotal += current.get(id) ?? 0n;
-    subTotal += sub.get(id) ?? 0n;
-  }
-  const intendedDrift = ((subTotal - currentTotal) * scale) / 1_000_000n;
+/**
+ * The partial adjustment, raised to the SMALLEST rate in `[lambda, 1]` whose
+ * notional still clears `minNotionalBase` - §9.1's minimum-turnover floor.
+ *
+ * P17 review I4. Evaluating the brakes on the final executed vector is what
+ * §9.1.4 asks for, but it makes MIN_TURNOVER see `lambda * notional`. A target
+ * whose full notional clears the floor and whose scaled notional does not then
+ * produced a HOLD - and since a hold changes no state, the next origin found
+ * the same target and held again, forever. That is a self-perpetuating hold
+ * introduced purely by the adjustment rate, and it is dormant today only
+ * because `adjustmentRate` defaults to 1.
+ *
+ * THE INVARIANT CHOSEN: the floor is never bypassed, and a move that could
+ * clear it is never refused for being scaled below it. Nothing below
+ * `minNotionalBase` is ever executed - the alternative fix (measure
+ * MIN_TURNOVER on the pre-adjustment vector) would let a dust move through,
+ * and §9.1's floor exists precisely to stop repeated small moves. Instead the
+ * rate is raised to the boundary: the policy moves the LEAST it is allowed to
+ * move, which is also Constantinides' prescription for leaving a no-trade
+ * region. When the full sub-target is itself under the floor no rate can help;
+ * the vector is returned at `lambda` and MIN_TURNOVER refuses it, which is a
+ * stable and correct refusal (the move is genuinely not worth its cost), not
+ * the pathology above.
+ *
+ * Notional is non-decreasing in `scale` (each venue's `trunc((s_i-c_i)*scale)`
+ * is), so a binary search over the fixed-point grid finds the boundary in ~20
+ * exact integer steps. PURE and deterministic.
+ */
+export function partialAdjustAtLeast(
+  current: Map<string, bigint>,
+  sub: Map<string, bigint>,
+  lambda: number,
+  minNotionalBase: bigint,
+): Map<string, bigint> {
+  const first = partialAdjust(current, sub, lambda);
+  if (notionalBase(current, first) >= minNotionalBase) return first;
+  // Unreachable at any rate: let the brake refuse it rather than inflate it.
+  if (notionalBase(current, sub) < minNotionalBase) return first;
 
-  const out = new Map<string, bigint>();
-  let drift = 0n;
-  for (const id of ids) {
-    const c = current.get(id) ?? 0n;
-    const s = sub.get(id) ?? 0n;
-    const moved = c + ((s - c) * scale) / 1_000_000n;
-    out.set(id, moved);
-    drift += moved - c;
+  let lo = lambda >= 1 ? SCALE_ONE : BigInt(Math.round(lambda * Number(SCALE_ONE)));
+  if (lo < 0n) lo = 0n;
+  let hi = SCALE_ONE;
+  while (lo < hi) {
+    const mid = (lo + hi) / 2n;
+    if (notionalBase(current, adjustAtScale(current, sub, mid)) >= minNotionalBase) hi = mid;
+    else lo = mid + 1n;
+  }
+  return lo >= SCALE_ONE ? new Map(sub) : adjustAtScale(current, sub, lo);
+}
+
+/**
+ * P17 review I1 — the executed vector, chosen by backing OFF rather than by
+ * falling all the way to the current position.
+ *
+ * `commit` must return `null` when a candidate cannot be executed (it fails the
+ * caller's feasibility re-check, before or after the partial adjustment) and
+ * the adjusted vector otherwise. The order is:
+ *
+ *   1. the full surviving set — every leg that cleared its hurdle;
+ *   2. the RISK-REDUCING SUBSET of it — only the divest-to-idle legs;
+ *   3. the current position, i.e. hold.
+ *
+ * Step 2 is the point. A subset of a feasible target need not be feasible, and
+ * when it is not, dropping straight to `current` discards the unpaired divests
+ * along with everything else — legs that carry no economic hurdle precisely
+ * because §9.1 states none for reducing exposure, and that the optimiser only
+ * proposed because a constraint moved. Discarding them is the all-or-nothing
+ * failure P17 exists to remove, pointed in the direction that RAISES risk.
+ *
+ * `backedOff` is reported so the census can tell a full execution from a
+ * reduced one; `decide` turns it into the `HURDLES_CLEARED_DIVEST_ONLY` reason.
+ *
+ * PURE, given a pure `commit`.
+ */
+export function chooseExecuted(
+  current: Map<string, bigint>,
+  sub: Map<string, bigint>,
+  divestOnly: Map<string, bigint>,
+  hasClearedDivest: boolean,
+  commit: (candidate: Map<string, bigint>) => Map<string, bigint> | null,
+): { executed: Map<string, bigint>; backedOff: boolean } {
+  const full = commit(sub);
+  if (full !== null) return { executed: full, backedOff: false };
+
+  if (hasClearedDivest) {
+    const reduced = commit(divestOnly);
+    if (reduced !== null) return { executed: reduced, backedOff: true };
   }
 
-  const dust = drift - intendedDrift;
-  if (dust !== 0n && ids.length > 0) {
-    const fix = ids.find((id) => (out.get(id) ?? 0n) - dust >= 0n) ?? ids[0]!;
-    out.set(fix, (out.get(fix) ?? 0n) - dust);
-  }
-  return out;
+  return { executed: new Map(current), backedOff: false };
 }

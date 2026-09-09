@@ -307,9 +307,13 @@ describe('decide() emits a bounded safety unwind that bypasses the economic gate
     expect(out.target.get('aave')).toBe(0n);
     expect(out.costGate.reason).toBe('SAFETY_UNWIND_BYPASS');
     expect(out.reasons.join(' ')).toContain('SAFETY_UNWIND');
-    // A bypass must never look like a cleared gate: no fabricated gain.
-    expect(out.costGate.gainBase).toBe(0n);
-    expect(out.costGate.moveCostBase).toBe(0n);
+    // A bypass must never look like a cleared gate. P17 removed the
+    // gain/cost/band triple this used to check for a fabricated non-zero (all
+    // four fields were permanently 0n once the single gate went, and no
+    // consumer read them); the same property is now that NOTHING WAS PRICED —
+    // an empty leg list, which `HURDLES_CLEARED` can never produce, since it
+    // requires at least one leg to have cleared.
+    expect(out.costGate.legs).toEqual([]);
   });
 
   it('emits ActionKind.EmergencyExit, not Divest', () => {

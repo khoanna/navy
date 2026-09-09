@@ -79,7 +79,11 @@ export function computeDecisionHashV2(parts: {
   reserve: unknown;
   target: unknown;
   enumeration: unknown;
-  costs: unknown;
+  /** P17 - the per-leg movement verdicts (`CostGateResult.legs`). This slot
+   *  carried `costGate.terms` while one gate priced the whole target; that map
+   *  is gone with the gate, and the legs are what a decision's movement
+   *  reasoning now consists of. */
+  legs: unknown;
   reasons: unknown;
 }): string {
   return hashData(parts);

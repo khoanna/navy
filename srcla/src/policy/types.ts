@@ -327,13 +327,21 @@ export interface ReserveResult {
   scenarioFeasible: Array<{ scenario: string; feasible: boolean; shortfallBase: bigint }>;
 }
 
+/**
+ * The movement decision's outcome.
+ *
+ * P17 removed `gainBase`, `moveCostBase`, `bandBase` and `terms`. They were the
+ * single gate's `gain vs max(C_move, k*sigma)` comparison, which P13/P15/P16
+ * deleted; once the gate went, all four were written as literal zeros on every
+ * path, no consumer in `src/` read any of them, and `terms` was the `costs`
+ * component of `computeDecisionHashV2` - so §10.2's hash covered a constant
+ * `{}` while `legs`, which carries the actual reasoning, was not hashed at all.
+ * `legs` now occupies that slot. The per-leg amounts are annualised WAD rates,
+ * not base units; the movement cost is priced inside each leg's `hurdleWad`.
+ */
 export interface CostGateResult {
   passed: boolean;
   reason: string;
-  gainBase: bigint;
-  moveCostBase: bigint;
-  bandBase: bigint;
-  terms: Record<string, bigint>;
   /**
    * P17 - the per-leg verdicts `steps/legs.ts#planLegs` produced for this
    * decision, in the order they were paired. Empty when nothing was evaluated
