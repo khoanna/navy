@@ -1,18 +1,22 @@
 # Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
 
-**Research report version:** 0.6
+**Research report version:** 0.7
 
 **Date:** 2026-09-09
 
 **Release scope:** Base-native research release specification
 
-**Empirical status:** The architecture, source review, market registry, and evaluation protocol are specified. Historical outperformance and production readiness have not yet been demonstrated.
+**Empirical status:** The architecture, source review, market registry, and evaluation protocol are specified. Two registered held-out evaluations have been run and both returned `FAIL`; Appendix D records what they measured and which defects in this specification produced that result. Historical outperformance and production readiness have not been demonstrated, and §11.5 no longer asks for a form of outperformance the registered universe cannot supply.
 
 ## Abstract
 
 A lending vault should not allocate all capital to the market displaying the highest annual percentage yield (APY). A sufficiently large deposit changes utilization and the attainable supply rate; accounting assets may not be synchronously withdrawable; and gas, slippage, reward conversion, and rate reversal can eliminate an apparent yield advantage. 
 
-This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits. A separately deployable TypeScript service observes finalized Base state, simulates protocol-exact post-deposit rates, calibrates deterministic lower prediction bounds without look-ahead, solves a constrained allocation problem, and submits staged rebalances only when conservative benefit exceeds full cost. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes. A registered B0–B5 evaluation, H1–H7 ablations, cohort accounting, stress tests, and pinned Base-fork replays form two release gates: forecast calibration and statistically distinguishable after-cost policy outperformance. This paper specifies a falsifiable architecture and evaluation procedure; it does not claim completed performance results.
+This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits. A separately deployable TypeScript service observes finalized Base state, simulates protocol-exact post-deposit rates, calibrates deterministic lower prediction bounds without look-ahead, solves a constrained allocation problem, and submits staged rebalances only when conservative benefit exceeds full cost.
+
+Version 0.7 revises the movement rule and the release criterion after two registered held-out evaluations returned `FAIL`. Three specification defects are corrected. The movement threshold conflated the *predictive dispersion of a single horizon outcome* with the *sampling error of an estimated edge*, charging forecast uncertainty twice and making the economic hurdle a function of the forecast horizon rather than of the economics; it is restated as an annualized rate differential against a registered payback period. Deploying idle capital was priced as though it were a venue-to-venue rotation, though it carries neither an incumbent position nor reversal risk; the two legs are now separated. The gate was binary over the whole target vector, where the transaction-cost literature prescribes trading to the boundary of a no-trade region and adjusting partially toward an aim portfolio; it is now evaluated per leg and executed by partial adjustment. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes.
+
+Version 0.7 also corrects what the release gate asks. Measured on the registered calibration era, the entire cross-sectional return available from reallocating among the three admitted venues is 18–43 basis points a year, against 494 basis points lost by not deploying at all. A criterion requiring SRCLA to *beat* every deployable baseline on yield is therefore not a demanding test but an unattainable one, and it left unmeasured the dimension in which SRCLA does dominate: the baselines that outearned it in the v0.6 evaluation did so by breaching the stressed-liquidity floor SRCLA is bound by. The policy gate becomes safety dominance plus non-inferiority on after-cost yield, with superiority claimed and tested per dimension, and with an explicit attainability requirement: a criterion that no registered policy could satisfy in the registered universe reports `NOT INFORMATIVE` rather than `FAIL`. This paper specifies a falsifiable architecture and evaluation procedure; it does not claim completed performance results.
 
 **Keywords:** DeFi, ERC-4626, Base, USDC, lending allocation, yield farming, deterministic forecasting, robust optimization, liquidity risk, transaction costs.
 
@@ -68,6 +72,54 @@ not pass; the overall gate still blocks, exactly as the existing `null` /
 NOT PRODUCED outcome does. It only distinguishes "the policy allocated badly"
 from "no policy could have satisfied this".
 
+## Amendment Record (v0.6 → v0.7)
+
+The v0.6 registered evaluation ran on two sealed eras and returned `FAIL` on
+both. On the 86-day primary era SRCLA executed **one** rebalance and realized
+0.871%; on the 16-day secondary era it executed **none** and realized 0.000%.
+At the 10,000 USDC tier on that era the fixed-weight baseline B4 realized
+24.951% while holding 100.0% stressed coverage and 100% withdrawal fill, so a
+safe and available alternative existed and the safety envelope does not explain
+the zero. The ablation that removes the movement gate and nothing else realized
+3.462% and 39.157% on the two eras. The gate was the binding constraint.
+
+The eleven amendments below are derived **entirely from the calibration era**
+(2024-03-15 → 2025-05-31, 10,632 hourly origins, three venues), re-measured for
+this revision and reproduced in Appendix D. No sealed observation informs any
+of them. They are registered here, before the code they justify is written.
+
+**Third burned-window declaration.** The v0.6 registered run and its diagnosis
+read `heldout-c` (2026-03-01 → 2026-05-25) and `heldout-b` (2026-08-24 →
+2026-09-08) in full, at per-policy and per-tier resolution. Both are design
+data from this point and may never again serve as held-out evidence. Together
+with the windows burned by v0.5 and v0.6, the design-data set is now
+2025-06-01 → present. Version 0.7 must be validated on an era that begins
+after this document is registered.
+
+| ID | Amendment | Section | Evidence |
+|---|---|---|---|
+| P13 | The movement hurdle uses the **standard error of the estimated edge**, not the predictive quantile of one horizon outcome. §7's lower bound already charges predictive dispersion; the band charged it a second time | §9.1 | The v0.6 objective subtracted \|q\|·notional and the gate then demanded the remainder clear another k·\|q\|·notional. At the registered artifact (q = −1.061e-4, k = 1) this required a venue to show **7.74% APY** before idle USDC could be deployed. Realized calibration-era means: Aave 6.13%, Compound 4.94%, Moonwell 4.86% |
+| P14 | `C_move` is decomposed **by leg**. Price impact, slippage and MEV are properties of the §9.4 Uniswap route and apply to the reward-swap leg only; lending deposit and withdraw legs carry gas, failure and buffer | §9.1, §9.3 | A supply or withdraw executes at the protocol index: there is no quoted price to slip against and no sandwich surface. Charging 8 bps of notional to a lending leg both invents a cost and double-counts §6.1's post-deposit curve, which already prices the rate effect of size |
+| P15 | The action rule is an **annualized rate differential against a registered payback period** $T_{\mathrm{pay}}$, not a horizon-return comparison | §9.1 | σ over the horizon is near-flat in H (×1.19 at 14d against ×3.74 for √H) while expected horizon return is linear in H, so the v0.6 rule's implied hurdle fell from 7.74% APY at H=1d to 0.66% at H=14d — a 12× swing in the economics from a forecasting choice |
+| P16 | Deploying idle capital is gated on **cost alone**. The differential hurdle applies only to venue-to-venue rotation, and §11.3 gains **H3d** so the two legs are ablated separately | §9.1, §11.3 | §9.1 already said idle capital "reduces target drift before SRCLA exits a strategy" and the implementation gated it identically to a rotation. Measured cost of the conflation: **494 bps/yr**, against 18–43 bps/yr for all rotation alpha combined |
+| P17 | The gate is evaluated **per leg** and executed by **partial adjustment** toward the aim. Discarding the whole target vector because one leg fails is forbidden | §8.2, §9.1 | Constantinides' no-trade region is exited by trading *to its boundary* [58]; Gârleanu and Pedersen's optimal policy under transaction costs is partial adjustment toward an aim portfolio [57]. v0.6 did neither: 0 or 1 trades on each held-out era |
+| P18 | The forecast horizon is **co-selected with the movement rule**. §7.3's loss gains the turnover and sacrificed-return terms it already names, every term is scale-normalized, and a selection margin below a registered threshold must be broken by the economic terms | §7.2, §7.3 | The v0.6 loss was 99.84% `downsideRate` (0.5076 of 0.5084), a quantity ≈0.5 for any unbiased candidate. H was decided on a margin of **1.27e-7**, and nothing in the loss could observe that the winning horizon stops the policy trading |
+| P19 | A fourth registered forecast candidate: **state-space forecasting of utilization, mapped through the venue's exact on-chain interest-rate model** | §7.2, §6.3–6.5 | One-day persistence R² for utilization is 0.758 / 0.918 / 0.915 against **−0.206** / 0.430 / 0.042 for the rate it drives. The rate is a kinked, governance-reparameterized function of a smooth bounded state; the registered grid forecast the discontinuous output and ignored the continuous input |
+| P20 | Deployability is **measured, not asserted**. A comparator that breaches the registered safety envelope during a run is not a deployable baseline for that run | §11.2, §11.5 | On the v0.6 secondary era every stressed-coverage violation belonged to a baseline or an ablation and none to SRCLA, yet the gate recorded them as SRCLA's failure. B1, B2 and B2u earned 39% while holding 0.878 coverage against a 0.99 floor SRCLA obeyed |
+| P21 | The policy gate becomes **safety dominance plus non-inferiority on after-cost yield**; superiority is claimed and tested per dimension; ablations are §11.3 evidence and not §11.2 comparators | §11.3, §11.5 | Requiring a safety-constrained optimiser to beat unconstrained comparators on yield tests the constraint, not the optimiser. An ablation that beats SRCLA is a finding about the removed component, which is what §11.3 exists to report |
+| P22 | The **skill window** — bounded hindsight minus the best admissible baseline — is measured before any yield criterion is scored. Within the margin it makes a *superiority* claim `NOT INFORMATIVE` and a *non-inferiority* pass weak evidence that must be disclosed as such | §11.5 | Best achievable calibration-era net APY across the whole v0.7 parameter space is 5.120%; equal-weight-and-hold is 4.941%; the zero-cost ceiling is 5.374%. A superiority criterion over an 18–43 bps window measures estimation noise, and a non-inferiority pass over one is satisfied by deploy-and-hold |
+| P23 | The registered artifact must **carry every quantity the policy reads**, and the artifact hash must cover all of it | §7.3, §8.2 | The v0.6 artifact recorded `residualPanelBuilt: true` while carrying no panel: the writer never serialized it and the loader never parsed it. P2's weight-dependent portfolio quantile and P8's dispersion silently fell back to a frozen scalar, which is the mechanical cause of the run's inert-ablation failure |
+
+**P16, P21 and P22 are the three that change a claim rather than a
+calculation, so each is justified only by calibration-era measurement.** P16
+and P22 rest on the figures in Appendix D, all of which are computed on the
+fitting era. P21 rests on a structural argument that needs no data: a
+comparator exempt from a constraint the candidate must obey cannot measure
+that candidate's skill. None of the three is supported by, or was chosen
+after inspecting, a sealed observation. The distinction matters because
+§11.5 forbids retuning against held-out data and these amendments must not be
+mistaken for it.
+
 ## 1. Introduction
 
 An automated lending vault has a simple-looking objective: place USDC where it earns the best return. In practice, that statement hides five decisions:
@@ -90,7 +142,7 @@ The principal contributions are:
 - protocol-exact post-deposit rate and liquidity simulation for the three initial Base markets;
 - a deterministic, walk-forward-calibrated lower prediction bound rather than an opaque external artificial-intelligence service;
 - dynamic reserve, shared-dependency, full-cost, staged-execution, and event-driven reward rules; and
-- a registered evaluation whose negative or statistically indistinguishable result fails the release gate and remains part of the research record.
+- a registered evaluation whose safety violation, inferiority at the registered margin, or unsupported superiority claim fails the release gate and remains part of the research record — as two such results already have.
 
 ## 2. Scope, Claims, and Release Boundary
 
@@ -110,16 +162,50 @@ The allocation and dependency model is generic so a later protocol can be added 
 
 ### 2.2 Research claim and falsification
 
-The paper makes a design-completeness claim: the disclosed policy combines capacity-aware rates, uncertainty treatment, dependency limits, withdrawal feasibility, and complete movement costs in one reproducible pipeline. It does not yet make an outperformance claim.
+The paper makes a design-completeness claim: the disclosed policy combines capacity-aware rates, uncertainty treatment, dependency limits, withdrawal feasibility, and complete movement costs in one reproducible pipeline. It makes no claim to superior yield, and the superiority it does claim is confined to named dimensions that §11.5 tests individually.
+
+Version 0.7 states the performance claim it *does* intend to test, because
+v0.6 tested one the registered universe cannot settle. Three admitted USDC
+lending venues on one chain, with pairwise rate correlations of 0.33 to 0.54,
+offer a mean best-worst spread of 3.29 percentage points whose leadership
+changes every two hours at the median. Appendix D measures the consequence:
+across the entire v0.7 parameter space the best attainable calibration-era net
+return is 5.120%, deploying once into a fixed equal weighting returns 4.941%,
+and removing movement cost altogether raises the ceiling only to 5.374%. All
+reallocation skill in this universe is therefore worth 18 to 43 basis points a
+year. Over the same era, failing to deploy at all costs 494.
+
+The claim under test is accordingly:
+
+> Subject to a stressed-liquidity envelope that simpler policies do not
+> respect, SRCLA deploys capital as productively as the best admissible
+> deployable baseline, at materially lower turnover, without a safety
+> violation.
+
+This is a weaker yield claim and a stronger safety claim than v0.6 made, and
+it is the pairing the data can adjudicate. It is not a retreat to an easier
+test: §11.5's safety criterion is unchanged and remains absolute, and the
+non-inferiority margin is registered before the run in the same way a
+superiority threshold would have been.
 
 The research proposition is rejected for release if any of the following occurs:
 
-- the policy violates a declared safety constraint;
+- SRCLA violates a declared safety constraint on any registered run;
 - deterministic forecasts fail their registered calibration requirements;
-- SRCLA is statistically indistinguishable from a simpler deployable baseline after equal costs, information, and delays;
+- SRCLA is inferior, at the registered non-inferiority margin, to any *admissible* deployable baseline after equal costs, information, and delays, where admissibility requires the baseline itself to have respected the safety envelope (§11.2);
+- a claimed per-dimension superiority is not statistically supported;
 - a required tier, regime, baseline, ablation, or fork result is missing;
 - the evaluation cannot reproduce its manifest and result hashes; or
 - the result depends on tuning against held-out observations.
+
+A criterion no registered policy could satisfy in the registered universe is
+not evidence about SRCLA, and a criterion every policy satisfies is not either.
+§11.5 measures the *skill window* — the gap between bounded hindsight and the
+best admissible baseline on the same era — before scoring yield. A superiority
+claim inside that window reports `NOT INFORMATIVE`, which neither passes nor
+fails; a non-inferiority pass inside it is published together with the window,
+because on a narrow universe such a pass is weak evidence of allocation quality
+and the report must say so rather than let a reader infer more.
 
 ### 2.3 Research core and production-hardening path
 
@@ -139,6 +225,36 @@ Material-fund deployment additionally requires independent audits, an admin mult
 
 Research on distributionally robust optimization, multiperiod allocation, switching costs, and non-stationarity supports the use of conservative objectives and no-trade regions [3]–[6]. Leveraged multi-market allocation [2] is outside the unleveraged release scope, while AgileRate and reinforcement-learning work optimize protocol rate setting rather than depositor allocation [7], [8]. Time-series cross-validation and prediction-bound literature supports rolling-origin evaluation and explicit distinction between estimating a conditional mean and bounding a future outcome [53], [54].
 
+The transaction-cost literature constrains the *form* of a movement rule more
+tightly than v0.6 recognized, and three results are load-bearing for §9.1.
+Constantinides shows that with proportional costs the optimal policy is a
+no-trade region whose width varies approximately as the cube root of the cost,
+and — the part v0.6 omitted — that a portfolio outside the region is moved *to
+its nearest boundary*, not to the unconstrained optimum [58]. Gârleanu and
+Pedersen derive the corresponding dynamic policy in closed form: aim ahead of
+the moving target and trade *partially* toward that aim each period, weighting
+predictors by the persistence of their signal [57]. The multi-asset case
+retains both properties: with several risky positions the no-trade region
+becomes a body in weight space, and the optimal action remains a move to its
+boundary rather than to the frictionless optimum [62]. Empirical work on
+threshold rebalancing reaches the same structural conclusion — rebalancing to
+the boundary of a varying-volatility no-trade band dominates both calendar
+rules and full reversion to target [59]. Two consequences follow that v0.6
+violated. A band whose width does not fall with cost is not a transaction-cost
+band; as cost approaches zero the no-trade region must vanish. And a rule that
+either executes an entire target vector or discards it is the one structure all
+three results exclude.
+
+A parallel literature explains why a forecast selected for accuracy can be the
+wrong forecast for the decision it feeds. Decision-focused learning and the
+smart predict-then-optimize framework train or select predictors against
+downstream decision quality rather than predictive loss, and recent work on
+portfolio applications identifies precisely the pathologies of ignoring that
+coupling: ranking instability and turnover unrelated to the underlying
+signal [60], [61]. §7.3 already named turnover and sacrificed return among its
+selection terms; P18 makes them operative, which is what would have rejected
+the horizon v0.6 registered.
+
 ### 3.2 Gap statement
 
 The review does not prove that a private deployed controller lacks a capability. It shows that an external reader cannot reconstruct one disclosed, direct, unleveraged Base-USDC controller simultaneously specifying:
@@ -153,7 +269,7 @@ The review does not prove that a private deployed controller lacks a capability.
 | Bounded on-chain execution | A forecast or key bypassing the safety policy |
 | Registered evaluation | Post-hoc tuning or irreproducible superiority claims |
 
-SRCLA is useful only if this combined policy produces statistically distinguishable after-cost value while preserving its safety envelope. Section 11 specifies the rejecting tests.
+SRCLA is useful only if this combined policy preserves its safety envelope at an after-cost return no worse than the best baseline that respects the same envelope, and only if the dimensions in which it claims to be better are the dimensions in which it is tested. Section 11 specifies the rejecting tests, and §11.5 additionally specifies when a test is incapable of rejecting anything.
 
 ## 4. System Architecture and Authority Boundary
 
@@ -331,13 +447,60 @@ pooled quantile that covers a volatile series over-covers a smooth one and vice 
 The quantile is *solved* so that realised calibration-era coverage attains the
 registered target, rather than fixed at a nominal value with coverage reported after. This empirical residual form avoids assuming that a normal standard-deviation multiplier correctly represents non-stationary lending returns. Every quantile rule, tie, minimum sample, and missing-data behavior is fixed before held-out evaluation.
 
+**The horizon is an economic scale, not a forecasting hyperparameter.** The
+target is a horizon return, so its expectation grows linearly in $H$. Its
+residual dispersion does not. Because the realized label is the venue's *mean*
+rate over the window, lengthening $H$ averages away exactly the variation the
+forecast is trying to bound, and the measured dispersion is close to flat:
+over the calibration era $\hat\sigma_H$ grows by a factor of 1.19 from one day
+to fourteen, where independent increments would predict 3.74. The
+signal-to-noise ratio of the quantity every downstream rule consumes therefore
+rises roughly in proportion to $H$ — measured at 1.5–2.6 at one day and
+15.8–24.6 at fourteen.
+
+Two rules follow, and v0.6 observed neither. A conservative bound
+$\ell=\hat\mu+q_\alpha$ subtracts a near-constant from a linearly growing
+quantity, so at a short horizon it can subtract most of the return: at $H$ = 1
+day the registered artifact's bound removes 3.87 percentage points of
+annualized return from every venue, against realized venue means of 4.86% to
+6.13%. And any threshold expressed in horizon-return units inherits the same
+scaling, so an economic hurdle stated that way is silently a function of a
+forecasting choice. §7.3 therefore selects $H$ against the decision it feeds
+(P18), and §9.1 states its hurdle in annualized units that do not depend on $H$
+at all (P15).
+
 ### 7.2 Registered candidate methods
 
-Calibration compares exactly three established deterministic candidates:
+Calibration compares exactly four established deterministic candidates:
 
 1. a rolling distribution of historical realized horizon returns;
-2. an exponentially weighted level forecast with a lower quantile of walk-forward horizon residuals; and
-3. a fixed-specification direct-horizon autoregressive model with exogenous features (ARX).
+2. an exponentially weighted level forecast with a lower quantile of walk-forward horizon residuals;
+3. a fixed-specification direct-horizon autoregressive model with exogenous features (ARX); and
+4. a **state-space candidate** that forecasts the venue's utilization and maps the forecast through that venue's exact on-chain interest-rate model.
+
+Candidate 4 (P19) exists because the first three forecast the wrong variable.
+A lending venue's supply rate is not a free-running time series: it is a
+deterministic, kinked, governance-parameterized function of utilization, and
+the same machinery §6.3–§6.5 already uses to price the vault's own deposit
+evaluates it. Every parameter that function needs — base rate, kink,
+low and high slopes, reserve factor, and the interest-rate-model address that
+identifies the regime they belong to — is recorded at each origin. Forecasting
+the smooth bounded state and applying the protocol's own map is therefore
+strictly more auditable than forecasting the discontinuous output, and it is
+substantially easier: one-day persistence explains 75.8%, 91.8% and 91.5% of
+utilization variance across the three venues, against −20.6%, 43.0% and 4.2%
+for the rates those utilizations produce. A rate forecast must learn the kink
+and every governance reparameterization from data; a state forecast reads them.
+
+The candidate is registered, not mandated. It enters the same grid as the
+other three, is fit on the same era, is scored by the same loss, and wins only
+if it wins. Its dynamics must be specified before evaluation: the registered
+form is a mean-reverting level model on utilization with the venue's
+observed cash and borrows as the state, refusing to extrapolate outside the
+utilization range observed within the current configuration regime. Where a
+regime change alters the rate model, the state history survives and only the
+map changes — which is the second reason to prefer it, since a rate history
+does not survive a reparameterization at all.
 
 The registered grid also compares horizons of 1, 7, and 14 days and lower-bound coverage targets of 90%, 95%, and 99%. The selected method, horizon, coverage, features, window or decay, residual treatment, minimum observations, and lexical tie-break are frozen from the calibration era before held-out evaluation.
 
@@ -352,6 +515,48 @@ $e_i^{\mathrm{cons}}$ in §8.1 and the exitable fraction in §8.2.
 Only an outcome whose horizon has fully ended and whose availability lag has passed may train a forecast at origin $t$. Random train/test splitting, full-history normalization, post-held-out retuning, and contamination across configuration regimes are forbidden. Overlapping horizons may be used for prediction, but formal coverage evaluation also reports a non-overlapping or dependence-aware stream [55].
 
 Candidate selection uses a published loss function covering point error, lower-bound coverage, exceedance shortfall, sharpness, downside outcomes, turnover, and sacrificed return. Coverage is reported per market and again for the portfolio produced after optimizer selection, because selecting among noisy forecasts can amplify optimistic errors. Calibration coverage and independence diagnostics are release gates, not descriptive charts. The selected parameter artifact and its content hash are immutable for held-out evaluation. A newly admitted or materially changed market remains at zero deployable weight until it has enough post-change completed labels.
+
+**Every term in that loss is binding, and P18 makes three of them so.** The
+v0.6 implementation carried five of the seven terms and weighted them on their
+raw scales, with the consequence that `downsideRate` — the fraction of
+residuals below zero, which is approximately one half for any unbiased
+candidate and therefore carries almost no information about candidate quality
+— supplied 99.84% of the total loss. Selection was decided in the residue, on
+a margin of 1.27e-7, and the two omitted terms were exactly the two that
+describe the decision the forecast exists to serve. Three rules follow.
+
+**Scale normalization.** Each term is standardized across the candidate grid
+before weighting, so a weight expresses a preference rather than an accident of
+units. A term whose interquartile range across the grid is below a registered
+threshold is reported as a diagnostic and given zero weight, because a
+statistic that does not vary between candidates cannot rank them.
+
+**Decision-focused terms.** Turnover and sacrificed return are computed by
+running the registered decision rule of §8 and §9 over the calibration era
+under each candidate artifact, and scoring the realized net return, the
+realized turnover, and the return foregone by every hurdle rejection. This
+couples the forecast to its consumer, in the sense the decision-focused
+learning literature makes precise [60], [61]. Without it, no forecast-accuracy
+statistic can observe that a candidate horizon leaves the movement rule unable
+to act — which is the specific failure v0.6's selection could not see.
+
+**Near-tie resolution.** Where the two best candidates are separated by less
+than a registered minimum margin on the normalized total, the lexical tie-break
+is not used. The tie is resolved on the decision-focused terms alone, and if it
+remains within the margin there, the longer horizon is selected, because §7.1
+establishes that signal-to-noise rises with horizon and the shorter choice
+carries strictly more estimation risk. A registration whose selection margin
+falls below the threshold records that fact in the artifact.
+
+**The artifact carries what the policy reads (P23).** Every quantity any
+downstream rule consumes — per-venue and portfolio residual quantiles, the
+residual panel from which weight-dependent portfolio quantiles are computed,
+the cash-bound quantiles, the horizon, the coverage target, the movement-rule
+constants, and the pinned configuration digests — is serialized into the
+registered artifact and covered by its content hash. A field the policy reads
+but the artifact does not carry has no registration, silently falls back to a
+default, and makes every result citing that artifact unreproducible; the
+artifact must fail to load rather than degrade.
 
 ## 8. Reserve, Stress, and Allocation Optimization
 
@@ -425,11 +630,34 @@ $$
 
 The release solver uses deterministic piecewise-linear approximations of the protocol-specific conservative return curves and a fixed market-ID tie-break. For the three-market universe, its output is checked against exhaustive enumeration at the same quantum and its approximation regret is persisted. The solver is generic across adapter and dependency records; adding a protocol does not add a protocol branch to the optimizer.
 
+**$w^*$ is an aim, not an instruction.** The solution to the problem above is
+the portfolio the vault would hold if repositioning were free. It is not the
+portfolio the vault moves to this hour. §9.1 decides which legs of
+$x^*-x$ are worth executing and how far along each to travel, and the
+executed target is the result of that decision — never $x^*$ itself, and never
+nothing. Separating the two is what allows the optimizer to remain a clean
+constrained maximization while the movement rule carries the entire
+transaction-cost problem, and it is the reason $q^p_\alpha(w)$ appears in the
+objective but no movement threshold does.
+
+The portfolio residual quantile $q^p_\alpha(w)$ is computed from the aligned
+panel of per-venue horizon residuals carried by the registered artifact, under
+the candidate's own weights. It is weight-dependent by construction, which is
+what allows a concentrated candidate to be penalized relative to a diversified
+one of the same size and what gives H6 and H7 something to remove. An artifact
+that carries no panel cannot compute it; per P23 such an artifact does not load.
+
 ## 9. Movement, Rewards, and On-Chain Execution
 
 ### 9.1 Complete-cost movement rule
 
-New deposits and existing idle USDC reduce target drift before SRCLA exits a strategy. Existing capital moves only if conservative horizon gain $G_H$ exceeds the complete movement cost:
+The movement rule decides which components of $x^*-x$ to execute and how far
+along each to travel. It is stated in **annualized rate units on both sides**,
+evaluated **per leg**, and executed by **partial adjustment**. Versions 0.4
+through 0.6 stated it in horizon-return units, evaluated it once over the whole
+target vector, and executed all or nothing; Appendix D measures what that cost.
+
+#### 9.1.1 Movement cost, decomposed by leg
 
 $$
 C_{\mathrm{move}}=
@@ -438,19 +666,140 @@ C_{\mathrm{L2}}+C_{\mathrm{L1data}}+C_{\mathrm{exit}}+C_{\mathrm{entry}}
 +C_{\mathrm{impact}}+C_{\mathrm{slippage/MEV}}+C_{\mathrm{failure}}+C_{\mathrm{buffer}}.
 $$
 
-The economic action rule is:
+The eleven terms are not all incurred by every action, and P14 fixes which
+belong where. A lending deposit or withdrawal executes against the protocol's
+own index or exchange rate: there is no quoted price to slip against, no
+counterparty spread, and no sandwich surface, so $C_{\mathrm{impact}}$ and
+$C_{\mathrm{slippage/MEV}}$ are zero on that leg. Those two terms describe the
+Uniswap V3 route of §9.4 and are charged to the reward-conversion leg, where
+they are real. The rate consequence of depositing size — the one effect that
+might be mistaken for impact — is already priced by §6.1's post-deposit curve,
+and charging basis points as well counts it twice.
+
+| Term | Lending leg (deposit / withdraw) | Reward leg (claim / swap) |
+|---|---|---|
+| $C_{\mathrm{L2}}$, $C_{\mathrm{L1data}}$ | applies | applies |
+| $C_{\mathrm{exit}}$, $C_{\mathrm{entry}}$ | applies | — |
+| $C_{\mathrm{claim}}$, $C_{\mathrm{approve/reset}}$, $C_{\mathrm{swap}}$ | — | applies |
+| $C_{\mathrm{impact}}$, $C_{\mathrm{slippage/MEV}}$ | **zero** | applies |
+| $C_{\mathrm{failure}}$, $C_{\mathrm{buffer}}$ | applies | applies |
+
+Base costs include both L2 execution and L1 data availability [47], priced from
+the origin's own fee observations and never from a constant.
+
+#### 9.1.2 Deploying idle capital
+
+Idle USDC earns nothing, with certainty. Moving it into an admitted venue
+displaces no incumbent position, creates no reversal exposure, and is compared
+against a counterfactual that carries no forecast error of its own. It is
+therefore gated on cost alone. For an amount $m$ into venue $i$ with
+conservative annualized bound $\ell_i$:
 
 $$
-G_H>\max\left(C_{\mathrm{move}},\;k\hat\sigma\right).
+\ell_i\cdot\frac{T_{\mathrm{pay}}}{\text{year}}\cdot m \;>\; C^{\mathrm{lend}}_{\mathrm{move}}(m),
 $$
 
-The second term is a no-trade band scaled by forecast dispersion. Here, $\hat\sigma$ is the calibrated dispersion of portfolio horizon residuals — the same quantity the frozen forecast artifact carries as its portfolio residual quantile — and $k$ is a registered scalar multiplier fixed before held-out evaluation. On a low-fee chain
-$C_{\mathrm{move}}$ is small enough that it alone does not suppress churn, and
-repeated entry and exit incur self-impact and reversal risk that execution cost does
-not capture. Decisions are evaluated hourly while the forecast horizon is measured in
-days; the band, not the cadence, governs how often capital actually moves. Base costs include both L2 execution and L1 data availability [47]. Cooldown, minimum turnover, maximum turnover, and reversal allowances prevent repeated small moves. A market that becomes ineligible invokes a bounded safety unwind and bypasses the economic gate.
+where $T_{\mathrm{pay}}$ is a registered payback period: the move must repay
+its own execution cost within $T_{\mathrm{pay}}$ at the conservative bound. No
+dispersion term appears. $\ell_i$ is already a lower bound at the registered
+coverage, and charging forecast uncertainty a second time here is the defect
+P13 removes.
 
-Where measured $C_{\mathrm{move}}$ is negligible against $k\hat\sigma$ — as it is on Base, where a full three-venue rebalance costs on the order of a hundredth of a cent — the action rule reduces to the no-trade band alone. $k$ is therefore not a nuisance parameter: it is the gate. It **must** be registered by a turnover-versus-return sweep over the calibration era before any held-out evaluation, and a value asserted without such a sweep makes every result that depends on it provisional.
+Version 0.6's first sentence of this section already exempted idle capital in
+words — "new deposits and existing idle USDC reduce target drift before SRCLA
+exits a strategy" — while its rule gated deployment identically to a rotation.
+The separation is now structural rather than advisory, because Appendix D
+measures the conflation at 494 basis points a year against 18 to 43 for every
+rotation decision combined.
+
+#### 9.1.3 Rotating between venues
+
+A rotation replaces a position that is already earning. It pays an exit and an
+entry, it can be reversed at further cost, and its benefit is a *difference* of
+two estimates rather than a level. For a candidate move of $m$ from venue $j$
+to venue $i$:
+
+$$
+\Delta\ell_{ij} \;>\;
+\underbrace{\frac{C^{\mathrm{lend}}_{\mathrm{move}}(m)}{m}\cdot\frac{\text{year}}{T_{\mathrm{pay}}}}_{\text{cost hurdle}}
+\;+\;
+\underbrace{k\cdot\operatorname{SE}\!\left[\Delta\hat\ell_{ij}\right]}_{\text{significance hurdle}} .
+$$
+
+Both sides are annualized rates, so the rule does not depend on the forecast
+horizon (P15).
+
+**The significance hurdle uses the standard error of the estimated edge**, not
+the predictive quantile of one horizon outcome (P13). The two answer different
+questions. A lower prediction bound asks how bad the *next realized return*
+might be; a movement rule asks whether an *estimated difference between two
+venues* is distinguishable from zero. Substituting one for the other is the
+category error the prediction-interval literature exists to prevent [54], and
+v0.6 committed its mirror image: §7 correctly used the predictive bound in the
+objective, then §9.1 used that same quantity again where the sampling error of
+an estimate belonged. The first belongs in the objective, where §7 and §8.2
+already place it. The second is a property of the estimator:
+
+$$
+\operatorname{SE}\!\left[\Delta\hat\ell_{ij}\right]=
+\sqrt{\frac{\sigma_i^2+\sigma_j^2-2\rho_{ij}\sigma_i\sigma_j}{W_{\mathrm{eff}}}},
+$$
+
+with $W_{\mathrm{eff}}$ the heteroskedasticity- and autocorrelation-consistent
+effective sample size of the estimation window [55], because overlapping
+horizons make the nominal count an overstatement. $k$ is a registered scalar
+fixed before held-out evaluation, and it now multiplies a quantity that shrinks
+as evidence accumulates rather than one fixed by the choice of horizon.
+
+The rule has the limiting behavior the transaction-cost literature requires and
+v0.6's did not. As execution cost falls the cost hurdle falls with it, and as
+the estimation window lengthens or the forecast improves the significance
+hurdle falls too; in the limit the no-trade region vanishes. A band that
+remains open at zero cost and perfect information is not a transaction-cost
+band [58], [59]. The payback form is used rather than the cube-root width
+because this objective is linear in returns while the cube-root result is
+derived for a quadratic tracking penalty; the qualitative requirement is
+inherited, the functional form is not claimed.
+
+$T_{\mathrm{pay}}$ carries the multi-period content that a one-period gate
+cannot express. A move's benefit accrues for as long as the position is held,
+which is endogenous to the policy and unknown at decision time;
+$T_{\mathrm{pay}}$ is the registered assertion of how long a move must be
+expected to survive to be worth making, and it is registered by a
+turnover-versus-return sweep over the calibration era, jointly with $k$ and
+with the horizon (P18). A value asserted without such a sweep makes every
+result depending on it provisional.
+
+#### 9.1.4 Per-leg evaluation and partial adjustment
+
+The hurdles above are evaluated **for each leg of $x^*-x$ separately**. The
+legs that clear form a candidate sub-target, which is then re-checked against
+§8.1's reserve requirement and §8.2's cap and dependency constraints, since a
+subset of a feasible target need not itself be feasible. If the sub-target is
+infeasible, the largest feasible subset in a registered ordering is used.
+Discarding the entire target because one leg fails its hurdle is forbidden
+(P17); it is the structure that produced zero and one rebalances on the two
+v0.6 held-out eras.
+
+The executed move is a partial adjustment toward the surviving sub-target:
+
+$$
+x \leftarrow x+\lambda\left(x^{\mathrm{sub}}-x\right),\qquad \lambda\in(0,1],
+$$
+
+with $\lambda$ registered. This is the form Gârleanu and Pedersen derive as
+optimal under transaction costs [57] and that threshold-rebalancing practice
+converges on independently [59]: move toward the aim rather than to it, so that
+a single noisy origin cannot commit the whole portfolio, and so that the
+realized position tracks a persistent signal while ignoring a transient one.
+Where a leg's hurdle is cleared by a wide margin, $\lambda$ may reach one; the
+registered sweep in §7.3 determines it alongside $k$ and $T_{\mathrm{pay}}$.
+
+Cooldown, minimum turnover, maximum turnover, and reversal allowances remain in
+force and prevent repeated small moves; they bound the policy's aggregate
+behavior, whereas the hurdles above decide individual legs. A market that
+becomes ineligible invokes a bounded safety unwind and bypasses the economic
+gate entirely.
 
 ### 9.2 Base interest and incentives
 
@@ -470,6 +819,11 @@ $$
 C_{\mathrm{claim}}+C_{\mathrm{approve/reset}}+C_{\mathrm{swap}}
 +C_{\mathrm{L1data}}+C_{\mathrm{impact}}+C_{\mathrm{slippage/MEV}}+C_{\mathrm{buffer}}.
 $$
+
+This is the leg that genuinely bears $C_{\mathrm{impact}}$ and
+$C_{\mathrm{slippage/MEV}}$, and per P14 it is the only one: the terms are
+priced here, against the executable depth of the approved route, and not
+against the notional of a lending deposit that never touches an exchange.
 
 Expiry risk, emission end, route deterioration, or a safety condition may also trigger evaluation, but no swap executes without its safety checks. Claim and swap are atomic where protocol semantics permit. Otherwise, the claimed token remains in its adapter until a later approved harvest or recovery.
 
@@ -553,13 +907,33 @@ Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000 USDC. Every r
 | B4 | Use one frozen robust allocation over the eligible market set. |
 | B5 | Use bounded hindsight as a non-deployable diagnostic upper bound. |
 
-B5 cannot establish deployability and is excluded from the deployable outperformance comparison.
+B5 cannot establish deployability and is excluded from the deployable comparison. It is retained for a second purpose in v0.7: B5's bounded-hindsight return is the registered universe's ceiling, and §11.5 uses the gap between it and the best admissible baseline to decide whether a yield criterion is informative at all (P22).
+
+**Deployability is measured, not asserted (P20).** A baseline is a *deployable
+comparator for a given run* only if, in that run, it satisfied every safety
+constraint the registered envelope imposes on SRCLA: the stressed liquid
+coverage floor, the withdrawal success threshold, and the market, dependency
+and reserve limits. A comparator that breached the envelope is reported in
+full, with the breach, and is **excluded from the comparison set for that run**.
+
+This is not a convenience. A policy exempt from a constraint the candidate must
+obey is not measuring the candidate's skill; it is measuring the constraint's
+cost. The v0.6 evaluation makes the point concretely: on the secondary
+held-out era B1, B2 and B2u returned approximately 39% while holding stressed
+coverage of 0.878 against a floor of 0.99, and SRCLA — which held 1.000 — was
+recorded as having failed to beat them. Whether the floor is worth its price is
+a legitimate and separate question, and §11.3's H4 is where it is asked.
+
+Exclusion is recorded as evidence, not silence. Where every deployable baseline
+at a tier is excluded, the comparison at that tier reports `NO ADMISSIBLE
+COMPARATOR` and does not verify, in the same way `CAPACITY-INFEASIBLE` does not.
 
 ### 11.3 Component hypotheses
 
 - **H1—capacity:** remove post-deposit simulation; rank on displayed rate.
 - **H2—uncertainty:** remove calibrated lower bounds; use the point forecast.
-- **H3—cost:** remove the complete-cost gate and the no-trade band.
+- **H3—cost:** remove both movement hurdles; deploy and rotate to the aim whenever it differs from the position.
+- **H3d—deployment hurdle only:** remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. Registered separately because v0.6's H3 conflated two effects of opposite economic size, and the run could not report which one it had measured.
 - **H4—liquidity:** remove the dynamic reserve and stress feasibility; admin floor only.
 - **H5—dependency:** remove shared-dependency caps.
 - **H6—structural liquidity cap:** remove $c_i^{\mathrm{liquidity}}$.
@@ -568,9 +942,39 @@ B5 cannot establish deployability and is excluded from the deployable outperform
 Each hypothesis removes only its named component while holding other information,
 delays, costs, and rules fixed.
 
+**Ablations are evidence about components, not comparators for the release
+gate (P21).** An ablation is SRCLA with one part removed, so an ablation that
+outperforms SRCLA is a finding that the removed part costs more than it earns —
+which is precisely the result §11.3 exists to surface, and precisely the result
+v0.6 produced when H3 returned 3.462% and 39.157% against SRCLA's 0.871% and
+0.000%. Folding that into §11.5's baseline criterion converted the single most
+informative diagnostic in the run into an undifferentiated gate failure. §11.5
+therefore reads the ablation table separately, and a component whose removal
+improves after-cost return without degrading safety is reported as a **negative
+contribution** requiring either respecification or removal from the policy.
+
+An ablation whose decision sequence is byte-identical to SRCLA's removed
+nothing on the evaluated data. Its delta is noise, attributing that delta to
+the named component is a misattribution, and the run must report it as `INERT`
+rather than as a contribution of either sign.
+
 ### 11.4 Metrics and fork evidence
 
 Forecast metrics include bias, mean absolute error, root mean squared error, mean absolute scaled error, pinball loss, lower-bound coverage, exception independence, exceedance shortfall, and sharpness. Controller metrics include realized net APY, share-price growth, cohort profit, Base L2 and L1 data fees, swap costs, turnover, reversals, drawdown, expected shortfall, withdrawal success, stressed liquid coverage, unavailable assets, dependency concentration, and policy violations.
+
+Version 0.7 adds four **deployment** metrics, because the v0.6 evaluation
+reported a policy that never deployed as though its only defect were a low
+return, and no metric in the set distinguished "allocated badly" from "did not
+allocate":
+
+- **capital-at-work fraction**: the time-weighted share of NAV held in an admitted venue rather than idle, reported per tier;
+- **deployment latency**: origins elapsed between capital becoming available and its first admitted deployment;
+- **idle drag**: return foregone against the same policy with the deployment hurdle removed, which is the quantity H3 conflates with rotation suppression;
+- **hurdle-block census**: for every origin at which the target differed from the position, which hurdle blocked which leg, and by what margin.
+
+The census is the diagnostic that would have identified v0.6's defect from the
+run record alone, rather than requiring the calibration-era re-derivation in
+Appendix D.
 
 Pinned Base-fork jobs validate exact adapter math, transaction success, gas, L1 data fee, swap output, protocol rounding, and balance deltas. Historical ETH/USD and USDC/USD oracle rounds convert transaction cost consistently. DEX price impact already embedded in executed output is not subtracted twice.
 
@@ -578,9 +982,80 @@ Stressed liquid coverage is reported as a distribution — minimum, 5th percenti
 
 ### 11.5 Two mandatory release gates
 
-The forecast gate fails on inadequate lower-bound calibration, incomplete labels, regime contamination, look-ahead, missing candidate results, or non-reproducible artifacts.
+Both gates are evaluated and reported. Every check returns `PASS`, `FAIL`, or
+one of the non-verifying outcomes `NOT PRODUCED`, `CAPACITY-INFEASIBLE`, `NO
+ADMISSIBLE COMPARATOR`, and `NOT INFORMATIVE`. A non-verifying outcome never
+rolls up into a pass. A negative result is published as `FAIL`; it is not
+removed, and no parameter is retuned against held-out data to avoid one.
 
-The policy gate fails on any safety violation, missing tier/regime/baseline/ablation/fork result, incomplete cost, manifest mismatch, irreproducible result hash, or statistically indistinguishable after-cost performance from simpler deployable baselines. A negative result is published as `FAIL`; it is not removed or retuned against held-out data.
+**The forecast gate** fails on inadequate lower-bound calibration, incomplete
+labels, regime contamination, look-ahead, missing candidate results, or
+non-reproducible artifacts. It is a gate and must be *run*: the v0.6 evaluation
+reported the policy gate alone, so half of what §11.5 has required since v0.4
+was never evaluated. Its checks are per-venue achieved coverage against target,
+Kupiec unconditional and Christoffersen conditional coverage on a
+dependence-aware stream, label completeness, regime purity, the availability-lag
+barrier, presence of every registered grid point, the registered selection
+margin (§7.3), and artifact reproducibility including the P23 completeness
+requirement.
+
+**The policy gate** has four parts.
+
+1. **Safety, on SRCLA's own runs.** Every registered safety constraint holds on
+   every SRCLA run at every tier: withdrawal success at or above threshold,
+   stressed liquid coverage at or above the floor, and no cap, dependency,
+   reserve, or loss violation. This criterion is absolute and is not traded
+   against return. Safety outcomes for baselines and ablations are reported in
+   full and govern admissibility under §11.2, but a comparator's violation is
+   never recorded as SRCLA's failure (P20).
+
+2. **Non-inferiority on after-cost yield.** Against each *admissible*
+   deployable baseline at each tier, SRCLA's after-cost per-period return is
+   non-inferior at a registered margin $\delta$, by a one-sided paired test with
+   heteroskedasticity- and autocorrelation-consistent standard errors [55] and
+   a distribution-free block-bootstrap cross-check. $\delta$ is registered
+   before the run. Where a paired difference series is degenerate the test
+   reports unusable rather than passing.
+
+3. **Superiority, per dimension, where claimed.** Any superiority the report
+   asserts — turnover, stressed coverage, withdrawal success, cost, capital-at-work
+   — is stated as a named hypothesis and tested on that dimension. A dimension
+   not claimed is not tested; a dimension claimed and unsupported fails.
+
+4. **Completeness and reproducibility.** Every registered tier, regime,
+   baseline, ablation, and pinned-prestate fork replay is present; costs are
+   complete; the manifest, dataset, and result hashes re-derive.
+
+**Attainability and power (P22).** Both are decided by one measurement, taken
+before the yield criteria are scored: the **skill window**, defined as B5's
+bounded-hindsight return minus the best admissible deployable baseline's return
+on the same era. It is the most any allocator could have earned over the
+simplest thing that respects the safety envelope, and it is a property of the
+universe, not of SRCLA. It applies to the two yield criteria in opposite
+directions, and conflating them would be the error this amendment exists to
+avoid.
+
+*Superiority (part 3), where yield is a claimed dimension.* If the skill window
+is within $\delta$, no policy could have demonstrated yield superiority at the
+resolution the claim requires. The claim reports `NOT INFORMATIVE` with the
+window published, and the verdict rests on the remaining criteria. Without this
+rule a report can be failed for not achieving something arithmetically
+unavailable, which is what v0.6's gate did.
+
+*Non-inferiority (part 2).* A narrow skill window makes non-inferiority
+**easier**, not harder, so it is never converted to `NOT INFORMATIVE` — that
+would excuse the candidate from a test it can pass. Instead the window is
+published alongside the result as a power disclosure, and where it is within
+$\delta$ the report must state in its verdict line that non-inferiority on this
+universe is weak evidence of allocation quality, because a policy that simply
+deploys and holds would also satisfy it. Version 0.7 expects exactly this
+disclosure on the three-venue universe: Appendix D measures the window at 18 to
+43 basis points a year.
+
+Attainability tests the *instrument*. It compares two baselines to each other,
+nothing about SRCLA's own performance can trigger it, and it cannot excuse a
+safety failure, a missing artifact, an irreproducible hash, or an inferiority
+finding.
 
 ## 12. Failure Handling and Security Properties
 
@@ -607,7 +1082,38 @@ Foundry verification covers ERC-4626 accounting and rounding, donation resistanc
 
 ## 13. Limitations and Threats to Validity
 
-SRCLA may underperform a simpler policy. Lower prediction bounds can reject profitable opportunities; reserves impose cash drag; dependency caps encode judgment; and protocol-exact adapters increase implementation and monitoring cost. A deterministic method is auditable but not automatically accurate. Historical Base behavior may not represent future regimes, and a three-market universe limits diversification.
+SRCLA may underperform a simpler policy. Lower prediction bounds can reject profitable opportunities; reserves impose cash drag; dependency caps encode judgment; and protocol-exact adapters increase implementation and monitoring cost. A deterministic method is auditable but not automatically accurate. Historical Base behavior may not represent future regimes.
+
+**The three-market universe bounds what any allocator can demonstrate, and the
+bound is now measured rather than asserted.** Over the calibration era the
+three admitted venues carry pairwise rate correlations of 0.33 to 0.54 and a
+mean best-worst spread of 3.29 percentage points whose leadership changes every
+two hours at the median, so a forecast cannot follow it and a cost-aware policy
+should not try. Appendix D's sweep finds that the best attainable net return
+across the whole v0.7 parameter space is 5.120% against 4.941% for deploying
+once into fixed equal weights, and that removing movement cost entirely raises
+the ceiling only to 5.374%. **Every allocation decision this universe can
+reward is worth 18 to 43 basis points a year.**
+
+Three consequences must be stated plainly. Any claim of allocation skill on
+three correlated venues is a claim about a 43-basis-point window and will be
+dominated by estimation noise, which is why §11.5 tests attainability before it
+tests yield. The safety machinery — reserve, stress feasibility, structural
+liquidity cap, dependency caps — is where the design's value must lie, because
+it is the only dimension in which the measured differences between policies are
+large. And the honest route to an allocation claim is a wider universe, not a
+better estimator: Morpho Blue USDC markets, Euler Earn, and further Base
+lending venues would supply genuine cross-sectional dispersion and, with it,
+statistical power that no amount of additional calendar time on three venues
+can produce. That expansion is named here as the next phase and is deliberately
+out of release-one scope, since each venue requires its own immutable adapter,
+admission evidence, archive history, and audit.
+
+A limitation of this revision itself: v0.7's amendments are derived from the
+calibration era and from the diagnosis of two failed held-out runs. They are
+therefore design decisions with all the risk that implies, and the eras that
+would have tested them are burned. Version 0.7 is registered before, not after,
+the evidence that can adjudicate it.
 
 Residual risks include contract exploits, proxy or governance changes, oracle failure, Circle USDC depeg or freeze risk, protocol liquidity disappearance, public-mempool MEV, allocator censorship, Base sequencer disruption, RPC corruption, and correlated infrastructure. The initial design accepts Base and Circle USDC as common-mode risks rather than claiming to diversify them away.
 
@@ -621,7 +1127,34 @@ SRCLA turns “move USDC to the best yield” into an explicit and bounded proce
 
 Base interest remains part of strategy value without harvesting. Separate incentive tokens are recognized conservatively and converted through approved Uniswap V3 routes only when an event-driven economic and safety gate passes. Users retain standard synchronous ERC-4626 entry and exit and pay their own gas.
 
-The architecture is intentionally falsifiable. Forecast calibration and after-cost policy outperformance are mandatory release gates. Until those registered evaluations pass—and the distinct production-hardening controls are completed—the correct conclusion is that SRCLA is a specified research system, not a demonstrated superior or production-ready investment product.
+The architecture is intentionally falsifiable, and version 0.7 exists because it
+was falsified. Two registered held-out evaluations returned `FAIL`, and the
+cause was not the market: a movement rule stated in the wrong units charged
+forecast uncertainty twice, priced idle capital as though deploying it were a
+round trip, and discarded whole target vectors rather than the legs that failed
+their own test. On the era it was fit to, that specification would not deploy
+capital into a venue paying less than 7.74% while the venues paid 4.86% to
+6.13%. The corrections in §9.1 follow from results the transaction-cost
+literature settled decades ago and that v0.4 through v0.6 cited without
+applying: a no-trade region must vanish as cost vanishes, and a portfolio
+outside one is moved to its boundary rather than all the way or not at all.
+
+The second correction is to what the release gate asks. Measurement, not
+preference, establishes that reallocating among three correlated venues is
+worth 18 to 43 basis points a year while failing to deploy costs 494, so a
+criterion demanding SRCLA beat every baseline on yield was testing a difference
+the universe cannot produce, and it was scoring against comparators that
+outearned SRCLA by breaching the liquidity floor SRCLA obeyed. Version 0.7 asks
+instead for safety dominance and non-inferior yield, requires any superiority
+claim to name and test its dimension, and refuses to score a criterion whose
+own ceiling lies inside its margin.
+
+Forecast calibration and the policy gate remain mandatory, and the forecast gate
+must now actually be run. Until those registered evaluations pass on an era
+sealed after this document — and the distinct production-hardening controls are
+completed — the correct conclusion is that SRCLA is a specified research system
+with a diagnosed and corrected controller, not a demonstrated superior or
+production-ready investment product.
 
 ## References
 
@@ -737,6 +1270,18 @@ The architecture is intentionally falsifiable. Forecast calibration and after-co
 
 [56] R. F. Barber, E. J. Candès, A. Ramdas, and R. J. Tibshirani, “Conformal Prediction Beyond Exchangeability,” *Annals of Statistics*, vol. 51, no. 2, pp. 816–845, 2023, doi: 10.1214/23-AOS2276.
 
+[57] N. Gârleanu and L. H. Pedersen, “Dynamic Trading with Predictable Returns and Transaction Costs,” *The Journal of Finance*, vol. 68, no. 6, pp. 2309–2340, 2013, doi: 10.1111/jofi.12080.
+
+[58] G. M. Constantinides, “Capital Market Equilibrium with Transaction Costs,” *Journal of Political Economy*, vol. 94, no. 4, pp. 842–862, 1986, doi: 10.1086/261410.
+
+[59] Norges Bank Investment Management, “No-Trade Band Rebalancing Rules: Expected Returns and Transaction Costs,” NBIM Discussion Note 01/2018. [Online]. Available: https://www.nbim.no/contentassets/8cb41f89dce345f5a6a295238f7872fb/no-trade-band-rebalancing-rules-expected-returns-and-transaction-costs.pdf. Accessed: Sep. 9, 2026.
+
+[60] A. N. Elmachtoub and P. Grigas, “Smart ‘Predict, then Optimize’,” *Management Science*, vol. 68, no. 1, pp. 9–26, 2022, doi: 10.1287/mnsc.2020.3922.
+
+[61] J. Mandi, J. Kotary, S. Berden, M. Mulamba, V. Bucarey, T. Guns, and F. Fioretto, “Decision-Focused Learning: Foundations, State of the Art, Benchmark and Future Opportunities,” *Journal of Artificial Intelligence Research*, vol. 80, pp. 1623–1701, 2024, doi: 10.1613/jair.1.15320.
+
+[62] K. Muthuraman and S. Kumar, “Multidimensional Portfolio Optimization with Proportional Transaction Costs,” *Mathematical Finance*, vol. 16, no. 2, pp. 301–335, 2006, doi: 10.1111/j.1467-9965.2006.00273.x.
+
 ## Appendix A. Release-One Base Registry
 
 Registry observations were pinned during research on Aug. 2, 2026. Activation must reverify every mutable proxy implementation, parameter, pause flag, cap, reward, oracle, and route at the deployment block.
@@ -757,18 +1302,23 @@ Morpho markets previously present in the research registry are explicitly exclud
 | Chain and asset | Base 8453; Circle native USDC only |
 | Snapshot cadence | One finalized snapshot every 15 minutes |
 | Decision cadence | Hourly |
-| Forecast candidates | Rolling horizon distribution; exponentially weighted residual model; fixed direct-horizon ARX — full cross product with horizons and coverage targets, per venue |
+| Forecast candidates | Rolling horizon distribution; exponentially weighted residual model; fixed direct-horizon ARX; **state-space utilization forecast mapped through the venue's exact on-chain rate model** — full cross product with horizons and coverage targets, per venue |
 | Forecast horizons | 1, 7, and 14 days |
 | Lower-bound coverage candidates | 90%, 95%, 99%; quantile solved to attain the target |
+| Selection loss | Seven terms, each scale-normalized across the grid; turnover and sacrificed return computed by running the registered decision rule; near-ties resolved on the economic terms and then toward the longer horizon |
 | Second forecast target | Venue withdrawable-cash lower bound |
 | Market cold start | Ineligible until sufficient post-regime completed history |
 | Reserve | Maximum of admin floor, withdrawal quantile minus conservatively executable venue exits, and stress shortfall |
 | Objective | Portfolio-level lower bound, liquidity-weighted |
 | Structural liquidity cap | Active; decreases toward zero near the venue kink |
 | Reward execution | Event-driven; Uniswap V3 only; no fixed weekly harvest |
-| Rebalance | Staged, expiring, ordered actions with complete-cost gate, turnover gate, and uncertainty no-trade band |
-| No-trade band multiplier | $k$ is a registered scalar multiplier that scales forecast dispersion $\hat\sigma$ into the action rule threshold; fixed before held-out evaluation |
+| Rebalance | Staged, expiring, ordered actions; per-leg hurdles; partial adjustment toward the surviving sub-target; turnover, cooldown and reversal brakes |
+| Deployment hurdle | Idle capital deploys when its conservative bound repays movement cost within $T_{\mathrm{pay}}$. No dispersion term |
+| Rotation hurdle | Annualized differential exceeds the amortized cost hurdle plus $k\cdot\operatorname{SE}[\Delta\hat\ell]$ |
+| Movement-cost attribution | Impact, slippage and MEV on the reward-swap leg only; lending legs carry gas, failure and buffer |
+| $k$, $T_{\mathrm{pay}}$, $\lambda$ | Registered jointly with the horizon by a turnover-versus-return sweep over the calibration era, before held-out evaluation. $k$ multiplies the standard error of the estimated edge, never a predictive quantile |
 | Evaluation tiers | 10,000; 100,000; 1,000,000; 10,000,000 USDC |
+| Release criterion | Safety dominance on SRCLA's runs; non-inferiority at registered $\delta$ against admissible baselines only; per-dimension superiority where claimed; attainability checked before yield is scored |
 | User transactions | Standard synchronous ERC-4626; user pays gas |
 | Runtime keys | Admin key only in uncommitted contract environment; allocator key only in `/srcla` environment |
 | Data ownership | `/srcla` owns its PostgreSQL schema; `/be` reads history via HTTP |
@@ -800,4 +1350,112 @@ pnpm run evaluation:run -- --manifest config/evaluation-manifest.json
 pnpm run evaluation:verify -- --latest-complete
 ```
 
-The evaluation command may produce `PASS` or `FAIL`. Successful reproducibility is distinct from a passing outperformance gate.
+The evaluation command may produce `PASS` or `FAIL`, and may report a criterion as `NOT PRODUCED`, `CAPACITY-INFEASIBLE`, `NO ADMISSIBLE COMPARATOR`, or `NOT INFORMATIVE`. Successful reproducibility is distinct from a passing policy gate, and a non-verifying criterion is distinct from both.
+
+## Appendix D. Calibration-Era Measurements Behind the v0.7 Amendments
+
+Every figure in this appendix is computed on the **calibration era only** —
+2024-03-15 to 2025-05-31, 10,632 hourly origins per venue, read directly from
+Compound III, the Aave V3 Pool and the Moonwell mToken at Base archive blocks.
+No sealed observation appears. The era is the registered fitting window, so
+using it for design is what it exists for; §11.5's prohibition applies to
+held-out data and is not engaged here.
+
+Labels, residuals and quantiles reproduce the registered pipeline exactly:
+horizon returns are the venue's mean supply rate over the window converted to
+the horizon, residuals are strictly causal under a rolling 24-observation mean,
+and quantiles are solved per venue to the 99% coverage target.
+
+### D.1 Dispersion does not scale with the horizon
+
+| Venue | $\lvert q\rvert$, H=1d | H=7d | H=14d |
+|---|---|---|---|
+| `aave-v3-usdc` | 1.061e-4 | 1.505e-4 | 1.266e-4 |
+| `compound-v3-usdc` | 5.144e-5 | 6.702e-5 | 7.705e-5 |
+| `moonwell-usdc` | 9.084e-5 | 1.102e-4 | 1.180e-4 |
+| **ratio to 1d, worst venue** | ×1.00 | ×1.42 | ×1.19 |
+| independent increments would give | ×1.00 | ×2.65 | ×3.74 |
+
+Signal-to-noise, $\mathbb{E}[R_H]/\hat\sigma_H$: **1.47–2.63 at one day,
+15.79–24.60 at fourteen.** Achieved coverage is 99.00–99.01% at every horizon,
+so the difference is not a calibration artifact.
+
+### D.2 What the v0.6 rule implied
+
+Solving $\hat r_H\varphi > \lvert q^p\rvert(1+k)$ at the registered artifact
+($q^p$ = −1.061e-4, $k$ = 1) for the annualized rate a venue must show before
+idle USDC may be deployed:
+
+| | H=1d | H=7d | H=14d |
+|---|---|---|---|
+| implied deployment hurdle | **7.744% APY** | 1.570% | 0.660% |
+| origins at which Aave clears it | 18.6% | — | 100.0% |
+| origins at which Compound clears it | 14.5% | — | 98.9% |
+| origins at which Moonwell clears it | 16.0% | — | 100.0% |
+
+Realized supply rates over the same era: Aave mean 6.13% (p05 2.94, p50 4.80,
+p95 14.37); Compound 4.94% (2.54, 3.97, 10.26); Moonwell 4.86% (1.80, 3.57,
+13.14). The registered horizon was selected over the alternatives by a loss
+margin of 1.27e-7.
+
+### D.3 The state is forecastable; the rate it produces is not
+
+One-step autocorrelation and persistence-forecast $R^2$:
+
+| Venue | acf(1h) rate / util | $R^2$ persist 1d, rate | $R^2$ persist 1d, util |
+|---|---|---|---|
+| `aave-v3-usdc` | 0.710 / 0.985 | **−0.206** | **0.758** |
+| `compound-v3-usdc` | 0.922 / 0.996 | 0.430 | 0.918 |
+| `moonwell-usdc` | 0.806 / 0.995 | 0.042 | 0.915 |
+
+A negative $R^2$ means the current rate predicts tomorrow's rate worse than the
+unconditional mean does. This is the empirical basis for P19.
+
+### D.4 The size of the prize
+
+| Quantity | Calibration era |
+|---|---|
+| best-venue spread over worst, mean / p50 / p95 | 3.29 / 2.00 / 11.10 pp |
+| always-best-venue APY (costless, hindsight) | 7.12% |
+| equal-weight-three APY | 5.31% |
+| median duration of a venue's rate leadership | **2 hours** (mean 7.7, p90 13) |
+| pairwise rate correlation | 0.434 / 0.332 / 0.536 |
+
+### D.5 Movement-rule structure, held to the same optimiser and data
+
+Vault 1,000,000 USDC, hourly origins, 5% idle floor, 50% per-venue cap,
+movement cost 8 bps of notional. A simplified replay: no capacity curve, no
+reserve stress, no withdrawals, no dependency caps. Its claim is about the
+relative behavior of gate *forms*, not about absolute return.
+
+| Movement rule | Net APY | Trades | Turnover | Cost |
+|---|---|---|---|---|
+| B0, all idle | 0.000% | 0 | 0× | 0 bps |
+| **v0.6 rule at H=1d** | **0.000%** | **0** | 0× | 0 bps |
+| argmax chase, cost-blind | **−1.409%** | 200 | 95.9× | 767 bps |
+| equal weight, deploy once | 4.941% | 1 | 0.9× | 7.6 bps |
+| v0.6 rule at H=14d | 5.110% | 1 | 0.9× | 7.6 bps |
+| best v0.7 configuration found | **5.120%** | 2 | 1.9× | 15.0 bps |
+
+The first and last rows differ only in the movement rule. The two v0.6 rows
+differ only in the forecast horizon, which the registered loss chose on a
+1.27e-7 margin.
+
+### D.6 Attainable return against assumed movement cost
+
+Best configuration over horizons {1, 7, 14} days, diversification weights,
+adjustment rates, payback periods {7, 30, 90} days and $k$ ∈ {0, 1, 2}:
+
+| Movement cost | Best net APY | Trades | Turnover |
+|---|---|---|---|
+| 8 bps | 5.120% | 2 | 1.9× |
+| 4 bps | 5.164% | 3 | 2.1× |
+| 1 bps | 5.262% | 16 | 7.5× |
+| 0.25 bps | 5.325% | 52 | 21.1× |
+| 0 bps | 5.374% | 78 | 30.4× |
+
+Against 4.941% for deploying once into equal weights, **all reallocation skill
+in this universe is worth 18 bps a year at realistic cost and 43 bps at zero
+cost**, while not deploying costs 494. This is the measurement behind P16, P22,
+and §13's statement that the universe, not the estimator, is the binding
+constraint on any allocation claim.
