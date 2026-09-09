@@ -2,6 +2,7 @@ import { rateAt } from './simulate.js';
 import { lowerBoundAt, exitableFraction, withdrawableLowerBoundBase } from './forecast.js';
 import { requiredReserve } from './reserve.js';
 import { portfolioResidualQuantileFor } from './portfolio-quantile.js';
+import { stressedCoverage, REGISTERED_COVERAGE_FLOOR } from './coverage.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
 const WAD = 10n ** 18n;
@@ -114,6 +115,10 @@ export function resolveQuantumBase(
  *   netting        -> B3 ("omit ... the P3 netting of the withdrawal quantile").
  * And one is a diagnostic on P2's aggregation, not an H:
  *   portfolioBound -> sum per-venue lower bounds instead of one portfolio bound.
+ * And one is NOT a registered hypothesis or baseline switch at all - it exists
+ * only so the coverage floor added below is expressible/testable in
+ * isolation, the same way the others are:
+ *   coverageFloor  -> drop the §11.4 stressed-coverage feasibility check.
  */
 export type PolicyAblation =
   | 'capacityCurves'
@@ -125,7 +130,8 @@ export type PolicyAblation =
   | 'exitableWeight'
   | 'reserve'
   | 'netting'
-  | 'portfolioBound';
+  | 'portfolioBound'
+  | 'coverageFloor';
 
 export type PolicyAblations = Partial<Record<PolicyAblation, boolean>>;
 
@@ -136,6 +142,11 @@ export interface OptimizeOpts {
   /** Disable individual components for the H1-H7 ablations. Each switch
    *  removes ONLY its named component; every other constraint stays live. */
   disable?: PolicyAblations;
+  /** §11.4's stressed-coverage feasibility floor. Defaults to
+   *  `REGISTERED_COVERAGE_FLOOR` (0.99) - the same number the evaluation
+   *  gate grades against, so a caller cannot silently score the optimiser
+   *  against one floor and grade it against another. */
+  coverageFloor?: number;
 }
 
 /** The reserve-shaping half of the switch set, in the shape reserve.ts takes.
@@ -329,6 +340,28 @@ export function optimize(
       // §8.1 - a target that fails ANY stress scenario is rejected before
       // returns are compared, not scored-and-penalised.
       if (r.scenarioFeasible.some((s) => !s.feasible)) return false;
+    }
+
+    // §11.4 - the optimiser must be held to the exact metric the evaluation
+    // gate grades it on, not a different liquidity computation that merely
+    // resembles it (the reserve check above is one such approximation; it is
+    // not a substitute for this). This floor is expected to be INFEASIBLE at
+    // many origins: at the 5,000bps (50% of TVL) demand level it requires
+    // paying half of NAV instantly out of exit capacity venues frequently do
+    // not have, especially once meaningfully deployed. That is intended, not
+    // a bug to soften - a floor tuned to usually bind is a floor tuned to
+    // look busy rather than to mean anything. The next task adds the
+    // fallback that handles an origin where nothing clears this bar; this
+    // task only makes the search evaluate the bar at all.
+    if (disable.coverageFloor !== true) {
+      const deployedTotal = [...candidate.values()].reduce((s, v) => s + v, 0n);
+      const cov = stressedCoverage({
+        holdings: candidate,
+        idleBase: totalAssetsBase - deployedTotal,
+        venueCashByMarket: new Map(input.markets.map((m) => [m.marketId, m.cash])),
+        totalAssetsBase,
+      });
+      if (cov.worst < (opts.coverageFloor ?? REGISTERED_COVERAGE_FLOOR)) return false;
     }
 
     return true;
