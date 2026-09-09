@@ -14,7 +14,7 @@ A lending vault should not allocate all capital to the market displaying the hig
 
 This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a deterministic controller for one pooled, unleveraged ERC-4626 vault over Circle native USDC on Base. Release one allocates through vault-bound adapters to Aave V3, Compound III, and Moonwell. An immutable on-chain layer enforces market admission, market and dependency caps, idle reserve, loss and slippage bounds, decision expiry, pause behavior, and bounded emergency exits. A separately deployable TypeScript service observes finalized Base state, simulates protocol-exact post-deposit rates, calibrates deterministic lower prediction bounds without look-ahead, solves a constrained allocation problem, and submits staged rebalances only when conservative benefit exceeds full cost.
 
-Version 0.7 revises the movement rule and the release criterion after two registered held-out evaluations returned `FAIL`. Three specification defects are corrected. The movement threshold conflated the *predictive dispersion of a single horizon outcome* with the *sampling error of an estimated edge*, charging forecast uncertainty twice and making the economic hurdle a function of the forecast horizon rather than of the economics; it is restated as an annualized rate differential against a registered payback period. Deploying idle capital was priced as though it were a venue-to-venue rotation, though it carries neither an incumbent position nor reversal risk; the two legs are now separated. The gate was binary over the whole target vector, where the transaction-cost literature prescribes trading to the boundary of a no-trade region and adjusting partially toward an aim portfolio; it is now evaluated per leg and executed by partial adjustment. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes.
+Version 0.7 revises the movement rule and the release criterion after two registered held-out evaluations returned `FAIL`. Three specification defects are corrected. The movement threshold conflated the *predictive dispersion of a single horizon outcome* with the *sampling error of an estimated edge*, charging forecast uncertainty twice; it is restated as an annualized rate differential against a registered payback period, which halves the rate a venue must show before idle capital deploys. That correction does not by itself make the economics independent of the forecast horizon — the residual dependence lives in §7's bound rather than in §9.1's hurdle, and §7.3's repaired selection loss is what addresses it. Deploying idle capital was priced as though it were a venue-to-venue rotation, though it carries neither an incumbent position nor reversal risk; the two legs are now separated. The gate was binary over the whole target vector, where the transaction-cost literature prescribes trading to the boundary of a no-trade region and adjusting partially toward an aim portfolio; it is now evaluated per leg and executed by partial adjustment. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes.
 
 Version 0.8 states what the study is for. The proposition is not that a
 constrained allocator earns more than an unconstrained one; it is that **the
@@ -809,8 +809,25 @@ $$
 \underbrace{k\cdot\operatorname{SE}\!\left[\Delta\hat\ell_{ij}\right]}_{\text{significance hurdle}} .
 $$
 
-Both sides are annualized rates, so the rule does not depend on the forecast
-horizon (P15).
+Both sides are annualized rates, so **the hurdle** does not depend on the
+forecast horizon (P15). That is a weaker statement than it may appear, and the
+difference matters. The hurdle is horizon-free; $\ell$ is not. §7's bound
+annualizes a horizon-return quantile, $\ell = r + q_H\cdot\text{year}/H$, and
+because $q_H$ is near-flat in $H$ the annualized penalty is not: measured on the
+calibration era it is 3.87 percentage points at $H$ = 1 day and 0.33 at 14 days.
+
+The consequence must be stated plainly rather than glossed. P13's removal of the
+double-count **halves** the rate a venue must show before idle capital deploys —
+from 7.744% to 3.872% at $H$ = 1 day, and from 0.660% to 0.330% at 14 days — but
+the *ratio* across horizons is unchanged at 11.7×, because it was never a
+property of the movement rule. It is a property of the forecast bound §7
+supplies. Nothing in §9.1 can remove it.
+
+What removes it is **P18**: selecting the horizon against the decision it feeds
+rather than against forecast accuracy alone. That amendment is therefore not a
+refinement of the selection loss but the load-bearing correction of the three,
+and a registration that adopts §9.1's new hurdles without §7.3's repaired loss
+would still be exposed to the failure v0.6 suffered.
 
 **The significance hurdle uses the standard error of the estimated edge**, not
 the predictive quantile of one horizon outcome (P13). The two answer different
@@ -1558,6 +1575,20 @@ Realized supply rates over the same era: Aave mean 6.13% (p05 2.94, p50 4.80,
 p95 14.37); Compound 4.94% (2.54, 3.97, 10.26); Moonwell 4.86% (1.80, 3.57,
 13.14). The registered horizon was selected over the alternatives by a loss
 margin of 1.27e-7.
+
+**What P13 fixes, and what it does not.** Removing the double-count halves the
+threshold at every horizon but leaves the ratio across horizons untouched:
+
+| | H=1d | H=7d | H=14d | swing |
+|---|---|---|---|---|
+| v0.6, dispersion charged twice | 7.744% | 1.570% | 0.660% | 11.73x |
+| v0.7, charged once | **3.872%** | **0.785%** | **0.330%** | **11.73x** |
+
+The swing is a property of §7's bound, not of §9.1's rule, so no movement-rule
+amendment can remove it. P18 can, by selecting the horizon against the decision
+it feeds. This is the reason P18 is the load-bearing amendment of the three and
+why adopting §9.1's hurdles without §7.3's repaired loss would leave the v0.6
+exposure intact.
 
 ### D.3 The state is forecastable; the rate it produces is not
 
