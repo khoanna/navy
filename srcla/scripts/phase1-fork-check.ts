@@ -442,7 +442,16 @@ async function main(): Promise<void> {
     const driver = new DecisionDriver({
       artifact,
       opts,
-      loadOrigin: () => buildRawOriginFromCollector(collector, prisma, gas, chainConfigDigests),
+      // §9.1's churn windows come from the SAME cost params `decide()` then
+      // evaluates the gate with (see decision-driver.ts's loadLastAction
+      // comment on why the measured window and the enforced window must be
+      // one value) — mirrors src/index.ts's live wiring of this argument.
+      loadOrigin: () =>
+        buildRawOriginFromCollector(collector, prisma, gas, chainConfigDigests, {
+          cooldownSeconds: opts.cost.cooldownSeconds,
+          turnoverWindowSeconds: opts.cost.turnoverWindowSeconds,
+          reversalWindowSeconds: opts.cost.reversalWindowSeconds,
+        }),
       persist: (out, input) => persistDecisionOutput(prisma, artifact, out, input),
     });
 
