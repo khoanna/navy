@@ -104,3 +104,114 @@ describe('optimize — coverage floor', () => {
     expect(covOf(without.target, ms)).toBeLessThan(covOf(withFloor.target, ms));
   });
 });
+
+describe('optimize — least-infeasible fallback', () => {
+  // A quantum this large relative to NAV is deliberate, not incidental: the
+  // registered floor's tightest level is 5,000bps (50% of TVL), so the very
+  // FIRST quantum a greedy search would ever try must already push
+  // cumulative deployment past ~half of NAV for the floor to be unclearable
+  // from a standing start of zero. Idle alone (NAV - one small quantum)
+  // clears that bar trivially at any quantum that is a small fraction of
+  // NAV -- which is exactly why the existing tests above (Q = 1,000 against
+  // a 10,000 NAV) show the floor binding only after PARTIAL deployment, not
+  // from zero. Reaching a genuinely EMPTY target -- the case this fallback
+  // exists for -- requires the first quantum itself to be large enough to
+  // fail the floor, which forces at most one quantum to fit in the vault at
+  // all (2 x 6,000 > 10,000), i.e. a single decisive allocation choice.
+  const Q_BIG = 6_000_000_000n; // 6,000 USDC
+
+  it('returns the HIGHEST-COVERAGE candidate when none clears the floor', () => {
+    // Two venues, each independently reachable in the ONE quantum this
+    // universe allows. 'a' pays a much better rate (10% vs 1%) but its cash
+    // exactly matches the quantum, so deploying into it drains coverage to
+    // 0.80. 'c' pays worse but holds a bit more cash (6,500 vs 6,000), so
+    // depositing there leaves coverage at 0.90 -- worse than doing nothing,
+    // but strictly better than 'a'. An objective-only greedy would pick 'a'
+    // (higher rate); the fallback must not: it has to pick 'c', because its
+    // job here is maximising coverage among what's hard-feasible, not
+    // maximising the objective the floor already vetoed.
+    const ms = [
+      market('a', { cash: 6_000_000_000n }),
+      market('c', { cash: 6_500_000_000n }),
+    ];
+    const curves = [
+      curve('a', Array(11).fill(WAD / 10n)),  // 10% -- the better rate
+      curve('c', Array(11).fill(WAD / 100n)), // 1%  -- the worse rate
+    ];
+    const opts = { ...OPTS, quantumBase: Q_BIG };
+
+    // Verify the fixture is actually drier than the floor at every
+    // allocation before trusting anything the fallback does with it: BOTH
+    // single-quantum candidates must score below the 0.99 floor, or this
+    // test would not be exercising the fallback at all.
+    const onlyA = new Map([['a', Q_BIG], ['c', 0n]]);
+    const onlyC = new Map([['a', 0n], ['c', Q_BIG]]);
+    const covA = covOf(onlyA, ms);
+    const covC = covOf(onlyC, ms);
+    expect(covA).toBeLessThan(0.99);
+    expect(covC).toBeLessThan(0.99);
+    // ...and 'c' really is the higher-coverage (but lower-rate) option, so a
+    // correct answer is distinguishable from an objective-only one.
+    expect(covC).toBeGreaterThan(covA);
+
+    const out = optimize(input(ms), curves, artifact(), opts);
+
+    // Refusing to act is the one thing the fallback exists to avoid.
+    const deployed = [...out.target.values()].reduce((s, v) => s + v, 0n);
+    expect(deployed).toBeGreaterThan(0n);
+
+    // It must be the HIGHER-coverage candidate ('c'), not the
+    // higher-objective one ('a').
+    expect(out.target.get('c') ?? 0n).toBe(Q_BIG);
+    expect(out.target.get('a') ?? 0n).toBe(0n);
+    expect(covOf(out.target, ms)).toBeCloseTo(covC, 9);
+
+    // No other reachable (hard-feasible, single-quantum) candidate scores
+    // strictly higher than what was returned.
+    expect(covA).toBeLessThanOrEqual(covOf(out.target, ms));
+  });
+
+  it('never returns a target that violates a HARD constraint to raise coverage', () => {
+    // Same shape as above, but this time 'b' -- the venue that WOULD have
+    // given the best coverage (0.90, same arithmetic as 'c' above) -- sits
+    // in a dependency group capped at 3,000 USDC, half its cash and well
+    // under the one quantum (6,000) this universe allocates in. A fallback
+    // that only relaxed the coverage floor (and nothing else) would still
+    // reject 'b': the group cap is a GUARDRAIL, not a preference, and it
+    // must keep binding even while the floor itself is being ignored.
+    const ms = [
+      market('a', { cash: 6_000_000_000n }),
+      market('b', { cash: 6_500_000_000n }),
+    ];
+    const curves = [
+      curve('a', Array(11).fill(WAD / 20n)),
+      curve('b', Array(11).fill(WAD / 10n)), // higher rate too, not just higher coverage
+    ];
+    const groups = [
+      { id: 'g1', capBps: 10_000, absoluteCapBase: 3_000_000_000n, members: ['b'] },
+    ];
+    const opts = { ...OPTS, quantumBase: Q_BIG };
+    const inp: DecisionInput = { ...input(ms), dependencyGroups: groups };
+
+    // Precondition: neither single-quantum candidate clears the floor, and
+    // 'b' (if the group cap did not exist) would outscore 'a' on coverage --
+    // so a fallback that ignored the group cap would have every incentive to
+    // pick it instead of 'a'.
+    const onlyA = new Map([['a', Q_BIG], ['b', 0n]]);
+    const onlyB = new Map([['a', 0n], ['b', Q_BIG]]);
+    expect(covOf(onlyA, ms)).toBeLessThan(0.99);
+    expect(covOf(onlyB, ms)).toBeLessThan(0.99);
+    expect(covOf(onlyB, ms)).toBeGreaterThan(covOf(onlyA, ms));
+
+    const out = optimize(inp, curves, artifact(), opts);
+
+    // The group cap must still bind: 'b' can never carry more than its
+    // 3,000 USDC group cap, and in this single-quantum universe that means
+    // it can never carry the quantum at all.
+    expect(out.target.get('b') ?? 0n).toBeLessThanOrEqual(3_000_000_000n);
+    expect(out.target.get('b') ?? 0n).toBe(0n);
+
+    // The fallback still deploys -- into the only hard-feasible venue.
+    expect(out.target.get('a') ?? 0n).toBe(Q_BIG);
+  });
+});

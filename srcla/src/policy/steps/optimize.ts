@@ -316,7 +316,11 @@ export function optimize(
     return pct < g.absoluteCapBase ? pct : g.absoluteCapBase;
   };
 
-  const feasible = (candidate: Map<string, bigint>): boolean => {
+  // GUARDRAILS the on-chain vault itself enforces (caps, dependency groups,
+  // the reserve floor, the §8.1 stress scenarios). The fallback below MUST
+  // NEVER relax any of these -- doing so would let the optimiser propose a
+  // plan the chain would refuse.
+  const hardFeasible = (candidate: Map<string, bigint>): boolean => {
     const deployed = [...candidate.values()].reduce((s, v) => s + v, 0n);
     if (deployed > totalAssetsBase) return false;
 
@@ -342,59 +346,144 @@ export function optimize(
       if (r.scenarioFeasible.some((s) => !s.feasible)) return false;
     }
 
-    // §11.4 - the optimiser must be held to the exact metric the evaluation
-    // gate grades it on, not a different liquidity computation that merely
-    // resembles it (the reserve check above is one such approximation; it is
-    // not a substitute for this). This floor is expected to be INFEASIBLE at
-    // many origins: at the 5,000bps (50% of TVL) demand level it requires
-    // paying half of NAV instantly out of exit capacity venues frequently do
-    // not have, especially once meaningfully deployed. That is intended, not
-    // a bug to soften - a floor tuned to usually bind is a floor tuned to
-    // look busy rather than to mean anything. The next task adds the
-    // fallback that handles an origin where nothing clears this bar; this
-    // task only makes the search evaluate the bar at all.
-    if (disable.coverageFloor !== true) {
-      const deployedTotal = [...candidate.values()].reduce((s, v) => s + v, 0n);
-      const cov = stressedCoverage({
-        holdings: candidate,
-        idleBase: totalAssetsBase - deployedTotal,
-        venueCashByMarket: new Map(input.markets.map((m) => [m.marketId, m.cash])),
-        totalAssetsBase,
-      });
-      if (cov.worst < (opts.coverageFloor ?? REGISTERED_COVERAGE_FLOOR)) return false;
-    }
-
     return true;
   };
 
-  // Greedy: repeatedly add one quantum wherever it raises the objective most.
-  const target = new Map<string, bigint>(curves.map((c) => [c.marketId, 0n]));
+  const coverageOf = (candidate: Map<string, bigint>): number => {
+    const deployedTotal = [...candidate.values()].reduce((s, v) => s + v, 0n);
+    return stressedCoverage({
+      holdings: candidate,
+      idleBase: totalAssetsBase - deployedTotal,
+      venueCashByMarket: new Map(input.markets.map((m) => [m.marketId, m.cash])),
+      totalAssetsBase,
+    }).worst;
+  };
+
+  // §11.4 - the optimiser must be held to the exact metric the evaluation
+  // gate grades it on, not a different liquidity computation that merely
+  // resembles it (the reserve check inside `hardFeasible` is one such
+  // approximation; it is not a substitute for this). This floor is expected
+  // to be INFEASIBLE at many origins: at the 5,000bps (50% of TVL) demand
+  // level it requires paying half of NAV instantly out of exit capacity
+  // venues frequently do not have, especially once meaningfully deployed.
+  // That is intended, not a bug to soften - a floor tuned to usually bind is
+  // a floor tuned to look busy rather than to mean anything. Unlike
+  // `hardFeasible`, this is a PREFERENCE: when no candidate clears it, the
+  // fallback below searches with `hardFeasible` alone rather than stranding
+  // the vault in cash.
+  const feasible = (candidate: Map<string, bigint>): boolean =>
+    hardFeasible(candidate) && (disable.coverageFloor === true
+      || coverageOf(candidate) >= (opts.coverageFloor ?? REGISTERED_COVERAGE_FLOOR));
+
+  // Greedy: repeatedly add one quantum wherever it raises the objective most,
+  // under whichever feasibility predicate is passed in.
   const steps = Number(totalAssetsBase / q);
+  const runGreedy = (feasiblePred: (c: Map<string, bigint>) => boolean): Map<string, bigint> => {
+    const t = new Map<string, bigint>(curves.map((c) => [c.marketId, 0n]));
 
-  for (let step = 0; step < steps; step++) {
-    let bestId: string | null = null;
-    let bestValue = portfolioLowerBound(input, curves, artifact, target, disable);
+    for (let step = 0; step < steps; step++) {
+      let bestId: string | null = null;
+      let bestValue = portfolioLowerBound(input, curves, artifact, t, disable);
 
-    // Deterministic tie-break: markets are visited in sorted id order, and
-    // only a strictly-greater value displaces the incumbent - an equal-value
-    // alternative discovered later in the sort never wins.
-    const ids = [...target.keys()].sort();
-    for (const id of ids) {
-      const trial = new Map(target);
-      trial.set(id, (trial.get(id) ?? 0n) + q);
-      if (!feasible(trial)) continue;
-      const value = portfolioLowerBound(input, curves, artifact, trial, disable);
-      if (value > bestValue) {
-        bestValue = value;
-        bestId = id;
+      // Deterministic tie-break: markets are visited in sorted id order, and
+      // only a strictly-greater value displaces the incumbent - an equal-value
+      // alternative discovered later in the sort never wins.
+      const ids = [...t.keys()].sort();
+      for (const id of ids) {
+        const trial = new Map(t);
+        trial.set(id, (trial.get(id) ?? 0n) + q);
+        if (!feasiblePred(trial)) continue;
+        const value = portfolioLowerBound(input, curves, artifact, trial, disable);
+        if (value > bestValue) {
+          bestValue = value;
+          bestId = id;
+        }
       }
+
+      if (bestId === null) break;
+      t.set(bestId, (t.get(bestId) ?? 0n) + q);
     }
 
-    if (bestId === null) break;
-    target.set(bestId, (target.get(bestId) ?? 0n) + q);
+    return t;
+  };
+
+  let target = runGreedy(feasible);
+  // The predicate that actually produced `target` -- passed to
+  // `verifyExhaustively` below so regret is measured against the same
+  // feasible set the greedy search was allowed to choose from, per the
+  // ruling in task-7: measuring it against a different feasible set (e.g.
+  // the floor-constrained one when the fallback fired) makes the number
+  // meaningless.
+  let searchedFeasible = feasible;
+
+  // FALLBACK (only when the floor is live and no candidate cleared it, i.e.
+  // the floor-constrained search never deployed anything). Relaxes the
+  // coverage floor ONLY -- `hardFeasible` still binds every guardrail, so
+  // this can never produce a plan the on-chain vault would reject. Refusing
+  // to act here would strand the vault in cash and trade away the whole
+  // outperformance gate, so the least-infeasible candidate is preferred over
+  // an empty one.
+  //
+  // This is its OWN search, not a re-read of the primary greedy's path: it
+  // re-walks the same greedy progression under `hardFeasible` alone, but at
+  // every step tracks the coverage of EVERY hard-feasible single-quantum
+  // trial it evaluates -- not only the one the objective ranking would have
+  // accepted -- and returns whichever trial scored the highest coverage
+  // across the whole search. Objective and coverage can rank candidates
+  // differently (a thin, high-rate venue vs. a deeper, low-rate one), and
+  // the fallback's job is to answer "what's the least-infeasible thing we
+  // could do", not "what would the objective-only search have done anyway".
+  const deployedAny = [...target.values()].some((v) => v > 0n);
+  if (!deployedAny && disable.coverageFloor !== true) {
+    searchedFeasible = hardFeasible;
+    const t = new Map<string, bigint>(curves.map((c) => [c.marketId, 0n]));
+    let bestCandidate: Map<string, bigint> | null = null;
+    let bestCoverage = -Infinity;
+
+    for (let step = 0; step < steps; step++) {
+      const baselineValue = portfolioLowerBound(input, curves, artifact, t, disable);
+      let bestId: string | null = null;
+      let bestValue = baselineValue;
+
+      const ids = [...t.keys()].sort();
+      for (const id of ids) {
+        const trial = new Map(t);
+        trial.set(id, (trial.get(id) ?? 0n) + q);
+        if (!hardFeasible(trial)) continue;
+
+        const value = portfolioLowerBound(input, curves, artifact, trial, disable);
+        // A candidate is only eligible for the coverage comparison if it is
+        // a genuine improvement over doing nothing this step -- the same
+        // bar the ordinary objective-driven greedy requires to accept a
+        // move. Without this, the fallback would happily deploy into a
+        // candidate the objective considers worthless (e.g. phi=0: a
+        // position that cannot be exited at all) purely because it scores
+        // well on coverage, which is a DIFFERENT kind of deadlock than the
+        // one this fallback exists to fix and must be left alone.
+        if (value <= baselineValue) continue;
+
+        const cov = coverageOf(trial);
+        if (cov > bestCoverage) {
+          bestCoverage = cov;
+          bestCandidate = trial;
+        }
+        if (value > bestValue) {
+          bestValue = value;
+          bestId = id;
+        }
+      }
+
+      if (bestId === null) break;
+      t.set(bestId, (t.get(bestId) ?? 0n) + q);
+    }
+
+    // If no hard-feasible non-empty candidate exists at all (e.g. every cap
+    // is zero), `bestCandidate` stays null and `target` keeps the empty map
+    // from the primary search -- the only honest answer at that origin.
+    if (bestCandidate !== null) target = bestCandidate;
   }
 
-  const enumeration = verifyExhaustively(input, curves, artifact, opts, target, feasible);
+  const enumeration = verifyExhaustively(input, curves, artifact, opts, target, searchedFeasible);
   return { target, enumeration };
 }
 
