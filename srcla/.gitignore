@@ -17,3 +17,14 @@ evaluation-results.json
 # committed outputs; these are the verifiable intermediates behind them.
 evaluation-heldout-*.json
 phase4-run.log
+
+# Scored-grid sidecars from `pnpm phase4:freeze` (see scripts/freeze-artifact.ts).
+#
+# DELIBERATE (P18/M2): the REGISTERED artifact's sidecar is COMMITTED as
+# evidence. It is ~110 KB, it is the only record of how the registered
+# selection was reached -- every per-term IQR, every candidate's normalized
+# z-scores and its realised decision score -- and reproducing it costs a
+# ~75-minute sweep. A sidecar written beside any OTHER artifact path is
+# iteration output and is not evidence of anything registered.
+config/*.grid.json
+!config/registered-artifact.grid.json

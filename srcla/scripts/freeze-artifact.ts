@@ -28,7 +28,11 @@
  *
  * RUNTIME. P18's two decision-focused loss terms are NOT opt-in: a selection
  * made without them is the v0.6 selection, and there must be no flag that
- * quietly produces one. Measured cost on the registered 81-point grid over
+ * quietly produces one. (`--selection-subsample N` makes a run FASTER, never
+ * term-free, and refuses to write the registered artifact.) They are measured
+ * over a SEQUENTIAL replay of the calibration era per candidate -- see
+ * `src/forecast/decision-score.ts` for why a frozen per-origin state made both
+ * terms measure the opposite of what §7.3 asks them for. Measured cost on the registered 81-point grid over
  * the 443-day calibration era: 63 ms per decision on average at
  * SELECTION_QUANTUM_STEPS allocation quanta, 886 origins per candidate after
  * the stride, i.e. ~56 s per grid point and ~76 minutes for the sweep.
@@ -53,6 +57,7 @@ import {
   attachDecisionTerms,
   interquartileRange,
   registeredGrid,
+  nearTieResolution,
   resolveNearTie,
   scoreGrid,
   selectPoint,
@@ -63,7 +68,12 @@ import {
   type ScoredPoint,
   type SweepRow,
 } from '../src/forecast/grid-sweep.js';
-import { scoreCandidateDecisions, type DecisionScore } from '../src/forecast/decision-score.js';
+import {
+  bestNetReturn,
+  sacrificedReturn,
+  scoreCandidateDecisions,
+  type DecisionScore,
+} from '../src/forecast/decision-score.js';
 import { buildResidualPanel } from '../src/policy/steps/portfolio-quantile.js';
 import { buildIdentityPin, regimeOf } from '../src/domain/config-digest.js';
 import {
@@ -111,21 +121,46 @@ const ADJUSTMENT_RATE = 1;
  */
 const SELECTION_SUBSAMPLE = 12;
 
+/** The one path a REGISTERED artifact may be written to. */
+const REGISTERED_ARTIFACT_PATH = 'config/registered-artifact.json';
+
+/**
+ * `--selection-subsample N` runs the ranking on a coarser stride, for
+ * iteration. It is NOT an opt-out: the decision terms still run, the
+ * non-registered stride is stamped into `_registration.selectionSubsample`
+ * beside `selectionSubsampleRegistered: false`, and the script REFUSES to
+ * write to `config/registered-artifact.json`. A fast run is therefore
+ * self-identifying and cannot be mistaken for a registration by anyone
+ * reading the artifact later.
+ */
+function resolveSubsample(): { everyNth: number; registered: boolean } {
+  const raw = arg('selection-subsample');
+  if (raw === undefined) return { everyNth: SELECTION_SUBSAMPLE, registered: true };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1 || Math.round(n) !== n) {
+    throw new Error(`--selection-subsample must be a positive integer, got ${raw}`);
+  }
+  return { everyNth: n, registered: n === SELECTION_SUBSAMPLE };
+}
+
 /**
  * The vault the selection decisions are scored at: the third registered tier
  * (§11.1), held ENTIRELY IDLE at every origin.
  *
- * WHY IDLE, AND WHY THE SAME STATE FOR EVERY CANDIDATE. The two terms have to
- * be comparable ACROSS the grid, so the state each candidate faces cannot be
- * the state that candidate's own past decisions produced -- that would score
- * each point on a different counterfactual and make the ranking a comparison
- * of trajectories rather than of forecasts. A fully idle vault is the one
- * state that is both candidate-independent and the state every deployment
- * actually starts from, and it puts the question this task exists to ask
- * directly: can the movement rule act on this forecast at all? The cost is
- * that rotation legs never arise here, so `turnover` measures deployment
- * churn only; the winner's full replay, which does carry position state,
- * measures the rest.
+ * The SEEDING state, not the state every origin sees. Every candidate starts
+ * from the same fully idle vault -- the state a real deployment starts from,
+ * and the only one that is candidate-independent -- and then follows its OWN
+ * trajectory from there: `scoreCandidateDecisions` threads positions, idle,
+ * accrued interest, movement cost and §9.1 churn history forward across
+ * origins.
+ *
+ * That comparison IS of trajectories, and it has to be. The first version of
+ * this froze the state at every origin so that all candidates faced literally
+ * identical inputs; the result was 886 independent cold starts in which
+ * nothing could ever rotate, `turnover` measured deployed fraction and
+ * penalised it, and a candidate that admitted no venue at all scored the best
+ * attainable value on both economic terms. Comparability came at the price of
+ * measuring the opposite of the intended quantity.
  */
 const SELECTION_TIER_BASE = 1_000_000_000_000n;
 
@@ -272,7 +307,21 @@ function sweepNoTradeBandK(
 }
 
 async function main(): Promise<void> {
-  const outPath = arg('out') ?? 'config/registered-artifact.json';
+  const outPath = arg('out') ?? REGISTERED_ARTIFACT_PATH;
+  const subsample = resolveSubsample();
+  if (!subsample.registered && outPath.endsWith(REGISTERED_ARTIFACT_PATH)) {
+    throw new Error(
+      `--selection-subsample ${subsample.everyNth} is not the registered stride ` +
+        `(${SELECTION_SUBSAMPLE}), so this run may not write ${REGISTERED_ARTIFACT_PATH}. ` +
+        `Pass --out to a scratch path, or drop the override.`,
+    );
+  }
+  if (!subsample.registered) {
+    console.log(
+      `[freeze] NON-REGISTERED selection stride ${subsample.everyNth} (registered is ` +
+        `${SELECTION_SUBSAMPLE}). This is an iteration artifact and says so in _registration.`,
+    );
+  }
   const minObservations = arg('min-observations') !== undefined ? Number(arg('min-observations')) : 30;
   const shouldSweepK = process.argv.includes('--sweep-k');
 
@@ -488,7 +537,7 @@ async function main(): Promise<void> {
       const labels = horizonLabelsOf(h);
       const config = harnessConfigFor(h);
       const out: DecisionInput[] = [];
-      for (let i = 0; i < dataset.snapshots.length; i += SELECTION_SUBSAMPLE) {
+      for (let i = 0; i < dataset.snapshots.length; i += subsample.everyNth) {
         const snap = dataset.snapshots[i]!;
         const originSeconds = Math.floor(snap.timestamp.getTime() / 1000);
         out.push(
@@ -522,7 +571,7 @@ async function main(): Promise<void> {
     }
     const decisionScores = new Map<GridPoint, DecisionScore>();
     console.log(
-      `[freeze] P18 decision scoring: ${rows.length} candidates x every ${SELECTION_SUBSAMPLE}th ` +
+      `[freeze] P18 decision scoring: ${rows.length} candidates x every ${subsample.everyNth}th ` +
         `origin at ${SELECTION_QUANTUM_STEPS} allocation quanta...`,
     );
     const scoringStarted = Date.now();
@@ -545,6 +594,17 @@ async function main(): Promise<void> {
     }
 
     // ---- Rank on all seven terms, standardized on the grid's own spread.
+    //
+    // §7.3's seventh term is GRID-RELATIVE: the shortfall of a candidate's
+    // realised net return against the best any candidate on this grid
+    // achieved. See `decision-score.ts#sacrificedReturn` for why the
+    // edge-on-blocked-legs definition it replaces could not see the failure
+    // it exists to detect.
+    const gridBestNetReturn = bestNetReturn([...decisionScores.values()]);
+    console.log(
+      `[freeze] best realised net return on the grid: ` +
+        `${(gridBestNetReturn * 100).toFixed(4)}% (the sacrificed-return reference)`,
+    );
     const scored: ScoredPoint[] = scoreGrid(
       rows.map((row) => {
         const s = decisionScores.get(row.point)!;
@@ -552,7 +612,7 @@ async function main(): Promise<void> {
           point: row.point,
           fit: attachDecisionTerms(row, {
             turnover: s.turnover,
-            sacrificedReturn: s.sacrificedReturn,
+            sacrificedReturn: sacrificedReturn(s, gridBestNetReturn),
           }),
         };
       }),
@@ -569,6 +629,7 @@ async function main(): Promise<void> {
     const selectionMargin =
       scored.length < 2 ? Number.POSITIVE_INFINITY : scored[1]!.total - scored[0]!.total;
     const nearTie = selectionMargin < MIN_SELECTION_MARGIN;
+    const tieResolution = nearTieResolution(scored);
 
     const describe = (r: SweepRow): string =>
       `${r.point.method}(${JSON.stringify(r.point.methodParams)}) ` +
@@ -588,8 +649,11 @@ async function main(): Promise<void> {
           : `; runner-up ${describe(rowOf(runnerUpScored))} at ` +
             `${runnerUpScored.total.toFixed(8)}, margin ${selectionMargin.toExponential(3)}` +
             (nearTie
-              ? ` — INSIDE ${MIN_SELECTION_MARGIN.toExponential(0)}, resolved by resolveNearTie ` +
-                `on the economic terms and then toward the longer horizon`
+              ? ` — INSIDE ${MIN_SELECTION_MARGIN.toExponential(0)}, resolved by ` +
+                (tieResolution === 'indistinguishable'
+                  ? 'NOTHING: total, economics and horizon all tied, so this is sort order ' +
+                    'and the loss does not support the choice'
+                  : `resolveNearTie on ${tieResolution}`)
               : '')) +
         (winner.zeroWeighted.length > 0
           ? `; ZERO-WEIGHTED (IQR < ${MIN_DISCRIMINATING_IQR}): ${winner.zeroWeighted.join(', ')}`
@@ -621,7 +685,8 @@ async function main(): Promise<void> {
         `    total=${sp.total.toFixed(8)}  ${sp.point.method.padEnd(12)} ` +
           `${JSON.stringify(sp.point.methodParams).padEnd(26)} ` +
           `H=${sp.point.horizonSeconds / 86_400}d cov=${sp.point.coverageTarget} ` +
-          `turnover=${s.turnover.toFixed(4)} sacrificed=${s.sacrificedReturn.toExponential(3)} ` +
+          `turnover=${s.turnover.toFixed(4)} netApy=${(s.realizedNetReturn * 100).toFixed(4)}% ` +
+          `sacrificed=${sacrificedReturn(s, gridBestNetReturn).toExponential(3)} ` +
           `rebalances=${s.rebalances}/${s.originsScored}`,
       );
     }
@@ -647,9 +712,11 @@ async function main(): Promise<void> {
       JSON.stringify(
         {
           era: { start: bounds.start, end: bounds.end, days: bounds.days },
-          selectionSubsample: SELECTION_SUBSAMPLE,
+          selectionSubsample: subsample.everyNth,
+          selectionSubsampleRegistered: subsample.registered,
           selectionQuantumSteps: SELECTION_QUANTUM_STEPS,
           selectionTierBase: SELECTION_TIER_BASE.toString(),
+          gridBestNetReturn,
           minDiscriminatingIqr: MIN_DISCRIMINATING_IQR,
           minSelectionMargin: MIN_SELECTION_MARGIN,
           zeroWeighted: winner.zeroWeighted,
@@ -740,11 +807,13 @@ async function main(): Promise<void> {
         // and the allocation quantum are part of the registration because
         // they are what makes the ranking affordable; see SELECTION_SUBSAMPLE
         // and SELECTION_QUANTUM_STEPS.
-        selectionSubsample: SELECTION_SUBSAMPLE,
+        selectionSubsample: subsample.everyNth,
+        selectionSubsampleRegistered: subsample.registered,
         selectionQuantumSteps: SELECTION_QUANTUM_STEPS,
         selectionTierBase: SELECTION_TIER_BASE.toString(),
         selectionOriginsScored: decisionScores.get(chosen.row.point)?.originsScored ?? null,
         selectionNearTieResolved: nearTie,
+        selectionResolvedBy: tieResolution,
         selectionZeroWeightedTerms: winner.zeroWeighted,
         selectionTermIqr: Object.fromEntries(
           (
@@ -766,6 +835,26 @@ async function main(): Promise<void> {
         ),
         selectionMinDiscriminatingIqr: MIN_DISCRIMINATING_IQR,
         selectionMinMargin: MIN_SELECTION_MARGIN,
+        // I3 — process disclosure, not just conclusion. The IQR threshold was
+        // 1e-4 when this sweep was first run, and was changed AFTER both that
+        // run's winner and the corrected run's winner were visible. The
+        // calibration era is not sealed, so that is permitted; recording it is
+        // what keeps it from reading as an a-priori choice. The substantive
+        // effect of the change is that it admits `coverageDeviation`, whose
+        // weight of 10.0 then dominates the winning candidate's total.
+        selectionThresholdChangedWithOutcomesVisible: true,
+        selectionThresholdNote:
+          'MIN_DISCRIMINATING_IQR was moved from 1e-4 to 0 after two full sweeps of this ' +
+          'grid had been observed. At 1e-4 the gate zero-weighted pointError (IQR 7.64e-5), ' +
+          'coverageDeviation (3.54e-5, weight 10.0) and exceedanceShortfall (2.34e-6, ' +
+          'weight 5.0) while keeping sharpness (1.72e-4, weight 0.5) — a separation by raw ' +
+          'units, not by discrimination. At 0 the gate labels only terms scoreGrid has ' +
+          'already neutralised via its sd||1 fallback. Admitting coverageDeviation is what ' +
+          'moved the winner.',
+        // §7.3's seventh term is measured against the best realised net return
+        // any candidate on THIS grid achieved; see decision-score.ts.
+        sacrificedReturnReference: 'grid-best realised net return',
+        gridBestNetReturn,
         accuracyOnlySelection: accuracyOnly.reason,
         decisionScore: decisionScores.get(chosen.row.point) ?? null,
         loss: chosen.row.loss,

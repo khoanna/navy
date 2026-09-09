@@ -1,5 +1,6 @@
 import {
   scoreGrid,
+  nearTieResolution,
   resolveNearTie,
   MIN_DISCRIMINATING_IQR,
   MIN_SELECTION_MARGIN,
@@ -22,15 +23,33 @@ function fit(overrides: Partial<Record<string, number>>) {
 }
 
 describe('P18: scale-normalized selection loss', () => {
-  it('zero-weights a term that is constant across the grid', () => {
-    const fits = [
-      { point: { id: 'p1' } as never, fit: fit({ pointError: 1e-5 }) },
-      { point: { id: 'p2' } as never, fit: fit({ pointError: 2e-5 }) },
-      { point: { id: 'p3' } as never, fit: fit({ pointError: 3e-5 }) },
-    ];
-    const scored = scoreGrid(fits, { minIqr: MIN_DISCRIMINATING_IQR });
-    // downsideRate is 0.5 everywhere -> no spread -> zero-weighted
+  const spreadFits = () => [
+    { point: { id: 'p1' } as never, fit: fit({ pointError: 1e-5 }) },
+    { point: { id: 'p2' } as never, fit: fit({ pointError: 2e-5 }) },
+    { point: { id: 'p3' } as never, fit: fit({ pointError: 3e-5 }) },
+  ];
+
+  it('zero-weights a term that is constant across the grid, at any positive threshold', () => {
+    // downsideRate is 0.5 everywhere -> no spread -> zero-weighted.
+    const scored = scoreGrid(spreadFits(), { minIqr: 1e-9 });
     expect(scored[0]!.zeroWeighted).toContain('downsideRate');
+  });
+
+  /**
+   * IMPORTANT I2. `MIN_DISCRIMINATING_IQR` is 0, so the gate names nothing —
+   * and that costs nothing, because `scoreGrid`'s `sd = ... || 1` fallback
+   * already makes a constant term's z-score 0 at every point. Labelling it
+   * `zeroWeighted` was never what neutralised it. Assert both halves: the
+   * label is absent, and the term still contributes exactly 0.
+   */
+  it('I2: at the registered threshold a constant term is not labelled, and is inert anyway', () => {
+    const scored = scoreGrid(spreadFits(), { minIqr: MIN_DISCRIMINATING_IQR });
+    expect(scored[0]!.zeroWeighted).toEqual([]);
+    for (const sp of scored) expect(sp.normalized['downsideRate']).toBe(0);
+    // Same ordering as when the constant term IS labelled: the label is a
+    // diagnostic, not a control.
+    const labelled = scoreGrid(spreadFits(), { minIqr: 1e-9 });
+    expect(scored.map((s) => s.total)).toEqual(labelled.map((s) => s.total));
   });
 
   it('standardization overturns the naive raw-weighted-sum winner when an outlier '
@@ -93,18 +112,28 @@ describe('P18: scale-normalized selection loss', () => {
    * `sharpness` (weight 0.5) survived on raw magnitude alone. The threshold
    * must separate CONSTANT terms from small-unit ones, not small from large.
    */
-  it('R20: keeps every term with the spread measured on the real grid, and drops only the constant one', () => {
+  it('R20: 1e-4 drops discriminating terms by units alone; the registered threshold does not', () => {
     const measured = [
       { pointError: 7.6e-5, coverageDeviation: 3.5e-5, exceedanceShortfall: 2.3e-6, sharpness: 1.7e-4, downsideRate: 0.47, turnover: 330, sacrificedReturn: 0 },
       { pointError: 1.2e-4, coverageDeviation: 6.0e-5, exceedanceShortfall: 4.0e-6, sharpness: 2.6e-4, downsideRate: 0.50, turnover: 355, sacrificedReturn: 0 },
       { pointError: 1.6e-4, coverageDeviation: 8.5e-5, exceedanceShortfall: 5.7e-6, sharpness: 3.4e-4, downsideRate: 0.53, turnover: 380, sacrificedReturn: 0 },
       { pointError: 2.0e-4, coverageDeviation: 1.1e-4, exceedanceShortfall: 7.4e-6, sharpness: 4.3e-4, downsideRate: 0.56, turnover: 405, sacrificedReturn: 0 },
     ];
-    const scored = scoreGrid(
+    const atOldThreshold = scoreGrid(
+      measured.map((m, i) => ({ point: { id: `p${i}` } as never, fit: fit(m) })),
+      { minIqr: 1e-4 },
+    );
+    expect(atOldThreshold[0]!.zeroWeighted).toEqual(
+      expect.arrayContaining(['pointError', 'coverageDeviation', 'exceedanceShortfall']),
+    );
+    expect(atOldThreshold[0]!.zeroWeighted).not.toContain('sharpness');
+
+    // At the registered threshold every term with real spread takes part.
+    const registered = scoreGrid(
       measured.map((m, i) => ({ point: { id: `p${i}` } as never, fit: fit(m) })),
       { minIqr: MIN_DISCRIMINATING_IQR },
     );
-    expect(scored[0]!.zeroWeighted).toEqual(['sacrificedReturn']);
+    expect(registered[0]!.zeroWeighted).toEqual([]);
   });
 
   it('a term measured in tiny units does not lose to one measured in large units', () => {
@@ -186,6 +215,44 @@ describe('P18: near-tie resolution', () => {
       sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 1_209_600 }),
     ]);
     expect(winner.point.horizonSeconds).toBe(1_209_600);
+  });
+
+  /**
+   * IMPORTANT I4. Two candidates from the SAME (horizon, coverage) bucket can
+   * share a turnover and a sacrificed return, and then tier 3 finds equal
+   * horizons too. `resolveNearTie` still has to return something and returns
+   * the sort-order first — which is the lexical tie-break it exists to avoid —
+   * so the degeneracy has to be REPORTED rather than hidden behind a winner.
+   */
+  it('I4: a same-bucket tie is reported as indistinguishable, not resolved', () => {
+    const bucket = [
+      sp({ total: 0, horizonSeconds: 604_800, turnover: 1, sacrificedReturn: 2 }),
+      sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 604_800, turnover: 1, sacrificedReturn: 2 }),
+    ];
+    expect(nearTieResolution(bucket)).toBe('indistinguishable');
+    // It still returns a point, and it is the sort-order first.
+    expect(resolveNearTie(bucket)).toBe(bucket[0]);
+  });
+
+  it('reports which tier decided', () => {
+    expect(
+      nearTieResolution([
+        sp({ total: 0, horizonSeconds: 86_400 }),
+        sp({ total: 1, horizonSeconds: 604_800 }),
+      ]),
+    ).toBe('margin');
+    expect(
+      nearTieResolution([
+        sp({ total: 0, horizonSeconds: 86_400, sacrificedReturn: 5 }),
+        sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 86_400, sacrificedReturn: -5 }),
+      ]),
+    ).toBe('economics');
+    expect(
+      nearTieResolution([
+        sp({ total: 0, horizonSeconds: 86_400 }),
+        sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 1_209_600 }),
+      ]),
+    ).toBe('horizon');
   });
 
   it('a one-point grid returns that point, and an empty grid throws', () => {

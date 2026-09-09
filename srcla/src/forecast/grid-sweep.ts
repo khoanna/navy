@@ -173,26 +173,38 @@ export interface SelectionLoss {
   sharpness: number;
   downsideRate: number;
   /**
-   * P18 — §7.3's sixth term. Total notional the REGISTERED DECISION RULE
-   * moved under this candidate over the scoring era, as a multiple of vault
-   * NAV. Measured by `forecast/decision-score.ts#scoreCandidateDecisions`
-   * and attached by `attachDecisionTerms`; `fitPoint` cannot compute it,
-   * because it is a property of the decision the forecast produces rather
-   * than of the forecast itself.
+   * P18 — §7.3's sixth term. Round-trip churn: total notional the REGISTERED
+   * DECISION RULE moved under this candidate over the scoring era, as a
+   * multiple of vault NAV. Measured over a SEQUENTIAL replay
+   * (`forecast/decision-score.ts`), which is what makes "lower is better"
+   * correct — over independent cold starts the same quantity measures
+   * DEPLOYED FRACTION and the term then penalises putting capital to work.
+   * `fitPoint` cannot compute it: it is a property of the decision the
+   * forecast produces, not of the forecast itself.
    *
-   * A point that has NOT been scored still reports 0, and `scoreGrid`'s IQR
-   * rule then zero-weights it — a term nothing has measured cannot
-   * discriminate.
+   * A point that has NOT been scored reports 0. `scoreGrid` standardizes on
+   * the grid's own spread, so an unscored (hence constant) term contributes
+   * exactly 0 to every candidate regardless of weight.
    */
   turnover: number;
   /**
-   * P18 — §7.3's seventh term. Mean per-origin annualised conservative gain
-   * of the legs the hurdle REFUSED, expressed as a fraction of NAV. This is
-   * the term that can see a candidate whose forecast leaves the movement
-   * rule unable to act: v0.6 selected a 1-day horizon on a 1.27e-7 margin
-   * and the policy then executed one rebalance across an 86-day era, which
-   * no accuracy statistic in this struct can observe. Same measurement and
-   * same zero-when-unscored status as `turnover`.
+   * P18 — §7.3's seventh term. The candidate's realised net return over the
+   * scored era, subtracted from the best realised net return any candidate on
+   * this grid achieved: the return this forecast gave up relative to what the
+   * grid demonstrably could reach. Lower is better, like every other term
+   * here; the grid's best scores exactly 0.
+   *
+   * This is the term that can see a candidate whose forecast leaves the
+   * movement rule unable to act — v0.6 selected a 1-day horizon on a 1.27e-7
+   * margin and the policy then executed one rebalance across an 86-day era,
+   * which no accuracy statistic in this struct can observe. The FIRST
+   * implementation of it could not see that either: it accumulated the edge on
+   * legs the hurdle blocked, and a candidate that admits nothing has no legs
+   * at all, so it scored the term's BEST value. See
+   * `forecast/decision-score.ts#sacrificedReturn`.
+   *
+   * Measured by `scoreCandidateDecisions` and attached by
+   * `attachDecisionTerms`; same zero-when-unscored status as `turnover`.
    */
   sacrificedReturn: number;
   /** Weighted total; lower is better. */
@@ -234,16 +246,23 @@ export interface FitPoint {
 }
 
 /**
- * A term whose interquartile range across the grid is below this cannot rank
- * candidates and is reported as a diagnostic with zero weight. P18: the v0.6
- * loss was 99.84% `downsideRate`, a quantity ~0.5 for any unbiased candidate,
- * so selection was decided in the residue on a 1.27e-7 margin.
+ * A term whose interquartile range across the grid is below this is reported
+ * as a diagnostic with zero weight.
  *
- * WHY 1e-12 AND NOT 1e-4 (ruling R20). The 1e-4 this replaces was chosen
- * before anything had been measured on the real grid, and against a
- * floor-indexed quantile that has since been corrected. Measured on the
- * registered 81-point grid over the 443-day calibration era (886 origins per
- * candidate), the seven raw IQRs are:
+ * IT IS ZERO, AND ZERO IS NOT A DISABLED GATE -- it is the value at which the
+ * gate stops doing something `scoreGrid` already does. A term that is
+ * constant across the grid has `sd === 0`, and `scoreGrid`'s `|| 1` fallback
+ * then makes its z-score `(raw - mean) / 1 === 0` at EVERY point, so it
+ * contributes exactly 0 to every candidate's total whatever its weight.
+ * Naming it in `zeroWeighted` as well changes no ordering; it is a label on a
+ * term that was already inert. Any positive threshold, by contrast, drops
+ * terms that are NOT inert.
+ *
+ * WHY NOT 1e-4 (ruling R20). The 1e-4 this replaces was chosen before
+ * anything had been measured on the real grid, and against a floor-indexed
+ * quantile that has since been corrected. Measured on the registered
+ * 81-point grid over the 443-day calibration era (886 origins per candidate),
+ * the seven raw IQRs were:
  *
  *   pointError           7.64e-5     coverageDeviation    3.54e-5
  *   exceedanceShortfall  2.34e-6     sharpness            1.72e-4
@@ -255,27 +274,26 @@ export interface FitPoint {
  * `exceedanceShortfall` (weight 5.0) -- and keeps `sharpness` (weight 0.5) on
  * the strength of being 2.2x larger in raw magnitude. Every one of those four
  * has real, ordered spread across the grid; what separates them is the UNITS
- * they are measured in, not whether they discriminate. Silently zero-weighting
- * a discriminating term is precisely the failure P18 exists to prevent, so
- * inheriting 1e-4 would have reproduced it one level up.
+ * they are measured in, not whether they discriminate. `scoreGrid`
+ * standardizes on the grid's own spread BEFORE weighting, so units are
+ * already handled there and an absolute gate on RAW values can only
+ * re-introduce them.
  *
- * The gate's remaining job is narrow, because `scoreGrid` standardizes every
- * term on the grid's own spread BEFORE weighting it: units are already handled
- * there, so the only term a z-score cannot express is one that is CONSTANT,
- * where the spread being divided by is zero (or float noise around it). 1e-12
- * catches exactly that class. On the measured grid it drops one term --
- * `sacrificedReturn`, whose IQR is identically zero because no blocked leg on
- * this era ever carried a positive conservative bound -- and keeps the six
- * that actually order the candidates.
+ * DISCLOSURE (I3): this constant was changed after both the 1e-4 winner and
+ * the corrected-threshold winner were visible. The calibration era is not
+ * sealed, so that is permitted -- but it is recorded here and in
+ * `_registration` rather than presented as an a-priori choice. The change is
+ * what admits `coverageDeviation`, whose weight of 10.0 then dominates the
+ * winning candidate's total.
  *
- * OPEN, for the paper owner rather than the code: a single ABSOLUTE threshold
- * over seven quantities whose natural units span eight orders of magnitude is
- * the wrong shape even at 1e-12. A scale-free gate (IQR relative to the term's
- * own dispersion, or a rank-based one) would state the intent directly. That
- * is a change to `scoreGrid`'s contract, not to a constant, so it is reported
- * rather than made here.
+ * OPEN, for the paper owner rather than the code: if a gate on
+ * non-discrimination is wanted at all, it should be scale-free (IQR relative
+ * to the term's own dispersion, or rank-based), not an absolute threshold
+ * over seven quantities whose natural units span eight orders of magnitude.
+ * That is a change to `scoreGrid`'s contract, so it is reported rather than
+ * made here.
  */
-export const MIN_DISCRIMINATING_IQR = 1e-12;
+export const MIN_DISCRIMINATING_IQR = 0;
 
 export interface ScoredPoint {
   point: GridPoint;
@@ -403,6 +421,44 @@ export function attachDecisionTerms(
  */
 export const MIN_SELECTION_MARGIN = 1e-3;
 
+/** Which of `resolveNearTie`'s tiers actually decided the selection. */
+export type NearTieResolution = 'margin' | 'economics' | 'horizon' | 'indistinguishable';
+
+/** The economic half of the normalized total: the two terms that price what
+ *  the decision rule can do with a forecast. Weights come from
+ *  `LOSS_WEIGHTS`, never re-declared. */
+function economicTotal(s: ScoredPoint): number {
+  return (
+    s.normalized['turnover']! * LOSS_WEIGHTS.turnover +
+    s.normalized['sacrificedReturn']! * LOSS_WEIGHTS.sacrificedReturn
+  );
+}
+
+/**
+ * Which tier decided, reported so a degenerate tie is VISIBLE rather than
+ * silently resolved by sort order.
+ *
+ * `'indistinguishable'` means all three tiers tied: the grid could not
+ * separate the two candidates on the total, on the economics, or on horizon.
+ * `resolveNearTie` still has to return something, and it returns the
+ * sort-order first — but a run that reports `'indistinguishable'` has made a
+ * choice the loss does not support, and the report must say so rather than
+ * present it as a selection. This is the case IMPORTANT I4 named: within one
+ * (horizon, coverage) bucket every method can share a turnover and a
+ * sacrificed return, and tier 3 then finds equal horizons.
+ */
+export function nearTieResolution(scored: readonly ScoredPoint[]): NearTieResolution {
+  const [best, runnerUp] = scored;
+  if (best === undefined || runnerUp === undefined) return 'margin';
+  if (runnerUp.total - best.total >= MIN_SELECTION_MARGIN) return 'margin';
+  if (Math.abs(economicTotal(best) - economicTotal(runnerUp)) >= MIN_SELECTION_MARGIN) {
+    return 'economics';
+  }
+  return best.point.horizonSeconds === runnerUp.point.horizonSeconds
+    ? 'indistinguishable'
+    : 'horizon';
+}
+
 /**
  * Resolve a near-tie on ECONOMICS, then on horizon.
  *
@@ -410,10 +466,14 @@ export const MIN_SELECTION_MARGIN = 1e-3;
  *  1. A real margin on the full normalized total decides outright.
  *  2. Inside the margin, the two ECONOMIC terms alone decide -- the terms
  *     that price what the decision rule can actually do with the forecast.
- *     Their weights are `LOSS_WEIGHTS`, not re-declared here.
  *  3. Still tied: take the LONGER horizon. §7.1 -- signal-to-noise rises with
  *     H, so the shorter choice carries strictly more estimation risk, and a
  *     coin-flip that lands on the riskier candidate is not a registration.
+ *
+ * When even the horizons match there is nothing left to decide on and this
+ * returns the sort-order first. That is not a tie-break, it IS the lexical
+ * outcome the function exists to avoid, so `nearTieResolution` reports it as
+ * `'indistinguishable'` and the caller must surface it.
  *
  * `scored` must be `scoreGrid`'s output, i.e. already sorted ascending by
  * `total`.
@@ -423,17 +483,17 @@ export function resolveNearTie(scored: ScoredPoint[]): ScoredPoint {
     throw new Error('resolveNearTie: the grid produced no scored point');
   }
   const [best, runnerUp] = scored;
-  if (runnerUp === undefined || runnerUp.total - best!.total >= MIN_SELECTION_MARGIN) return best!;
-  // Resolve on the economic terms alone.
-  const econ = (s: ScoredPoint): number =>
-    s.normalized['turnover']! * LOSS_WEIGHTS.turnover +
-    s.normalized['sacrificedReturn']! * LOSS_WEIGHTS.sacrificedReturn;
-  if (Math.abs(econ(best!) - econ(runnerUp)) >= MIN_SELECTION_MARGIN) {
-    return econ(best!) < econ(runnerUp) ? best! : runnerUp;
+  if (runnerUp === undefined) return best!;
+  switch (nearTieResolution(scored)) {
+    case 'margin':
+      return best!;
+    case 'economics':
+      return economicTotal(best!) < economicTotal(runnerUp) ? best! : runnerUp;
+    case 'horizon':
+      return best!.point.horizonSeconds >= runnerUp.point.horizonSeconds ? best! : runnerUp;
+    default:
+      return best!;
   }
-  // Still tied: take the LONGER horizon. §7.1 - signal-to-noise rises with H,
-  // so the shorter choice carries strictly more estimation risk.
-  return best!.point.horizonSeconds >= runnerUp.point.horizonSeconds ? best! : runnerUp;
 }
 
 /**

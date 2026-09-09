@@ -1,48 +1,79 @@
 /**
- * P18/Task 7 — §7.3's two decision-focused loss terms.
+ * P18/Task 7 — §7.3's two decision-focused loss terms, over a SEQUENTIAL
+ * replay.
  *
- * The fixtures below are the `decide.spec.ts` rebalance fixture, which is
- * already tuned so a genuinely profitable deployment of the whole vault
- * clears every gate. Three artifacts differentiate the behaviours the two
- * terms have to be able to SEE:
+ * The world these fixtures present is 24 hourly origins over two venues whose
+ * supply rates ALTERNATE leadership every origin ('aa' leads on even origins,
+ * 'bb' on odd). That oscillation is what makes churn expressible at all: with
+ * a frozen cold-start state — the defect this replay replaces — `current` is
+ * empty at every origin, only deploy legs can ever be emitted, and no capital
+ * is ever moved twice.
  *
- *  - `artifactThatTrades`  — conservative bound at the observed rate, a
- *    30-day payback: both venues' deploy legs clear.
- *  - `artifactThatNeverTrades` — the same artifact with a 60-second payback,
- *    which is what a movement cost has to repay itself within. The amortised
- *    cost hurdle is then ~43000x larger and no leg can clear, so the run
- *    holds at every origin and every positive bound is booked as sacrificed.
- *  - `artifactThatChurns` — both venues admissible at a near-zero bound, so
- *    the optimiser spreads across both and both legs clear. `steady` puts a
- *    deep residual quantile on 'bb', so 'bb' contributes neither allocation
- *    nor a cleared leg and strictly less notional moves.
+ * Four artifacts, each isolating one behaviour the terms must be able to see:
+ *
+ *  - `artifactThatChurns`    — a shallow bound at both venues, so the
+ *    optimiser chases the leader and rotates the book every origin.
+ *  - `artifactThatIsSteady`  — 'bb' priced at a bound so deep it is never
+ *    worth entering, so the vault deploys into 'aa' once and holds.
+ *  - `artifactThatNeverTrades` — a 60-second payback period, so the amortised
+ *    movement cost hurdle is ~43,000x larger and no leg can clear. It holds
+ *    from a standing start and earns nothing.
+ *  - `artifactThatAdmitsNothing` — the C2 pathology. Its pinned config digests
+ *    match no venue, so `admit` rejects the whole universe and `decide`
+ *    returns before the cost gate with `legs: []`. Under the old
+ *    edge-on-blocked-legs definition of the second term this scored
+ *    `turnover = 0` and `sacrificedReturn = 0` — both BEST attainable — so the
+ *    amendment written to catch "this forecast leaves the movement rule unable
+ *    to trade" ranked it FIRST. It must now rank LAST.
  */
 import { DEFAULT_DECIDE_OPTS } from '../../../src/policy/decide.js';
 import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
-import { scoreCandidateDecisions } from '../../../src/forecast/decision-score.js';
+import {
+  bestNetReturn,
+  sacrificedReturn,
+  scoreCandidateDecisions,
+  type DecisionScore,
+} from '../../../src/forecast/decision-score.js';
+import {
+  attachDecisionTerms,
+  scoreGrid,
+  LOSS_WEIGHTS,
+  MIN_DISCRIMINATING_IQR,
+  type FitPoint,
+  type GridPoint,
+} from '../../../src/forecast/grid-sweep.js';
 import type { DecisionInput, MarketObservation, PolicyArtifact } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
+const HIGH = (WAD * 6n) / 100n;
+const LOW = (WAD * 3n) / 100n;
 
-function market(id: string, over: Partial<MarketObservation> = {}): MarketObservation {
+/**
+ * LEADERSHIP IS EXPRESSED IN UTILISATION, NOT IN THE DISPLAYED RATE.
+ * `simulate.ts` seeds only `points[0]` from `supplyRateWad` and derives every
+ * other point from real IRM math over `cash`/`borrows`, so two venues with
+ * identical cash and borrows produce identical curves however their displayed
+ * rates differ — and the optimiser, which reads the curve, would see no
+ * reason to rotate. The leader therefore runs at 75% utilisation on
+ * Compound's kinked model and the laggard at zero.
+ */
+function market(id: string, leads: boolean, over: Partial<MarketObservation> = {}): MarketObservation {
   return {
     marketId: id,
     adapter: `0x${id.padEnd(40, '0')}`,
     protocol: 'compound',
-    cash: 10n ** 12n,
-    borrows: 0n,
+    cash: leads ? 2_000_000_000_000n : 10n ** 12n,
+    borrows: leads ? 6_000_000_000_000n : 0n,
     reserves: 0n,
-    supplyRateWad: (WAD * 3n) / 100n,
-    utilizationWad: 0n,
+    supplyRateWad: leads ? HIGH : LOW,
+    utilizationWad: leads ? (WAD * 75n) / 100n : 0n,
     positionBase: 0n,
-    maxDeployableBase: 10n ** 12n,
-    maxWithdrawableBase: 10n ** 12n,
+    maxDeployableBase: 10n ** 13n,
+    maxWithdrawableBase: leads ? 2_000_000_000_000n : 10n ** 12n,
     configDigest: '0xd',
     regimeId: 'r1',
     paused: false,
-    // Half the vault per venue, so "how many venues cleared" is visible in
-    // the notional: with 'bb' priced out, only 50% of NAV can be deployed.
-    capBps: 5000,
+    capBps: 10000,
     absoluteCapBase: 10n ** 13n,
     maxLossBps: 50,
     dependencyGroupIds: [],
@@ -64,10 +95,9 @@ function history(marketId: string) {
   }));
 }
 
-/** Twelve origins an hour apart. Positions stay flat: the fixture varies the
- *  ARTIFACT, which is what the selection loss varies. */
+/** 24 hourly origins with alternating venue leadership. */
 function origins(): DecisionInput[] {
-  return Array.from({ length: 12 }, (_unused, i) => ({
+  return Array.from({ length: 24 }, (_unused, i) => ({
     origin: {
       blockNumber: 1000 + i,
       blockHash: '0x' + 'ab'.repeat(32),
@@ -84,7 +114,10 @@ function origins(): DecisionInput[] {
       paused: false,
       configurationDigest: '0x' + 'cd'.repeat(32),
     },
-    markets: [market('aa'), market('bb')],
+    markets: [
+      market('aa', i % 2 === 0),
+      market('bb', i % 2 !== 0),
+    ],
     dependencyGroups: [],
     withdrawals: [],
     gas: {
@@ -112,11 +145,6 @@ function baseArtifact(): PolicyArtifact {
   };
 }
 
-const artifactThatTrades = (): PolicyArtifact => baseArtifact();
-
-/** A payback period a movement cost cannot repay itself within. */
-const artifactThatNeverTrades = (): PolicyArtifact => ({ ...baseArtifact(), paybackSeconds: 60 });
-
 const artifactThatChurns = (): PolicyArtifact => baseArtifact();
 
 /** 'bb' priced at a bound so deep it is never worth entering. */
@@ -125,59 +153,129 @@ const artifactThatIsSteady = (): PolicyArtifact => ({
   residualQuantileWadByMarket: { aa: 0n, bb: -WAD },
 });
 
+/** A payback period a movement cost cannot repay itself within. */
+const artifactThatNeverTrades = (): PolicyArtifact => ({ ...baseArtifact(), paybackSeconds: 60 });
+
+/** C2: pins that match no venue, so `admit` empties the universe. */
+const artifactThatAdmitsNothing = (): PolicyArtifact => ({
+  ...baseArtifact(),
+  pinnedConfigDigests: { aa: '0xdeadbeef', bb: '0xdeadbeef' },
+});
+
 const opts = () => ({
   ...DEFAULT_DECIDE_OPTS,
   cost: {
     ...DEFAULT_DECIDE_OPTS.cost,
+    // §9.1's aggregate brakes are deliberately slackened here so the ROTATION
+    // behaviour is what the fixture measures. At the defaults a book that
+    // rotates fully every hour exhausts the 100%-of-TVL daily turnover window
+    // after the first move, and every candidate then reports the same
+    // turnover — the brake, not the forecast, would be what the test sees.
+    cooldownSeconds: 0,
     minTurnoverBps: 1,
-    maxTurnoverBps: 10000,
+    maxTurnoverBps: 10_000_000,
+    reversalAllowanceBps: 10_000_000,
     slippageBps: 0,
     mevBps: 0,
     impactBps: 0,
   },
 });
 
+const score = (a: PolicyArtifact, everyNth = 1): DecisionScore =>
+  scoreCandidateDecisions(origins(), a, opts(), { everyNth });
+
 describe('P18: decision-focused loss terms', () => {
-  it('a candidate whose hurdle never opens scores maximal sacrificed return', () => {
-    const blocked = scoreCandidateDecisions(origins(), artifactThatNeverTrades(), opts(), { everyNth: 1 });
-    const trading = scoreCandidateDecisions(origins(), artifactThatTrades(), opts(), { everyNth: 1 });
-    expect(blocked.rebalances).toBe(0);
-    expect(trading.rebalances).toBeGreaterThan(0);
-    expect(blocked.sacrificedReturn).toBeGreaterThan(trading.sacrificedReturn);
+  it('is a SEQUENTIAL replay: capital deployed once stays deployed and earns', () => {
+    const steady = score(artifactThatIsSteady());
+    expect(steady.rebalances).toBeGreaterThan(0);
+    // A cold start at every origin would re-deploy the whole book every time,
+    // so turnover would be ~1 per rebalancing origin. Holding a position
+    // means far less than that moves.
+    expect(steady.turnover).toBeLessThan(steady.rebalances);
+    // And the position accrued: net return is positive, which is only
+    // possible if a position survived from one origin to the next.
+    expect(steady.realizedNetReturn).toBeGreaterThan(0);
   });
 
-  it('a candidate that churns scores high turnover', () => {
-    const churn = scoreCandidateDecisions(origins(), artifactThatChurns(), opts(), { everyNth: 1 });
-    const steady = scoreCandidateDecisions(origins(), artifactThatIsSteady(), opts(), { everyNth: 1 });
-    expect(churn.turnover).toBeGreaterThan(steady.turnover);
+  it('a candidate that chases the leader scores higher turnover than one that holds', () => {
+    expect(score(artifactThatChurns()).turnover).toBeGreaterThan(
+      score(artifactThatIsSteady()).turnover,
+    );
+  });
+
+  it('a candidate whose hurdle never opens earns nothing and sacrifices the most', () => {
+    const blocked = score(artifactThatNeverTrades());
+    const trading = score(artifactThatIsSteady());
+    const best = bestNetReturn([blocked, trading]);
+    expect(blocked.rebalances).toBe(0);
+    expect(blocked.realizedNetReturn).toBe(0);
+    expect(sacrificedReturn(blocked, best)).toBeGreaterThan(sacrificedReturn(trading, best));
   });
 
   /**
-   * A blocked leg whose conservative bound is NEGATIVE forgoes nothing:
-   * refusing it is the hurdle working. Summed signed, the term would be
-   * minimised by the candidate least able to trade — and `LOSS_WEIGHTS` puts
-   * a weight of 3.0 behind "lower is better", so an unclamped version would
-   * actively select for the over-conservatism P18 exists to detect. On the
-   * real calibration grid this is not hypothetical: at a 1-day horizon the
-   * annualised residual quantile alone is around -18%.
+   * C2, the regression this whole redefinition exists for. The pathological
+   * candidate is BEST on turnover (it moves nothing) and would have been
+   * tied-best on the old edge-on-blocked-legs second term (it has no blocked
+   * legs to accumulate an edge over, because it never reaches the cost gate).
+   * Under the realised-return shortfall it must come LAST.
    */
-  it('never books a NEGATIVE bound as a sacrifice', () => {
-    for (const a of [
-      artifactThatTrades(),
-      artifactThatNeverTrades(),
-      artifactThatIsSteady(),
-      { ...baseArtifact(), residualQuantileWadByMarket: { aa: -WAD, bb: -WAD } },
-    ]) {
-      const score = scoreCandidateDecisions(origins(), a, opts(), { everyNth: 1 });
-      expect(score.sacrificedReturn).toBeGreaterThanOrEqual(0);
-    }
+  it('C2: a candidate that admits NOTHING ranks last on the economic terms, not first', () => {
+    const dead = score(artifactThatAdmitsNothing());
+    const steady = score(artifactThatIsSteady());
+    const churn = score(artifactThatChurns());
+
+    // The trap: on the terms that used to decide, the dead candidate wins.
+    expect(dead.rebalances).toBe(0);
+    expect(dead.turnover).toBe(0);
+    expect(dead.turnover).toBeLessThan(steady.turnover);
+
+    const scores = [dead, steady, churn];
+    const best = bestNetReturn(scores);
+    const point = (id: string): GridPoint => ({
+      method: 'rolling',
+      methodParams: { windowObservations: 24 },
+      horizonSeconds: 604_800,
+      coverageTarget: 0.95,
+      ...({ id } as unknown as object),
+    });
+    const fit = (s: DecisionScore): FitPoint =>
+      attachDecisionTerms(
+        {
+          quantileWadByMarket: {},
+          coverageByMarket: {},
+          loss: {
+            pointError: 0, coverageDeviation: 0, exceedanceShortfall: 0, sharpness: 0,
+            downsideRate: 0, turnover: 0, sacrificedReturn: 0, total: 0,
+            observations: 100, achievedCoverage: 0.95,
+          },
+        },
+        { turnover: s.turnover, sacrificedReturn: sacrificedReturn(s, best) },
+      );
+
+    const scored = scoreGrid(
+      [
+        { point: point('dead'), fit: fit(dead) },
+        { point: point('steady'), fit: fit(steady) },
+        { point: point('churn'), fit: fit(churn) },
+      ],
+      { minIqr: MIN_DISCRIMINATING_IQR },
+    );
+    const econ = (i: number): number =>
+      scored[i]!.normalized['turnover']! * LOSS_WEIGHTS.turnover +
+      scored[i]!.normalized['sacrificedReturn']! * LOSS_WEIGHTS.sacrificedReturn;
+
+    // Lower is better, and `scoreGrid` sorts ascending, so the dead candidate
+    // must be the LAST entry and carry the WORST economic total.
+    const deadIndex = scored.findIndex((sp) => sp.fit.loss.turnover === 0);
+    expect(deadIndex).toBe(scored.length - 1);
+    expect(econ(deadIndex)).toBeGreaterThan(econ(0));
   });
 
   it('the subsample rule is deterministic and reported', () => {
-    const a = scoreCandidateDecisions(origins(), artifactThatTrades(), opts(), { everyNth: 4 });
-    const b = scoreCandidateDecisions(origins(), artifactThatTrades(), opts(), { everyNth: 4 });
+    const a = score(artifactThatIsSteady(), 4);
+    const b = score(artifactThatIsSteady(), 4);
     expect(a).toEqual(b);
     expect(a.originsScored).toBeLessThan(origins().length);
-    expect(a.originsScored).toBe(3);
+    expect(a.originsScored).toBe(6);
   });
 });
