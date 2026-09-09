@@ -66,7 +66,18 @@ function columnSigma(artifact: PolicyArtifact, marketId: string): bigint {
   return isqrt((acc / (n - 1n)) * WAD);
 }
 
-/** Pearson correlation of two residual columns, in WAD. */
+/**
+ * Pearson correlation of two residual columns, in WAD, clamped to
+ * `[-WAD, WAD]`.
+ *
+ * The unclamped ratio can land a few parts in 1e12 outside that range on
+ * bigint rounding alone (measured up to `WAD + 234999n` across 400 random
+ * columns, and identical columns alone can overshoot by `~2e4`) - fixed-point
+ * covariance/variance division is not exact. An overshoot past +WAD makes
+ * `varDiff` in `edgeStandardErrorWad` go negative before its own `> 0n`
+ * clamp, which is a correctness bug (a negative "variance"), not merely an
+ * ugly number - clamp at the source instead of downstream.
+ */
 function columnCorr(artifact: PolicyArtifact, i: string, j: string): bigint {
   const panel = artifact.residualPanel;
   if (panel === undefined) return 0n;
@@ -86,7 +97,10 @@ function columnCorr(artifact: PolicyArtifact, i: string, j: string): bigint {
   }
   const denom = isqrt(va * WAD) * isqrt(vb * WAD);
   if (denom === 0n) return 0n;
-  return (cov * WAD * WAD) / denom;
+  const rho = (cov * WAD * WAD) / denom;
+  if (rho > WAD) return WAD;
+  if (rho < -WAD) return -WAD;
+  return rho;
 }
 
 /** Integer square root for non-negative bigints (Newton). */
@@ -98,9 +112,33 @@ function isqrt(v: bigint): bigint {
 }
 
 /**
+ * Whether the artifact's residual panel actually covers both venues, i.e.
+ * whether `edgeStandardErrorWad(artifact, i, j)` reflects a real estimate
+ * rather than degenerating to zero for want of data.
+ *
+ * `columnSigma`/`columnCorr` already return `0n` when the panel is absent or
+ * a market id is missing from it - the right conservative fallback for a
+ * VALUE - but `0n` is indistinguishable from "these two venues are
+ * genuinely uncorrelated with identical zero dispersion", so a caller must
+ * check coverage separately to tell the two apart (IMPORTANT 3).
+ */
+function panelCoversBoth(artifact: PolicyArtifact, i: string, j: string): boolean {
+  const panel = artifact.residualPanel;
+  return panel !== undefined
+    && panel.rows.length >= 2
+    && panel.marketIds.includes(i)
+    && panel.marketIds.includes(j);
+}
+
+/**
  * §9.1.3's SE[dl_ij], annualised. This is the sampling error of an ESTIMATED
  * DIFFERENCE, not the predictive quantile of one horizon outcome - the two
  * answer different questions and v0.6 used the second where the first belongs.
+ *
+ * Returns `0n` (not a throw) when the panel does not cover both venues -
+ * see `panelCoversBoth`; callers that need to distinguish that from a
+ * genuine zero-dispersion estimate must check it themselves, which
+ * `rotateClears` below does.
  */
 export function edgeStandardErrorWad(artifact: PolicyArtifact, i: string, j: string): bigint {
   const si = columnSigma(artifact, i);
@@ -117,9 +155,39 @@ function lendingCost(input: DecisionInput, moves: Move[], p: CostParams): bigint
 }
 
 /**
+ * §9.1's amortised movement cost, annualised over the registered payback
+ * period, in WAD.
+ *
+ * IMPORTANT 2: `artifact.paybackSeconds` is `0` on the provisional/bootstrap
+ * path (`artifact.ts`'s `need()` ladder does not require it, and
+ * `config/bootstrap-artifact.json` does not set it), which would otherwise
+ * divide by zero the moment a caller reaches this with amountBase > 0n -
+ * `RangeError: Division by zero` rather than a diagnosable error. Fail with
+ * a named, attributable error instead.
+ */
+function costHurdleWad(cost: bigint, amountBase: bigint, artifact: PolicyArtifact): bigint {
+  if (amountBase === 0n) return 0n;
+  if (artifact.paybackSeconds <= 0) {
+    throw new Error(
+      `hurdles: artifact.paybackSeconds must be > 0 to price a movement hurdle, got ` +
+      `${artifact.paybackSeconds}. A registered artifact sets this jointly with noTradeBandK ` +
+      `and adjustmentRate (P15/P18); the provisional/bootstrap artifact does not.`
+    );
+  }
+  return (cost * WAD * SECONDS_PER_YEAR) / (amountBase * BigInt(artifact.paybackSeconds));
+}
+
+/**
  * §9.1.2 - idle capital deploys when its conservative bound repays the
  * movement cost within the registered payback period. NO dispersion term:
  * the bound already carries it, and the counterfactual (idle) is certain.
+ *
+ * IMPORTANT 4: decides and reports off the SAME annualised comparison
+ * (`ell` vs `costHurdleWad`) rather than an independently-truncated
+ * base-unit comparison (`gain` vs `cost`) whose disagreement band with the
+ * annualised fields was ~1.2e7 WAD wide near the boundary - exactly where a
+ * caller reading `clears` alongside `edgeWad`/`hurdleWad` most needs them to
+ * agree.
  */
 export function deployClears(
   input: DecisionInput,
@@ -131,20 +199,29 @@ export function deployClears(
 ): LegVerdict {
   const ell = annualLowerBound(curve, artifact, marketId, amountBase);
   const cost = lendingCost(input, [{ adapter: marketId, amountBase, kind: 'deploy' }], p);
-  const gain = (ell * BigInt(artifact.paybackSeconds) * amountBase) / (SECONDS_PER_YEAR * WAD);
-  const costHurdleWad = amountBase === 0n ? 0n
-    : (cost * WAD * SECONDS_PER_YEAR) / (amountBase * BigInt(artifact.paybackSeconds));
-  const clears = gain > cost;
+  const hurdleWad = costHurdleWad(cost, amountBase, artifact);
+  const clears = ell > hurdleWad;
   return {
     kind: 'deploy', marketId, fromMarketId: null, amountBase, clears,
-    edgeWad: ell, hurdleWad: costHurdleWad, costHurdleWad, significanceWad: 0n,
-    reason: clears ? 'DEPLOY_CLEARS' : `DEPLOY_BLOCKED: bound ${ell} <= hurdle ${costHurdleWad}`,
+    edgeWad: ell, hurdleWad, costHurdleWad: hurdleWad, significanceWad: 0n,
+    reason: clears ? 'DEPLOY_CLEARS' : `DEPLOY_BLOCKED: bound ${ell} <= hurdle ${hurdleWad}`,
   };
 }
 
 /**
  * §9.1.3 - a rotation clears when the annualised differential exceeds the
  * amortised round-trip cost plus k standard errors of the estimated edge.
+ *
+ * IMPORTANT 3: when the artifact's residual panel does not cover BOTH
+ * venues (absent panel, or either id missing from `marketIds`), the
+ * significance term silently reads `0n` and the rotation hurdle collapses
+ * to cost-only - unconstrained churn with no signal that it happened. The
+ * live service boots from `config/bootstrap-artifact.json`, which carries
+ * no panel, so this is not a hypothetical. This never throws (the
+ * provisional path must still load) but the returned `reason` always names
+ * the degeneracy with a `; SIGNIFICANCE_UNAVAILABLE` suffix so it is
+ * visible in a census rather than indistinguishable from a genuine
+ * zero-dispersion estimate.
  */
 export function rotateClears(
   input: DecisionInput,
@@ -162,15 +239,15 @@ export function rotateClears(
     { adapter: fromId, amountBase, kind: 'divest' },
     { adapter: toId, amountBase, kind: 'deploy' },
   ], p);
-  const costHurdleWad = amountBase === 0n ? 0n
-    : (cost * WAD * SECONDS_PER_YEAR) / (amountBase * BigInt(artifact.paybackSeconds));
+  const costHurdle = costHurdleWad(cost, amountBase, artifact);
   const kFixed = BigInt(Math.round(artifact.noTradeBandK * 1_000_000));
   const significanceWad = (edgeStandardErrorWad(artifact, toId, fromId) * kFixed) / 1_000_000n;
-  const hurdleWad = costHurdleWad + significanceWad;
+  const hurdleWad = costHurdle + significanceWad;
   const clears = edge > hurdleWad;
+  const coverageSuffix = panelCoversBoth(artifact, toId, fromId) ? '' : '; SIGNIFICANCE_UNAVAILABLE';
   return {
     kind: 'rotate', marketId: toId, fromMarketId: fromId, amountBase, clears,
-    edgeWad: edge, hurdleWad, costHurdleWad, significanceWad,
-    reason: clears ? 'ROTATE_CLEARS' : `ROTATE_BLOCKED: edge ${edge} <= hurdle ${hurdleWad}`,
+    edgeWad: edge, hurdleWad, costHurdleWad: costHurdle, significanceWad,
+    reason: (clears ? 'ROTATE_CLEARS' : `ROTATE_BLOCKED: edge ${edge} <= hurdle ${hurdleWad}`) + coverageSuffix,
   };
 }

@@ -1,6 +1,6 @@
-import { annualLowerBound, deployClears, rotateClears } from '../../../src/policy/steps/hurdles.js';
+import { annualLowerBound, deployClears, rotateClears, edgeStandardErrorWad } from '../../../src/policy/steps/hurdles.js';
 import type { CostParams } from '../../../src/policy/steps/cost.js';
-import type { DecisionInput, PolicyArtifact, RateCurve } from '../../../src/policy/types.js';
+import type { DecisionInput, PolicyArtifact, RateCurve, ResidualPanel } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
 const SECONDS_PER_YEAR = 31_536_000n;
@@ -211,7 +211,7 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     expect(closedFormDiff).toBeLessThan(fivePercentOfAbsAnnualQ / 1_000n);
   });
 
-  it('3. near-boundary discrimination: 10bps above the implied threshold clears, 10bps below does not', () => {
+  it('3. deployClears is monotone and crisp around its own bisected threshold (not about the threshold\'s location — see test 2 for that)', () => {
     const art = artifact({ horizonSeconds: 604_800 });
     const threshold = findDeployThreshold(idleInput(), art, 'aave', AMOUNT, params());
     const tenBps = pct(0.1);
@@ -259,22 +259,159 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     expect(cheap.costHurdleWad).toBeLessThan(dear.costHurdleWad);
   });
 
-  it('7. a 5pp differential clears the rotation hurdle; a 1bp one does not', () => {
+  it('7. a rotation differential ~20% above the hurdle clears; ~20% below does not (neither arm vacuous)', () => {
+    // MINOR 7: the original 5pp/9pp-vs-4pp fixture was vacuous in both
+    // directions — its "clears" case cleared by 79x (nowhere near the
+    // boundary) and its "blocked" case had a NEGATIVE edge (aave's
+    // quantile exceeds compound's in magnitude, so 1bp of raw rate spread
+    // was never going to be the deciding factor). Rebuilt so both arms sit
+    // close to the actual hurdle instead.
+    const art = artifact();
+
+    // hurdleWad (cost + significance) does not depend on the curve RATES —
+    // only on cost/params/artifact/amount — so probe it once with any flat
+    // rates, then aim the raw rate differential at hurdle +/- 20% by
+    // solving edge = (rTo - rFrom) + bias, where
+    // bias = annualLowerBound(...,0) at rate 0 for each venue.
+    const probe = rotateClears(
+      deployedInput(), art, flatCurve(0n, 'aave'), flatCurve(0n, 'compound'), 'aave', 'compound', AMOUNT, params(),
+    );
+    const hurdle = probe.hurdleWad;
+    expect(hurdle).toBeGreaterThan(0n); // otherwise this test would prove nothing
+
+    const bias = annualLowerBound(flatCurve(0n, 'aave'), art, 'aave', AMOUNT)
+      - annualLowerBound(flatCurve(0n, 'compound'), art, 'compound', 0n);
+    const rFrom = pct(4);
+    const margin = hurdle / 5n; // ~20% of the hurdle
+
+    const rToClear = rFrom + (hurdle + margin - bias);
     const big = rotateClears(
-      deployedInput(), artifact(),
-      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      deployedInput(), art, flatCurve(rToClear, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, params(),
     );
+    const rToBlock = rFrom + (hurdle - margin - bias);
     const tiny = rotateClears(
-      deployedInput(), artifact(),
-      flatCurve(pct(4.01), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      deployedInput(), art, flatCurve(rToBlock, 'aave'), flatCurve(rFrom, 'compound'), 'aave', 'compound', AMOUNT, params(),
     );
+
     expect(big.clears).toBe(true);
     expect(tiny.clears).toBe(false);
+    // Both arms sit within one-fifth of a hurdle-width of the boundary, by
+    // construction (bigint-exact — no curve rate feeds into hurdleWad, so
+    // both verdicts report the SAME hurdle the probe measured).
+    expect(big.hurdleWad).toBe(hurdle);
+    expect(tiny.hurdleWad).toBe(hurdle);
+    expect(big.edgeWad - big.hurdleWad).toBe(margin);
+    expect(tiny.hurdleWad - tiny.edgeWad).toBe(margin);
   });
 
   it('8. annualLowerBound is HIGHER at H=14d than H=1d for the same curve (residual horizon dependence)', () => {
     const oneDay = annualLowerBound(flatCurve(pct(5), 'aave'), artifact({ horizonSeconds: 86_400 }), 'aave', 0n);
     const fortnight = annualLowerBound(flatCurve(pct(5), 'aave'), artifact({ horizonSeconds: 1_209_600 }), 'aave', 0n);
     expect(fortnight).toBeGreaterThan(oneDay);
+  });
+
+  // --- fix-round-1 additions (CRITICAL/IMPORTANT/MINOR review findings) ---
+
+  it('9. IMPORTANT 2: paybackSeconds <= 0 fails with a named error, not a bigint RangeError', () => {
+    const zeroPayback = artifact({ paybackSeconds: 0 });
+    expect(() =>
+      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', AMOUNT, params()),
+    ).toThrow(/paybackSeconds must be > 0/);
+    expect(() =>
+      rotateClears(
+        deployedInput(), zeroPayback,
+        flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+      ),
+    ).toThrow(/paybackSeconds must be > 0/);
+
+    // The zero-amount short-circuit (nothing to amortise a cost over) must
+    // still not throw, payback or no payback — this is the artifact
+    // `config/bootstrap-artifact.json` actually ships (paybackSeconds
+    // absent -> 0 on the provisional path), evaluated against a genuinely
+    // empty move.
+    expect(() =>
+      deployClears(idleInput(), zeroPayback, flatCurve(pct(5)), 'aave', 0n, params()),
+    ).not.toThrow();
+  });
+
+  it('10. IMPORTANT 3: rotateClears marks SIGNIFICANCE_UNAVAILABLE when the panel does not cover both venues', () => {
+    const noPanel = artifact();
+    delete (noPanel as { residualPanel?: ResidualPanel }).residualPanel;
+    const v1 = rotateClears(
+      deployedInput(), noPanel,
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+    );
+    expect(v1.significanceWad).toBe(0n);
+    expect(v1.reason).toContain('SIGNIFICANCE_UNAVAILABLE');
+
+    // Also degenerate when a panel exists but omits one of the two venues —
+    // the live service boots from the bootstrap artifact, which has no
+    // panel at all, but a partially-registered one is the same failure mode.
+    const partialPanel = artifact({});
+    (partialPanel as { residualPanel?: ResidualPanel }).residualPanel = {
+      marketIds: ['aave'],
+      originsSeconds: [0, 3600, 7200, 10800],
+      rows: [[1n], [2n], [3n], [4n]],
+    };
+    const v2 = rotateClears(
+      deployedInput(), partialPanel,
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+    );
+    expect(v2.reason).toContain('SIGNIFICANCE_UNAVAILABLE');
+
+    // And the marker is ABSENT when the panel genuinely covers both venues
+    // (the default fixture) — this must never fire on a healthy artifact.
+    const covered = rotateClears(
+      deployedInput(), artifact(),
+      flatCurve(pct(9), 'aave'), flatCurve(pct(4), 'compound'), 'aave', 'compound', AMOUNT, params(),
+    );
+    expect(covered.reason).not.toContain('SIGNIFICANCE_UNAVAILABLE');
+  });
+
+  it('11. IMPORTANT 4: deployClears decides and reports off the SAME comparison at the boundary', () => {
+    const art = artifact({ horizonSeconds: 604_800 });
+    const threshold = findDeployThreshold(idleInput(), art, 'aave', AMOUNT, params());
+    // Sweep a narrow band either side of the bisected threshold. The
+    // pre-fix defect was an independently-truncated base-unit gain/cost
+    // comparison disagreeing with the annualised edgeWad/hurdleWad fields
+    // in a ~1.2e7-wide band exactly here — this asserts the invariant that
+    // makes that impossible: clears is ALWAYS `edgeWad > hurdleWad`.
+    for (const delta of [-2_000_000n, -1n, 0n, 1n, 2_000_000n]) {
+      const v = deployClears(idleInput(), art, flatCurve(threshold + delta), 'aave', AMOUNT, params());
+      expect(v.clears).toBe(v.edgeWad > v.hurdleWad);
+    }
+  });
+
+  it('12. MINOR 5: correlation clamp — identical residual columns give a well-defined (zero) standard error', () => {
+    // The reviewer's own repro shape: identical columns are exactly where
+    // the unclamped Pearson ratio was measured to overshoot WAD (up to
+    // `WAD + 234999n` observed across random columns; identical columns
+    // alone overshoot by ~2e4). True rho for identical columns is exactly
+    // 1, so the standard error of their difference must be exactly zero —
+    // a corrupted (unclamped) rho could instead drive `varDiff` negative.
+    const col = [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n].map((v) => v * PANEL_UNIT);
+    const identicalPanel: ResidualPanel = {
+      marketIds: ['aave', 'compound', 'moonwell'],
+      originsSeconds: col.map((_, i) => i * 3600),
+      rows: col.map((v) => [v, v, v]), // aave === compound === moonwell at every origin
+    };
+    const art = artifact();
+    (art as { residualPanel?: ResidualPanel }).residualPanel = identicalPanel;
+    expect(edgeStandardErrorWad(art, 'aave', 'compound')).toBe(0n);
+  });
+
+  it('13. MINOR 6: pins SECONDS_PER_YEAR to 365 days, not protocols/math.ts\'s 365.25d', () => {
+    const H = 604_800;
+    const q = MEASURED_QUANTILES['aave']!;
+    const result = annualLowerBound(flatCurve(0n, 'aave'), artifact({ horizonSeconds: H }), 'aave', 0n);
+    const expected365 = (q * 31_536_000n) / BigInt(H);
+    expect(result).toBe(expected365);
+
+    // The other candidate constant would give a measurably different
+    // number — not swallowed by test 2's 5% tolerance band (a 0.07% shift),
+    // which is exactly why that test cannot be relied on to catch a swap
+    // and this needs its own exact pin.
+    const expected365_25 = (q * 31_557_600n) / BigInt(H);
+    expect(result).not.toBe(expected365_25);
   });
 });

@@ -2,6 +2,7 @@ import {
   MOVE_COST_TERMS,
   movementCostBase,
   reversalChurnBase,
+  applyBrakes,
 } from '../../../src/policy/steps/cost.js';
 import type { DecisionInput, MarketObservation } from '../../../src/policy/types.js';
 
@@ -232,6 +233,146 @@ describe('movementCostBase - pure-execution cost anchor', () => {
     expect(terms['l2']!).not.toBe(terms['l1Data']! + terms['exit']! + terms['entry']! + terms['claim']!);
     expect(terms['approveReset']! + terms['swap']!).not.toBe(exitEntryClaim);
     expect(terms['l2']!).not.toBe(terms['approveReset']! + terms['swap']!);
+  });
+});
+
+/** Sum of `|target_i - current_i|` over every venue — the same `notional`
+ *  the pre-P13/P15/P16 `costGate` derived internally via `movesFrom`, now
+ *  passed into `applyBrakes` explicitly rather than recomputed inside it. */
+function notionalOf(current: Map<string, bigint>, target: Map<string, bigint>): bigint {
+  let n = 0n;
+  for (const id of new Set([...current.keys(), ...target.keys()])) {
+    const delta = (target.get(id) ?? 0n) - (current.get(id) ?? 0n);
+    n += delta < 0n ? -delta : delta;
+  }
+  return n;
+}
+
+/**
+ * §9.1.4's brakes, extracted from the pre-P13/P15/P16 `costGate` into
+ * `applyBrakes` (CRITICAL 1 of the Task 3 review): stubbing `costGate`'s
+ * whole body to throw removed the only enforcement of these five checks,
+ * not just their old tests. Paper §9.1.4: "Cooldown, minimum turnover,
+ * maximum turnover, and reversal allowances remain in force ... they bound
+ * the policy's aggregate behavior, whereas the hurdles above decide
+ * individual legs" — these are a distinct, always-live constraint, not
+ * subsumed by the two hurdles in `steps/hurdles.ts`.
+ */
+describe('applyBrakes', () => {
+  it('blocks while inside the cooldown window', () => {
+    const i = input([market('a', { positionBase: 0n })], 999_000); // 1000s ago, cooldown 3600
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', Q * 4n]]);
+    const reason = applyBrakes(i, notionalOf(current, target), current, target, PARAMS);
+    expect(reason).toContain('COOLDOWN');
+  });
+
+  it('blocks a move whose turnover is below the minimum', () => {
+    const i = input([market('a')]);
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', 1n]]);
+    const reason = applyBrakes(i, notionalOf(current, target), current, target, PARAMS);
+    expect(reason).toContain('MIN_TURNOVER');
+  });
+
+  it('blocks a move whose turnover exceeds the maximum', () => {
+    const i = input([market('a')]);
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', 9_000_000_000n]]);
+    const reason = applyBrakes(i, notionalOf(current, target), current, target, PARAMS);
+    expect(reason).toContain('MAX_TURNOVER');
+  });
+
+  it('returns null when no brake fires', () => {
+    const i = input([market('a')]);
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', Q * 4n]]);
+    expect(applyBrakes(i, notionalOf(current, target), current, target, PARAMS)).toBeNull();
+  });
+
+  it('is deterministic', () => {
+    const i = input([market('a')]);
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', Q * 4n]]);
+    const args: Parameters<typeof applyBrakes> = [i, notionalOf(current, target), current, target, PARAMS];
+    expect(applyBrakes(...args)).toEqual(applyBrakes(...args));
+  });
+});
+
+describe('applyBrakes churn brakes read persisted history (NEW-19)', () => {
+  // Every case here supplies REAL history. The bug was that the production
+  // driver supplied none, so a gate that only ever saw an empty history was
+  // indistinguishable from a gate that did not exist.
+  it('MAX_TURNOVER fires on turnover already spent in the rolling window', () => {
+    // Vault 10,000 USDC; maxTurnoverBps 5000 -> 5,000 USDC allowed. A move
+    // of 4,000 alone passes; with 2,000 already spent it must not.
+    const current = new Map([['a', 0n]]);
+    const target = new Map([['a', Q * 4n]]);
+
+    const alone = applyBrakes(input([market('a')]), notionalOf(current, target), current, target, PARAMS);
+    expect(alone).toBeNull();
+
+    const withHistory = applyBrakes(
+      input([market('a')], null, { turnoverWindowBase: Q * 2n }),
+      notionalOf(current, target),
+      current,
+      target,
+      PARAMS
+    );
+    expect(withHistory).toContain('MAX_TURNOVER');
+    // The message names the window it applied, so a rejection is never
+    // attributed to a bound the gate did not use.
+    expect(withHistory).toContain(String(PARAMS.turnoverWindowSeconds));
+  });
+
+  it('REVERSAL_ALLOWANCE blocks undoing a recent move; a monotone continuation in the SAME direction is NOT charged', () => {
+    // Vault 10,000 USDC; reversalAllowanceBps 200 -> 200 USDC of churn.
+    // A recent +2,000 into `a` followed by a proposed full exit is 4,000 of
+    // round-trip churn (gross 4,000, |net| 0).
+    const history = { recentMoves: [{ marketId: 'a', deltaBase: Q * 2n, timestampSeconds: 999_000 }] };
+
+    const reversingCurrent = new Map([['a', Q * 2n]]);
+    const reversingTarget = new Map([['a', 0n]]);
+    const reversing = applyBrakes(
+      input([market('a', { positionBase: Q * 2n })], null, history),
+      notionalOf(reversingCurrent, reversingTarget),
+      reversingCurrent,
+      reversingTarget,
+      PARAMS
+    );
+    expect(reversing).toContain('REVERSAL_ALLOWANCE');
+
+    // THE defining property (this is what separates the allowance from a
+    // second turnover cap): the SAME history, but a move in the SAME
+    // direction — a monotone continuation, not a reversal — must not be
+    // charged at all.
+    const continuingCurrent = new Map([['a', Q * 2n]]);
+    const continuingTarget = new Map([['a', Q * 4n]]);
+    const continuing = applyBrakes(
+      input([market('a', { positionBase: Q * 2n })], null, history),
+      notionalOf(continuingCurrent, continuingTarget),
+      continuingCurrent,
+      continuingTarget,
+      PARAMS
+    );
+    expect(continuing).toBeNull();
+  });
+
+  it('the reversal brake is inert only because there is no history', () => {
+    // Same reversal shape, empty recentMoves: nothing to reverse against,
+    // so no brake fires at all. Stated explicitly so a future regression to
+    // a permanently-empty history cannot masquerade as "the brake approves
+    // this move" when really it never saw anything to compare against.
+    const current = new Map([['a', Q * 2n]]);
+    const target = new Map([['a', 0n]]);
+    const reason = applyBrakes(
+      input([market('a', { positionBase: Q * 2n })]),
+      notionalOf(current, target),
+      current,
+      target,
+      PARAMS
+    );
+    expect(reason).toBeNull();
   });
 });
 

@@ -103,7 +103,11 @@ export function resolveQuantumBase(
  *
  *   H1 capacity            -> capacityCurves   (decide.ts: flat displayed-rate curves)
  *   H2 uncertainty         -> uncertainty      (drop the calibrated residual quantile)
- *   H3 cost                -> costGate         (decide.ts: skip the gate AND the band)
+ *   H3 cost                -> costGate         (decide.ts: skip the economic hurdles in
+ *                                                steps/hurdles.ts; the brakes in
+ *                                                cost.ts#applyBrakes are a distinct,
+ *                                                always-live constraint per §9.1.4 and are
+ *                                                NOT part of what H3 ablates)
  *   H4 liquidity           -> dynamicReserve   (reserve.ts floorOnly: admin floor only)
  *   H5 dependency          -> dependencyCaps
  *   H6 structural liq. cap -> liquidityCap

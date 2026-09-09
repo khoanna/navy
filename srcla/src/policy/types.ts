@@ -268,13 +268,22 @@ export interface PolicyArtifact {
    *
    * Present only on a calibrated artifact. `steps/portfolio-quantile.ts`
    * turns it into `q^p_alpha(w)` — a real lower quantile of the portfolio
-   * residual series under the candidate's own weights — and P8's band uses
-   * the same quantity as its dispersion.
+   * residual series under the candidate's own weights. `steps/hurdles.ts`'s
+   * `edgeStandardErrorWad` also reads this panel directly (per-venue sigma
+   * and cross-venue correlation), independently of `q^p_alpha(w)`.
    */
   residualPanel?: ResidualPanel;
   minObservations: number;
   availabilityLagSeconds: number;
-  /** P8 band multiplier. */
+  /**
+   * P8's significance multiplier k. Originally the no-trade band's
+   * `k*sigma` scalar (`noTradeBandBase`, removed by P13/P15/P16);
+   * `steps/hurdles.ts#rotateClears` now uses it to scale
+   * `edgeStandardErrorWad` into `significanceWad`, the rotation hurdle's "k
+   * standard errors of the estimated edge" term. Name kept for continuity
+   * with the paper's registration record (P8, P15, P18) rather than
+   * renamed to match the new call site.
+   */
   noTradeBandK: number;
   /**
    * §9.1's registered payback period, in seconds. A move must repay its own

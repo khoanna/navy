@@ -275,16 +275,76 @@ function signedDeltas(current: ReadonlyMap<string, bigint>, target: ReadonlyMap<
 }
 
 /**
- * §9.1 - the action rule G_H > max(C_move, k*sigma), gated by cooldown,
- * turnover bounds and the reversal allowance. Each gate is checked
- * independently and returns its own `reason` so a caller can tell which
- * constraint actually blocked the move (constraint 4) - a move is never
- * rejected for an unstated reason.
+ * §9.1's five brakes: cooldown, minimum turnover, maximum turnover and the
+ * reversal allowance, plus the trivial no-op guard. Paper §9.1.4 is
+ * explicit that these remain in force independently of the hurdles in
+ * `steps/hurdles.ts`: "Cooldown, minimum turnover, maximum turnover, and
+ * reversal allowances remain in force and prevent repeated small moves;
+ * they bound the policy's aggregate behavior, whereas the hurdles above
+ * decide individual legs." Partial adjustment does not subsume them.
  *
- * All four churn brakes read `input.lastAction`, which
+ * This is the brake ENFORCEMENT extracted from the pre-P13/P15/P16
+ * `costGate` (now a throwing stub - see its own comment) so it keeps a
+ * caller in `src/`, not just in tests: `reversalChurnBase` and
+ * `signedDeltas` would otherwise be orphaned with the band's removal, and
+ * the brakes themselves would exist only in git history despite the paper
+ * requiring them. Task 4 is expected to call this from `decide.ts` alongside
+ * `deployClears`/`rotateClears`.
+ *
+ * Each check is independent and returns its own reason string (unchanged
+ * from the pre-existing `costGate` messages, so any caller or test that
+ * matched on them still does) so a rejection is never attributed to an
+ * unstated constraint. Returns `null` when nothing fires.
+ *
+ * `notional` is the same quantity the old `costGate` derived from
+ * `movesFrom` - the sum of `|target_i - current_i|` over every venue whose
+ * allocation changes, i.e. `notional === 0n` iff there is no move at all
+ * (NO_MOVES). All four churn brakes read `input.lastAction`, which
  * `runtime/decision-driver.ts#loadLastAction` derives from persisted
- * decisions. They are inert only when there genuinely is no history.
+ * decisions; they are inert only when there genuinely is no history.
  */
+export function applyBrakes(
+  input: DecisionInput,
+  notional: bigint,
+  current: ReadonlyMap<string, bigint>,
+  target: ReadonlyMap<string, bigint>,
+  p: CostParams,
+): string | null {
+  if (notional === 0n) return 'NO_MOVES: target equals current';
+
+  const last = input.lastAction.timestampSeconds;
+  if (last !== null && input.origin.timestampSeconds - last < p.cooldownSeconds) {
+    return `COOLDOWN: ${input.origin.timestampSeconds - last}s < ${p.cooldownSeconds}s`;
+  }
+
+  const minTurnover = (input.vault.totalAssetsBase * BigInt(p.minTurnoverBps)) / 10_000n;
+  if (notional < minTurnover) return `MIN_TURNOVER: ${notional} < ${minTurnover}`;
+
+  const maxTurnover = (input.vault.totalAssetsBase * BigInt(p.maxTurnoverBps)) / 10_000n;
+  if (input.lastAction.turnoverWindowBase + notional > maxTurnover) {
+    return (
+      `MAX_TURNOVER: ${notional} would push the ${p.turnoverWindowSeconds}s rolling window ` +
+      `(${input.lastAction.turnoverWindowBase} already moved) above ${maxTurnover}`
+    );
+  }
+
+  const churn = reversalChurnBase(
+    input.lastAction.recentMoves,
+    signedDeltas(current, target),
+    input.origin.timestampSeconds,
+    p.reversalWindowSeconds,
+  );
+  const reversalAllowance = (input.vault.totalAssetsBase * BigInt(p.reversalAllowanceBps)) / 10_000n;
+  if (churn > reversalAllowance) {
+    return (
+      `REVERSAL_ALLOWANCE: round-trip churn ${churn} over ${p.reversalWindowSeconds}s ` +
+      `exceeds the allowance ${reversalAllowance}`
+    );
+  }
+
+  return null;
+}
+
 /**
  * The turnover still available in the rolling window, in USDC base units.
  *
@@ -349,10 +409,13 @@ export function clampToTurnoverBudget(
  * `max(C_move, k*sigma)` — a threshold that moved with the forecast horizon
  * and double-charged forecast dispersion (once in the objective's lower
  * bound, again as the band). `steps/hurdles.ts`'s `deployClears`/
- * `rotateClears` are the replacement, stated in annualised rate units. Task
- * 4 rewires every caller (`decide.ts` among them) onto those two functions
- * and removes this stub entirely; until then it throws rather than silently
- * returning a `CostGateResult` computed from logic that no longer exists.
+ * `rotateClears` are the economic-hurdle replacement, stated in annualised
+ * rate units; `applyBrakes` above is the brake-enforcement replacement (the
+ * cooldown/turnover/reversal checks this used to run inline — paper §9.1.4
+ * says those remain in force independently of the hurdles). Task 4 rewires
+ * every caller (`decide.ts` among them) onto those three functions and
+ * removes this stub entirely; until then it throws rather than silently
+ * returning a `CostGateResult` computed from a band that no longer exists.
  */
 export function costGate(
   _input: DecisionInput,
