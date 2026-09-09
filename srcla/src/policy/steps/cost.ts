@@ -1,4 +1,4 @@
-import type { CostGateResult, DecisionInput, MoveRecord, PolicyArtifact, RateCurve } from '../types.js';
+import type { DecisionInput, MoveRecord } from '../types.js';
 
 const WEI_PER_ETH = 10n ** 18n;
 
@@ -284,12 +284,12 @@ function signedDeltas(current: ReadonlyMap<string, bigint>, target: ReadonlyMap<
  * decide individual legs." Partial adjustment does not subsume them.
  *
  * This is the brake ENFORCEMENT extracted from the pre-P13/P15/P16
- * `costGate` (now a throwing stub - see its own comment) so it keeps a
- * caller in `src/`, not just in tests: `reversalChurnBase` and
- * `signedDeltas` would otherwise be orphaned with the band's removal, and
- * the brakes themselves would exist only in git history despite the paper
- * requiring them. Task 4 is expected to call this from `decide.ts` alongside
- * `deployClears`/`rotateClears`.
+ * `costGate`, which P17 deleted outright: it compared a horizon-return gain
+ * against `max(C_move, k*sigma)`, a threshold that moved with the forecast
+ * horizon and double-charged forecast dispersion. `decide.ts` calls this
+ * alongside `steps/hurdles.ts`'s `deployClears`/`rotateClears`, on the FINAL
+ * executed vector — the hurdles decide individual legs, these bound the
+ * aggregate.
  *
  * Each check is independent and returns its own reason string (unchanged
  * from the pre-existing `costGate` messages, so any caller or test that
@@ -402,28 +402,4 @@ export function clampToTurnoverBudget(
     clamped.set(marketId, (current.get(marketId) ?? 0n) + scaled);
   }
   return clamped;
-}
-
-/**
- * SUPERSEDED (P13/P15/P16). This compared a horizon-return gain against
- * `max(C_move, k*sigma)` — a threshold that moved with the forecast horizon
- * and double-charged forecast dispersion (once in the objective's lower
- * bound, again as the band). `steps/hurdles.ts`'s `deployClears`/
- * `rotateClears` are the economic-hurdle replacement, stated in annualised
- * rate units; `applyBrakes` above is the brake-enforcement replacement (the
- * cooldown/turnover/reversal checks this used to run inline — paper §9.1.4
- * says those remain in force independently of the hurdles). Task 4 rewires
- * every caller (`decide.ts` among them) onto those three functions and
- * removes this stub entirely; until then it throws rather than silently
- * returning a `CostGateResult` computed from a band that no longer exists.
- */
-export function costGate(
-  _input: DecisionInput,
-  _curves: RateCurve[],
-  _artifact: PolicyArtifact,
-  _current: Map<string, bigint>,
-  _target: Map<string, bigint>,
-  _p: CostParams
-): CostGateResult {
-  throw new Error('costGate superseded by hurdles.ts; see plan Task 4');
 }

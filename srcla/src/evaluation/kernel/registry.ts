@@ -183,7 +183,12 @@ export const REGISTERED_ABLATIONS: readonly RegisteredPolicy[] = [
   {
     id: 'h3',
     name: 'H3 cost',
-    paperDefinition: 'remove the complete-cost gate and the no-trade band.',
+    paperDefinition:
+      'remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) ' +
+      "that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement " +
+      'hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max ' +
+      'turnover, reversal allowance) stay in force, since the paper puts them outside the ' +
+      'hurdles.',
     section: '11.3',
     deployable: true,
     shape: 'kernel',

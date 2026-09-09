@@ -21,7 +21,14 @@ const WAD = 10n ** 18n;
 const SECONDS_PER_YEAR = 31_536_000n;
 
 export interface LegVerdict {
-  kind: 'deploy' | 'rotate';
+  /**
+   * `deploy` = idle -> venue (§9.1.2), `rotate` = venue -> venue (§9.1.3).
+   * `divest` = venue -> idle: NOT produced by this module, because §9.1
+   * states no hurdle for taking exposure off; `steps/legs.ts` emits it for an
+   * unpaired reduction so the executed vector can shrink without an economic
+   * threshold it has no definition for.
+   */
+  kind: 'deploy' | 'rotate' | 'divest';
   marketId: string;
   fromMarketId: string | null;
   amountBase: bigint;

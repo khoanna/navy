@@ -16,7 +16,8 @@
 import { safetyUnwind, SAFETY_EXIT_CODES } from '../../../src/policy/steps/unwind.js';
 import { admit } from '../../../src/policy/steps/admit.js';
 import { decide, DEFAULT_DECIDE_OPTS } from '../../../src/policy/decide.js';
-import { costGate } from '../../../src/policy/steps/cost.js';
+import { applyBrakes } from '../../../src/policy/steps/cost.js';
+import { planLegs } from '../../../src/policy/steps/legs.js';
 import { simulateCurves } from '../../../src/policy/steps/simulate.js';
 import { ActionKind } from '../../../src/policy/steps/plan.js';
 import { loadBootstrapArtifact } from '../../../src/policy/artifact.js';
@@ -101,6 +102,13 @@ function artifactFor(markets: MarketObservation[]): PolicyArtifact {
     minObservations: 0,
     residualQuantileWadByMarket: {},
     noTradeBandK: 0,
+    // P15/P17: `paybackSeconds` is the registered window a move must repay its
+    // own movement cost within, and `steps/hurdles.ts` throws without it. The
+    // bootstrap artifact does not carry one (a payback period is a
+    // registration, not a default), so a fixture that drives decide() through
+    // the per-leg hurdles has to supply it. 30 days matches
+    // scripts/freeze-artifact.ts's PAYBACK_SECONDS.
+    paybackSeconds: 30 * 86_400,
   };
 }
 
@@ -254,17 +262,40 @@ describe('decide() emits a bounded safety unwind that bypasses the economic gate
     return { markets, input: input(markets), artifact: artifactFor(markets) };
   }
 
-  it('would be suppressed by MIN_TURNOVER if it went through the gate', () => {
+  // P17 rewrote what "the gate" is: the single `costGate` this control used to
+  // call is gone, replaced by §9.1.4's two halves — the per-leg hurdles
+  // (steps/hurdles.ts, driven by steps/legs.ts) and the aggregate brakes
+  // (cost.ts#applyBrakes). The property under test is unchanged — this exit
+  // could not have reached the chain through the economic path — so the
+  // control now asserts it against BOTH halves, which is strictly stronger
+  // than the one assertion it replaces.
+  it('would be suppressed by the economic path: MIN_TURNOVER, and no leg to price', () => {
     // The control. Without this, "the unwind was emitted" is consistent with
-    // the gate having been passable all along.
+    // the economic path having been passable all along.
     const { markets, input: i, artifact } = pausedTinyPosition();
-    const admission = admit(i, artifact);
-    const curves = simulateCurves(i, admission.eligible, DEFAULT_DECIDE_OPTS.quantumBase, 16);
     const current = new Map(markets.map((m) => [m.marketId, m.positionBase]));
-    const target = new Map(markets.map((m) => [m.marketId, m.marketId === 'aave' ? 0n : 0n]));
-    const gate = costGate(i, curves, artifact, current, target, DEFAULT_DECIDE_OPTS.cost);
-    expect(gate.passed).toBe(false);
-    expect(gate.reason).toContain('MIN_TURNOVER');
+    const target = new Map(markets.map((m) => [m.marketId, 0n]));
+
+    // 1. The aggregate brake. 50 USDC of notional against a 100,000 USDC
+    //    vault is 5bps, under the 10bps MIN_TURNOVER floor.
+    let notional = 0n;
+    for (const id of new Set([...current.keys(), ...target.keys()])) {
+      const d = (target.get(id) ?? 0n) - (current.get(id) ?? 0n);
+      notional += d < 0n ? -d : d;
+    }
+    expect(notional).toBe(50n * USDC);
+    const brake = applyBrakes(i, notional, current, target, DEFAULT_DECIDE_OPTS.cost);
+    expect(brake).not.toBeNull();
+    expect(brake).toContain('MIN_TURNOVER');
+
+    // 2. The hurdles cannot even see the exit. A paused venue fails
+    //    admission, so it has no simulated curve, so `planLegs` emits no leg
+    //    for it — the economic path has no way to divest it at any size.
+    const admission = admit(i, artifact);
+    expect(admission.eligible).not.toContain('aave');
+    const curves = simulateCurves(i, admission.eligible, DEFAULT_DECIDE_OPTS.quantumBase, 16);
+    const legs = planLegs(current, target, i, artifact, curves, DEFAULT_DECIDE_OPTS.cost);
+    expect(legs.every((l) => l.marketId !== 'aave')).toBe(true);
   });
 
   it('emits the exit anyway, with the gate reported as bypassed', () => {

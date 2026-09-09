@@ -1,4 +1,5 @@
 import type { HorizonSeconds, CoverageTarget, ForecastMethod } from './registered.js';
+import type { LegVerdict } from './steps/hurdles.js';
 
 /** Raw protocol state at one finalised origin, in native integer units. */
 export interface MarketObservation {
@@ -333,6 +334,19 @@ export interface CostGateResult {
   moveCostBase: bigint;
   bandBase: bigint;
   terms: Record<string, bigint>;
+  /**
+   * P17 - the per-leg verdicts `steps/legs.ts#planLegs` produced for this
+   * decision, in the order they were paired. Empty when nothing was evaluated
+   * (a hold before the hurdles, a safety-unwind bypass, or the H3 ablation).
+   *
+   * `passed` is now a statement about the EXECUTED vector, not about one
+   * threshold over the whole target: it is true when at least one leg cleared,
+   * the survivors were feasible, and the partial adjustment toward them
+   * survived the aggregate brakes. The per-leg detail lives here because
+   * "the move was refused" and "three of four legs were refused" are different
+   * facts and a census must be able to tell them apart.
+   */
+  legs: LegVerdict[];
 }
 
 export interface PlanDraft {

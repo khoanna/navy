@@ -3,16 +3,29 @@ import { admit } from './steps/admit.js';
 import { simulateCurves, flatDisplayedRateCurves } from './steps/simulate.js';
 import { forecastMarkets } from './steps/forecast.js';
 import { requiredReserve } from './steps/reserve.js';
-import { optimize, reserveOptsFrom, resolveQuantumBase, type PolicyAblations } from './steps/optimize.js';
 import {
+  effectiveCapBase,
+  optimize,
+  reserveOptsFrom,
+  resolveQuantumBase,
+  type PolicyAblations,
+} from './steps/optimize.js';
+import {
+  applyBrakes,
   clampToTurnoverBudget,
-  costGate,
   remainingTurnoverBase,
   type CostParams,
 } from './steps/cost.js';
+import { planLegs, survivingTarget, partialAdjust } from './steps/legs.js';
 import { buildPlan, type BuildPlanOpts } from './steps/plan.js';
 import { safetyUnwind } from './steps/unwind.js';
-import type { DecisionInput, DecisionOutput, PolicyArtifact } from './types.js';
+import type {
+  CostGateResult,
+  DecisionInput,
+  DecisionOutput,
+  PolicyArtifact,
+  RateCurve,
+} from './types.js';
 
 export interface DecideOpts {
   codeCommit: string;
@@ -162,6 +175,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
         moveCostBase: 0n,
         bandBase: 0n,
         terms: {},
+        legs: [],
       },
       plan: partial.plan ?? null,
       action: partial.action ?? 'hold',
@@ -229,13 +243,16 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
     // must be able to tell "the gate cleared this" from "the gate was
     // bypassed", so the reason is explicit and every amount is zero rather
     // than a fabricated gain.
-    const bypassed = {
+    const bypassed: CostGateResult = {
       passed: true,
       reason: 'SAFETY_UNWIND_BYPASS',
       gainBase: 0n,
       moveCostBase: 0n,
       bandBase: 0n,
       terms: {},
+      // No leg was evaluated: §9.1's unwind bypasses the economic gate
+      // wholesale, so an empty list is the honest report, not an omission.
+      legs: [],
     };
 
     const emergencyExitAdapters = new Set(unwind.exits.map((e) => e.adapter));
@@ -312,12 +329,21 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   // holding 100% cash proposes ~94% of NAV, is refused, and finds the same
   // 100% cash at the next origin) and broke §11.1's equal envelope, since
   // B0 and B4 never run through this gate at all. See
-  // `clampToTurnoverBudget`. Ablating the cost gate ablates the brake too,
-  // so H3 removes the trim along with the threshold.
-  const target =
-    disable.costGate === true
-      ? unclampedTarget
-      : clampToTurnoverBudget(current, unclampedTarget, remainingTurnoverBase(input, opts.cost));
+  // `clampToTurnoverBudget`.
+  //
+  // P17: the trim is now UNCONDITIONAL, H3 included. It was previously
+  // skipped under `disable.costGate` because that switch also removed the
+  // MAX_TURNOVER brake it feeds. §9.1.4 puts the brakes outside the hurdles
+  // ("they bound the policy's aggregate behavior, whereas the hurdles above
+  // decide individual legs") and `cost.ts#applyBrakes` is now evaluated on
+  // every path, H3 included — so leaving H3 untrimmed would hand it an
+  // untrimmed vector and then veto it on MAX_TURNOVER, making the ablation
+  // strictly MORE constrained than the policy it ablates.
+  const target = clampToTurnoverBudget(
+    current,
+    unclampedTarget,
+    remainingTurnoverBase(input, opts.cost),
+  );
 
   // Same derivation the optimiser scored candidates with (reserveOptsFrom),
   // so the reported reserve cannot disagree with the one the search obeyed.
@@ -331,25 +357,101 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
     })
   );
 
-  // H3: remove the complete-cost gate AND the no-trade band. The gate is
-  // reported as passed with an explicit reason so a result can never be read
-  // as "the gate was evaluated and cleared"; every amount below is USDC base
-  // units (6 dp).
-  const gate =
-    disable.costGate === true
-      ? {
-          passed: true,
-          reason: 'COST_GATE_ABLATED',
-          gainBase: 0n,
-          moveCostBase: 0n,
-          bandBase: 0n,
-          terms: {},
-        }
-      : costGate(input, curves, artifact, current, target, opts.cost);
+  // P17 — §9.1.4's per-leg evaluation, replacing the single all-or-nothing
+  // gate. The target is diffed into legs, each leg meets its own hurdle
+  // (steps/hurdles.ts), the survivors are re-checked for feasibility, and the
+  // executed move is a partial adjustment toward them. v0.6's one-gate form
+  // discarded the whole vector whenever any part of it failed, which produced
+  // 1 and 0 rebalances on the two sealed held-out eras.
+  //
+  // H3 (`disable.costGate`) skips the economic hurdles only. The aggregate
+  // brakes below stay live on every path — §9.1.4 states they "remain in
+  // force" independently of the hurdles — so H3 is an ablation of the
+  // thresholds, not of the churn budget.
+  const verdicts =
+    disable.costGate === true ? [] : planLegs(current, target, input, artifact, curves, opts.cost);
+
+  // H3d: remove the DEPLOYMENT hurdle only, keeping the rotation hurdle, so
+  // §9.1.2 and §9.1.3 can be attributed separately.
+  const effective =
+    disable.deploymentHurdle === true
+      ? verdicts.map((v) =>
+          v.kind === 'deploy' ? { ...v, clears: true, reason: 'DEPLOY_HURDLE_ABLATED' } : v,
+        )
+      : verdicts;
+
+  const sub = disable.costGate === true ? target : survivingTarget(current, target, effective);
+
+  // A subset of a feasible target need not itself be feasible: dropping the
+  // deploy leg that was going to absorb a divest changes idle, the reserve and
+  // every cap check. Re-check before committing, and again after the partial
+  // adjustment, which lands strictly between two vectors but is not guaranteed
+  // to satisfy a non-monotone constraint at the interpolation point.
+  const feasible = (candidate: Map<string, bigint>): boolean =>
+    reFeasible(input, artifact, curves, current, candidate, disable, {
+      reserveQuantile: opts.reserveQuantile,
+      reserveHorizonSeconds: opts.reserveHorizonSeconds,
+    });
+
+  const feasibleSub = feasible(sub) ? sub : current;
+  const adjusted = partialAdjust(current, feasibleSub, artifact.adjustmentRate);
+  const executed = feasible(adjusted) ? adjusted : current;
+
+  // §9.1.4's brakes are evaluated on the FINAL executed vector, not the raw
+  // target: they bound the policy's aggregate behaviour, so the quantity they
+  // must see is the notional actually about to move.
+  let notionalBase = 0n;
+  for (const id of new Set([...current.keys(), ...executed.keys()])) {
+    const d = (executed.get(id) ?? 0n) - (current.get(id) ?? 0n);
+    notionalBase += d < 0n ? -d : d;
+  }
+  const brake = applyBrakes(input, notionalBase, current, executed, opts.cost);
+
+  // `applyBrakes` reports `NO_MOVES: target equals current` for a zero
+  // notional, which was exact when the executed vector WAS the target. It no
+  // longer is: a zero notional now usually means the hurdles refused every leg,
+  // or that the survivors did not survive the feasibility re-check. Report the
+  // actual cause in those two cases and leave every other brake string
+  // untouched, so a census can still match on them.
+  const anyCleared = effective.some((v) => v.clears);
+  const gate: CostGateResult = {
+    passed: brake === null,
+    reason:
+      brake === null
+        ? disable.costGate === true
+          ? 'COST_GATE_ABLATED'
+          : 'HURDLES_CLEARED'
+        : notionalBase === 0n && effective.length > 0
+          ? anyCleared
+            ? 'INFEASIBLE_AFTER_HURDLES'
+            : 'ALL_LEGS_BLOCKED'
+          : brake,
+    // Every amount here is USDC base units (6 dp). The gain/cost/band triple
+    // belonged to the single-threshold comparison P13/P15/P16 removed; the
+    // per-leg detail that replaced it is in `legs`, in annualised WAD.
+    gainBase: 0n,
+    moveCostBase: 0n,
+    bandBase: 0n,
+    terms: {},
+    legs: effective,
+  };
   if (!gate.passed) {
-    reasons.push(`COST_GATE: ${gate.reason}`);
+    reasons.push(`HURDLES: ${gate.reason}`);
     return finish({ admission, curves, lowerBounds, reserve, target, enumeration, costGate: gate });
   }
+
+  // Everything below plans and reports the EXECUTED vector, not the raw
+  // target: the reserve the plan header commits to must be the one required by
+  // the allocation the plan actually reaches.
+  const executedReserve = requiredReserve(
+    input,
+    artifact,
+    executed,
+    reserveOptsFrom(disable, {
+      reserveQuantile: opts.reserveQuantile,
+      reserveHorizonSeconds: opts.reserveHorizonSeconds,
+    })
+  );
 
   // buildPlan's header embeds decisionHash (it becomes the derived planId
   // too), but the decision hash itself is computed from reasons/target/
@@ -357,14 +459,22 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   // guaranteed-non-zero decisionHash is used only to check whether any
   // action would actually be emitted (plan === null means NO_ACTIONS).
   const placeholderHash = '0x' + '00'.repeat(31) + '01';
-  const draftPlan = buildPlan(input, target, reserve.requiredBase, placeholderHash, {
+  const draftPlan = buildPlan(input, executed, executedReserve.requiredBase, placeholderHash, {
     ...opts.plan,
     snapshotHash: `0x${snapshotHash}`,
   });
 
   if (draftPlan === null) {
     reasons.push('NO_ACTIONS');
-    return finish({ admission, curves, lowerBounds, reserve, target, enumeration, costGate: gate });
+    return finish({
+      admission,
+      curves,
+      lowerBounds,
+      reserve: executedReserve,
+      target: executed,
+      enumeration,
+      costGate: gate,
+    });
   }
 
   reasons.push('REBALANCE');
@@ -372,8 +482,8 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
     admission,
     curves,
     lowerBounds,
-    reserve,
-    target,
+    reserve: executedReserve,
+    target: executed,
     enumeration,
     costGate: gate,
     plan: draftPlan,
@@ -382,9 +492,123 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
 
   // The plan commits to the real decision hash, so it is rebuilt once that
   // hash exists.
-  out.plan = buildPlan(input, target, reserve.requiredBase, `0x${out.decisionHash}`, {
+  out.plan = buildPlan(input, executed, executedReserve.requiredBase, `0x${out.decisionHash}`, {
     ...opts.plan,
     snapshotHash: `0x${snapshotHash}`,
   });
   return out;
+}
+
+/**
+ * Re-run the guardrails `optimize`'s own `hardFeasible` applies, against a
+ * vector `optimize` did not itself produce.
+ *
+ * P17 needs this because the executed vector is no longer the optimiser's
+ * output: it is a SUBSET of it (only the legs that cleared their hurdle) and
+ * then a partial adjustment toward that subset. Neither is guaranteed feasible
+ * just because the target was — dropping a deploy leg that was going to absorb
+ * a divest changes idle, and idle is what the reserve is paid out of.
+ *
+ * It mirrors `optimize`'s predicate term for term (total, per-venue caps,
+ * dependency groups, the reserve requirement and the §8.1 stress scenarios),
+ * with two deliberate differences, both forced by the fact that this predicate
+ * — unlike `optimize`'s — is applied to vectors that CONTAIN THE CURRENT
+ * POSITION rather than being built up from zero:
+ *
+ *  1. Caps are enforced only over the SIMULATED UNIVERSE (`curves`). A
+ *     candidate here can carry a legacy position in a venue that has since
+ *     fallen out of admission; `optimize` never sees such a venue, so
+ *     `caps.get(id) ?? 0n` would read `0n` and refuse every candidate outright,
+ *     turning one de-admitted holding into a permanent hold. The holding is
+ *     still counted toward `deployed`, so the reserve check stays honest about
+ *     it; exiting it is §9.1's safety unwind's job, not this one's.
+ *
+ *  2. Every bound is evaluated as "NO WORSE THAN CURRENT", not as an absolute.
+ *     A percentage cap is a fraction of TVL and the stress scenarios are a
+ *     function of live venue cash, so the vault can find ITSELF in breach with
+ *     no move at all — a redemption shrinks `totalAssetsBase` and a `capBps`
+ *     bound with it. Demanding absolute compliance from every candidate would
+ *     then reject the current position too, and `decide` would hold forever in
+ *     exactly the state that most needs a move. A candidate may not push a
+ *     bound further out of compliance; it is not required to repair a
+ *     pre-existing breach in one cycle.
+ *
+ * The §11.4 stressed-coverage floor is deliberately NOT re-applied: `optimize`
+ * treats it as a PREFERENCE and falls back to `hardFeasible` alone when no
+ * candidate clears it, so enforcing it here as a hard constraint would reject
+ * survivors the optimiser itself accepted.
+ *
+ * PURE.
+ */
+function reFeasible(
+  input: DecisionInput,
+  artifact: PolicyArtifact,
+  curves: RateCurve[],
+  current: Map<string, bigint>,
+  candidate: Map<string, bigint>,
+  disable: PolicyAblations,
+  opts: { reserveQuantile: number; reserveHorizonSeconds: number }
+): boolean {
+  const { totalAssetsBase } = input.vault;
+
+  const sum = (v: Map<string, bigint>): bigint => {
+    let acc = 0n;
+    for (const x of v.values()) acc += x;
+    return acc;
+  };
+
+  for (const x of candidate.values()) if (x < 0n) return false;
+  const deployed = sum(candidate);
+  if (deployed > totalAssetsBase) return false;
+
+  for (const c of curves) {
+    const m = input.markets.find((k) => k.marketId === c.marketId);
+    if (m === undefined) return false;
+    const x = candidate.get(c.marketId) ?? 0n;
+    const cap = effectiveCapBase(m, totalAssetsBase, disable.liquidityCap);
+    if (x > cap && x > (current.get(c.marketId) ?? 0n)) return false;
+  }
+
+  if (disable.dependencyCaps !== true) {
+    for (const g of input.dependencyGroups) {
+      let candidateSum = 0n;
+      let currentSum = 0n;
+      for (const member of g.members) {
+        candidateSum += candidate.get(member) ?? 0n;
+        currentSum += current.get(member) ?? 0n;
+      }
+      const pct = (totalAssetsBase * BigInt(g.capBps)) / 10_000n;
+      const cap = pct < g.absoluteCapBase ? pct : g.absoluteCapBase;
+      if (candidateSum > cap && candidateSum > currentSum) return false;
+    }
+  }
+
+  if (disable.reserve !== true) {
+    const reserveOpts = reserveOptsFrom(disable, opts);
+    const r = requiredReserve(input, artifact, candidate, reserveOpts);
+    const idle = totalAssetsBase - deployed;
+    if (idle < r.requiredBase) {
+      const currentIdle = totalAssetsBase - sum(current);
+      const currentRequired = requiredReserve(input, artifact, current, reserveOpts).requiredBase;
+      // Only a candidate that leaves LESS idle than today against a reserve
+      // requirement it already fails is refused; one that improves the
+      // shortfall is exactly the move a breached vault needs.
+      if (idle - r.requiredBase < currentIdle - currentRequired) return false;
+    }
+    // §8.1 — a candidate must not fail a stress scenario the current position
+    // passes. Scenario feasibility is a function of live venue cash, so the
+    // current position can already fail one; requiring the candidate to fix
+    // that in one step would strand the vault.
+    const failed = new Set(r.scenarioFeasible.filter((x) => !x.feasible).map((x) => x.scenario));
+    if (failed.size > 0) {
+      const currentFailed = new Set(
+        requiredReserve(input, artifact, current, reserveOpts)
+          .scenarioFeasible.filter((x) => !x.feasible)
+          .map((x) => x.scenario)
+      );
+      for (const scenario of failed) if (!currentFailed.has(scenario)) return false;
+    }
+  }
+
+  return true;
 }

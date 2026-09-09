@@ -4,14 +4,20 @@
  * Block deployment and invoke bounded unwind when possible".
  *
  * WHAT WAS WRONG. `optimize` builds `target` only over ADMITTED markets, so
- * a paused or de-admitted venue's position became an ordinary divest in
- * `cost.ts#movesFrom` and was then put through the FULL economic gate:
- * cooldown, MIN_TURNOVER, MAX_TURNOVER and `gain > max(C_move, k*sigma)`. A
- * safety exit from a paused venue could therefore be suppressed by
- * MIN_TURNOVER - the smaller the stranded position, the more certainly it
- * was suppressed. Worse, when EVERY market fails admission, `decide` returns
- * at ADMISSION_EMPTY before a target is built at all, so the one situation
- * that most needs an unwind produced a HOLD. (Readiness audit NEW-20.)
+ * a paused or de-admitted venue's position became an ordinary divest in the
+ * economic path and was put through the whole of it: cooldown, MIN_TURNOVER,
+ * MAX_TURNOVER and the movement threshold of the day (a `k*sigma` no-trade
+ * band then; §9.1.2's deployment hurdle and §9.1.3's rotation hurdle in
+ * `steps/hurdles.ts` now). A safety exit from a paused venue could therefore
+ * be suppressed by MIN_TURNOVER - the smaller the stranded position, the more
+ * certainly it was suppressed. Worse, when EVERY market fails admission,
+ * `decide` returns at ADMISSION_EMPTY before a target is built at all, so the
+ * one situation that most needs an unwind produced a HOLD. (Readiness audit
+ * NEW-20.)
+ *
+ * Still true after P17's per-leg rewrite, and for a second reason: `planLegs`
+ * skips any venue with no simulated curve, which is exactly a de-admitted one,
+ * so the economic path cannot exit it at all. This unwind is the only exit.
  *
  * `ActionKind.EmergencyExit` was defined in `plan.ts` and never emitted;
  * `buildPlan` produced kinds 0|1 only.

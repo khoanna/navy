@@ -568,10 +568,14 @@ export function renderReport(params: ReportParams): string {
   out.push('');
   out.push(
     a.noTradeBandKResolved
-      ? `P8's no-trade band multiplier \`k\` resolved to **${a.noTradeBandK}** on the calibration era.`
-      : `**P8's \`k\` did not resolve.** The sweep was inconclusive, so \`k\` remains at ` +
-          `${a.noTradeBandK} as a registered default and every P8 result is provisional. A value ` +
-          `chosen because it moves a gate would not be a registration.`,
+      ? `P8's significance multiplier \`k\` — the standard-error scalar in §9.1.3's rotation ` +
+          `hurdle, formerly the \`k*sigma\` no-trade band's multiplier — resolved to ` +
+          `**${a.noTradeBandK}** on the calibration era.`
+      : `**P8's \`k\` did not resolve.** The sweep was inconclusive, so \`k\` — the ` +
+          `standard-error scalar in §9.1.3's rotation hurdle, formerly the \`k*sigma\` ` +
+          `no-trade band's multiplier — remains at ${a.noTradeBandK} as a registered default ` +
+          `and every P8 result is provisional. A value chosen because it moves a gate would ` +
+          `not be a registration.`,
   );
   out.push('');
 

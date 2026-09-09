@@ -103,6 +103,13 @@ function artifact(over: Partial<PolicyArtifact> = {}): PolicyArtifact {
     cashResidualQuantileWadByMarket: {},
     cashLowerBoundQuantileWad: 0n,
     noTradeBandK: 0,
+    // P15/P17: `paybackSeconds` is the registered window a move must repay its
+    // own movement cost within, and `steps/hurdles.ts` throws without it. The
+    // bootstrap artifact does not carry one (a payback period is a
+    // registration, not a default), so a fixture that drives decide() through
+    // the per-leg hurdles has to supply it. 30 days matches
+    // scripts/freeze-artifact.ts's PAYBACK_SECONDS.
+    paybackSeconds: 30 * 86_400,
     ...over,
   };
 }
@@ -357,6 +364,48 @@ describe('decide: H3 cost switch', () => {
     expect(ablated.costGate.moveCostBase).toBe(0n);
     expect(ablated.costGate.bandBase).toBe(0n);
     expect(ablated.costGate.terms).toEqual({});
+  });
+
+  // P17 — H3d decomposes H3: §9.1.2's deployment hurdle is removed while
+  // §9.1.3's rotation hurdle stays live, so the two thresholds can be
+  // attributed separately rather than only jointly.
+  it('P17/H3d: the deployment hurdle can be ablated on its own', () => {
+    const i = input();
+    const gated = decide(i, artifact(), PUNITIVE);
+
+    // Non-vacuity: every leg here is a deployment, and the live hurdle
+    // genuinely refuses all of them.
+    expect(gated.costGate.legs.length).toBeGreaterThan(0);
+    expect(gated.costGate.legs.every((l) => l.kind === 'deploy')).toBe(true);
+    expect(gated.costGate.legs.every((l) => !l.clears)).toBe(true);
+    expect(gated.action).toBe('hold');
+
+    const h3d = decide(i, artifact(), { ...PUNITIVE, disable: { deploymentHurdle: true } });
+    expect(h3d.action).toBe('rebalance');
+    expect(h3d.costGate.legs.every((l) => l.clears)).toBe(true);
+    expect(h3d.costGate.legs.every((l) => l.reason === 'DEPLOY_HURDLE_ABLATED')).toBe(true);
+    // H3d is not H3: the hurdles were evaluated, one of them was overridden.
+    expect(h3d.costGate.reason).toBe('HURDLES_CLEARED');
+  });
+
+  // P17 — H3 removes the ECONOMIC HURDLES only. §9.1.4 puts the churn brakes
+  // outside them ("they bound the policy's aggregate behavior, whereas the
+  // hurdles above decide individual legs"), so `cost.ts#applyBrakes` is
+  // evaluated on the H3 path too. Before P17 the `costGate` switch skipped the
+  // brakes as well, which made H3 an ablation of two different things at once.
+  it('P17: the §9.1.4 brakes stay live under H3', () => {
+    const recent = input({
+      lastAction: { timestampSeconds: 1_000_000 - 60, turnoverWindowBase: 0n, recentMoves: [] },
+    });
+    const ablated = decide(recent, artifact(), { ...OPTS, disable: { costGate: true } });
+    expect(ablated.action).toBe('hold');
+    expect(ablated.costGate.reason).toContain('COOLDOWN');
+
+    // Non-vacuity: the same H3 decision with no recent action rebalances, so
+    // the hold above is the cooldown and not the ablation failing to deploy.
+    const fresh = decide(input(), artifact(), { ...OPTS, disable: { costGate: true } });
+    expect(fresh.action).toBe('rebalance');
+    expect(fresh.costGate.reason).toBe('COST_GATE_ABLATED');
   });
 });
 

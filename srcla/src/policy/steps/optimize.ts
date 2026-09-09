@@ -108,6 +108,11 @@ export function resolveQuantumBase(
  *                                                cost.ts#applyBrakes are a distinct,
  *                                                always-live constraint per §9.1.4 and are
  *                                                NOT part of what H3 ablates)
+ *   H3d deployment hurdle  -> deploymentHurdle (decide.ts: force every DEPLOY leg to clear
+ *                                                while the ROTATION hurdle stays live -
+ *                                                P17's decomposition of H3 into its two
+ *                                                halves, so the §9.1.2 and §9.1.3
+ *                                                thresholds can be attributed separately)
  *   H4 liquidity           -> dynamicReserve   (reserve.ts floorOnly: admin floor only)
  *   H5 dependency          -> dependencyCaps
  *   H6 structural liq. cap -> liquidityCap
@@ -128,6 +133,7 @@ export type PolicyAblation =
   | 'capacityCurves'
   | 'uncertainty'
   | 'costGate'
+  | 'deploymentHurdle'
   | 'dynamicReserve'
   | 'dependencyCaps'
   | 'liquidityCap'

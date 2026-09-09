@@ -138,6 +138,13 @@ function testArtifact(over: Partial<PolicyArtifact> = {}): PolicyArtifact {
     cashResidualQuantileWadByMarket: {},
     cashLowerBoundQuantileWad: 0n,
     noTradeBandK: 0,
+    // P15/P17: `paybackSeconds` is the registered window a move must repay its
+    // own movement cost within, and `steps/hurdles.ts` throws without it. The
+    // bootstrap artifact does not carry one (a payback period is a
+    // registration, not a default), so a fixture that drives decide() through
+    // the per-leg hurdles has to supply it. 30 days matches
+    // scripts/freeze-artifact.ts's PAYBACK_SECONDS.
+    paybackSeconds: 30 * 86_400,
     ...over,
   };
 }

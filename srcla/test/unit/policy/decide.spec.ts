@@ -79,6 +79,13 @@ function artifact(): PolicyArtifact {
     residualQuantileWadByMarket: { aa: 0n, bb: 0n },
     pinnedConfigDigests: { aa: '0xd', bb: '0xd' },
     noTradeBandK: 0,
+    // P15/P17: `paybackSeconds` is the registered window a move must repay its
+    // own movement cost within, and `steps/hurdles.ts` throws without it. The
+    // bootstrap artifact does not carry one (a payback period is a
+    // registration, not a default), so a fixture that drives decide() through
+    // the per-leg hurdles has to supply it. 30 days matches
+    // scripts/freeze-artifact.ts's PAYBACK_SECONDS.
+    paybackSeconds: 30 * 86_400,
   };
 }
 
@@ -167,6 +174,50 @@ const REBALANCE_OPTS = {
     slippageBps: 0,
     mevBps: 0,
     impactBps: 0,
+  },
+};
+
+/**
+ * P17's fixture: two venues the optimiser wants to split between, one of which
+ * cannot repay its own movement cost.
+ *
+ * 'aa' runs at 75% utilisation on Compound's kinked model (~7.7% annualised
+ * conservative bound) and is capped at 50% of the vault, so the optimiser has
+ * to place the other half somewhere; 'bb' is a zero-borrow Compound market at
+ * the model's base rate (~3.0%). Both legs are the same size (5,000 USDC), so
+ * both see the SAME amortised cost hurdle — `ONE_GOOD_ONE_BAD_OPTS` sizes gas
+ * to put that hurdle at ~5.2% annualised, between the two bounds. The margins
+ * are ~48% above on 'aa' and ~42% below on 'bb', so this is not a
+ * knife-edge fixture.
+ */
+function oneGoodOneBadInput(): DecisionInput {
+  const base = input();
+  const markets = [
+    market('aa', {
+      protocol: 'compound',
+      cash: 2_000_000_000_000n,
+      borrows: 6_000_000_000_000n,
+      utilizationWad: (WAD * 75n) / 100n,
+      capBps: 5000,
+    }),
+    market('bb', { protocol: 'compound', cash: 10n ** 13n, borrows: 0n, utilizationWad: 0n }),
+  ];
+  return { ...base, markets, history: [...rebalanceHistory('aa'), ...rebalanceHistory('bb')] };
+}
+
+function oneGoodOneBadArtifact(): PolicyArtifact {
+  return rebalanceArtifact();
+}
+
+const ONE_GOOD_ONE_BAD_OPTS = {
+  ...REBALANCE_OPTS,
+  cost: {
+    ...REBALANCE_OPTS.cost,
+    // Sized so the amortised cost hurdle for a 5,000 USDC leg over the
+    // fixture's 30-day payback lands at ~5.2% annualised: above 'bb''s 3.0%
+    // bound and below 'aa''s 7.7%.
+    gasPerAction: 600_000_000n,
+    planGasOverhead: 600_000_000n,
   },
 };
 
@@ -316,6 +367,106 @@ describe('decide', () => {
     const expectedSnapshotHash = out.snapshotHash.startsWith('0x') ? out.snapshotHash : `0x${out.snapshotHash}`;
     expect(out.plan!.header.snapshotHash).toBe(expectedSnapshotHash);
     expect(out.plan!.header.snapshotHash).not.toBe('0x' + '00'.repeat(32));
+  });
+
+  // -------------------------------------------------------------------------
+  // P17 — per-leg evaluation. v0.6 evaluated ONE gate over the whole target
+  // and returned `hold` when it failed, discarding every leg including the
+  // ones that were individually profitable. These two cases pin the
+  // replacement: a leg is judged on its own, and a blocked leg does not take
+  // a clearing one down with it.
+  // -------------------------------------------------------------------------
+
+  it('P17: reports a per-leg verdict for every leg it evaluated', () => {
+    const out = decide(rebalanceInput(), rebalanceArtifact(), REBALANCE_OPTS);
+    expect(out.action).toBe('rebalance');
+    expect(out.costGate.legs.length).toBeGreaterThan(0);
+    expect(out.costGate.legs.some((l) => l.clears)).toBe(true);
+    expect(out.costGate.reason).toBe('HURDLES_CLEARED');
+    // Every leg names the venue it moves into and the amount it moves.
+    for (const l of out.costGate.legs) {
+      expect(l.amountBase).toBeGreaterThan(0n);
+      expect(typeof l.reason).toBe('string');
+    }
+  });
+
+  it('P17: deploys into the venue that clears even when another leg does not', () => {
+    const out = decide(oneGoodOneBadInput(), oneGoodOneBadArtifact(), ONE_GOOD_ONE_BAD_OPTS);
+
+    // Non-vacuity, both directions: the optimiser genuinely wanted both
+    // venues, and the hurdles genuinely refused one of them.
+    const byMarket = new Map(out.costGate.legs.map((l) => [l.marketId, l]));
+    expect(byMarket.get('aa')!.clears).toBe(true);
+    expect(byMarket.get('bb')!.clears).toBe(false);
+    expect(byMarket.get('bb')!.reason).toContain('DEPLOY_BLOCKED');
+
+    // The clearing leg executes. Under v0.6's single gate this whole decision
+    // was a hold.
+    expect(out.action).toBe('rebalance');
+    expect(out.target.get('aa')).toBe(5_000_000_000n);
+    expect(out.target.get('bb')).toBe(0n);
+    expect(out.plan).not.toBeNull();
+  });
+
+  it('P17: holds, and says why, only when EVERY leg is blocked', () => {
+    const punitive = {
+      ...ONE_GOOD_ONE_BAD_OPTS,
+      cost: {
+        ...ONE_GOOD_ONE_BAD_OPTS.cost,
+        gasPerAction: 5_000_000_000n,
+        planGasOverhead: 5_000_000_000n,
+      },
+    };
+    const out = decide(oneGoodOneBadInput(), oneGoodOneBadArtifact(), punitive);
+    expect(out.costGate.legs.every((l) => !l.clears)).toBe(true);
+    expect(out.action).toBe('hold');
+    // The cause is the hurdles, not the brakes' NO_MOVES: the target did NOT
+    // equal current, the executed vector did.
+    expect(out.costGate.reason).toBe('ALL_LEGS_BLOCKED');
+    expect(out.reasons.some((r) => r.startsWith('HURDLES:'))).toBe(true);
+  });
+
+  // §9.1.4's partial adjustment, end to end. `adjustmentRate` is 1 on every
+  // other fixture (the bootstrap default), so this is the only case that
+  // exercises lambda < 1 through the kernel — and, with it, the monotone form
+  // of `decide`'s feasibility re-check: a percentage cap is a fraction of TVL,
+  // so the CURRENT position can already breach one, and an interpolation
+  // between a breaching current and a compliant sub-target sits in between.
+  // Requiring absolute compliance there would refuse the very move that
+  // repairs the breach.
+  it('P17: moves partway toward the sub-target at lambda < 1, from a position already over its cap', () => {
+    // 5,000 USDC held in a venue now capped at 10% of a 10,000 USDC vault.
+    const overCap = (): DecisionInput => {
+      const base = input();
+      return {
+        ...base,
+        vault: { ...base.vault, idleBase: 5_000_000_000n },
+        markets: [
+          market('aa', {
+            protocol: 'compound',
+            supplyRateWad: (WAD * 3n) / 100n,
+            positionBase: 5_000_000_000n,
+            capBps: 1000,
+          }),
+        ],
+        history: rebalanceHistory('aa'),
+      };
+    };
+
+    const full = decide(overCap(), rebalanceArtifact(), REBALANCE_OPTS);
+    // Non-vacuity: at lambda = 1 the kernel goes all the way to the cap.
+    expect(full.action).toBe('rebalance');
+    expect(full.target.get('aa')).toBe(1_000_000_000n);
+
+    const half = decide(
+      overCap(),
+      { ...rebalanceArtifact(), adjustmentRate: 0.5 },
+      REBALANCE_OPTS,
+    );
+    expect(half.action).toBe('rebalance');
+    // 5,000 + 0.5 * (1,000 - 5,000) = 3,000 USDC: still over the 1,000 cap,
+    // but strictly closer to it than the position it started from.
+    expect(half.target.get('aa')).toBe(3_000_000_000n);
   });
 
   it('does not read the wall clock', () => {
