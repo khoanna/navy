@@ -5,9 +5,9 @@ const paper = readFileSync(
   join(process.cwd(), '../docs/research/output/srcla-paper.md'), 'utf8',
 );
 
-describe('paper v0.6', () => {
-  it('declares version 0.6', () => {
-    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.6/);
+describe('paper v0.8', () => {
+  it('declares version 0.8', () => {
+    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.8/);
   });
 
   it('carries an amendment record for v0.5 -> v0.6', () => {
@@ -35,5 +35,37 @@ describe('paper v0.6', () => {
   it('keeps the v0.4 -> v0.5 record rather than replacing it', () => {
     expect(paper).toContain('Amendment Record (v0.4 → v0.5)');
     expect(paper).toMatch(/\|\s*P1\s*\|/);
+  });
+});
+
+describe('paper v0.7 -> v0.8 amendments', () => {
+  it('carries amendment records for v0.6 -> v0.7 and v0.7 -> v0.8', () => {
+    expect(paper).toContain('Amendment Record (v0.6 → v0.7)');
+    expect(paper).toContain('Amendment Record (v0.7 → v0.8)');
+  });
+
+  it('registers P13 through P28', () => {
+    for (const id of [
+      'P13', 'P14', 'P15', 'P16', 'P17', 'P18', 'P19', 'P20',
+      'P21', 'P22', 'P23', 'P24', 'P25', 'P26', 'P27', 'P28',
+    ]) {
+      expect(paper).toMatch(new RegExp('\\|\\s*' + id + '\\s*\\|'));
+    }
+  });
+
+  it('declares the THIRD burned window', () => {
+    expect(paper).toMatch(/Third burned-window declaration/);
+  });
+
+  it('requires demonstration rather than allowing a pass by inaction', () => {
+    expect(paper).toMatch(/NOT DEMONSTRATED/);
+  });
+
+  it('states sustainability as the primary release criterion', () => {
+    expect(paper).toMatch(/Sustainability is the primary release criterion/i);
+  });
+
+  it('states the yield criterion as non-inferiority, not superiority', () => {
+    expect(paper).toMatch(/non-inferior/i);
   });
 });
