@@ -1,64 +1,64 @@
 {
   "policyVersion": 5,
-  "horizonSeconds": 1209600,
-  "coverageTarget": 0.9,
+  "horizonSeconds": 86400,
+  "coverageTarget": 0.99,
   "method": "rolling",
   "methodParams": {
-    "windowObservations": 72
+    "windowObservations": 24
   },
   "residualQuantileWadByMarket": {
-    "aave-v3-usdc": "-93476924591008",
-    "compound-v3-usdc": "-56549797869899",
-    "moonwell-usdc": "-125295295320904"
+    "aave-v3-usdc": "-106084734766695",
+    "compound-v3-usdc": "-51437739289824",
+    "moonwell-usdc": "-90840211541856"
   },
-  "portfolioResidualQuantileWad": "-125295295320904",
+  "portfolioResidualQuantileWad": "-106084734766695",
   "cashResidualQuantileWadByMarket": {
-    "aave-v3-usdc": "-776336332119521289",
-    "compound-v3-usdc": "-636891963127383617",
-    "moonwell-usdc": "-679190564888706180"
+    "moonwell-usdc": "-578332789497322173",
+    "aave-v3-usdc": "-913233550108798320",
+    "compound-v3-usdc": "-573077519620859569"
   },
   "cashLowerBoundQuantileWad": "-100000000000000000",
   "minObservations": 30,
   "availabilityLagSeconds": 900,
   "noTradeBandK": 1,
   "pinnedConfigDigests": {
-    "aave-v3-usdc": "aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
     "compound-v3-usdc": "compound:0xb125e6687d4313864e53df431d5425969c15eb2f",
-    "moonwell-usdc": "moonwell:0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22"
+    "moonwell-usdc": "moonwell:0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
+    "aave-v3-usdc": "aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5"
   },
   "configDigest": "registered-2026-09-08",
   "_registration": {
     "calibrationEra": {
-      "start": "2024-09-01T00:00:00.000Z",
-      "end": "2025-08-31T23:59:59.000Z",
-      "days": 365
+      "start": "2024-03-15T00:00:00.000Z",
+      "end": "2025-05-31T23:59:59.000Z",
+      "days": 443
     },
-    "calibrationOrigins": 8760,
-    "labelsSwept": 77256,
+    "calibrationOrigins": 10632,
+    "labelsSwept": 94104,
     "gridPoints": 81,
     "scorablePoints": 81,
-    "selection": "selected rolling({\"windowObservations\":72}) H=14d cov=0.9 with loss 0.46801599 (achieved coverage 90.00% on 25182 residuals); runner-up rolling({\"windowObservations\":72}) H=14d cov=0.95 at 0.46838213, margin 3.661e-4",
-    "selectionMargin": 0.00036613502649690544,
+    "selection": "selected rolling({\"windowObservations\":24}) H=1d cov=0.99 with loss 0.50835640 (achieved coverage 99.01% on 31734 residuals); runner-up rolling({\"windowObservations\":24}) H=1d cov=0.9 at 0.50835653, margin 1.274e-7",
+    "selectionMargin": 1.2740071031469569e-7,
     "loss": {
-      "pointError": 0.000059179965284513715,
-      "coverageDeviation": 0.000047653085537224804,
-      "exceedanceShortfall": 0.0000074092333101547504,
-      "sharpness": 0.00009177400592725502,
-      "downsideRate": 0.46739734731157173,
-      "total": 0.4680159913017429,
-      "observations": 25182,
-      "achievedCoverage": 0.9000476530855372
+      "pointError": 0.000013362820152097973,
+      "coverageDeviation": 0.00007373794668175115,
+      "exceedanceShortfall": 2.8016136512065033e-7,
+      "sharpness": 0.00008278756186608224,
+      "downsideRate": 0.5075628663263377,
+      "total": 0.508356403201066,
+      "observations": 31734,
+      "achievedCoverage": 0.9900737379466817
     },
     "coverageByMarket": {
-      "aave-v3-usdc": 0.9000476530855372,
-      "compound-v3-usdc": 0.9000476530855372,
-      "moonwell-usdc": 0.9000476530855372
+      "aave-v3-usdc": 0.9900737379466817,
+      "compound-v3-usdc": 0.9900737379466817,
+      "moonwell-usdc": 0.9900737379466817
     },
     "noTradeBandKSweep": [],
     "noTradeBandKResolved": false,
     "residualPanelBuilt": true,
     "sealedErasNotRead": [
-      "heldout-a",
+      "heldout-c",
       "heldout-b"
     ],
     "burnedWindowExcluded": {
