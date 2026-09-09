@@ -46,6 +46,27 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
           snapshots: [],
         },
       },
+      // h3 "removes the complete-cost gate and the no-trade band" and here
+      // OUTPERFORMS srcla (0.0755 > 0.0421) — a clearly NEGATIVE contribution
+      // (contribution = 0.0421 - 0.0755 = -3.34pp), i.e. removing the cost
+      // gate helped on this fixture. Exercises the negative-contribution
+      // callout.
+      {
+        policy: { id: 'h3', section: '§11.3', deployable: true, disable: {} },
+        tier: 1_000_000_000_000n,
+        rebalances: 288,
+        inertVsSrcla: false,
+        replay: {
+          realizedNetApy: 0.0755,
+          totalCosts: 9_876_000n,
+          totalTurnover: 12_340_000_000_000n,
+          withdrawalSuccessRate: 1,
+          minStressedLiquidCoverage: 1,
+          coverageDistribution: { min: 1, p05: 1, median: 1 },
+          withdrawals: [],
+          snapshots: [],
+        },
+      },
     ],
     withdrawalSource: 'registered-schedule',
     artifact: { artifactHash: 'abc' },
@@ -314,6 +335,40 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).toContain('0xgas');
     expect(md).toContain('0xgas2');
   });
+
+  it('places Ablation contributions after the results table and before the gate table', () => {
+    const resultsIdx = md.indexOf('## Results — era `heldout-c`');
+    const ablationIdx = md.indexOf('## Ablation contributions');
+    const gateIdx = md.indexOf('### §11.5 gate');
+    expect(resultsIdx).toBeGreaterThan(-1);
+    expect(ablationIdx).toBeGreaterThan(resultsIdx);
+    expect(ablationIdx).toBeLessThan(gateIdx);
+  });
+
+  it('explains the contribution sign convention in plain terms', () => {
+    expect(md).toMatch(/component was earning its keep/);
+    expect(md).toMatch(/component cost more than it earned on this data/);
+  });
+
+  it('tables the ablation, what it removes, both APYs, the contribution and both rebalance counts', () => {
+    expect(md).toContain('`h3`');
+    expect(md).toContain('remove the complete-cost gate and the no-trade band');
+    expect(md).toMatch(/\|\s*`h3`\s*\|.*\|\s*7\.550%\s*\|/); // h3 (ablation) APY column
+    expect(md).toMatch(/\|\s*288\s*\|\s*12\s*\|/); // ablation rebalances (288) next to SRCLA's (12)
+  });
+
+  it('marks a NEGATIVE ablation contribution with an explicit, un-missable callout', () => {
+    // h3's ablation APY (7.55%) exceeds SRCLA's (4.21%) in the fixture, so
+    // removing the cost gate measured as an improvement here.
+    expect(md).toMatch(/\*\*Negative contribution: removing the component helped, not hurt\.\*\*/);
+    expect(md).toMatch(/`h3`.*contribution \*\*-3\.340 pp\*\*/);
+  });
+
+  it('marks the INERT ablation as a construction-zero, not a measured contribution', () => {
+    expect(md).toMatch(
+      /`h5`.*\*\*INERT\*\* \(identical decisions — not a measured contribution\)/,
+    );
+  });
 });
 
 describe('renderReport — a passing run', () => {
@@ -321,5 +376,99 @@ describe('renderReport — a passing run', () => {
     const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
     expect(md).toMatch(/release gate \*\*PASS\*\*/);
     expect(md).not.toMatch(/PASS\*\* — blocked on/);
+  });
+});
+
+describe('renderReport — ablation contributions edge cases', () => {
+  it('renders the section header and lead sentence even with no ablation results', () => {
+    const bareRun: RunSummary = {
+      ...fakeRun('heldout-c', true),
+      evaluation: {
+        results: [
+          {
+            policy: { id: 'srcla', section: '§8', deployable: true, disable: {} },
+            tier: 1_000_000_000_000n,
+            rebalances: 12,
+            inertVsSrcla: false,
+            replay: {
+              realizedNetApy: 0.0421,
+              totalCosts: 1_234_000n,
+              totalTurnover: 890_000_000_000n,
+              withdrawalSuccessRate: 1,
+              minStressedLiquidCoverage: 1,
+              coverageDistribution: { min: 1, p05: 1, median: 1 },
+              withdrawals: [],
+              snapshots: [],
+            },
+          },
+        ],
+        withdrawalSource: 'registered-schedule',
+        artifact: { artifactHash: 'abc' },
+        provisional: false,
+        missingPolicyIds: [],
+        missingTiers: [],
+      } as unknown as RegisteredEvaluationResult,
+    };
+    const md = renderReport({ ...params, runs: [bareRun] });
+    expect(md).toContain('## Ablation contributions');
+    expect(md).not.toMatch(/Negative contribution/);
+  });
+
+  it('does not print the negative-contribution callout when every contribution is non-negative', () => {
+    const positiveOnlyRun: RunSummary = {
+      ...fakeRun('heldout-c', true),
+      evaluation: {
+        results: [
+          {
+            policy: { id: 'srcla', section: '§8', deployable: true, disable: {} },
+            tier: 1_000_000_000_000n,
+            rebalances: 12,
+            inertVsSrcla: false,
+            replay: {
+              realizedNetApy: 0.0421,
+              totalCosts: 1_234_000n,
+              totalTurnover: 890_000_000_000n,
+              withdrawalSuccessRate: 1,
+              minStressedLiquidCoverage: 1,
+              coverageDistribution: { min: 1, p05: 1, median: 1 },
+              withdrawals: [],
+              snapshots: [],
+            },
+          },
+          {
+            // h1 underperforms srcla here (0.03 < 0.0421), a POSITIVE
+            // contribution: removing capacity curves hurt.
+            policy: { id: 'h1', section: '§11.3', deployable: true, disable: {} },
+            tier: 1_000_000_000_000n,
+            rebalances: 20,
+            inertVsSrcla: false,
+            replay: {
+              realizedNetApy: 0.03,
+              totalCosts: 1_000_000n,
+              totalTurnover: 500_000_000_000n,
+              withdrawalSuccessRate: 1,
+              minStressedLiquidCoverage: 1,
+              coverageDistribution: { min: 1, p05: 1, median: 1 },
+              withdrawals: [],
+              snapshots: [],
+            },
+          },
+        ],
+        withdrawalSource: 'registered-schedule',
+        artifact: { artifactHash: 'abc' },
+        provisional: false,
+        missingPolicyIds: [],
+        missingTiers: [],
+      } as unknown as RegisteredEvaluationResult,
+    };
+    const md = renderReport({ ...params, runs: [positiveOnlyRun] });
+    expect(md).toContain('## Ablation contributions');
+    expect(md).toContain('`h1`');
+    expect(md).not.toMatch(/Negative contribution/);
+
+    // Sanity: the same assertion DOES fire against the shared fixture (h3
+    // negative), proving this spec is discriminating and not vacuous.
+    const negativeMd = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+    expect(negativeMd).toMatch(/Negative contribution/);
   });
 });

@@ -20,6 +20,7 @@
 import { ERAS_IN_ORDER, eraBounds, type EraTag } from '../eras.js';
 import type { RegisteredGateResult } from '../kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../kernel/harness.js';
+import { REGISTERED_ABLATIONS } from '../kernel/registry.js';
 
 export interface RunSummary {
   /** Which registered era this run opened. */
@@ -264,6 +265,102 @@ function resultsTable(out: RegisteredEvaluationResult): string {
   return sections.join('\n\n');
 }
 
+/**
+ * §11.3's H1–H7 each remove exactly one component from SRCLA. This section
+ * makes each removal's measured effect legible: `contribution = SRCLA net
+ * APY − ablation net APY` at the same tier. Positive means the component
+ * earned its keep (removing it hurt); negative means the component cost more
+ * than it earned on THIS data (removing it helped) — the report's single
+ * most important signal, so a negative row gets an explicit callout rather
+ * than sitting quietly in a table column.
+ *
+ * INERT is a different statement from "measured a zero": an inert ablation's
+ * decisions are byte-identical to SRCLA's, so its contribution is zero BY
+ * CONSTRUCTION, not because the removed component happened to net out.
+ */
+function ablationContributionsSection(evaluation: RegisteredEvaluationResult): string {
+  const out: string[] = [];
+  out.push('## Ablation contributions');
+  out.push('');
+  out.push(
+    'Each row below removes exactly one component from SRCLA (§11.3) and reports what that ' +
+      'component was measured to be worth: `contribution = SRCLA net APY − ablation net APY` ' +
+      'at the same tier. **Positive** means removing the component made the policy worse — the ' +
+      "component was earning its keep. **Negative** means removing it made the policy BETTER — " +
+      'the component cost more than it earned on this data.',
+  );
+  out.push('');
+
+  const tiers = [...new Set(evaluation.results.map((r) => r.tier.toString()))].sort((a, b) =>
+    BigInt(a) < BigInt(b) ? -1 : 1,
+  );
+
+  const negatives: Array<{ tier: string; id: string; description: string; contributionPp: number }> = [];
+
+  for (const tier of tiers) {
+    const srclaResult = evaluation.results.find(
+      (r) => r.policy.id === 'srcla' && r.tier.toString() === tier,
+    );
+    if (srclaResult === undefined) continue;
+
+    const rows: string[] = [];
+    for (const ablation of REGISTERED_ABLATIONS) {
+      const r = evaluation.results.find(
+        (x) => x.policy.id === ablation.id && x.tier.toString() === tier,
+      );
+      if (r === undefined) continue;
+
+      const contribution = srclaResult.replay.realizedNetApy - r.replay.realizedNetApy;
+      const contributionPp = contribution * 100;
+      const sign = contributionPp >= 0 ? '+' : '';
+      const valueStr = `${sign}${contributionPp.toFixed(3)} pp`;
+      const contributionCell = r.inertVsSrcla
+        ? '**INERT** (identical decisions — not a measured contribution)'
+        : contributionPp < 0
+          ? `**${valueStr}**`
+          : valueStr;
+
+      rows.push(
+        `| \`${ablation.id}\` | ${ablation.paperDefinition} | ${pct(srclaResult.replay.realizedNetApy)} | ` +
+          `${pct(r.replay.realizedNetApy)} | ${contributionCell} | ${r.rebalances} | ${srclaResult.rebalances} |`,
+      );
+
+      if (!r.inertVsSrcla && contribution < 0) {
+        negatives.push({ tier, id: ablation.id, description: ablation.paperDefinition, contributionPp });
+      }
+    }
+    if (rows.length === 0) continue;
+
+    out.push(`#### Tier ${usdc(BigInt(tier))} USDC`);
+    out.push('');
+    out.push(
+      '| Ablation | Removes | SRCLA net APY | Ablation net APY | Contribution | Ablation rebalances | ' +
+        'SRCLA rebalances |',
+    );
+    out.push('|---|---|---|---|---|---|---|');
+    out.push(...rows);
+    out.push('');
+  }
+
+  if (negatives.length > 0) {
+    out.push(
+      '> **Negative contribution: removing the component helped, not hurt.** This is the ' +
+        "report's most important measured signal — the component cost more than it earned on " +
+        'this data.',
+    );
+    out.push('>');
+    for (const n of negatives) {
+      out.push(
+        `> - \`${n.id}\` (${n.description}) at tier ${usdc(BigInt(n.tier))} USDC: contribution ` +
+          `**${n.contributionPp.toFixed(3)} pp**.`,
+      );
+    }
+    out.push('');
+  }
+
+  return out.join('\n');
+}
+
 function comparisonTable(gate: RegisteredGateResult): string {
   if (gate.comparisons.length === 0) {
     return '_No SRCLA-vs-baseline comparison was produced._';
@@ -427,6 +524,8 @@ export function renderReport(params: ReportParams): string {
     out.push('### SRCLA against each deployable baseline');
     out.push('');
     out.push(comparisonTable(run.gate));
+    out.push('');
+    out.push(ablationContributionsSection(run.evaluation));
     out.push('');
     out.push('### §11.5 gate');
     out.push('');
