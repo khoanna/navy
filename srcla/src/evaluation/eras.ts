@@ -40,11 +40,20 @@
  *    Neither alone is sufficient evidence.
  *
  * ---------------------------------------------------------------------------
+ * 3. `heldout-c` is LESS BURNED, NOT PRISTINE. Aggregate statistics spanning
+ *    it -- net APY, worst stressed coverage, total cost and turnover over the
+ *    whole of former held-out A -- were read while diagnosing v0.5. What is
+ *    known is the era-wide direction, not this period's structure. It is used
+ *    because the alternative, the 16-day `heldout-b`, is too short and too
+ *    dominated by a single venue's liquidity failure to adjudicate a yield
+ *    claim.
+ *
+ * ---------------------------------------------------------------------------
  * PURE: no I/O, no Date.now(), no randomness.
  * UNITS: all boundaries are Unix seconds, inclusive at both ends.
  */
 
-export type EraTag = 'calibration' | 'heldout-a' | 'burned' | 'heldout-b';
+export type EraTag = 'calibration' | 'burned-a' | 'heldout-c' | 'burned' | 'heldout-b';
 
 export interface RegisteredEra {
   tag: EraTag;
@@ -72,21 +81,32 @@ const OPEN_ENDED = at('2099-12-31T23:59:59Z');
 export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.freeze({
   calibration: {
     tag: 'calibration',
-    startSeconds: at('2024-09-01T00:00:00Z'),
-    endSeconds: at('2025-08-31T23:59:59Z'),
+    startSeconds: at('2024-03-15T00:00:00Z'),
+    endSeconds: at('2025-05-31T23:59:59Z'),
     sealed: false,
     role:
       'The ONLY data any artifact, quantile, grid point or no-trade band may be fit on. ' +
-      '365 days.',
+      '443 days, extended back to the deployment floor for v0.6.',
   },
-  'heldout-a': {
-    tag: 'heldout-a',
-    startSeconds: at('2025-09-01T00:00:00Z'),
+  'burned-a': {
+    tag: 'burned-a',
+    startSeconds: at('2025-06-01T00:00:00Z'),
+    endSeconds: at('2026-02-28T23:59:59Z'),
+    sealed: false,
+    role:
+      'Former PRIMARY held-out era (was heldout-a). Its aggregate statistics were read ' +
+      'while diagnosing v0.5, which burned it under paper §2.2 -- it is design data now, ' +
+      'not held-out. Excluded from fitting and from evaluation alike, same as `burned`.',
+  },
+  'heldout-c': {
+    tag: 'heldout-c',
+    startSeconds: at('2026-03-01T00:00:00Z'),
     endSeconds: at('2026-05-25T23:59:59Z'),
     sealed: true,
     role:
-      'PRIMARY held-out era, 267 days. Sealed until the registered run. Reported for ' +
-      'statistical power; see disclosure 2 for its temporal caveat.',
+      'v0.6 VALIDATION era, 86 days. Sealed until the registered run. LESS BURNED, NOT ' +
+      'PRISTINE -- see disclosure 3. Used because heldout-b alone is too short and too ' +
+      'dominated by one venue\'s liquidity failure to adjudicate a yield claim.',
   },
   burned: {
     tag: 'burned',

@@ -18,14 +18,15 @@ describe('registered eras — structure', () => {
 
   it('orders calibration strictly before the primary held-out era', () => {
     expect(REGISTERED_ERAS.calibration.endSeconds).toBeLessThan(
-      REGISTERED_ERAS['heldout-a'].startSeconds,
+      REGISTERED_ERAS['heldout-c'].startSeconds,
     );
   });
 
   it('seals both held-out eras and neither of the others', () => {
-    expect([...SEALED_ERAS].sort()).toEqual(['heldout-a', 'heldout-b']);
+    expect([...SEALED_ERAS].sort()).toEqual(['heldout-b', 'heldout-c']);
     expect(REGISTERED_ERAS.calibration.sealed).toBe(false);
     expect(REGISTERED_ERAS.burned.sealed).toBe(false);
+    expect(REGISTERED_ERAS['burned-a'].sealed).toBe(false);
   });
 });
 
@@ -41,7 +42,8 @@ describe("registered eras — paper §4.1's burned window", () => {
     // Disclosure 1: §4.1's letter puts it in calibration; doing so would place
     // fitting data after held-out A in time and invert walk-forward order.
     expect(eraFor(at('2026-06-15T00:00:00Z'))).not.toBe('calibration');
-    expect(eraFor(at('2026-06-15T00:00:00Z'))).not.toBe('heldout-a');
+    expect(eraFor(at('2026-06-15T00:00:00Z'))).not.toBe('burned-a');
+    expect(eraFor(at('2026-06-15T00:00:00Z'))).not.toBe('heldout-c');
     expect(eraFor(at('2026-06-15T00:00:00Z'))).not.toBe('heldout-b');
   });
 
@@ -57,7 +59,7 @@ describe("registered eras — paper §4.1's burned window", () => {
   });
 
   it('puts the day before and the day after the burn in different eras', () => {
-    expect(eraFor(at('2026-05-25T23:00:00Z'))).toBe('heldout-a');
+    expect(eraFor(at('2026-05-25T23:00:00Z'))).toBe('heldout-c');
     expect(eraFor(at('2026-08-24T00:00:00Z'))).toBe('heldout-b');
   });
 });
@@ -66,15 +68,15 @@ describe('eraFor', () => {
   it('classifies each era from a representative origin', () => {
     expect(eraFor(at('2024-09-01T00:00:00Z'))).toBe('calibration');
     expect(eraFor(at('2025-03-15T12:00:00Z'))).toBe('calibration');
-    expect(eraFor(at('2025-09-01T00:00:00Z'))).toBe('heldout-a');
-    expect(eraFor(at('2026-01-01T00:00:00Z'))).toBe('heldout-a');
+    expect(eraFor(at('2025-09-01T00:00:00Z'))).toBe('burned-a');
+    expect(eraFor(at('2026-01-01T00:00:00Z'))).toBe('burned-a');
     expect(eraFor(at('2026-09-01T00:00:00Z'))).toBe('heldout-b');
   });
 
   it('returns null before the registered window rather than folding into the nearest era', () => {
     // The backfill may resolve a boundary block outside the window. Such a row
     // belongs to no era and must not be silently absorbed into one.
-    expect(eraFor(at('2024-08-31T23:59:59Z'))).toBeNull();
+    expect(eraFor(at('2024-03-14T23:59:59Z'))).toBeNull();
     expect(eraFor(at('2023-01-01T00:00:00Z'))).toBeNull();
   });
 
@@ -88,12 +90,12 @@ describe('eraFor', () => {
 
 describe('assertNotSealed', () => {
   it('refuses to hand a sealed era to a fitting purpose', () => {
-    expect(() => assertNotSealed('heldout-a', 'artifact calibration')).toThrow(/sealed/i);
+    expect(() => assertNotSealed('heldout-c', 'artifact calibration')).toThrow(/sealed/i);
     expect(() => assertNotSealed('heldout-b', 'grid sweep')).toThrow(/sealed/i);
   });
 
   it('names the purpose in the message, so a stack trace says what tried to peek', () => {
-    expect(() => assertNotSealed('heldout-a', 'noTradeBandK sweep')).toThrow(/noTradeBandK sweep/);
+    expect(() => assertNotSealed('heldout-c', 'noTradeBandK sweep')).toThrow(/noTradeBandK sweep/);
   });
 
   it('allows the calibration era', () => {
@@ -106,20 +108,54 @@ describe('assertNotSealed', () => {
     // boundaries themselves rather than by this guard.
     expect(() => assertNotSealed('burned', 'documenting what was burned')).not.toThrow();
   });
+
+  it('allows burned-a, the former held-out era that reading v0.5 burned', () => {
+    expect(() => assertNotSealed('burned-a', 'documenting what was burned')).not.toThrow();
+  });
 });
 
 describe('eraBounds', () => {
   it('reports the registered spans a report table needs', () => {
-    expect(eraBounds('calibration').days).toBe(365);
-    expect(eraBounds('heldout-a').days).toBe(267);
+    expect(eraBounds('calibration').days).toBe(443);
+    expect(eraBounds('burned-a').days).toBe(273);
     expect(eraBounds('burned').days).toBe(90);
-    expect(eraBounds('calibration').start).toBe('2024-09-01T00:00:00.000Z');
-    expect(eraBounds('heldout-a').start).toBe('2025-09-01T00:00:00.000Z');
+    expect(eraBounds('calibration').start).toBe('2024-03-15T00:00:00.000Z');
+    expect(eraBounds('burned-a').start).toBe('2025-06-01T00:00:00.000Z');
+  });
+});
+
+describe('v0.6 era re-cut', () => {
+  it('extends calibration back to the deployment floor', () => {
+    expect(eraBounds('calibration').start).toBe('2024-03-15T00:00:00.000Z');
+    expect(eraBounds('calibration').days).toBe(443);
   });
 
-  it('gives held-out A materially more data than the burned window it replaces', () => {
-    // The whole point: CLAUDE.md's "no held-out data" was 0 days of unseen
-    // history against 90 days of burned. This is 267 against 90.
-    expect(eraBounds('heldout-a').days).toBeGreaterThan(eraBounds('burned').days * 2);
+  it('declares the former held-out era burned', () => {
+    // Read in aggregate while diagnosing v0.5, so it is design data now.
+    expect(eraFor(at('2025-06-01T00:00:00Z'))).toBe('burned-a');
+    expect(eraFor(at('2026-02-28T12:00:00Z'))).toBe('burned-a');
+    expect(REGISTERED_ERAS['burned-a'].sealed).toBe(false);
+  });
+
+  it('seals heldout-c as the v0.6 validation era', () => {
+    expect(eraFor(at('2026-03-01T00:00:00Z'))).toBe('heldout-c');
+    expect(eraFor(at('2026-05-25T23:00:00Z'))).toBe('heldout-c');
+    expect(REGISTERED_ERAS['heldout-c'].sealed).toBe(true);
+    expect(eraBounds('heldout-c').days).toBe(86);
+    expect(() => assertNotSealed('heldout-c', 'grid sweep')).toThrow(/sealed/i);
+  });
+
+  it('keeps every burned window out of every sealed era', () => {
+    for (const burned of ['burned', 'burned-a'] as const) {
+      const b = REGISTERED_ERAS[burned];
+      for (const tag of SEALED_ERAS) {
+        const e = REGISTERED_ERAS[tag];
+        expect(e.endSeconds < b.startSeconds || e.startSeconds > b.endSeconds).toBe(true);
+      }
+    }
+  });
+
+  it("says in heldout-c's role that it is less burned, not pristine", () => {
+    expect(REGISTERED_ERAS['heldout-c'].role).toMatch(/less burned, not pristine/i);
   });
 });

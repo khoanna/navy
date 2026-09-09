@@ -11,7 +11,7 @@ import { renderReport, type RunSummary } from '../../../src/evaluation/report/re
 import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
 
-function fakeRun(era: 'heldout-a' | 'heldout-b', pass: boolean): RunSummary {
+function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
   const evaluation = {
     results: [
       {
@@ -79,7 +79,7 @@ function fakeRun(era: 'heldout-a' | 'heldout-b', pass: boolean): RunSummary {
 
 const params = {
   generatedAt: '2026-09-08T00:00:00.000Z',
-  runs: [fakeRun('heldout-a', false), fakeRun('heldout-b', false)],
+  runs: [fakeRun('heldout-c', false), fakeRun('heldout-b', false)],
   notObserved: ['dependency group registry (id, capBps, absoluteCapBase, members)'],
   artifactSummary: {
     hash: 'abc',
@@ -102,7 +102,7 @@ describe('renderReport — mandatory disclosures', () => {
   });
 
   it('prints the era table with every registered era and marks the sealed ones', () => {
-    for (const era of ['calibration', 'heldout-a', 'burned', 'heldout-b']) {
+    for (const era of ['calibration', 'heldout-c', 'burned', 'heldout-b']) {
       expect(md).toContain(`\`${era}\``);
     }
     expect(md).toMatch(/\*\*sealed\*\*/);
@@ -145,7 +145,7 @@ describe('renderReport — mandatory disclosures', () => {
   });
 
   it('reports every run it was given, not only the best one', () => {
-    expect(md).toContain('## Results — era `heldout-a`');
+    expect(md).toContain('## Results — era `heldout-c`');
     expect(md).toContain('## Results — era `heldout-b`');
   });
 
@@ -167,7 +167,7 @@ describe('renderReport — mandatory disclosures', () => {
 
 describe('renderReport — a passing run', () => {
   it('does not print a blocked-reasons clause when the gate passed', () => {
-    const md = renderReport({ ...params, runs: [fakeRun('heldout-a', true)] });
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
     expect(md).toMatch(/release gate \*\*PASS\*\*/);
     expect(md).not.toMatch(/PASS\*\* — blocked on/);
   });
