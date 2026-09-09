@@ -160,30 +160,52 @@ Measured motivation: one-day persistence R² for utilization is 0.758 / 0.918 /
 extrapolate outside the utilization range observed within the current
 configuration regime.
 
-### 3.7 Evaluation protocol (P20, P21, P22)
+### 3.7 Evaluation protocol (P20–P22, P24–P28)
 
-`src/evaluation/kernel/gates.ts`:
+**Paper v0.8 reorders this section's priorities.** Sustainability, not yield, is
+the primary criterion; yield is scored only among sustainable comparators. The
+mechanics below are unchanged in kind but change in what they gate.
 
-- **Safety check scopes to SRCLA's runs.** Baseline and ablation safety
-  outcomes are computed and reported but never fail SRCLA's gate.
-- **`deployable` becomes measured.** `registry.ts`'s static flag becomes the
-  *eligibility* to be a comparator; admissibility is decided per run by whether
-  the comparator respected the safety envelope. An excluded comparator is
-  reported with its breach. All excluded at a tier → `NO ADMISSIBLE COMPARATOR`.
+`src/evaluation/kernel/gates.ts`, in gate order:
+
+1. **Demonstration floor (P25) — first.** Time-weighted capital-at-work below
+   the registered floor → every sustainability criterion reports
+   `NOT DEMONSTRATED`. Without this, B0 (all idle) is the study's most
+   sustainable policy and v0.6's SRCLA passes at the tier where it earned
+   0.000%. This single check is what keeps the reframing honest.
+2. **Completeness and reproducibility**, including the fork replay (§3.8).
+3. **Sustainability (P24, P26) — primary, absolute, per tier.** S1
+   redeemability (withdrawal success + time-to-full-exit), S2 stressed
+   coverage, S3 capacity discipline (venue-stress contribution, displayed-vs-realized
+   gap), S4 continuity, S5 **scale invariance — every tier independently, never
+   an average**. Scoped to SRCLA's runs; comparator outcomes are computed
+   identically, reported, and govern admissibility at step 4 (P20).
+4. **Yield among sustainable policies (P27).** Non-inferiority, one-sided at
+   registered `delta`, HAC plus block bootstrap. A comparator that failed step 3
+   at that tier is excluded. All excluded → `NO SUSTAINABLE COMPARATOR`.
+5. **The price of unsustainability (P27).** Per excluded policy per tier:
+   realized return, criterion broken, margin. This is a *published result*, not
+   a diagnostic — it is the paper's headline quantity.
+
+Unchanged from the v0.7 design:
+
 - **Ablations leave the baseline comparison.** H1–H7 and H3d are scored in a
   separate §11.3 table with `INERT` / positive / **negative contribution**
   verdicts.
-- **Superiority → non-inferiority**, one-sided at registered `delta`, HAC plus
-  block bootstrap, on admissible comparators only.
-- **Skill window** = B5 − best admissible baseline, computed before yield is
-  scored. Inside `delta`: a *superiority* claim reports `NOT INFORMATIVE`; a
+- **Skill window** = B5 − best *sustainable* baseline, computed before step 4.
+  Inside `delta`: a *superiority* claim reports `NOT INFORMATIVE`; a
   *non-inferiority* pass is published with the window and a weak-evidence
-  disclosure. These are opposite directions and must not share a branch.
+  disclosure. Opposite directions, separate branches. **It can never touch
+  steps 1–3** — yield can be beyond reach, redeemability cannot.
 - **Forecast gate runs.** `release-gates.ts`'s `evaluateForecastGate` is
   currently dead code with only spec-file callers; it is replaced by a
   registered implementation invoked by the harness and rendered by the report.
   `evaluatePolicyGate` — the weaker duplicate the operator proposal-review
   endpoint uses — is re-pointed at `kernel/gates.ts` so one definition governs.
+
+Three new metrics (P28) feed S1 and S3 and must be computed in the replay:
+time-to-full-exit, venue-stress contribution, and the displayed-versus-realized
+yield gap.
 
 New registry entry `h3d`: remove the deployment hurdle only, retaining the
 rotation hurdle. v0.6's H3 removed both and could not report which it measured.
@@ -249,6 +271,14 @@ must be wired (§3.8) or §11.5 blocks, and the skill window on three venues is
 weak-evidence disclosure rather than a superiority result. That is the designed
 outcome, not a shortfall.
 
+**The sustainability claim is currently untested, not established.** Appendix E
+of the paper records that SRCLA never breached redeemability on either v0.6
+era — but it earned 0.000% at every tier on one of them, so under the new
+demonstration floor that record reports `NOT DEMONSTRATED` rather than a pass.
+The controller work in the companion plan is what makes the claim testable; the
+gate work here is what will test it. Neither on its own produces a result, and
+the implementation must not be described as if it did.
+
 ## 6. Open decisions for the paper owner
 
 These are registrations, not code choices, and each must be fixed before the
@@ -257,7 +287,17 @@ freeze:
 1. `delta`, the non-inferiority margin.
 2. `payback` ($T_{\mathrm{pay}}$) — swept jointly with `k` and `lambda`, but the
    sweep's grid is a registration.
-3. The minimum length of the fresh sealed era before v0.7 may be evaluated.
+3. The minimum length of the fresh sealed era before v0.8 may be evaluated.
 4. The registered leg-ordering used when a sub-target is infeasible.
 5. Whether the selection subsample in §5 is acceptable, or whether the grid
    shrinks instead.
+6. **The demonstration floor (P25)** — the time-weighted capital-at-work below
+   which a run proves nothing. It must exceed what a cash-holding policy
+   achieves and sit below what a fully deployed policy achieves net of the idle
+   reserve; with `minIdleBps` at 500 the mechanical ceiling is 0.95. A floor of
+   0.80 is the working suggestion, and it is a registration, not a tuning knob.
+7. **The time-to-full-exit bound (P28/S1)** — how many origins a complete
+   redemption may take before redeemability is considered failed.
+8. **The venue-stress contribution bound (P28/S3)** — the share of a venue's
+   utilization the vault may itself account for. This is the knob that encodes
+   "do not create the congestion you will then suffer".

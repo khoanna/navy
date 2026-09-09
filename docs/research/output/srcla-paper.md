@@ -1,6 +1,6 @@
 # Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
 
-**Research report version:** 0.7
+**Research report version:** 0.8
 
 **Date:** 2026-09-09
 
@@ -16,7 +16,29 @@ This report specifies the Safe, Robust, Cost-Aware Lending Allocator (SRCLA), a 
 
 Version 0.7 revises the movement rule and the release criterion after two registered held-out evaluations returned `FAIL`. Three specification defects are corrected. The movement threshold conflated the *predictive dispersion of a single horizon outcome* with the *sampling error of an estimated edge*, charging forecast uncertainty twice and making the economic hurdle a function of the forecast horizon rather than of the economics; it is restated as an annualized rate differential against a registered payback period. Deploying idle capital was priced as though it were a venue-to-venue rotation, though it carries neither an incumbent position nor reversal risk; the two legs are now separated. The gate was binary over the whole target vector, where the transaction-cost literature prescribes trading to the boundary of a no-trade region and adjusting partially toward an aim portfolio; it is now evaluated per leg and executed by partial adjustment. Base interest remains inside protocol positions; separately accrued incentives are conservatively recognized and converted through an immutable, Uniswap-V3-only reward executor when an event-driven cost gate passes.
 
-Version 0.7 also corrects what the release gate asks. Measured on the registered calibration era, the entire cross-sectional return available from reallocating among the three admitted venues is 18–43 basis points a year, against 494 basis points lost by not deploying at all. A criterion requiring SRCLA to *beat* every deployable baseline on yield is therefore not a demanding test but an unattainable one, and it left unmeasured the dimension in which SRCLA does dominate: the baselines that outearned it in the v0.6 evaluation did so by breaching the stressed-liquidity floor SRCLA is bound by. The policy gate becomes safety dominance plus non-inferiority on after-cost yield, with superiority claimed and tested per dimension, and with an explicit attainability requirement: a criterion that no registered policy could satisfy in the registered universe reports `NOT INFORMATIVE` rather than `FAIL`. This paper specifies a falsifiable architecture and evaluation procedure; it does not claim completed performance results.
+Version 0.8 states what the study is for. The proposition is not that a
+constrained allocator earns more than an unconstrained one; it is that **the
+highest available yield is frequently not redeemable**, and that an allocator
+should be judged on whether the return it reports can actually be withdrawn, at
+the size the vault actually holds, in the period it actually ran. The v0.6
+evaluation supplies the evidence: the policy that always selects the highest
+displayed rate breached the stressed-liquidity floor at **every** vault tier on
+one held-out era, and a fixed-weight policy that earned 24.95% with perfect
+coverage at one million USDC held **zero** stressed coverage at ten million.
+Yield and redeemability are not two scores to trade off. A return that cannot
+be redeemed is not a return.
+
+The release gate is rebuilt around that. Sustainability — redeemability under
+stress, capacity discipline, operational continuity, and *invariance across
+vault size* — is the primary and absolute criterion. Yield is scored second and
+only among policies that are themselves sustainable; a policy that breaches is
+not a comparator but a counterexample, and its return is published as the
+measured price of unsustainability. One requirement keeps this honest and is
+stated first among the criteria: **sustainability must be demonstrated while
+deployed.** A vault holding idle cash is trivially redeemable and has shown
+nothing, so a registered capital-at-work floor precedes every other
+sustainability check. This paper specifies a falsifiable architecture and
+evaluation procedure; it does not claim completed performance results.
 
 **Keywords:** DeFi, ERC-4626, Base, USDC, lending allocation, yield farming, deterministic forecasting, robust optimization, liquidity risk, transaction costs.
 
@@ -120,6 +142,50 @@ after inspecting, a sealed observation. The distinction matters because
 §11.5 forbids retuning against held-out data and these amendments must not be
 mistaken for it.
 
+**Superseded in part.** P21's framing — safety dominance with yield as the
+criterion under test — was replaced by P24–P27 below before v0.7 was ever
+registered. P21's two structural rulings survive intact: ablations are §11.3
+evidence rather than §11.2 comparators, and a superiority claim must name and
+test its dimension. What did not survive is the assumption that yield is the
+quantity a release gate should be organised around.
+
+## Amendment Record (v0.7 → v0.8)
+
+**Version 0.7 was never registered and never run.** It was superseded before
+any evaluation used it, so no result depends on it and no era was consumed by
+it. This record documents a restatement of the study's purpose by its owner and
+the gate that follows from it.
+
+Versions 0.4 through 0.7 all treated yield as the quantity under test and
+safety as a constraint upon it — v0.7 weakened the yield claim to
+non-inferiority but kept that shape. The study's purpose is the opposite.
+**The proposition is that the highest available yield is frequently not
+redeemable**, and that a lending allocator must be judged on whether the return
+it reports survives contact with withdrawal demand, with the vault's own size,
+and with a venue's real cash. Reaching for the highest displayed rate is not a
+neutral choice that a safety layer then bounds; it is the specific behaviour
+that produces unredeemable positions. Appendix E measures that directly.
+
+The five amendments below reconfigure the release gate accordingly. They do not
+change the controller: §7 through §10 are untouched. They change what a result
+must demonstrate.
+
+| ID | Amendment | Section | Evidence |
+|---|---|---|---|
+| P24 | **Sustainability is the primary release criterion and it is absolute.** Redeemability, capacity discipline, operational continuity, and invariance across vault size are scored per policy per tier, and SRCLA must satisfy every one on every registered run | §11.5 | Over the two v0.6 held-out eras SRCLA held stressed coverage of **1.000 at all four tiers on both eras**, while B1 breached at all four tiers on one era, B2 and B2u at three, and B4 at the largest. Every policy that outearned SRCLA breached somewhere |
+| P25 | **Sustainability must be demonstrated while deployed.** A registered time-weighted capital-at-work floor precedes every other sustainability check; below it the run reports `NOT DEMONSTRATED` and no sustainability claim may be drawn from it | §11.4, §11.5 | SRCLA scored 1.000 coverage at the 10M tier on `heldout-c` while realizing 0.000% — it was redeemable because it held cash. Without this criterion B0, which holds everything idle, is the most sustainable policy in the study |
+| P26 | **Scale invariance is a criterion, not an average.** A policy is sustainable only if it satisfies P24 at *every* registered tier; a per-tier pass does not aggregate | §11.1, §11.5 | B4 realized 24.95% with 1.000 coverage at 1M on `heldout-b` and **0.590** at 10M; on `heldout-c` its coverage at 10M was **0.000** and B1's **0.108**. Capacity failure is invisible to any metric averaged over tiers |
+| P27 | **An unsustainable policy is a counterexample, not a comparator.** Its yield is published as the measured price of unsustainability, per tier, with the criterion it broke | §11.2, §11.5 | B1 earned 39.16% at 10k on `heldout-b` holding 0.878 coverage against a 0.99 floor. Under v0.6 that figure was recorded as SRCLA's failure to compete; it is in fact the paper's central exhibit |
+| P28 | **Three sustainability metrics are registered**: time-to-full-exit, the vault's own contribution to venue utilization, and the displayed-versus-realized yield gap | §11.4 | Stressed coverage is a stock measure at one origin. None of the three failure modes the paper argues against — a slow exit, a vault that creates the congestion it then suffers, and an advertised rate that never materializes — is observable from it |
+
+**What P24–P28 do not do.** They do not lower a threshold, remove a check, or
+excuse a failure. The safety floors are unchanged and the yield criterion of
+v0.7 survives intact as a secondary test among sustainable policies. What
+changes is which quantity carries the claim, and P25 makes the new primary
+criterion strictly harder to satisfy than the old safety check was: v0.6's
+SRCLA would have reported `NOT DEMONSTRATED` at the tier where it scored a
+perfect coverage number.
+
 ## 1. Introduction
 
 An automated lending vault has a simple-looking objective: place USDC where it earns the best return. In practice, that statement hides five decisions:
@@ -142,7 +208,7 @@ The principal contributions are:
 - protocol-exact post-deposit rate and liquidity simulation for the three initial Base markets;
 - a deterministic, walk-forward-calibrated lower prediction bound rather than an opaque external artificial-intelligence service;
 - dynamic reserve, shared-dependency, full-cost, staged-execution, and event-driven reward rules; and
-- a registered evaluation whose safety violation, inferiority at the registered margin, or unsupported superiority claim fails the release gate and remains part of the research record — as two such results already have.
+- a registered evaluation in which **sustainability, not yield, is the primary criterion** — redeemability under stress, capacity discipline, and invariance across vault size, each demonstrated with capital actually at work — and whose failure remains part of the research record, as two such results already have.
 
 ## 2. Scope, Claims, and Release Boundary
 
@@ -177,26 +243,42 @@ year. Over the same era, failing to deploy at all costs 494.
 
 The claim under test is accordingly:
 
-> Subject to a stressed-liquidity envelope that simpler policies do not
-> respect, SRCLA deploys capital as productively as the best admissible
-> deployable baseline, at materially lower turnover, without a safety
-> violation.
+> **Sustainability claim.** With capital actually deployed, SRCLA remains
+> redeemable under registered withdrawal stress at every vault size and in
+> every evaluated period, and the simpler policies that outearn it do not.
+>
+> **Yield claim, secondary and conditional.** Among policies that are
+> themselves sustainable at a given size, SRCLA's after-cost return is
+> non-inferior at a registered margin, at materially lower turnover.
 
-This is a weaker yield claim and a stronger safety claim than v0.6 made, and
-it is the pairing the data can adjudicate. It is not a retreat to an easier
-test: §11.5's safety criterion is unchanged and remains absolute, and the
-non-inferiority margin is registered before the run in the same way a
-superiority threshold would have been.
+The order is the substance. Yield is scored only among policies that have
+first shown they can honour a redemption, because a return that cannot be
+withdrawn is not a return — it is an accounting entry that will be revised
+downward the first time a user tries to leave. §5.2 already draws that
+distinction for the vault's own accounting; §11.5 now draws it for the
+evaluation.
+
+This is not a retreat to an easier test. Under v0.6's gate a policy could pass
+by earning well and breaching redeemability at one tier, provided the average
+looked acceptable; under P25 and P26 it cannot, and neither can a policy that
+achieves perfect redeemability by holding cash. Version 0.6's own SRCLA would
+have failed the new primary criterion at the tier where it recorded a perfect
+coverage score, because it recorded that score while realizing 0.000%.
 
 The research proposition is rejected for release if any of the following occurs:
 
-- SRCLA violates a declared safety constraint on any registered run;
+- SRCLA fails any sustainability criterion of §11.5 at any registered tier — redeemability, capacity discipline, continuity, or scale invariance;
+- SRCLA satisfies those criteria only below the registered capital-at-work floor, in which case nothing has been demonstrated and the run reports `NOT DEMONSTRATED`;
 - deterministic forecasts fail their registered calibration requirements;
-- SRCLA is inferior, at the registered non-inferiority margin, to any *admissible* deployable baseline after equal costs, information, and delays, where admissibility requires the baseline itself to have respected the safety envelope (§11.2);
+- SRCLA is inferior, at the registered non-inferiority margin, to any baseline that is itself sustainable at that tier, after equal costs, information, and delays;
 - a claimed per-dimension superiority is not statistically supported;
 - a required tier, regime, baseline, ablation, or fork result is missing;
 - the evaluation cannot reproduce its manifest and result hashes; or
 - the result depends on tuning against held-out observations.
+
+Note what is *not* on that list. A baseline earning more than SRCLA is not a
+rejection when that baseline breached redeemability; §11.5 excludes it from
+comparison and §11.2 publishes its return as the price of the breach.
 
 A criterion no registered policy could satisfy in the registered universe is
 not evidence about SRCLA, and a criterion every policy satisfies is not either.
@@ -266,10 +348,11 @@ The review does not prove that a private deployed controller lacks a capability.
 | Market and shared-dependency caps | Nominal diversification preserving common-mode exposure |
 | Dynamic reserve and withdrawal stress | Positive NAV but unsuccessful synchronous exits |
 | Complete cost and turnover gate | Churn destroying gross yield improvements |
+| Sustainability as the release criterion | A reported return that no user could have withdrawn, at the size the vault actually held |
 | Bounded on-chain execution | A forecast or key bypassing the safety policy |
 | Registered evaluation | Post-hoc tuning or irreproducible superiority claims |
 
-SRCLA is useful only if this combined policy preserves its safety envelope at an after-cost return no worse than the best baseline that respects the same envelope, and only if the dimensions in which it claims to be better are the dimensions in which it is tested. Section 11 specifies the rejecting tests, and §11.5 additionally specifies when a test is incapable of rejecting anything.
+SRCLA is useful only if, with capital actually deployed, it stays redeemable at every vault size while the simpler policies that outearn it do not, and only if its after-cost return is then no worse than the best baseline that also stayed redeemable. Section 11 specifies the rejecting tests, and §11.5 additionally specifies when a test is incapable of rejecting anything.
 
 ## 4. System Architecture and Authority Boundary
 
@@ -909,24 +992,34 @@ Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000 USDC. Every r
 
 B5 cannot establish deployability and is excluded from the deployable comparison. It is retained for a second purpose in v0.7: B5's bounded-hindsight return is the registered universe's ceiling, and §11.5 uses the gap between it and the best admissible baseline to decide whether a yield criterion is informative at all (P22).
 
-**Deployability is measured, not asserted (P20).** A baseline is a *deployable
-comparator for a given run* only if, in that run, it satisfied every safety
-constraint the registered envelope imposes on SRCLA: the stressed liquid
-coverage floor, the withdrawal success threshold, and the market, dependency
-and reserve limits. A comparator that breached the envelope is reported in
-full, with the breach, and is **excluded from the comparison set for that run**.
+**Comparability is measured, not asserted (P20, P27).** A baseline is a
+comparator *for a given run at a given tier* only if, in that run and at that
+tier, it satisfied the §11.5 sustainability criteria SRCLA is held to. A
+baseline that breached is **excluded from the yield comparison** and published
+instead as a counterexample: its realized return, the criterion it broke, and
+the margin.
 
-This is not a convenience. A policy exempt from a constraint the candidate must
-obey is not measuring the candidate's skill; it is measuring the constraint's
-cost. The v0.6 evaluation makes the point concretely: on the secondary
-held-out era B1, B2 and B2u returned approximately 39% while holding stressed
-coverage of 0.878 against a floor of 0.99, and SRCLA — which held 1.000 — was
-recorded as having failed to beat them. Whether the floor is worth its price is
-a legitimate and separate question, and §11.3's H4 is where it is asked.
+This is not a convenience, and it is not a way of discarding an inconvenient
+result. A policy exempt from a constraint the candidate must obey does not
+measure the candidate's skill; it measures the constraint's cost — which is a
+real and interesting quantity, so §11.5 part 5 publishes it rather than
+suppressing it. The v0.6 evaluation makes the point concretely: on the
+secondary held-out era B1, B2 and B2u returned approximately 39% while holding
+stressed coverage of 0.878 against a floor of 0.99, and SRCLA — which held
+1.000 at every tier — was recorded as having failed to beat them. Under v0.8
+that 39% is reported as the price B1 paid in redeemability, which is the
+observation the study exists to make. Whether the floor is worth its price
+remains a legitimate and separate question, and §11.3's H4 is where it is asked.
 
-Exclusion is recorded as evidence, not silence. Where every deployable baseline
-at a tier is excluded, the comparison at that tier reports `NO ADMISSIBLE
-COMPARATOR` and does not verify, in the same way `CAPACITY-INFEASIBLE` does not.
+B1 has a particular status in this design. It is the registered embodiment of
+"take the highest displayed rate", which is the behaviour the paper argues
+against, and it is therefore expected to earn well and to breach. A run in
+which B1 neither outearned SRCLA nor breached would be evidence *against* the
+paper's proposition, and the report must say so if it occurs.
+
+Where no baseline at a tier is sustainable, the comparison at that tier reports
+`NO SUSTAINABLE COMPARATOR` and does not verify, in the same way
+`CAPACITY-INFEASIBLE` does not.
 
 ### 11.3 Component hypotheses
 
@@ -976,6 +1069,17 @@ The census is the diagnostic that would have identified v0.6's defect from the
 run record alone, rather than requiring the calibration-era re-derivation in
 Appendix D.
 
+Version 0.8 adds three **sustainability** metrics (P28). Stressed liquid
+coverage is a stock measure at a single origin, and none of the three failure
+modes this paper argues against is visible in it:
+
+- **Time to full exit**: the number of origins required to redeem 100% of NAV under the registered stress, executing only same-transaction exits the venues could actually honour. A vault that can return 99% instantly and the last 1% never is not redeemable.
+- **Venue-stress contribution**: the share of each venue's utilization attributable to the vault's own position. This separates a vault that suffered congestion from one that *created* the congestion it then suffered — the mechanism by which chasing a thin high-rate venue destroys the rate it was chasing.
+- **Displayed-versus-realized yield gap**: the advertised rate at the origin of each deployment against the return the vault actually realized over the holding period. This is the quantity B1 maximizes and the quantity the paper argues is not the objective.
+
+All three are reported per policy and per tier, never aggregated across tiers,
+because P26 makes scale a criterion rather than a nuisance dimension.
+
 Pinned Base-fork jobs validate exact adapter math, transaction success, gas, L1 data fee, swap output, protocol rounding, and balance deltas. Historical ETH/USD and USDC/USD oracle rounds convert transaction cost consistently. DEX price impact already embedded in executed output is not subtracted twice.
 
 Stressed liquid coverage is reported as a distribution — minimum, 5th percentile and median over the era's origins — and the gate tests the **minimum**. Where a tier's registered stress demand exceeds the observed worst-case liquidity of the whole admitted venue set, the coverage check reports **CAPACITY-INFEASIBLE**: it **does not verify and does not pass**, and the release gate still blocks. The distinction exists so that "the policy allocated badly" is separable from "no policy could have satisfied this on the admitted venues".
@@ -999,63 +1103,92 @@ barrier, presence of every registered grid point, the registered selection
 margin (§7.3), and artifact reproducibility including the P23 completeness
 requirement.
 
-**The policy gate** has four parts.
+**The policy gate** has five parts, and their order is load-bearing. Parts 1
+and 2 decide whether a result exists at all; part 3 is the primary criterion;
+part 4 is scored only among policies that passed part 3.
 
-1. **Safety, on SRCLA's own runs.** Every registered safety constraint holds on
-   every SRCLA run at every tier: withdrawal success at or above threshold,
-   stressed liquid coverage at or above the floor, and no cap, dependency,
-   reserve, or loss violation. This criterion is absolute and is not traded
-   against return. Safety outcomes for baselines and ablations are reported in
-   full and govern admissibility under §11.2, but a comparator's violation is
-   never recorded as SRCLA's failure (P20).
+1. **Demonstration (P25).** Time-weighted capital-at-work over the run is at or
+   above the registered floor. Below it the run reports `NOT DEMONSTRATED` for
+   every sustainability criterion and no sustainability claim may be drawn from
+   it. This is first because a vault holding idle cash satisfies every
+   redeemability test trivially: B0 would otherwise be the study's most
+   sustainable policy, and v0.6's SRCLA would have earned a perfect coverage
+   score at the tier where it realized 0.000%.
 
-2. **Non-inferiority on after-cost yield.** Against each *admissible*
-   deployable baseline at each tier, SRCLA's after-cost per-period return is
-   non-inferior at a registered margin $\delta$, by a one-sided paired test with
-   heteroskedasticity- and autocorrelation-consistent standard errors [55] and
-   a distribution-free block-bootstrap cross-check. $\delta$ is registered
-   before the run. Where a paired difference series is degenerate the test
-   reports unusable rather than passing.
-
-3. **Superiority, per dimension, where claimed.** Any superiority the report
-   asserts — turnover, stressed coverage, withdrawal success, cost, capital-at-work
-   — is stated as a named hypothesis and tested on that dimension. A dimension
-   not claimed is not tested; a dimension claimed and unsupported fails.
-
-4. **Completeness and reproducibility.** Every registered tier, regime,
+2. **Completeness and reproducibility.** Every registered tier, regime,
    baseline, ablation, and pinned-prestate fork replay is present; costs are
    complete; the manifest, dataset, and result hashes re-derive.
 
+3. **Sustainability (P24, P26) — primary and absolute.** For SRCLA, at
+   **every** registered tier independently:
+
+   - **S1 Redeemability.** Withdrawal success at or above the registered threshold at every origin, and time-to-full-exit within the registered bound.
+   - **S2 Stressed liquid coverage** at or above the floor, reported as a distribution with the gate on the minimum.
+   - **S3 Capacity discipline.** The vault's own deposits do not push a venue past its registered utilization ceiling; venue-stress contribution stays within bounds; the displayed-versus-realized yield gap is reported.
+   - **S4 Continuity.** No cap, dependency, reserve, or loss violation; no unrecoverable plan state.
+   - **S5 Scale invariance.** S1–S4 hold at every tier. **A per-tier pass does not aggregate** — a policy sustainable at one million and not at ten million is not sustainable, and averaging over tiers hides exactly the capacity failure this paper is about.
+
+   This criterion is absolute and is never traded against return. Baseline and
+   ablation sustainability outcomes are computed identically, reported in full,
+   and govern admissibility under part 4, but a comparator's breach is never
+   recorded as SRCLA's failure (P20).
+
+4. **Yield, among sustainable policies only (P27).** Against each baseline that
+   *itself* satisfies part 3 at that tier, SRCLA's after-cost per-period return
+   is non-inferior at a registered margin $\delta$, by a one-sided paired test
+   with heteroskedasticity- and autocorrelation-consistent standard errors [55]
+   and a distribution-free block-bootstrap cross-check. $\delta$ is registered
+   before the run. Where a paired difference series is degenerate the test
+   reports unusable rather than passing. Where no baseline at a tier is
+   sustainable, the comparison reports `NO SUSTAINABLE COMPARATOR`.
+
+   A baseline excluded here is **not** a comparator SRCLA failed to beat. It is
+   a counterexample, and part 5 is where it is published.
+
+5. **The price of unsustainability (P27).** For every excluded policy, at every
+   tier, the report publishes its realized return, the criterion it broke, and
+   the margin by which it broke it. The difference between that return and
+   SRCLA's is the measured cost of remaining redeemable, and it is the paper's
+   headline quantity rather than an appendix note. It is reported whether it is
+   favourable or not: a small price strengthens the argument for sustainability,
+   a large one is the honest statement of what sustainability costs.
+
+**Superiority, per dimension, where claimed.** Any superiority the report
+asserts — turnover, coverage distribution, time-to-full-exit, capital-at-work,
+cost — is stated as a named hypothesis and tested on that dimension. A dimension
+not claimed is not tested; a dimension claimed and unsupported fails.
+
 **Attainability and power (P22).** Both are decided by one measurement, taken
-before the yield criteria are scored: the **skill window**, defined as B5's
-bounded-hindsight return minus the best admissible deployable baseline's return
-on the same era. It is the most any allocator could have earned over the
-simplest thing that respects the safety envelope, and it is a property of the
-universe, not of SRCLA. It applies to the two yield criteria in opposite
-directions, and conflating them would be the error this amendment exists to
-avoid.
+before part 4 is scored: the **skill window**, defined as B5's bounded-hindsight
+return minus the return of the best baseline that is itself sustainable at that
+tier. It is the most any allocator could have earned over the simplest thing
+that stays redeemable, and it is a property of the universe, not of SRCLA. It
+applies to the two yield statements in opposite directions, and conflating them
+would be the error this amendment exists to avoid.
 
-*Superiority (part 3), where yield is a claimed dimension.* If the skill window
-is within $\delta$, no policy could have demonstrated yield superiority at the
-resolution the claim requires. The claim reports `NOT INFORMATIVE` with the
-window published, and the verdict rests on the remaining criteria. Without this
-rule a report can be failed for not achieving something arithmetically
-unavailable, which is what v0.6's gate did.
+*Yield superiority, where the report claims it.* If the skill window is within
+$\delta$, no policy could have demonstrated yield superiority at the resolution
+the claim requires. The claim reports `NOT INFORMATIVE` with the window
+published. Without this rule a report can be failed for not achieving something
+arithmetically unavailable, which is what v0.6's gate did.
 
-*Non-inferiority (part 2).* A narrow skill window makes non-inferiority
+*Non-inferiority (part 4).* A narrow skill window makes non-inferiority
 **easier**, not harder, so it is never converted to `NOT INFORMATIVE` — that
 would excuse the candidate from a test it can pass. Instead the window is
 published alongside the result as a power disclosure, and where it is within
 $\delta$ the report must state in its verdict line that non-inferiority on this
-universe is weak evidence of allocation quality, because a policy that simply
-deploys and holds would also satisfy it. Version 0.7 expects exactly this
+universe is weak evidence of *allocation* quality, because a policy that simply
+deploys and holds would also satisfy it. Version 0.8 expects exactly this
 disclosure on the three-venue universe: Appendix D measures the window at 18 to
 43 basis points a year.
 
-Attainability tests the *instrument*. It compares two baselines to each other,
-nothing about SRCLA's own performance can trigger it, and it cannot excuse a
-safety failure, a missing artifact, an irreproducible hash, or an inferiority
-finding.
+Attainability applies to part 4 alone. It compares two baselines to each other,
+nothing about SRCLA's own performance can trigger it, and **it can never touch
+parts 1 through 3**: a demonstration failure, a missing artifact, an
+irreproducible hash, or any sustainability breach is scored on its own terms
+regardless of what the universe could have offered. The asymmetry is
+deliberate. Yield is a claim about a market and can be beyond reach;
+redeemability is a claim about the vault and never is.
 
 ## 12. Failure Handling and Security Properties
 
@@ -1098,16 +1231,27 @@ reward is worth 18 to 43 basis points a year.**
 Three consequences must be stated plainly. Any claim of allocation skill on
 three correlated venues is a claim about a 43-basis-point window and will be
 dominated by estimation noise, which is why §11.5 tests attainability before it
-tests yield. The safety machinery — reserve, stress feasibility, structural
-liquidity cap, dependency caps — is where the design's value must lie, because
-it is the only dimension in which the measured differences between policies are
-large. And the honest route to an allocation claim is a wider universe, not a
-better estimator: Morpho Blue USDC markets, Euler Earn, and further Base
-lending venues would supply genuine cross-sectional dispersion and, with it,
-statistical power that no amount of additional calendar time on three venues
-can produce. That expansion is named here as the next phase and is deliberately
-out of release-one scope, since each venue requires its own immutable adapter,
-admission evidence, archive history, and audit.
+tests yield. The sustainability machinery — reserve, stress feasibility,
+structural liquidity cap, dependency caps — is where the design's value must
+lie, because it is the only dimension in which the measured differences between
+policies are large: the same universe that offers 43 basis points of allocation
+skill produced coverage differences between 1.000 and 0.000 at the largest tier
+(Appendix E). And the honest route to an *allocation* claim is a wider
+universe, not a better estimator: Morpho Blue USDC markets, Euler Earn, and
+further Base lending venues would supply genuine cross-sectional dispersion
+and, with it, statistical power that no amount of additional calendar time on
+three venues can produce. That expansion is named here as the next phase and is
+deliberately out of release-one scope, since each venue requires its own
+immutable adapter, admission evidence, archive history, and audit.
+
+**A limitation specific to the sustainability claim.** Withdrawal demand is a
+registered schedule, not an observed series (§7's second target and §8.1's
+$W_H$), because the Navy vault has no Base mainnet history. Every redeemability
+figure in this paper therefore describes behaviour under a *stipulated* stress,
+and a reader must treat the stress itself as a modelling choice open to
+challenge. What the figures do establish without that caveat is the *relative*
+ordering — every policy faces the identical schedule at the identical origins —
+and it is the ordering, not the level, that the sustainability claim rests on.
 
 A limitation of this revision itself: v0.7's amendments are derived from the
 calibration era and from the diagnosis of two failed held-out runs. They are
@@ -1139,22 +1283,37 @@ literature settled decades ago and that v0.4 through v0.6 cited without
 applying: a no-trade region must vanish as cost vanishes, and a portfolio
 outside one is moved to its boundary rather than all the way or not at all.
 
-The second correction is to what the release gate asks. Measurement, not
-preference, establishes that reallocating among three correlated venues is
-worth 18 to 43 basis points a year while failing to deploy costs 494, so a
-criterion demanding SRCLA beat every baseline on yield was testing a difference
-the universe cannot produce, and it was scoring against comparators that
-outearned SRCLA by breaching the liquidity floor SRCLA obeyed. Version 0.7 asks
-instead for safety dominance and non-inferior yield, requires any superiority
-claim to name and test its dimension, and refuses to score a criterion whose
-own ceiling lies inside its margin.
+The second correction is to what the release gate asks, and it is the larger
+one. Versions 0.4 through 0.7 all treated yield as the quantity under test and
+redeemability as a constraint upon it. That is the wrong way round for this
+system. Measurement establishes that reallocating among three correlated venues
+is worth 18 to 43 basis points a year while failing to deploy costs 494 — so
+the yield question is small — and the same evaluation shows stressed coverage
+ranging from 1.000 to 0.000 between policies at the largest tier, so the
+redeemability question is not. The policy that always takes the highest
+displayed rate breached redeemability at every tier on one held-out era. A
+fixed-weight policy that earned 24.95% with perfect coverage at one million
+USDC held zero stressed coverage at ten million. **Chasing the highest rate is
+not a neutral choice that a safety layer then bounds; it is the mechanism that
+produces unredeemable positions**, and the same is true of ignoring the vault's
+own size.
+
+Version 0.8 therefore makes sustainability the primary and absolute criterion —
+redeemability under stress, capacity discipline, continuity, and invariance
+across vault size — and scores yield second, only among policies that have
+first shown they can honour a redemption. One requirement keeps that honest:
+sustainability must be demonstrated with capital at work, since a vault holding
+idle cash passes every redeemability test and has proven nothing. By that
+standard version 0.6's own SRCLA does not pass, despite a perfect coverage
+score, and saying so is the point of the criterion.
 
 Forecast calibration and the policy gate remain mandatory, and the forecast gate
 must now actually be run. Until those registered evaluations pass on an era
 sealed after this document — and the distinct production-hardening controls are
 completed — the correct conclusion is that SRCLA is a specified research system
-with a diagnosed and corrected controller, not a demonstrated superior or
-production-ready investment product.
+with a diagnosed and corrected controller and a release criterion that finally
+tests what the system is for: not the highest yield, but a yield that can be
+withdrawn.
 
 ## References
 
@@ -1318,7 +1477,9 @@ Morpho markets previously present in the research registry are explicitly exclud
 | Movement-cost attribution | Impact, slippage and MEV on the reward-swap leg only; lending legs carry gas, failure and buffer |
 | $k$, $T_{\mathrm{pay}}$, $\lambda$ | Registered jointly with the horizon by a turnover-versus-return sweep over the calibration era, before held-out evaluation. $k$ multiplies the standard error of the estimated edge, never a predictive quantile |
 | Evaluation tiers | 10,000; 100,000; 1,000,000; 10,000,000 USDC |
-| Release criterion | Safety dominance on SRCLA's runs; non-inferiority at registered $\delta$ against admissible baselines only; per-dimension superiority where claimed; attainability checked before yield is scored |
+| Release criterion | **Sustainability first and absolute**: demonstration floor, then redeemability, capacity discipline, continuity and scale invariance at every tier. Yield scored second, non-inferiority at registered $\delta$, against sustainable comparators only. Unsustainable policies published as counterexamples with the price they paid |
+| Demonstration floor | Registered time-weighted capital-at-work. Below it a run reports `NOT DEMONSTRATED` and supports no sustainability claim |
+| Sustainability metrics | Withdrawal success; stressed coverage (min, p05, median); time to full exit; venue-stress contribution; displayed-versus-realized yield gap — all per tier, never aggregated across tiers |
 | User transactions | Standard synchronous ERC-4626; user pays gas |
 | Runtime keys | Admin key only in uncommitted contract environment; allocator key only in `/srcla` environment |
 | Data ownership | `/srcla` owns its PostgreSQL schema; `/be` reads history via HTTP |
@@ -1350,9 +1511,9 @@ pnpm run evaluation:run -- --manifest config/evaluation-manifest.json
 pnpm run evaluation:verify -- --latest-complete
 ```
 
-The evaluation command may produce `PASS` or `FAIL`, and may report a criterion as `NOT PRODUCED`, `CAPACITY-INFEASIBLE`, `NO ADMISSIBLE COMPARATOR`, or `NOT INFORMATIVE`. Successful reproducibility is distinct from a passing policy gate, and a non-verifying criterion is distinct from both.
+The evaluation command may produce `PASS` or `FAIL`, and may report a criterion as `NOT DEMONSTRATED`, `NOT PRODUCED`, `CAPACITY-INFEASIBLE`, `NO SUSTAINABLE COMPARATOR`, or `NOT INFORMATIVE`. Successful reproducibility is distinct from a passing policy gate, and a non-verifying criterion is distinct from both. `NOT DEMONSTRATED` is the one to read first: it means the run did not put enough capital to work to support any sustainability claim, whatever its coverage numbers say.
 
-## Appendix D. Calibration-Era Measurements Behind the v0.7 Amendments
+## Appendix D. Calibration-Era Measurements Behind the v0.7 Movement-Rule Amendments
 
 Every figure in this appendix is computed on the **calibration era only** —
 2024-03-15 to 2025-05-31, 10,632 hourly origins per venue, read directly from
@@ -1459,3 +1620,79 @@ in this universe is worth 18 bps a year at realistic cost and 43 bps at zero
 cost**, while not deploying costs 494. This is the measurement behind P16, P22,
 and §13's statement that the universe, not the estimator, is the binding
 constraint on any allocation claim.
+
+## Appendix E. The Sustainability Evidence Already in the Record
+
+Unlike Appendix D, this appendix reports figures from the **two sealed eras of
+the v0.6 registered evaluation**. Those eras are burned — the third
+burned-window declaration records that they were read in full — so nothing here
+may be treated as held-out evidence for v0.8, and no v0.8 parameter was chosen
+from it. It is included because the v0.6 run measured the sustainability
+question correctly even while its gate scored the wrong thing, and discarding
+that measurement would waste the only redeemability evidence this project has.
+
+### E.1 Stressed liquid coverage, per policy per tier
+
+Floor: 0.99. Bold marks a breach.
+
+| Policy | era | 10k | 100k | 1M | 10M |
+|---|---|---|---|---|---|
+| `srcla` | heldout-c | 1.000 | 1.000 | 1.000 | 1.000 |
+| `srcla` | heldout-b | 1.000 | 1.000 | 1.000 | 1.000 |
+| `b1` highest displayed rate | heldout-c | 1.000 | 1.000 | 1.000 | **0.108** |
+| `b1` highest displayed rate | heldout-b | **0.878** | **0.878** | **0.878** | **0.878** |
+| `b2` capacity, no uncertainty | heldout-c | 1.000 | 1.000 | 1.000 | **0.171** |
+| `b2` capacity, no uncertainty | heldout-b | **0.878** | **0.878** | **0.878** | 1.000 |
+| `b2u` unreserved | heldout-c | 1.000 | 1.000 | 1.000 | **0.066** |
+| `b2u` unreserved | heldout-b | **0.878** | **0.878** | **0.878** | 1.000 |
+| `b4` frozen robust weights | heldout-c | 1.000 | 1.000 | 1.000 | **0.000** |
+| `b4` frozen robust weights | heldout-b | 1.000 | 1.000 | 1.000 | **0.590** |
+| `h1` no capacity simulation | heldout-c | **0.911** | **0.911** | 1.000 | 1.000 |
+
+**SRCLA is the only registered policy that never breached, at any tier, on
+either era.** B1 — the registered embodiment of "take the highest displayed
+rate" — breached at every tier on one era and at the largest tier on the other.
+
+### E.2 Return against redeemability at the two largest tiers
+
+`heldout-b`, the era where the difference is starkest:
+
+| Policy | 1M: return / coverage | 10M: return / coverage |
+|---|---|---|
+| `b1` | 39.19% / **0.878** | 38.55% / **0.878** |
+| `b4` | 24.95% / 1.000 | 24.95% / **0.590** |
+| `srcla` | 0.00% / 1.000 | 0.00% / 1.000 |
+
+`heldout-c`:
+
+| Policy | 1M: return / coverage | 10M: return / coverage |
+|---|---|---|
+| `b1` | 3.39% / 1.000 | 3.31% / **0.108** |
+| `b4` | 3.63% / 1.000 | 3.63% / **0.000** |
+| `srcla` | 0.87% / 1.000 | 0.00% / 1.000 |
+
+B4's row is the clearest statement of the capacity thesis available: an
+identical policy, an identical era, a return unchanged to two decimal places,
+and coverage that falls from 1.000 to 0.000 purely because the vault got
+larger. No metric averaged across tiers can see it.
+
+### E.3 Why this is not yet a result for SRCLA
+
+Three qualifications, and they are the reason P25 exists.
+
+1. **SRCLA's perfect record was earned by not deploying.** It realized 0.000%
+   at the 10M tier on `heldout-c` and 0.000% at every tier on `heldout-b`. A
+   vault holding idle cash satisfies every redeemability test trivially. Under
+   §11.5's demonstration floor this run reports `NOT DEMONSTRATED`, not a pass.
+2. **At 10k through 1M on `heldout-c`, SRCLA was not more sustainable than its
+   comparators** — B1, B2 and B4 all held 1.000 coverage there and earned three
+   to four times as much. The sustainability advantage appears at the largest
+   tier and on the era with a venue liquidity failure, not everywhere.
+3. **The 10M tier is `CAPACITY-INFEASIBLE`** under P12: its registered stress
+   demand exceeds the observed worst-case liquidity of the whole admitted venue
+   set. SRCLA's 1.000 there is partly an artifact of that.
+
+The claim v0.8 puts forward is therefore *testable and currently untested*: a
+controller that deploys above the demonstration floor **and** holds
+redeemability at every tier would be a result, and no run has yet produced one.
+That is the experiment the v0.7 controller and this gate exist to make possible.

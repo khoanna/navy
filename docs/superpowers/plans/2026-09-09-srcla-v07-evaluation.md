@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make forecast selection answer to the decision it feeds, add the state-space forecast candidate, and rebuild the §11.5 release gate so it measures what SRCLA can actually be right or wrong about.
+**Goal:** Make forecast selection answer to the decision it feeds, add the state-space forecast candidate, and rebuild the §11.5 release gate around **sustainability as the primary criterion** — redeemability under stress, capacity discipline, and invariance across vault size, each demonstrated with capital actually at work — with yield scored second and only among policies that are themselves sustainable.
+
+**Paper v0.8 changes this plan's centre of gravity.** The study's proposition is that the highest available yield is frequently not redeemable, so the gate must test redeemability first and absolutely. Task 11 is rewritten accordingly and Task 11b is new. Tasks 6–8 (forecast selection) are unaffected.
 
 **Architecture:** `grid-sweep.ts` stops being decided by a near-constant term: every loss term is standardized across the grid, non-discriminating terms are zero-weighted, and the two decision-focused terms §7.3 already names are computed by running the real decision rule. A fourth forecast candidate forecasts utilization and maps it through the venue's own on-chain IRM. `kernel/gates.ts` scopes safety to SRCLA's runs, measures deployability rather than asserting it, separates ablations from baselines, replaces yield superiority with non-inferiority, and computes the skill window that decides whether a yield criterion is informative at all.
 
@@ -640,9 +642,252 @@ counted as a baseline SRCLA failed to beat."
 
 ---
 
-### Task 11: Non-inferiority and the skill window (P21 part 2, P22)
+### Task 10b: The sustainability gate (P24, P25, P26, P28)
 
-Measured on the calibration era, all reallocation skill in this universe is worth 18–43 bps/yr while failing to deploy costs 494. A superiority criterion over that window measures estimation noise. Replace it with non-inferiority, and compute the skill window that says whether either yield criterion means anything.
+This is the primary release criterion under paper v0.8 and the reason the study
+exists. Sustainability is scored **per policy per tier**, absolutely, and behind
+a demonstration floor — because a vault holding idle cash passes every
+redeemability test and has proven nothing. On the v0.6 data SRCLA held 1.000
+stressed coverage at all four tiers on both eras *while realizing 0.000% on one
+of them*; that must report `NOT DEMONSTRATED`, not a pass.
+
+**Files:**
+- Create: `src/evaluation/kernel/sustainability.ts`
+- Create: `src/evaluation/replay/sustainability-metrics.ts`
+- Modify: `src/evaluation/kernel/gates.ts`, `src/evaluation/kernel/harness.ts`, `src/evaluation/report/render-markdown.ts`
+- Test: `test/unit/evaluation/sustainability.spec.ts` (create)
+
+**Interfaces:**
+- Consumes: `PolicyRunResult` from `harness.ts`; `capitalAtWork` from the controller plan's Task 5.
+- Produces:
+  - `export const REGISTERED_DEMONSTRATION_FLOOR = 0.80`
+  - `export const REGISTERED_MAX_EXIT_ORIGINS = 24`
+  - `export const REGISTERED_MAX_VENUE_STRESS_SHARE = 0.25`
+  - `export interface SustainabilityVerdict { policyId: string; tier: string; demonstrated: boolean; s1: boolean | null; s2: boolean | null; s3: boolean | null; s4: boolean | null; sustainable: boolean | null; breach: string | null }`
+  - `export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdict`
+  - `export function scaleInvariant(verdicts: readonly SustainabilityVerdict[]): boolean | null`
+  - `export function timeToFullExit(series, stress): number | null`
+  - `export function venueStressContribution(series): Record<string, number>`
+  - `export function displayedVsRealizedGap(series): number`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `test/unit/evaluation/sustainability.spec.ts`:
+
+```typescript
+import {
+  sustainabilityAtTier, scaleInvariant, REGISTERED_DEMONSTRATION_FLOOR,
+} from '../../../src/evaluation/kernel/sustainability.js';
+
+describe('P25: sustainability must be demonstrated while deployed', () => {
+  it('an all-idle run reports NOT DEMONSTRATED, not a pass', () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 }));
+    expect(v.demonstrated).toBe(false);
+    expect(v.sustainable).toBeNull();          // null, never true
+  });
+
+  it("v0.6 SRCLA's perfect coverage at 0.000% return does NOT pass", () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0.02, realizedNetApy: 0, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 }));
+    expect(v.sustainable).toBeNull();
+    expect(v.breach).toMatch(/NOT DEMONSTRATED/);
+  });
+
+  it('a deployed run holding the floor is sustainable', () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1, exitOrigins: 3, venueStressShare: 0.1 }));
+    expect(v.demonstrated).toBe(true);
+    expect(v.sustainable).toBe(true);
+  });
+
+  it('a deployed run breaching coverage is NOT sustainable and names the criterion', () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 0.878, withdrawalSuccessRate: 1 }));
+    expect(v.sustainable).toBe(false);
+    expect(v.breach).toMatch(/S2/);
+  });
+
+  it('a run that cannot fully exit inside the bound fails S1 even at perfect coverage', () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1, exitOrigins: 500 }));
+    expect(v.sustainable).toBe(false);
+    expect(v.breach).toMatch(/S1/);
+  });
+
+  it('a run that itself causes most of a venue\'s utilization fails S3', () => {
+    const v = sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1, venueStressShare: 0.8 }));
+    expect(v.sustainable).toBe(false);
+    expect(v.breach).toMatch(/S3/);
+  });
+});
+
+describe('P26: scale invariance is a criterion, not an average', () => {
+  it('B4 - sustainable at 1M, breaching at 10M - is NOT scale invariant', () => {
+    const vs = [
+      sustainabilityAtTier(run({ tier: '1000000000000', capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 })),
+      sustainabilityAtTier(run({ tier: '10000000000000', capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 0.590, withdrawalSuccessRate: 1 })),
+    ];
+    expect(scaleInvariant(vs)).toBe(false);
+  });
+
+  it('three passing tiers and one NOT DEMONSTRATED is null, never true', () => {
+    const vs = [
+      sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 })),
+      sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 })),
+      sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 })),
+      sustainabilityAtTier(run({ capitalAtWorkFraction: 0.0, minStressedLiquidCoverage: 1.0, withdrawalSuccessRate: 1 })),
+    ];
+    expect(scaleInvariant(vs)).toBeNull();
+  });
+
+  it('averaging cannot rescue a breach: 3 x 1.000 and 1 x 0.000 is not sustainable', () => {
+    const vs = [1.0, 1.0, 1.0, 0.0].map((c) =>
+      sustainabilityAtTier(run({ capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: c, withdrawalSuccessRate: 1 })));
+    expect(scaleInvariant(vs)).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm test:unit sustainability`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Implement `src/evaluation/kernel/sustainability.ts`**
+
+```typescript
+/**
+ * Paper §11.5 parts 1 and 3 - the PRIMARY release criterion.
+ *
+ * The study's proposition is that the highest available yield is frequently
+ * not redeemable. Sustainability is therefore scored first, absolutely, and
+ * per tier; yield is scored afterwards and only among policies that pass here.
+ *
+ * P25 is why `demonstrated` gates everything: a vault holding idle cash
+ * satisfies every redeemability test and has proven nothing. On the v0.6 data
+ * SRCLA held 1.000 coverage at every tier on both eras while realizing 0.000%
+ * on one of them - a perfect score that must not read as a pass.
+ *
+ * PURE. Three-valued throughout: `null` is NOT DEMONSTRATED and never a pass.
+ */
+import type { PolicyRunResult } from './harness.js';
+
+/** Time-weighted capital-at-work below which a run proves nothing. */
+export const REGISTERED_DEMONSTRATION_FLOOR = 0.80;
+/** Origins a complete redemption may take before S1 fails. */
+export const REGISTERED_MAX_EXIT_ORIGINS = 24;
+/** Share of a venue's utilization the vault may itself account for. */
+export const REGISTERED_MAX_VENUE_STRESS_SHARE = 0.25;
+export const REGISTERED_MIN_WITHDRAWAL_SUCCESS = 0.99;
+
+export interface SustainabilityVerdict {
+  policyId: string;
+  tier: string;
+  demonstrated: boolean;
+  s1: boolean | null;
+  s2: boolean | null;
+  s3: boolean | null;
+  s4: boolean | null;
+  sustainable: boolean | null;
+  breach: string | null;
+}
+
+export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdict {
+  const r = run.replay;
+  const tier = run.tier.toString();
+  const demonstrated = (r.capitalAtWorkFraction ?? 0) >= REGISTERED_DEMONSTRATION_FLOOR;
+
+  if (!demonstrated) {
+    return {
+      policyId: run.policy.id, tier, demonstrated: false,
+      s1: null, s2: null, s3: null, s4: null, sustainable: null,
+      breach: `NOT DEMONSTRATED: capital at work ${(r.capitalAtWorkFraction ?? 0).toFixed(3)} ` +
+        `< ${REGISTERED_DEMONSTRATION_FLOOR}; a vault holding idle cash is trivially redeemable`,
+    };
+  }
+
+  const s1 = (r.withdrawalSuccessRate ?? 0) >= REGISTERED_MIN_WITHDRAWAL_SUCCESS
+    && (r.timeToFullExitOrigins ?? 0) <= REGISTERED_MAX_EXIT_ORIGINS;
+  const s2 = r.minStressedLiquidCoverage >= 0.99;
+  const s3 = Math.max(0, ...Object.values(r.venueStressContribution ?? {})) <= REGISTERED_MAX_VENUE_STRESS_SHARE;
+  const s4 = (r.policyViolations ?? 0) === 0;
+
+  const failed: string[] = [];
+  if (!s1) failed.push('S1 redeemability');
+  if (!s2) failed.push(`S2 stressed coverage ${r.minStressedLiquidCoverage.toFixed(3)}`);
+  if (!s3) failed.push('S3 capacity discipline');
+  if (!s4) failed.push('S4 continuity');
+
+  return {
+    policyId: run.policy.id, tier, demonstrated: true, s1, s2, s3, s4,
+    sustainable: failed.length === 0,
+    breach: failed.length === 0 ? null : failed.join('; '),
+  };
+}
+
+/**
+ * P26 - every tier independently. A per-tier pass does NOT aggregate: B4 held
+ * 1.000 coverage at 1M and 0.590 at 10M on the same era with an identical
+ * return, and no metric averaged over tiers can see that.
+ */
+export function scaleInvariant(verdicts: readonly SustainabilityVerdict[]): boolean | null {
+  if (verdicts.length === 0) return null;
+  if (verdicts.some((v) => v.sustainable === false)) return false;   // a breach dominates
+  if (verdicts.some((v) => v.sustainable === null)) return null;     // then absence
+  return true;
+}
+```
+
+Note the ordering inside `scaleInvariant`: a demonstrated breach at any tier
+outranks a `NOT DEMONSTRATED` at another, because a proven failure is a
+stronger fact than a missing measurement.
+
+- [ ] **Step 4: Implement the three metrics**
+
+Create `src/evaluation/replay/sustainability-metrics.ts` with `timeToFullExit`
+(origins required to redeem 100% of NAV executing only same-transaction exits
+the venues could honour, `null` if never), `venueStressContribution` (per venue,
+the vault's share of that venue's utilization, time-weighted) and
+`displayedVsRealizedGap` (advertised rate at deployment minus realized return
+over the holding period). Add all three plus `policyViolations` to
+`PolicyRunResult.replay` and populate them in the replay.
+
+- [ ] **Step 5: Run tests**
+
+Run: `pnpm test:unit sustainability`
+Expected: PASS, 9 tests.
+
+- [ ] **Step 6: Wire into the gate in the paper's order**
+
+In `gates.ts`, restructure `runRegisteredGate` so the checks are emitted in
+§11.5's order: **Demonstration → Completeness → Sustainability → Yield →
+Price of unsustainability**. The sustainability check is scoped to SRCLA
+(`policy.id === SRCLA_POLICY.id`); comparator verdicts are computed identically
+and stored for Task 11's admissibility filter and Task 11b's counterexample
+table. Emit one check per criterion so the report names which one failed.
+
+Run: `pnpm test:unit registered-gates && pnpm exec tsc --noEmit`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/evaluation/kernel/sustainability.ts src/evaluation/replay/sustainability-metrics.ts src/evaluation/ test/unit/evaluation/sustainability.spec.ts
+git commit -m "feat(eval): sustainability as the primary release criterion (P24-P26, P28)
+
+Redeemability, capacity discipline, continuity and scale invariance,
+scored per policy per tier behind a demonstration floor. A vault
+holding idle cash passes every redeemability test and has proven
+nothing, so capital-at-work below the floor reports NOT DEMONSTRATED
+and never a pass - which is what v0.6's SRCLA would have reported at
+the tier where it scored 1.000 coverage on a 0.000% return.
+
+Scale invariance does not aggregate: B4 held 1.000 at 1M and 0.590 at
+10M on the same era with an identical return."
+```
+
+---
+
+### Task 11: Non-inferiority among sustainable policies, and the skill window (P21 part 2, P22, P27)
+
+Measured on the calibration era, all reallocation skill in this universe is worth 18–43 bps/yr while failing to deploy costs 494. A superiority criterion over that window measures estimation noise. Replace it with non-inferiority **against sustainable comparators only**, publish every excluded policy's return as the measured price of unsustainability (P27), and compute the skill window that says whether either yield statement means anything.
+
+The exclusion is the paper's positive evidence, not a technicality: B1 earned 39.16% at the 10k tier on `heldout-b` holding 0.878 coverage against a 0.99 floor. Under v0.6 that figure was recorded as SRCLA's failure to compete. Under v0.8 it is the headline.
 
 **Files:**
 - Modify: `src/evaluation/kernel/gates.ts`
@@ -654,7 +899,11 @@ Measured on the calibration era, all reallocation skill in this universe is wort
 - Produces:
   - `export const REGISTERED_NONINFERIORITY_MARGIN = 0.0043` (43 bps — the measured zero-cost skill window; **replace with the paper owner's registered δ before the freeze**)
   - `export function nonInferiorityTest(srclaReturns, baselineReturns, margin): PairedTestResult`
-  - `export function skillWindow(atTier, admissible): { windowApy: number; hindsightApy: number; bestBaselineApy: number; informative: boolean }`
+  - `export function skillWindow(atTier, sustainable): { windowApy: number; hindsightApy: number; bestBaselineApy: number; informative: boolean }`
+  - `export interface Counterexample { policyId: string; tier: string; realizedNetApy: number; criterion: string; margin: number }`
+  - `export function unsustainabilityPrice(atTier, srcla, verdicts): Counterexample[]`
+
+Comparator admissibility comes from Task 10b's `sustainabilityAtTier`, not from a static `deployable` flag and not from a bare coverage comparison.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -685,6 +934,42 @@ describe('P22: skill window governs the two yield criteria in OPPOSITE direction
     expect(t.pValue).toBeGreaterThan(0.05);
   });
 });
+
+describe('P27: an unsustainable policy is a counterexample, not a comparator', () => {
+  it('excludes a coverage-breaching baseline from the yield comparison', () => {
+    const gate = runRegisteredGate(runResult({
+      srcla: { capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, realizedNetApy: 0.05 },
+      b1: { capitalAtWorkFraction: 0.95, minStressedLiquidCoverage: 0.878, realizedNetApy: 0.3916 },
+    }), {});
+    expect(gate.comparisons.some((c) => c.baselineId === 'b1')).toBe(false);
+  });
+
+  it('publishes the excluded policy as a priced counterexample', () => {
+    const out = runResult({
+      srcla: { capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0, realizedNetApy: 0.05 },
+      b1: { capitalAtWorkFraction: 0.95, minStressedLiquidCoverage: 0.878, realizedNetApy: 0.3916 },
+    });
+    const prices = unsustainabilityPrice(out.results, srclaOf(out), verdictsOf(out));
+    const b1 = prices.find((p) => p.policyId === 'b1')!;
+    expect(b1.realizedNetApy).toBeCloseTo(0.3916);
+    expect(b1.criterion).toMatch(/S2/);
+    expect(b1.margin).toBeCloseTo(0.99 - 0.878, 3);
+  });
+
+  it('reports NO SUSTAINABLE COMPARATOR when every baseline breached', () => {
+    const gate = runRegisteredGate(runResult({
+      srcla: { capitalAtWorkFraction: 0.92, minStressedLiquidCoverage: 1.0 },
+      b0: { minStressedLiquidCoverage: 0.5, capitalAtWorkFraction: 0.9 },
+      b1: { minStressedLiquidCoverage: 0.5, capitalAtWorkFraction: 0.9 },
+      b2: { minStressedLiquidCoverage: 0.5, capitalAtWorkFraction: 0.9 },
+      b3: { minStressedLiquidCoverage: 0.5, capitalAtWorkFraction: 0.9 },
+      b4: { minStressedLiquidCoverage: 0.5, capitalAtWorkFraction: 0.9 },
+    }), {});
+    const ni = gate.checks.find((c) => c.name.startsWith('Non-inferior'));
+    expect(ni!.passed).toBeNull();
+    expect(ni!.detail).toMatch(/NO SUSTAINABLE COMPARATOR/);
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -696,13 +981,13 @@ Expected: FAIL — `nonInferiorityTest` does not exist.
 
 `nonInferiorityTest` shifts the paired difference series by `+margin` and runs the existing one-sided HAC test against the null "SRCLA is worse by at least the margin". `skillWindow` computes `B5 − max(admissible baseline APY)`.
 
-Wire both into the gate: rename the "Outperforms every deployable baseline" check to **"Non-inferior to every admissible deployable baseline"**; add a separate **"Superiority: yield"** check that is `null`/`NOT INFORMATIVE` when the window is within the margin, and only otherwise scored. Append the weak-evidence disclosure to the non-inferiority detail when the window is narrow.
+Wire into the gate: rename the "Outperforms every deployable baseline" check to **"Non-inferior to every sustainable baseline"**, filtered by Task 10b's verdicts; add a separate **"Superiority: yield"** check that is `null`/`NOT INFORMATIVE` when the window is within the margin, and only otherwise scored; add **"Price of unsustainability"** as a reported (never gating) section rendered from `unsustainabilityPrice`. Append the weak-evidence disclosure to the non-inferiority detail when the window is narrow.
 
-**The two must not share a branch.** A narrow window makes superiority unprovable and non-inferiority *trivially easier*; converting both to `NOT INFORMATIVE` would excuse SRCLA from a test it can pass.
+**Three separations must hold.** (1) A narrow window makes superiority unprovable and non-inferiority *trivially easier*; converting both to `NOT INFORMATIVE` would excuse SRCLA from a test it can pass. (2) The skill window may never touch the demonstration, completeness or sustainability checks — yield can be beyond reach, redeemability cannot. (3) The counterexample table never gates; it reports.
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm test:unit non-inferiority` → PASS, 4 tests.
+Run: `pnpm test:unit non-inferiority` → PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -821,12 +1106,15 @@ Expect ~1h. Confirm the artifact now contains `residualPanel`, `paybackSeconds`,
 
 - [ ] **Step 3: Verify the controller behaves as designed on calibration data**
 
-Run the decision rule over the calibration era with the new artifact and assert the three properties the v0.6 run violated:
-- capital-at-work fraction > 0.9 (it deployed);
+Run the decision rule over the calibration era with the new artifact, at **all four tiers**, and assert:
+- capital-at-work fraction above `REGISTERED_DEMONSTRATION_FLOOR` at every tier — without this nothing else counts (P25);
+- stressed coverage at or above 0.99 at every tier *while* above that floor — this is the pairing v0.6 never achieved;
 - rebalance count between 1 and ~50 (it did not churn);
 - the hurdle-block census shows rotation blocks, not deployment blocks.
 
-Record the numbers in the commit message. **These are calibration-era figures and must be labelled as such in any report — they are not evidence of held-out performance.**
+The second assertion is the whole experiment in miniature. v0.6 could hold coverage or deploy, never both; if the calibration run cannot do both either, stop and report that before touching a sealed era.
+
+Record the numbers in the commit message. **These are calibration-era figures and must be labelled as such in any report — they are not evidence of held-out sustainability.**
 
 - [ ] **Step 4: Confirm no regression in the script typecheck count**
 
@@ -856,10 +1144,14 @@ records the selection margin and subsample. No sealed era was read."
 
 ## Self-Review Notes
 
-**Spec coverage.** §3.5 → Tasks 6–7. §3.6 → Task 8. §3.7 → Tasks 9–12. §3.8 → Task 13. The re-freeze the spec implies → Task 14.
+**Spec coverage.** §3.5 → Tasks 6–7. §3.6 → Task 8. §3.7 → Tasks 9, 10, **10b**, 11, 12. §3.8 → Task 13. The re-freeze the spec implies → Task 14.
 
-**Placeholder scan.** `REGISTERED_NONINFERIORITY_MARGIN`, `PAYBACK_SECONDS`, `ADJUSTMENT_RATE`, `SELECTION_SUBSAMPLE` and `MIN_SELECTION_MARGIN` ship with concrete values so the code runs and the tests are real. Each is a **registration** the paper owner must confirm (spec §6) before the artifact is cited, and each is recorded in `_registration` so the artifact testifies to what was used. That is deliberate, not a TODO.
+**Task order matters.** 10b (sustainability) must precede 11 (yield), because 11's comparator admissibility is 10b's verdict. Running them in the other order reproduces v0.6's mistake of deciding comparability from a static flag.
+
+**Placeholder scan.** `REGISTERED_NONINFERIORITY_MARGIN`, `PAYBACK_SECONDS`, `ADJUSTMENT_RATE`, `SELECTION_SUBSAMPLE`, `MIN_SELECTION_MARGIN`, `REGISTERED_DEMONSTRATION_FLOOR`, `REGISTERED_MAX_EXIT_ORIGINS` and `REGISTERED_MAX_VENUE_STRESS_SHARE` ship with concrete values so the code runs and the tests are real. Each is a **registration** the paper owner must confirm (spec §6, items 1–8) before the artifact is cited, and each is recorded in `_registration` so the artifact testifies to what was used. That is deliberate, not a TODO. The demonstration floor is the most consequential of the eight: set it too low and "safe by inaction" passes, too high and the reserve itself fails the gate.
 
 **Type consistency.** `ScoredPoint` (Task 6) is consumed by `resolveNearTie` (Task 7). `DecisionScore` (Task 7) populates the two new `SelectionLoss` fields declared in Task 6. `IrmParams` (Task 8) is local to the forecast layer. `admissibleComparators` (Task 9) feeds `skillWindow` (Task 11). `deploymentHurdle` comes from the controller plan's Task 4 and is used by `h3d` in Task 9. `ForkReplayResult` (Task 13) already exists in `gates.ts` and is not redefined.
 
-**Expected outcome.** Even with all fourteen tasks complete, a registered run cannot PASS until a fresh era sealed after paper commit `e8f7474a` reaches the registered minimum length. On a three-venue universe the yield criterion will report a non-inferiority pass carrying a weak-evidence disclosure rather than a superiority result. That is the designed outcome of P22, not a shortfall.
+**Expected outcome.** Even with all fifteen tasks complete, a registered run cannot PASS until a fresh era sealed after the v0.8 paper commit reaches the registered minimum length. On a three-venue universe the yield criterion will report a non-inferiority pass carrying a weak-evidence disclosure rather than a superiority result — the designed outcome of P22, not a shortfall.
+
+**What a PASS would mean under v0.8.** Not that SRCLA earned the most. That SRCLA, with capital genuinely at work above the demonstration floor, stayed redeemable at every vault size across a sealed era, while the policies that outearned it did not — and that the report published exactly what that cost. No run has yet produced that pairing: v0.6 could hold coverage or deploy, never both.
