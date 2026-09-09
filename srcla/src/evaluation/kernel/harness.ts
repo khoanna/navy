@@ -16,6 +16,12 @@
  * times are seconds.
  */
 import { runReplay, type PolicyFn, type ReplayResult, type WithdrawalRequest } from '../replay/replay.js';
+import {
+  accumulateCensus,
+  accumulateGateCensus,
+  capitalAtWork,
+  deploymentLatency,
+} from '../replay/deployment-metrics.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
 import type { CompletedLabel, DecisionInput, PolicyArtifact } from '../../policy/types.js';
 import type { DecideOpts } from '../../policy/decide.js';
@@ -63,10 +69,38 @@ export interface WithdrawalSchedule {
   source: 'observed' | 'registered-schedule';
 }
 
+/**
+ * §11.4's deployment metrics — the diagnostic the v0.6 run record lacked. A
+ * policy that never deployed and a policy that deployed badly both reported
+ * as "low return"; these four fields make the difference legible from the
+ * run record alone, without re-deriving it by hand.
+ */
+export interface DeploymentMetrics {
+  /** Time-averaged fraction of NAV actually deployed, over the run. */
+  capitalAtWorkFraction: number;
+  /** Origins elapsed before the first admitted deployment; null if never. */
+  deploymentLatencyOrigins: number | null;
+  /**
+   * This run's net APY minus the SAME policy's net APY with the deployment
+   * hurdle (§9.1.2) disabled — the H3d ablation. `null` until H3d is
+   * registered (it is not registered by this task); populated only for the
+   * `srcla` row, and only when an `h3d` row ran at the same tier.
+   */
+  idleDragApy: number | null;
+  /**
+   * Reason-code -> count, merged from every origin's `accumulateCensus`
+   * (per-leg hurdle blocks) and `accumulateGateCensus` (aggregate brake
+   * blocks, with `BACKOFF_THEN_` distinguishing a brake on the divest-only
+   * backoff from a brake on the full target). Empty for policy shapes that
+   * never call `decide` (`idle`, `frozen-equal-weight`).
+   */
+  hurdleBlocks: Record<string, number>;
+}
+
 export interface PolicyRunResult {
   policy: RegisteredPolicy;
   tier: bigint;
-  replay: ReplayResult;
+  replay: ReplayResult & DeploymentMetrics;
   /** Kernel decision hashes, one per origin. The evidence for `inert`. */
   decisionHashes: string[];
   /** Number of origins whose action was 'rebalance'. */
@@ -396,6 +430,8 @@ export function createKernelPolicyFn(
     withdrawals: DecisionInput['withdrawals'];
     hindsightRates: Map<string, bigint>;
     decisionHashes: string[];
+    /** §11.4 census, mutated in place across every origin this policy runs. */
+    hurdleBlocks: Record<string, number>;
     onRebalance: () => void;
   },
 ): PolicyFn {
@@ -469,6 +505,11 @@ export function createKernelPolicyFn(
 
     const out = runKernel(policy, input, { artifact: ctx.artifact, opts: ctx.opts });
     ctx.decisionHashes.push(out.decisionHash);
+    // §11.4 census — every origin, not only rebalances, so a run that held
+    // throughout still reports WHY (ADMISSION_EMPTY, NOT_EVALUATED, a churn
+    // brake, ...) rather than reducing to a bare rebalance count.
+    accumulateCensus(out.costGate.legs, ctx.hurdleBlocks);
+    accumulateGateCensus(out.costGate, ctx.hurdleBlocks);
     if (out.action !== 'rebalance') return [];
 
     const actions = targetToActions(out.target, state.strategyBalances);
@@ -528,6 +569,7 @@ export function runRegisteredEvaluation(
         : REGISTERED_POLICIES.filter((p) => options.policyIds!.includes(p.id));
     for (const policy of policies) {
       const decisionHashes: string[] = [];
+      const hurdleBlocks: Record<string, number> = {};
       let rebalances = 0;
       const policyFn = createKernelPolicyFn(policy, {
         artifact,
@@ -537,6 +579,7 @@ export function runRegisteredEvaluation(
         withdrawals,
         hindsightRates,
         decisionHashes,
+        hurdleBlocks,
         onRebalance: () => {
           rebalances += 1;
         },
@@ -559,7 +602,29 @@ export function runRegisteredEvaluation(
         ethUsdE8: replayGas.ethUsdE8,
       });
 
-      perTier.push({ policy, tier, replay, decisionHashes, rebalances, inertVsSrcla: false });
+      // §11.4 — derived from the replay's own snapshot series (idle/deployed
+      // are already tracked there), plus the census this policy's origins
+      // accumulated above. `idleDragApy` needs the H3d row, which has not
+      // run yet at this point in the loop, so it is filled in below.
+      const series = replay.snapshots.map((s) => ({
+        idleBase: s.idleBase,
+        deployedBase: s.totalAssets - s.idleBase,
+      }));
+      const deploymentMetrics: DeploymentMetrics = {
+        capitalAtWorkFraction: capitalAtWork(series),
+        deploymentLatencyOrigins: deploymentLatency(series),
+        idleDragApy: null,
+        hurdleBlocks,
+      };
+
+      perTier.push({
+        policy,
+        tier,
+        replay: { ...replay, ...deploymentMetrics },
+        decisionHashes,
+        rebalances,
+        inertVsSrcla: false,
+      });
     }
 
     const srcla = perTier.find((r) => r.policy.id === SRCLA_POLICY.id);
@@ -569,6 +634,17 @@ export function runRegisteredEvaluation(
         r.policy.shape === 'kernel' &&
         r.decisionHashes.length === srcla.decisionHashes.length &&
         r.decisionHashes.every((h, i) => h === srcla.decisionHashes[i]);
+    }
+
+    // idleDragApy (§9.1.2's ablation, H3d): this run's net APY minus SRCLA's
+    // net APY with the deployment hurdle disabled. H3d is not registered by
+    // this task (`REGISTERED_ABLATIONS` carries no `h3d` id), so `perTier`
+    // never actually contains one yet and this stays a no-op until it does —
+    // deliberately: the follow-on plan registers H3d, and nothing here
+    // should have to change when it does.
+    const h3d = perTier.find((r) => r.policy.id === 'h3d');
+    if (h3d !== undefined && srcla !== undefined) {
+      srcla.replay.idleDragApy = srcla.replay.realizedNetApy - h3d.replay.realizedNetApy;
     }
 
     results.push(...perTier);

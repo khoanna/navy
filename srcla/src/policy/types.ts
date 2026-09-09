@@ -355,6 +355,22 @@ export interface CostGateResult {
    * facts and a census must be able to tell them apart.
    */
   legs: LegVerdict[];
+  /**
+   * True when the EXECUTED vector is `decide.ts#chooseExecuted`'s
+   * risk-reducing backoff (the divest-only subset) rather than the full
+   * surviving set. This is reported independently of `reason` because a
+   * churn brake evaluated AFTER the backoff (`applyBrakes` runs on the final
+   * executed vector) overwrites `reason` with the brake string alone —
+   * `'REVERSAL_ALLOWANCE: ...'` looks identical whether it fired on the full
+   * target or on an already-backed-off one. A census that only parses
+   * `reason` cannot tell "the policy tried to back off and STILL got
+   * brake-blocked" from "the policy never needed to back off and got
+   * brake-blocked on the full move" — two different failure modes that call
+   * for different fixes. `passed && backedOff` is the success case
+   * (`reason === 'HURDLES_CLEARED_DIVEST_ONLY'`); `!passed && backedOff` is
+   * the degenerate one this field exists to surface.
+   */
+  backedOff: boolean;
 }
 
 export interface PlanDraft {

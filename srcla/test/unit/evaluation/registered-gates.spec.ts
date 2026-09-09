@@ -98,6 +98,11 @@ function run(
       totalCosts: 0n,
       minStressedLiquidCoverage: opts.minStressed ?? 1,
       coverageDistribution: { min: opts.minStressed ?? 1, p05: opts.minStressed ?? 1, median: 1 },
+      // §11.4 deployment metrics — not under test here, so fixed/neutral values.
+      capitalAtWorkFraction: 1,
+      deploymentLatencyOrigins: 0,
+      idleDragApy: null,
+      hurdleBlocks: {},
     },
   } as PolicyRunResult;
 }

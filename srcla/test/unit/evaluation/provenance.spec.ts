@@ -155,6 +155,11 @@ function row(policyId: string, tier: bigint, apy: number): PolicyRunResult {
       totalCosts: 12_345n,
       minStressedLiquidCoverage: 1,
       coverageDistribution: { min: 1, p05: 1, median: 1 },
+      // §11.4 deployment metrics — not under test here, so fixed/neutral values.
+      capitalAtWorkFraction: 1,
+      deploymentLatencyOrigins: 0,
+      idleDragApy: null,
+      hurdleBlocks: {},
     },
   } as PolicyRunResult;
 }

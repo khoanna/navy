@@ -174,7 +174,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       },
       target: partial.target ?? current,
       enumeration: partial.enumeration ?? null,
-      costGate: partial.costGate ?? { passed: false, reason: 'NOT_EVALUATED', legs: [] },
+      costGate: partial.costGate ?? { passed: false, reason: 'NOT_EVALUATED', legs: [], backedOff: false },
       plan: partial.plan ?? null,
       action: partial.action ?? 'hold',
       reasons,
@@ -254,6 +254,7 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
       // caller reading `passed === true` tells a bypass from a cleared gate by
       // the reason AND by the fact that nothing was priced.
       legs: [],
+      backedOff: false,
     };
 
     const emergencyExitAdapters = new Set(unwind.exits.map((e) => e.adapter));
@@ -453,6 +454,11 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
             : 'ALL_LEGS_BLOCKED'
           : brake,
     legs: effective,
+    // Reported independently of `reason`: a brake that fires AFTER the
+    // backoff overwrites `reason` with the brake string alone, which is
+    // indistinguishable from the same brake firing on the full target
+    // unless this is carried alongside it. See CostGateResult#backedOff.
+    backedOff,
   };
   if (!gate.passed) {
     reasons.push(`HURDLES: ${gate.reason}`);
