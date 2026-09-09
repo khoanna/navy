@@ -8,7 +8,6 @@
 import {
   runReplay,
   accruedYieldBase,
-  stressedLiquidCoverage,
   annualizedSharePriceGrowth,
   DEFAULT_REPLAY_GAS_PRICE_WEI,
   DEFAULT_REPLAY_ETH_USD_E8,
@@ -420,27 +419,12 @@ describe('withdrawalSuccessRate (metrics/risk)', () => {
 // §11.4 stressed liquid coverage
 // ---------------------------------------------------------------------------
 
-describe('stressedLiquidCoverage', () => {
-  const snap = (cash: bigint): TimeOrderedSnapshot => {
-    const t = new Date();
-    return { index: 0, timestamp: t, blockHash: '0x0', snapshots: [marketSnapshot('aa', t, { cashBase: cash })] };
-  };
-
-  it('is 1 for a fully idle vault', () => {
-    expect(stressedLiquidCoverage(createInitialState(TIER), snap(0n))).toBe(1);
-  });
-
-  it('discounts the vault\'s own supplied cash', () => {
-    const s = createInitialState(TIER);
-    s.idleBase = 0n;
-    s.strategyBalances = new Map([['aa', TIER]]);
-    // Venue cash equals the vault's own position: on the conservative
-    // reading nothing is exitable, so the 50% stress demand is uncovered.
-    expect(stressedLiquidCoverage(s, snap(TIER))).toBe(0);
-    // With ample external cash the exit is fully available.
-    expect(stressedLiquidCoverage(s, snap(TIER * 10n))).toBe(1);
-  });
-
+// The underlying computation (`stressedCoverage`) is unit-tested directly in
+// test/unit/policy/coverage.spec.ts and cross-checked against this module's
+// call site in test/unit/evaluation/coverage-parity.spec.ts. This block only
+// covers what's specific to the replay: that the per-snapshot field and the
+// running minimum are populated from it correctly.
+describe('replay stressedLiquidCoverage reporting', () => {
   it('is reported per snapshot and minimised across the replay', () => {
     const d = dataset(4, (day, t) => [
       marketSnapshot('aa', t, { cashBase: day === 2 ? 0n : 1_000_000_000_000n }),

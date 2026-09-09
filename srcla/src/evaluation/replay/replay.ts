@@ -6,6 +6,7 @@
  */
 import { VaultReplay, type RedeemFailure } from './erc4626.js';
 import { modelExecution } from './execution.js';
+import { stressedCoverage } from '../../policy/steps/coverage.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
 import type { VaultState } from './state.js';
 
@@ -131,9 +132,6 @@ export interface ReplayConfig {
   /** USD per ETH, 8 decimals. Same provenance caveat as `gasPriceWei`. */
   ethUsdE8?: bigint;
 }
-
-/** Registered §8.1 stress demand set, in bps of TVL. */
-const STRESS_DEMAND_BPS = [500, 1000, 2500, 5000] as const;
 
 /** Base-chain gas price used when the caller supplies none. wei per gas. */
 export const DEFAULT_REPLAY_GAS_PRICE_WEI = 30_000_000n; // 0.03 gwei
@@ -261,7 +259,12 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     // Record state
     const sharePriceWad = vault.currentSharePrice();
     const totalReturn = Number(sharePriceWad - initialSharePrice) / Number(WAD);
-    const coverage = stressedLiquidCoverage(vault.getState(), snapshot);
+    const coverage = stressedCoverage({
+      holdings: vault.getState().strategyBalances,
+      idleBase: vault.getState().idleBase,
+      venueCashByMarket: new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase])),
+      totalAssetsBase: vault.getState().totalAssets,
+    }).worst;
     if (coverage < minStressedLiquidCoverage) minStressedLiquidCoverage = coverage;
 
     snapshots.push({
@@ -380,38 +383,6 @@ export function accruedYieldBase(
     accrued += (balance * rateWad * elapsedSeconds) / (SECONDS_PER_YEAR * WAD);
   }
   return accrued;
-}
-
-/**
- * §11.4 stressed liquid coverage. For each registered §8.1 demand
- * D_s = s * TVL, what fraction of D_s could the vault have paid
- * synchronously from idle plus conservative venue exits? The conservative
- * exit assumes the vault's own supplied cash has been borrowed out, i.e.
- * `min(balance, max(0, venueCash - balance))`.
- *
- * Returns the worst (minimum) ratio over the demand set, capped at 1.
- */
-export function stressedLiquidCoverage(state: VaultState, snapshot: TimeOrderedSnapshot): number {
-  const tvl = state.totalAssets;
-  if (tvl <= 0n) return 1;
-
-  const cashByMarket = new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase]));
-  let liquid = state.idleBase;
-  for (const [marketId, balance] of state.strategyBalances) {
-    if (balance <= 0n) continue;
-    const venueCash = cashByMarket.get(marketId) ?? 0n;
-    const external = venueCash > balance ? venueCash - balance : 0n;
-    liquid += balance < external ? balance : external;
-  }
-
-  let worst = 1;
-  for (const bps of STRESS_DEMAND_BPS) {
-    const demand = (tvl * BigInt(bps)) / 10_000n;
-    if (demand <= 0n) continue;
-    const ratio = liquid >= demand ? 1 : Number(liquid) / Number(demand);
-    if (ratio < worst) worst = ratio;
-  }
-  return worst;
 }
 
 /**
