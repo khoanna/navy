@@ -173,15 +173,26 @@ export interface SelectionLoss {
   sharpness: number;
   downsideRate: number;
   /**
-   * P18/Task 7: portfolio turnover induced by a candidate's forecast. Not
-   * yet measured here -- populated by Task 7. Until then every candidate
-   * reports 0, which the grid-level IQR rule in `scoreGrid` correctly
-   * zero-weights (a term nothing has measured cannot discriminate).
+   * P18 — §7.3's sixth term. Total notional the REGISTERED DECISION RULE
+   * moved under this candidate over the scoring era, as a multiple of vault
+   * NAV. Measured by `forecast/decision-score.ts#scoreCandidateDecisions`
+   * and attached by `attachDecisionTerms`; `fitPoint` cannot compute it,
+   * because it is a property of the decision the forecast produces rather
+   * than of the forecast itself.
+   *
+   * A point that has NOT been scored still reports 0, and `scoreGrid`'s IQR
+   * rule then zero-weights it — a term nothing has measured cannot
+   * discriminate.
    */
   turnover: number;
   /**
-   * P18/Task 7: return sacrificed by a candidate's forecast relative to the
-   * achievable optimum. Same status as `turnover` above.
+   * P18 — §7.3's seventh term. Mean per-origin annualised conservative gain
+   * of the legs the hurdle REFUSED, expressed as a fraction of NAV. This is
+   * the term that can see a candidate whose forecast leaves the movement
+   * rule unable to act: v0.6 selected a 1-day horizon on a 1.27e-7 margin
+   * and the policy then executed one rebalance across an 86-day era, which
+   * no accuracy statistic in this struct can observe. Same measurement and
+   * same zero-when-unscored status as `turnover`.
    */
   sacrificedReturn: number;
   /** Weighted total; lower is better. */
@@ -207,9 +218,10 @@ export const LOSS_WEIGHTS = Object.freeze({
   /** A bound far below the mean is safe and useless; penalised mildly. */
   sharpness: 0.5,
   downsideRate: 1.0,
-  /** P18/Task 7: not yet measured (see `SelectionLoss.turnover`). */
+  /** P18 — churn is a cost, and a candidate that trades more must earn it. */
   turnover: 2.0,
-  /** P18/Task 7: not yet measured (see `SelectionLoss.sacrificedReturn`). */
+  /** P18 — the heaviest economic term: an unusable forecast is the failure
+   *  this whole amendment exists to make visible. */
   sacrificedReturn: 3.0,
 });
 
@@ -226,8 +238,44 @@ export interface FitPoint {
  * candidates and is reported as a diagnostic with zero weight. P18: the v0.6
  * loss was 99.84% `downsideRate`, a quantity ~0.5 for any unbiased candidate,
  * so selection was decided in the residue on a 1.27e-7 margin.
+ *
+ * WHY 1e-12 AND NOT 1e-4 (ruling R20). The 1e-4 this replaces was chosen
+ * before anything had been measured on the real grid, and against a
+ * floor-indexed quantile that has since been corrected. Measured on the
+ * registered 81-point grid over the 443-day calibration era (886 origins per
+ * candidate), the seven raw IQRs are:
+ *
+ *   pointError           7.64e-5     coverageDeviation    3.54e-5
+ *   exceedanceShortfall  2.34e-6     sharpness            1.72e-4
+ *   downsideRate         5.72e-2     turnover             4.91e+1
+ *   sacrificedReturn     0.00e+0
+ *
+ * At 1e-4 that gate discards `pointError` (§7.3's first term), discards
+ * `coverageDeviation` (weight 10.0, "the primary failure"), discards
+ * `exceedanceShortfall` (weight 5.0) -- and keeps `sharpness` (weight 0.5) on
+ * the strength of being 2.2x larger in raw magnitude. Every one of those four
+ * has real, ordered spread across the grid; what separates them is the UNITS
+ * they are measured in, not whether they discriminate. Silently zero-weighting
+ * a discriminating term is precisely the failure P18 exists to prevent, so
+ * inheriting 1e-4 would have reproduced it one level up.
+ *
+ * The gate's remaining job is narrow, because `scoreGrid` standardizes every
+ * term on the grid's own spread BEFORE weighting it: units are already handled
+ * there, so the only term a z-score cannot express is one that is CONSTANT,
+ * where the spread being divided by is zero (or float noise around it). 1e-12
+ * catches exactly that class. On the measured grid it drops one term --
+ * `sacrificedReturn`, whose IQR is identically zero because no blocked leg on
+ * this era ever carried a positive conservative bound -- and keeps the six
+ * that actually order the candidates.
+ *
+ * OPEN, for the paper owner rather than the code: a single ABSOLUTE threshold
+ * over seven quantities whose natural units span eight orders of magnitude is
+ * the wrong shape even at 1e-12. A scale-free gate (IQR relative to the term's
+ * own dispersion, or a rank-based one) would state the intent directly. That
+ * is a change to `scoreGrid`'s contract, not to a constant, so it is reported
+ * rather than made here.
  */
-export const MIN_DISCRIMINATING_IQR = 1e-4;
+export const MIN_DISCRIMINATING_IQR = 1e-12;
 
 export interface ScoredPoint {
   point: GridPoint;
@@ -318,6 +366,77 @@ export function scoreGrid(
 }
 
 /**
+ * Attach P18's two decision-focused terms to a fitted point.
+ *
+ * They are deliberately NOT folded into `loss.total`. That field is the raw
+ * weighted sum of the five ACCURACY terms, every one of which is a
+ * horizon-return fraction in [0, 1]-ish units; `turnover` is a multiple of NAV
+ * accumulated over hundreds of origins and is two to three orders of magnitude
+ * larger. Adding it raw would let one term decide the ranking by scale alone,
+ * which is the same defect P18 is closing at the other end (a `downsideRate`
+ * near 0.5 dominating a loss nothing else could move). The economic terms
+ * enter selection through `scoreGrid`, which standardizes every term on the
+ * grid's own spread before weighting it.
+ *
+ * `selectPoint` therefore stops being the selection rule once these are
+ * measured; it survives as the accuracy-only diagnostic the report prints
+ * alongside the real ranking.
+ */
+export function attachDecisionTerms(
+  fit: FitPoint,
+  terms: { turnover: number; sacrificedReturn: number },
+): FitPoint {
+  return {
+    ...fit,
+    loss: { ...fit.loss, turnover: terms.turnover, sacrificedReturn: terms.sacrificedReturn },
+  };
+}
+
+/**
+ * Below this normalized-total margin the grid has NOT distinguished two
+ * candidates, and the lexical tie-break (whichever `sort` happened to place
+ * first) must not be what decides a registered horizon.
+ *
+ * 1e-3 of a z-scored, weighted total. The v0.6 selection was made on a margin
+ * of 1.27e-7 -- four orders of magnitude inside this -- and produced a horizon
+ * the movement rule could not act on.
+ */
+export const MIN_SELECTION_MARGIN = 1e-3;
+
+/**
+ * Resolve a near-tie on ECONOMICS, then on horizon.
+ *
+ * Three tiers, in order:
+ *  1. A real margin on the full normalized total decides outright.
+ *  2. Inside the margin, the two ECONOMIC terms alone decide -- the terms
+ *     that price what the decision rule can actually do with the forecast.
+ *     Their weights are `LOSS_WEIGHTS`, not re-declared here.
+ *  3. Still tied: take the LONGER horizon. §7.1 -- signal-to-noise rises with
+ *     H, so the shorter choice carries strictly more estimation risk, and a
+ *     coin-flip that lands on the riskier candidate is not a registration.
+ *
+ * `scored` must be `scoreGrid`'s output, i.e. already sorted ascending by
+ * `total`.
+ */
+export function resolveNearTie(scored: ScoredPoint[]): ScoredPoint {
+  if (scored.length === 0) {
+    throw new Error('resolveNearTie: the grid produced no scored point');
+  }
+  const [best, runnerUp] = scored;
+  if (runnerUp === undefined || runnerUp.total - best!.total >= MIN_SELECTION_MARGIN) return best!;
+  // Resolve on the economic terms alone.
+  const econ = (s: ScoredPoint): number =>
+    s.normalized['turnover']! * LOSS_WEIGHTS.turnover +
+    s.normalized['sacrificedReturn']! * LOSS_WEIGHTS.sacrificedReturn;
+  if (Math.abs(econ(best!) - econ(runnerUp)) >= MIN_SELECTION_MARGIN) {
+    return econ(best!) < econ(runnerUp) ? best! : runnerUp;
+  }
+  // Still tied: take the LONGER horizon. §7.1 - signal-to-noise rises with H,
+  // so the shorter choice carries strictly more estimation risk.
+  return best!.point.horizonSeconds >= runnerUp.point.horizonSeconds ? best! : runnerUp;
+}
+
+/**
  * Walk the labels for one grid point, producing per-venue residuals.
  *
  * Strictly causal: the forecast for label `i` uses labels `0..i-1` of that
@@ -398,9 +517,12 @@ export function fitPoint(
     exceedanceShortfall: exceedanceSum / n,
     sharpness: sharpnessSum / n,
     downsideRate: downside / n,
-    // P18/Task 7: not yet measured at this point in the pipeline (see
-    // `SelectionLoss.turnover`/`sacrificedReturn`). scoreGrid's IQR rule
-    // zero-weights them until Task 7 populates them.
+    // P18 — a property of the DECISION, not of the forecast, so it cannot
+    // be computed here: measuring it means running `decide` over the era
+    // under this candidate. `attachDecisionTerms` fills both in once
+    // `forecast/decision-score.ts` has done that. Left at 0 for any caller
+    // that only wants the accuracy fit, where scoreGrid's IQR rule
+    // zero-weights them.
     turnover: 0,
     sacrificedReturn: 0,
     total: 0,

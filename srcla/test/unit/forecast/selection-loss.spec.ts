@@ -1,4 +1,11 @@
-import { scoreGrid, MIN_DISCRIMINATING_IQR, interquartileRange } from '../../../src/forecast/grid-sweep.js';
+import {
+  scoreGrid,
+  resolveNearTie,
+  MIN_DISCRIMINATING_IQR,
+  MIN_SELECTION_MARGIN,
+  interquartileRange,
+  type ScoredPoint,
+} from '../../../src/forecast/grid-sweep.js';
 
 // Ruling R16: scoreGrid reads loss fields nested at f.fit.loss[term], matching
 // the real FitPoint shape (`{ loss: { pointError, ... } }`), not flat on the
@@ -77,6 +84,29 @@ describe('P18: scale-normalized selection loss', () => {
     expect(scored[0]!.zeroWeighted).not.toContain('pointError');
   });
 
+  /**
+   * Ruling R20. The measured raw IQRs on the registered 81-point grid are
+   * pointError 7.64e-5, coverageDeviation 3.54e-5, exceedanceShortfall
+   * 2.34e-6, sharpness 1.72e-4, downsideRate 5.72e-2, turnover 4.91e+1,
+   * sacrificedReturn 0. At the old 1e-4 threshold the first three -- carrying
+   * §7.3 weights of 1.0, 10.0 and 5.0 -- were all zero-weighted while
+   * `sharpness` (weight 0.5) survived on raw magnitude alone. The threshold
+   * must separate CONSTANT terms from small-unit ones, not small from large.
+   */
+  it('R20: keeps every term with the spread measured on the real grid, and drops only the constant one', () => {
+    const measured = [
+      { pointError: 7.6e-5, coverageDeviation: 3.5e-5, exceedanceShortfall: 2.3e-6, sharpness: 1.7e-4, downsideRate: 0.47, turnover: 330, sacrificedReturn: 0 },
+      { pointError: 1.2e-4, coverageDeviation: 6.0e-5, exceedanceShortfall: 4.0e-6, sharpness: 2.6e-4, downsideRate: 0.50, turnover: 355, sacrificedReturn: 0 },
+      { pointError: 1.6e-4, coverageDeviation: 8.5e-5, exceedanceShortfall: 5.7e-6, sharpness: 3.4e-4, downsideRate: 0.53, turnover: 380, sacrificedReturn: 0 },
+      { pointError: 2.0e-4, coverageDeviation: 1.1e-4, exceedanceShortfall: 7.4e-6, sharpness: 4.3e-4, downsideRate: 0.56, turnover: 405, sacrificedReturn: 0 },
+    ];
+    const scored = scoreGrid(
+      measured.map((m, i) => ({ point: { id: `p${i}` } as never, fit: fit(m) })),
+      { minIqr: MIN_DISCRIMINATING_IQR },
+    );
+    expect(scored[0]!.zeroWeighted).toEqual(['sacrificedReturn']);
+  });
+
   it('a term measured in tiny units does not lose to one measured in large units', () => {
     // exceedanceShortfall ~1e-7, downsideRate ~0.5: after standardization a
     // one-sigma move in either must weigh the same before weights apply.
@@ -110,5 +140,58 @@ describe('P18: scale-normalized selection loss', () => {
         expect(interquartileRange(Array(n).fill(7))).toBe(0);
       }
     });
+  });
+});
+
+/**
+ * P18/Task 7 — a selection inside the noise must not be settled by whichever
+ * candidate `sort` happened to place first. v0.6's registered run chose a
+ * 1-day horizon on a margin of 1.27e-7 and the policy then executed ONE
+ * rebalance across an 86-day era.
+ */
+describe('P18: near-tie resolution', () => {
+  const sp = (
+    over: { total: number; horizonSeconds: number; turnover?: number; sacrificedReturn?: number },
+  ): ScoredPoint =>
+    ({
+      point: { horizonSeconds: over.horizonSeconds } as never,
+      fit: fit({}),
+      normalized: {
+        turnover: over.turnover ?? 0,
+        sacrificedReturn: over.sacrificedReturn ?? 0,
+      },
+      total: over.total,
+      zeroWeighted: [],
+    }) as ScoredPoint;
+
+  it('a real margin decides outright, economics notwithstanding', () => {
+    const winner = resolveNearTie([
+      sp({ total: 0, horizonSeconds: 86_400, sacrificedReturn: 5 }),
+      sp({ total: 1, horizonSeconds: 1_209_600, sacrificedReturn: -5 }),
+    ]);
+    expect(winner.point.horizonSeconds).toBe(86_400);
+  });
+
+  it('inside the margin, the economic terms overturn the lexical winner', () => {
+    const winner = resolveNearTie([
+      sp({ total: 0, horizonSeconds: 86_400, sacrificedReturn: 5 }),
+      sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 1_209_600, sacrificedReturn: -5 }),
+    ]);
+    expect(winner.point.horizonSeconds).toBe(1_209_600);
+  });
+
+  it('tied on economics too, it takes the LONGER horizon (§7.1)', () => {
+    const winner = resolveNearTie([
+      sp({ total: 0, horizonSeconds: 86_400 }),
+      sp({ total: MIN_SELECTION_MARGIN / 10, horizonSeconds: 1_209_600 }),
+    ]);
+    expect(winner.point.horizonSeconds).toBe(1_209_600);
+  });
+
+  it('a one-point grid returns that point, and an empty grid throws', () => {
+    expect(resolveNearTie([sp({ total: 0, horizonSeconds: 604_800 })]).point.horizonSeconds).toBe(
+      604_800,
+    );
+    expect(() => resolveNearTie([])).toThrow(/no scored point/);
   });
 });
