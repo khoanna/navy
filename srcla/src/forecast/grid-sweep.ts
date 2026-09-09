@@ -172,6 +172,18 @@ export interface SelectionLoss {
   exceedanceShortfall: number;
   sharpness: number;
   downsideRate: number;
+  /**
+   * P18/Task 7: portfolio turnover induced by a candidate's forecast. Not
+   * yet measured here -- populated by Task 7. Until then every candidate
+   * reports 0, which the grid-level IQR rule in `scoreGrid` correctly
+   * zero-weights (a term nothing has measured cannot discriminate).
+   */
+  turnover: number;
+  /**
+   * P18/Task 7: return sacrificed by a candidate's forecast relative to the
+   * achievable optimum. Same status as `turnover` above.
+   */
+  sacrificedReturn: number;
   /** Weighted total; lower is better. */
   total: number;
   /** Diagnostics. */
@@ -195,6 +207,10 @@ export const LOSS_WEIGHTS = Object.freeze({
   /** A bound far below the mean is safe and useless; penalised mildly. */
   sharpness: 0.5,
   downsideRate: 1.0,
+  /** P18/Task 7: not yet measured (see `SelectionLoss.turnover`). */
+  turnover: 2.0,
+  /** P18/Task 7: not yet measured (see `SelectionLoss.sacrificedReturn`). */
+  sacrificedReturn: 3.0,
 });
 
 export interface FitPoint {
@@ -203,6 +219,68 @@ export interface FitPoint {
   loss: SelectionLoss;
   /** Per-venue achieved coverage, the P1 diagnostic. */
   coverageByMarket: Record<string, number>;
+}
+
+/**
+ * A term whose interquartile range across the grid is below this cannot rank
+ * candidates and is reported as a diagnostic with zero weight. P18: the v0.6
+ * loss was 99.84% `downsideRate`, a quantity ~0.5 for any unbiased candidate,
+ * so selection was decided in the residue on a 1.27e-7 margin.
+ */
+export const MIN_DISCRIMINATING_IQR = 1e-4;
+
+export interface ScoredPoint {
+  point: GridPoint;
+  fit: FitPoint;
+  normalized: Record<string, number>;
+  total: number;
+  zeroWeighted: string[];
+}
+
+const LOSS_TERMS = [
+  'pointError', 'coverageDeviation', 'exceedanceShortfall',
+  'sharpness', 'downsideRate', 'turnover', 'sacrificedReturn',
+] as const;
+
+/**
+ * Standardize each term across the grid (z-score on the grid's own spread),
+ * then weight. A term is standardized BEFORE weighting so a weight expresses
+ * a preference rather than an accident of units.
+ *
+ * This is a GRID-LEVEL pass over `fitPoint`'s output -- it does not replace
+ * `fitPoint`'s own `loss.total` (a raw weighted sum used elsewhere), it ranks
+ * across points using scale-normalized terms and drops any term whose spread
+ * across the grid cannot discriminate (P18).
+ */
+export function scoreGrid(
+  fits: ReadonlyArray<{ point: GridPoint; fit: FitPoint }>,
+  opts: { minIqr: number },
+): ScoredPoint[] {
+  const stats: Record<string, { mean: number; sd: number; iqr: number }> = {};
+  for (const term of LOSS_TERMS) {
+    const xs = fits.map((f) => (f.fit.loss as unknown as Record<string, number>)[term] ?? 0);
+    const mean = xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length);
+    const sd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, xs.length - 1)) || 1;
+    const sorted = xs.slice().sort((a, b) => a - b);
+    const q = (p: number) => sorted[Math.floor(p * (sorted.length - 1))] ?? 0;
+    stats[term] = { mean, sd, iqr: q(0.75) - q(0.25) };
+  }
+  const zeroWeighted = LOSS_TERMS.filter((t) => stats[t]!.iqr < opts.minIqr);
+
+  return fits
+    .map(({ point, fit }) => {
+      const normalized: Record<string, number> = {};
+      let total = 0;
+      for (const term of LOSS_TERMS) {
+        const raw = (fit.loss as unknown as Record<string, number>)[term] ?? 0;
+        const z = (raw - stats[term]!.mean) / stats[term]!.sd;
+        normalized[term] = z;
+        if (zeroWeighted.includes(term)) continue;
+        total += (LOSS_WEIGHTS as unknown as Record<string, number>)[term]! * z;
+      }
+      return { point, fit, normalized, total, zeroWeighted: [...zeroWeighted] };
+    })
+    .sort((a, b) => a.total - b.total);
 }
 
 /**
@@ -286,6 +364,11 @@ export function fitPoint(
     exceedanceShortfall: exceedanceSum / n,
     sharpness: sharpnessSum / n,
     downsideRate: downside / n,
+    // P18/Task 7: not yet measured at this point in the pipeline (see
+    // `SelectionLoss.turnover`/`sacrificedReturn`). scoreGrid's IQR rule
+    // zero-weights them until Task 7 populates them.
+    turnover: 0,
+    sacrificedReturn: 0,
     total: 0,
     observations: n,
     achievedCoverage: coverage,
