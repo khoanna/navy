@@ -17,7 +17,7 @@
  * PURE: no I/O, no Date.now() beyond what the caller passes in.
  * UNITS: money is USDC base units (6 dp); APYs are dimensionless fractions.
  */
-import { ERAS_IN_ORDER, eraBounds, type EraTag } from '../eras.js';
+import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
 import type { RegisteredGateResult } from '../kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../kernel/harness.js';
 import { REGISTERED_ABLATIONS } from '../kernel/registry.js';
@@ -215,22 +215,86 @@ function datasetProvenanceSection(p: DatasetProvenance): string {
   return out.join('\n');
 }
 
+/**
+ * A registered era's role text, made safe to emit as one markdown list item.
+ *
+ * The roles in `eras.ts` are prose: they contain `--`, balanced backticks and
+ * (as source strings) hard line wraps. Collapsing whitespace keeps each role
+ * on one list line; the `|` escape means a role could later gain a pipe
+ * without silently splitting a cell if this text is ever reused in a table.
+ * Nothing is truncated — the whole point of the list is that it is lossless.
+ */
+const eraRoleLine = (role: string): string =>
+  role.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+
+/**
+ * The registered-era block: a table of the MECHANICAL columns, then every
+ * era's FULL role beneath it.
+ *
+ * WHY THE ROLE IS NOT A TABLE CELL. It used to be `role.split('.')[0]`,
+ * intended as "the first sentence". `heldout-c`'s role opens with the version
+ * string `v0.6`, so the split landed inside it and the published report said
+ * the era's role was, in full, `v0.` — deleting the "LESS BURNED, NOT
+ * PRISTINE" caveat the run's credibility depends on. A 200-character caveat
+ * does not belong in a table cell; it belongs in a list, whole.
+ *
+ * OPEN-ENDED ERAS. `heldout-b` ends at the far-future sentinel, so rendering
+ * `eraBounds().end` and `.days` printed "2099-12-31" and "26793 days" in a
+ * published document. Such an era's End and Days are reported as `open`.
+ */
 function eraTable(): string {
   const rows = ERAS_IN_ORDER.map((e) => {
     const b = eraBounds(e.tag);
-    return `| \`${e.tag}\` | ${b.start.slice(0, 10)} | ${b.end.slice(0, 10)} | ${b.days} | ${e.sealed ? '**sealed**' : '—'} | ${e.role.split('.')[0]}. |`;
+    const open = isOpenEnded(e.tag);
+    return (
+      `| \`${e.tag}\` | ${b.start.slice(0, 10)} | ${open ? 'open' : b.end.slice(0, 10)} | ` +
+      `${open ? 'open' : b.days} | ${e.sealed ? '**sealed**' : '—'} |`
+    );
   });
+  const roles = ERAS_IN_ORDER.map((e) => `- \`${e.tag}\` — ${eraRoleLine(e.role)}`);
   return [
-    '| Era | Start | End | Days | Sealed | Role |',
-    '|---|---|---|---|---|---|',
+    '| Era | Start | End | Days | Sealed |',
+    '|---|---|---|---|---|',
     ...rows,
+    '',
+    'An era with an End of `open` grows with the live collector; its effective end is ' +
+      'whenever collection last ran, reported per era in the measured-coverage table below.',
+    '',
+    'Each era\'s registered role, in full — none of this is abbreviated, because the caveats ' +
+      'are the point:',
+    '',
+    ...roles,
   ].join('\n');
+}
+
+/** How much of a gate's detail a table cell carries before it is cut. */
+const GATE_DETAIL_MAX = 600;
+
+/**
+ * Truncate a gate detail VISIBLY. The old `.slice(0, 300)` cut mid-token with
+ * no marker, so a reader could not tell that a detail naming, say, four
+ * offending runs had been cut after two. Cutting back to the last space and
+ * appending an ellipsis says "there was more".
+ *
+ * Truncation happens BEFORE pipe-escaping so a cut can never land between a
+ * `\` and the `|` it escapes.
+ */
+function gateDetail(detail: string): string {
+  const cut =
+    detail.length <= GATE_DETAIL_MAX
+      ? detail
+      : (() => {
+          const head = detail.slice(0, GATE_DETAIL_MAX);
+          const lastSpace = head.lastIndexOf(' ');
+          return `${(lastSpace > 0 ? head.slice(0, lastSpace) : head).trimEnd()}…`;
+        })();
+  return cut.replace(/\|/g, '\\|');
 }
 
 function gateTable(gate: RegisteredGateResult): string {
   const rows = gate.checks.map((c) => {
     const mark = c.passed === true ? 'PASS' : c.passed === false ? '**FAIL**' : '**NOT PRODUCED**';
-    return `| ${mark} | ${c.name} | ${c.detail.replace(/\|/g, '\\|').slice(0, 300)} |`;
+    return `| ${mark} | ${c.name} | ${gateDetail(c.detail)} |`;
   });
   return ['| Verdict | Check | Detail |', '|---|---|---|', ...rows].join('\n');
 }
@@ -403,8 +467,11 @@ export function renderReport(params: ReportParams): string {
   out.push('## Verdict');
   out.push('');
   for (const run of params.runs) {
+    // Same sentinel problem as the era table: an open-ended era has no day
+    // count to print, only the origins actually collected.
+    const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
     out.push(
-      `- **${run.era}** (${eraBounds(run.era).days}d, ${run.datasetOrigins} origins): ` +
+      `- **${run.era}** (${span}, ${run.datasetOrigins} origins): ` +
         `§11.5 release gate **${run.gate.pass ? 'PASS' : 'FAIL'}**` +
         (run.gate.pass ? '' : ` — blocked on: ${run.gate.blockedReasons.join('; ')}`),
     );

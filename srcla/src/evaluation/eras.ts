@@ -81,6 +81,13 @@ const at = (iso: string): number => Math.floor(Date.parse(iso) / 1000);
  */
 const OPEN_ENDED = at('2099-12-31T23:59:59Z');
 
+/**
+ * The sentinel itself, exported so that a consumer can recognise it rather
+ * than re-deriving `2099-12-31` from memory. Nothing outside this module
+ * should ever compare against a hardcoded far-future date.
+ */
+export const OPEN_ENDED_END_SECONDS = OPEN_ENDED;
+
 export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.freeze({
   calibration: {
     tag: 'calibration',
@@ -178,6 +185,19 @@ export function assertNotSealed(tag: EraTag, purpose: string): void {
         `'calibration' instead.`,
     );
   }
+}
+
+/**
+ * True when the era's end is the forward-growing sentinel rather than a real
+ * boundary.
+ *
+ * `eraBounds` deliberately still returns the sentinel arithmetic — it is used
+ * by the backfill and the manifest, which want a concrete upper bound. A
+ * PRESENTATION layer must not print it: "ends 2099-12-31, 26,793 days long"
+ * is a sentinel leaking into a published document. Ask here instead.
+ */
+export function isOpenEnded(tag: EraTag): boolean {
+  return REGISTERED_ERAS[tag].endSeconds === OPEN_ENDED;
 }
 
 /** ISO bounds, for a manifest or a report table. */

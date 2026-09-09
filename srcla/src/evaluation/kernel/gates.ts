@@ -31,6 +31,10 @@ import {
   type BlockBootstrapResult,
   type PairedTestResult,
 } from '../metrics/significance.js';
+import {
+  REGISTERED_COVERAGE_FLOOR,
+  REGISTERED_STRESS_DEMAND_BPS,
+} from '../../policy/steps/coverage.js';
 import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from './harness.js';
 import { REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
 
@@ -177,7 +181,10 @@ export function evaluateRegisteredRelease(
   opts: RegisteredGateOptions = {},
 ): RegisteredGateResult {
   const minWithdrawalSuccess = opts.minWithdrawalSuccess ?? 0.99;
-  const minStressed = opts.minStressedLiquidCoverage ?? 0.99;
+  // The floor the OPTIMISER enforces, imported rather than re-declared:
+  // `src/policy/steps/coverage.ts` exists precisely to stop the optimiser and
+  // the grader from carrying two copies of this number that can drift apart.
+  const minStressed = opts.minStressedLiquidCoverage ?? REGISTERED_COVERAGE_FLOOR;
   const alpha = opts.significanceLevel ?? 0.05;
 
   const checks: RegisteredGateCheck[] = [];
@@ -364,8 +371,24 @@ export function evaluateRegisteredRelease(
 
 const label = (r: PolicyRunResult): string => `${r.policy.id}@${r.tier}`;
 
-/** §11.4's stress demand for a tier: 50% of TVL, in USDC base units. */
-const stressDemandBase = (tier: bigint): bigint => (tier * 5_000n) / 10_000n;
+/**
+ * The most demanding level in the registered §8.1 stress set, in bps of TVL.
+ * Derived from `REGISTERED_STRESS_DEMAND_BPS` by taking its maximum rather
+ * than by indexing it, so reordering or extending the registered set cannot
+ * silently change which level the gate grades against.
+ */
+const MAX_STRESS_DEMAND_BPS: number = REGISTERED_STRESS_DEMAND_BPS.reduce(
+  (max, bps) => (bps > max ? bps : max),
+  0,
+);
+
+/**
+ * §11.4's stress demand for a tier, in USDC base units: the worst registered
+ * demand level applied to TVL. Today that is 5,000 bps (50%) — the same
+ * number the optimiser's coverage step uses, now read from the same place.
+ */
+export const stressDemandBase = (tier: bigint): bigint =>
+  (tier * BigInt(MAX_STRESS_DEMAND_BPS)) / 10_000n;
 
 /** Base units (6 dp) rendered as a whole-dollar figure, no separators -- matches how tests match it. */
 const usd = (base: bigint): string => (base / 1_000_000n).toString();

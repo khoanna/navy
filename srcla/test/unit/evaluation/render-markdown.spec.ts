@@ -234,6 +234,41 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).toMatch(/\*\*sealed\*\*/);
   });
 
+  // FINAL-REVIEW FIX 1. The role column used to be `e.role.split('.')[0]`,
+  // meant as "the first sentence". `heldout-c`'s role opens `v0.6 VALIDATION
+  // era...`, so the split landed inside the version string and the published
+  // report gave that era's role as the literal text `v0.` — silently deleting
+  // the "LESS BURNED, NOT PRISTINE" caveat the plan REQUIRED it to surface.
+  it('prints each era\u2019s FULL role, including heldout-c\u2019s LESS BURNED caveat', () => {
+    expect(md).toMatch(/less burned, not pristine/i);
+    expect(md).toContain('see disclosure 3');
+    // The other roles survive whole too, not just the one with the caveat.
+    expect(md).toContain('The ONLY data any artifact, quantile, grid point or no-trade band may be fit on.');
+    expect(md).toContain('Paper \u00a74.1 DESIGN DATA.');
+    // Regression guard: restoring `split('.')[0]` renders `heldout-c`'s role
+    // as the bare stub `v0` (as a table cell, `v0.`). Both shapes must fail
+    // here if the truncation ever comes back.
+    const heldoutCRole = md
+      .split('\n')
+      .find((l) => l.includes('`heldout-c` \u2014'))!
+      .replace('- `heldout-c` \u2014 ', '');
+    expect(heldoutCRole).not.toMatch(/^v0\.?$/);
+    expect(md).not.toMatch(/\bv0\.\s*\|/); // the table-cell variant
+    expect(md).not.toMatch(/\u2014\s*v0\.?\s*$/m); // the list variant
+  });
+
+  // FINAL-REVIEW FIX 2. `heldout-b` ends at the OPEN_ENDED sentinel
+  // (2099-12-31), so `eraBounds` reported a 26,793-day era. A sentinel must
+  // never reach a published document.
+  it('reports an open-ended era as open rather than leaking the 2099 sentinel', () => {
+    expect(md).not.toContain('2099');
+    expect(md).not.toContain('26793');
+    expect(md).not.toContain('26,793');
+    expect(md).toMatch(/\| `heldout-b` \| 2026-08-24 \| open \| open \|/);
+    // The Verdict line for that era must not print a sentinel day count either.
+    expect(md).toContain('**heldout-b** (open-ended,');
+  });
+
   it('states BOTH disclosed era deviations', () => {
     expect(md).toMatch(/lies in \*\*neither\*\* era/);
     expect(md).toMatch(/Held-out A \*\*precedes\*\* the burned window/);
@@ -254,6 +289,38 @@ describe('renderReport — mandatory disclosures', () => {
   it('says plainly when P8 k did NOT resolve', () => {
     expect(md).toMatch(/\*\*P8's `k` did not resolve\.\*\*/);
     expect(md).toMatch(/chosen because it moves a gate would not be a registration/);
+  });
+
+  // FINAL-REVIEW FIX 3. `.slice(0, 300)` cut a gate detail mid-token with no
+  // marker at all, so a reader could not tell anything had been dropped.
+  it('marks a truncated gate detail with an ellipsis and does not cut mid-word', () => {
+    const long = `${'liquiditycheck '.repeat(80)}TRAILING`;
+    const longDetailRun: RunSummary = {
+      ...fakeRun('heldout-c', false),
+      gate: {
+        pass: false,
+        checks: [
+          { name: 'Long detail', passed: false, detail: long },
+          { name: 'Short detail', passed: true, detail: 'all four tiers ran' },
+        ],
+        comparisons: [],
+        blockedReasons: ['Long detail'],
+      } as unknown as RegisteredGateResult,
+    };
+    const rendered = renderReport({ ...params, runs: [longDetailRun] });
+    const row = rendered.split('\n').find((l) => l.startsWith('| **FAIL** | Long detail |'))!;
+    expect(row).toBeDefined();
+    expect(row).toMatch(/\u2026 \|$/);
+    // Cut back to a word boundary: the last surviving token is WHOLE, not a
+    // prefix of one. Every token in the fixture is the same 14-char word, so
+    // a mid-word cut would leave a shorter fragment here.
+    const shown = row.slice('| **FAIL** | Long detail | '.length, -' |'.length).slice(0, -1);
+    expect(shown.split(' ').every((t) => t === 'liquiditycheck')).toBe(true);
+    // More than the old 300-char cap survives, and the tail is still dropped.
+    expect(row.length).toBeGreaterThan(400);
+    expect(row).not.toContain('TRAILING');
+    // A short detail is untouched and gains no ellipsis.
+    expect(rendered).toContain('| PASS | Short detail | all four tiers ran |');
   });
 
   it('distinguishes NOT PRODUCED from FAIL in the gate table', () => {
