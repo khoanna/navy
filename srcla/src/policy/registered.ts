@@ -37,3 +37,13 @@ export const BURNED_WINDOW = {
   startIso: '2026-05-26T00:00:00.000Z',
   endIso: '2026-08-23T23:59:59.999Z',
 } as const;
+
+/**
+ * §8.1 — no-trade band multiplier `k` grid. Reaches down to 0.05 because the old
+ * grid's smallest non-zero value (0.25) already blocked 99.28% of moves on the
+ * calibration era — its entire non-zero range was saturated, so the sweep could
+ * not locate an optimum. k=0 is a legitimate outcome meaning the band earns
+ * nothing on this data, a finding about P8 to be reported rather than an error.
+ */
+export const K_CANDIDATES = [0, 0.05, 0.1, 0.25, 0.5, 1, 2] as const;
+export type KCandidate = (typeof K_CANDIDATES)[number];

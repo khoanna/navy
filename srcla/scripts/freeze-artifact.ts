@@ -54,6 +54,7 @@ import type { EvaluationDataset } from '../src/evaluation/dataset.js';
 import type { PolicyArtifact } from '../src/policy/types.js';
 import type { CompletedLabel } from '../src/policy/types.js';
 import type { HorizonSeconds } from '../src/policy/registered.js';
+import { K_CANDIDATES } from '../src/policy/registered.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -62,15 +63,6 @@ function arg(name: string): string | undefined {
 
 /** §7.3's availability lag: an outcome is usable only once it is readable. */
 const AVAILABILITY_LAG_SECONDS = 900;
-
-/**
- * P8's no-trade band multiplier, swept rather than asserted.
- *
- * `config/bootstrap-artifact.json` says outright that k=1.0 "carries no such
- * registration and was never swept", and that calibrating it needs a
- * turnover-vs-return sweep over a real collected dataset. This is that sweep.
- */
-const K_CANDIDATES = [0, 0.25, 0.5, 1, 2, 4] as const;
 
 /**
  * Score each candidate `k` by RUNNING THE POLICY, on the calibration era.
