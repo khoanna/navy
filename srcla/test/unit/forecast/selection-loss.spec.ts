@@ -36,6 +36,36 @@ describe('P18: scale-normalized selection loss', () => {
   });
 
   /**
+   * §7.3 requires a non-discriminating term to be "reported as a diagnostic
+   * AND given zero weight". At `minIqr: 0` the second half is implicit, so
+   * `constantTerms` is what keeps the first half alive.
+   */
+  it('reports exactly-constant terms as a diagnostic even when the gate names nothing', () => {
+    const scored = scoreGrid(spreadFits(), { minIqr: MIN_DISCRIMINATING_IQR });
+    expect(scored[0]!.zeroWeighted).toEqual([]);
+    // downsideRate, turnover and sacrificedReturn are constant in `fit()`.
+    expect(scored[0]!.constantTerms).toEqual(
+      expect.arrayContaining(['downsideRate', 'turnover', 'sacrificedReturn']),
+    );
+    expect(scored[0]!.constantTerms).not.toContain('pointError');
+  });
+
+  /**
+   * The limit of that diagnostic, asserted so nobody reads it as "this term
+   * is informative". Standardization is scale-free, so a term whose spread is
+   * pure noise is NOT constant and takes its full weight.
+   */
+  it('does NOT flag a merely-uninformative term: the guard is constancy, not noise', () => {
+    const noisy = [1e-18, -2e-18, 3e-18, -1e-18];
+    const scored = scoreGrid(
+      noisy.map((v, i) => ({ point: { id: `p${i}` } as never, fit: fit({ sharpness: 1e-4 + v }) })),
+      { minIqr: MIN_DISCRIMINATING_IQR },
+    );
+    expect(scored[0]!.constantTerms).not.toContain('sharpness');
+    expect(Math.abs(scored[0]!.normalized['sharpness']!)).toBeGreaterThan(0.1);
+  });
+
+  /**
    * IMPORTANT I2. `MIN_DISCRIMINATING_IQR` is 0, so the gate names nothing —
    * and that costs nothing, because `scoreGrid`'s `sd = ... || 1` fallback
    * already makes a constant term's z-score 0 at every point. Labelling it
@@ -191,6 +221,7 @@ describe('P18: near-tie resolution', () => {
       },
       total: over.total,
       zeroWeighted: [],
+      constantTerms: [],
     }) as ScoredPoint;
 
   it('a real margin decides outright, economics notwithstanding', () => {

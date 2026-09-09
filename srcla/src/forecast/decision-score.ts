@@ -39,9 +39,20 @@
  * the next origin's position, positions accrue at each venue's observed
  * supply rate over the elapsed interval, movement cost is charged against
  * idle, and `lastAction` is reduced from the run's own action history through
- * the same `summariseLastAction` the live driver uses -- so §9.1's cooldown,
- * rolling turnover window and reversal allowance see real history rather than
- * a permanently neutral input.
+ * the same `summariseLastAction` the live driver uses.
+ *
+ * THE §9.1 BRAKES ARE STILL LOOSER HERE THAN IN PRODUCTION, and the cause is
+ * the stride, not the reduction. Origins are hourly and the registered stride
+ * is 12, so scored origins sit 12 h apart while `DEFAULT_DECIDE_OPTS.cost`
+ * sets `cooldownSeconds: 3600` and 86,400 s turnover/reversal windows. The
+ * cooldown therefore can NEVER bind in the scorer, and the 24 h windows hold
+ * at most 2 decisions where production would see 24. Measured `turnover` is
+ * consequently an UPPER-BIASED proxy: the aggregate brakes that would trim a
+ * thrashing candidate are materially weaker here than they would be live.
+ * This remains a large improvement on the permanently-neutral `lastAction` it
+ * replaces — the rolling window and the reversal allowance do bind across
+ * consecutive scored origins — but it is not the production envelope, and a
+ * report must not claim the brakes "see real history" without this caveat.
  *
  * DETERMINISTIC: the subsample is every Nth origin in time order, never a
  * random draw, and `everyNth` is recorded in the artifact's registration.
@@ -63,10 +74,25 @@ export interface DecisionScore {
    * §7.3's sixth term: ROUND-TRIP CHURN. Notional moved as a multiple of the
    * NAV at each origin, summed over every scored origin.
    *
+   * DOUBLE-SIDED. It sums `|delta|` PER VENUE, so a rotation of X out of one
+   * venue and into another books 2X, and a reported figure of "20x NAV" is
+   * ~10x NAV of round trips. That convention matches `notionalBase` and
+   * §9.1's turnover brakes, and it is scale-invariant across candidates, so
+   * the ranking is unaffected -- but any prose quoting the number has to say
+   * which side it counts.
+   *
    * Meaningful only because the replay is sequential: capital deployed at one
    * origin and pulled back at the next is counted twice, which is what makes
    * "lower is better" the correct direction. Comparable across candidates
    * only at a fixed `originsScored`, which the grid holds constant.
+   *
+   * It is also the ONLY term in the loss that prices churn at all. §9.1's
+   * claim that execution cost does not capture reversal risk is validated
+   * rather than merely asserted here: the movement cost this replay charges
+   * is ~$0.01 for a two-leg rotation at the dataset's own median gas and ETH
+   * price, about 1e-4 pp of APY -- four orders of magnitude below the 0.75 pp
+   * of realised return the registered winner trades away to churn less. If
+   * `turnover` carried no weight, nothing would restrain churn.
    */
   turnover: number;
   /**
@@ -75,10 +101,43 @@ export interface DecisionScore {
    * venue's observed supply rate and every executed move charged its §9.1
    * movement cost.
    *
+   * NOT COMPARABLE TO A §11 REPLAY NUMBER, for two reasons that both need
+   * saying wherever this is quoted:
+   *
+   *  1. Interest is accrued at the rate observed at the START of each
+   *     interval; the §11 replay credits the interval's END snapshot. The
+   *     start rate is the causal choice here (the end rate is not knowable
+   *     while the interval is being earned) but it is a different estimator.
+   *  2. The credited rate is the venue's DISPLAYED rate, with no post-deposit
+   *     capacity curve applied. A candidate that deploys size into a venue is
+   *     therefore credited a rate its own deposit would have depressed, so
+   *     this ledger UNDER-PRICES churn: the returns side is flattered for the
+   *     candidates that move most, which biases `sacrificedReturn` against
+   *     the low-churn candidates the loss ends up choosing. The bias runs
+   *     opposite to the selection, not toward it.
+   *
    * §7.3's seventh term is derived FROM this, not stored here, because it is
    * grid-relative -- see `sacrificedReturn`.
    */
   realizedNetReturn: number;
+  /**
+   * DIAGNOSTIC, NOT A LOSS TERM. §7.3's letter asks the decision terms to
+   * score "the realized net return, the realized turnover, and the return
+   * foregone by every hurdle rejection". This is that third quantity: the
+   * mean per-origin annualised conservative bound of the legs the hurdle
+   * REFUSED, as a fraction of NAV, clamped at a non-negative edge (a blocked
+   * leg whose bound is negative forgoes nothing -- refusing it is the hurdle
+   * working).
+   *
+   * It was P18's first definition of `sacrificedReturn` and it is NOT used as
+   * that term, because it is blind to the failure the term exists to detect:
+   * a candidate whose forecast admits no venue never reaches the cost gate,
+   * has no blocked legs, and scores this at its BEST value. `sacrificedReturn`
+   * below is the realised-return shortfall instead. But the paper asks for the
+   * quantity to be SCORED, so it is measured and reported rather than deleted
+   * along with the definition that used it.
+   */
+  foregoneEdge: number;
   /** Origins at which `decide` returned `action: 'rebalance'`. */
   rebalances: number;
   /** Origins actually visited, i.e. after the stride. */
@@ -131,7 +190,7 @@ export function scoreCandidateDecisions(
 
   const first = origins[0];
   if (first === undefined) {
-    return { turnover: 0, realizedNetReturn: 0, rebalances: 0, originsScored: 0 };
+    return { turnover: 0, realizedNetReturn: 0, foregoneEdge: 0, rebalances: 0, originsScored: 0 };
   }
 
   // The replay's own state. `origins` supplies the MARKET observations
@@ -151,6 +210,7 @@ export function scoreCandidateDecisions(
   let lastSeconds = first.origin.timestampSeconds;
 
   let turnover = 0;
+  let foregone = 0;
   let rebalances = 0;
   let scored = 0;
 
@@ -194,7 +254,18 @@ export function scoreCandidateDecisions(
     scored += 1;
 
     const nav = Number(totalAssetsBase);
-    if (out.action !== 'rebalance' || nav <= 0) continue;
+    if (nav <= 0) continue;
+
+    // §7.3's third named quantity, reported as a diagnostic. See
+    // `DecisionScore.foregoneEdge` for why it is not the loss term.
+    for (const leg of out.costGate.legs) {
+      if (leg.clears) continue;
+      const edge = Number(leg.edgeWad) / 1e18;
+      if (edge <= 0) continue;
+      foregone += edge * (Number(leg.amountBase) / nav);
+    }
+
+    if (out.action !== 'rebalance') continue;
 
     // ---- Apply the executed target.
     const moves: Move[] = [];
@@ -252,5 +323,11 @@ export function scoreCandidateDecisions(
       ? 0
       : ((Number(finalNav) / Number(initialNav) - 1) * Number(SECONDS_PER_YEAR)) / eraSeconds;
 
-  return { turnover, realizedNetReturn, rebalances, originsScored: scored };
+  return {
+    turnover,
+    realizedNetReturn,
+    foregoneEdge: scored === 0 ? 0 : foregone / scored,
+    rebalances,
+    originsScored: scored,
+  };
 }

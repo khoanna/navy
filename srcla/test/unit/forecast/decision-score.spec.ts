@@ -271,6 +271,28 @@ describe('P18: decision-focused loss terms', () => {
     expect(econ(deadIndex)).toBeGreaterThan(econ(0));
   });
 
+  /**
+   * §7.3 asks the decision terms to score "the realized net return, the
+   * realized turnover, and the return foregone by every hurdle rejection".
+   * The third is not the seventh LOSS term — it is blind to a candidate that
+   * never reaches the cost gate, which is the failure P18 exists to detect —
+   * but the paper asks for it, so it is measured and reported.
+   */
+  it('reports the foregone-edge diagnostic §7.3 names, alongside the shortfall', () => {
+    // A candidate whose hurdle blocks profitable legs books a positive
+    // foregone edge; one that trades those same legs books less.
+    expect(score(artifactThatNeverTrades()).foregoneEdge).toBeGreaterThan(0);
+    expect(score(artifactThatNeverTrades()).foregoneEdge).toBeGreaterThan(
+      score(artifactThatChurns()).foregoneEdge,
+    );
+    // And here is exactly why it is a diagnostic and not the loss term: the
+    // candidate that admits NOTHING has no blocked legs at all, so it scores
+    // the diagnostic's BEST value while being the worst possible policy.
+    const dead = score(artifactThatAdmitsNothing());
+    expect(dead.foregoneEdge).toBe(0);
+    expect(dead.foregoneEdge).toBeLessThan(score(artifactThatNeverTrades()).foregoneEdge);
+  });
+
   it('the subsample rule is deterministic and reported', () => {
     const a = score(artifactThatIsSteady(), 4);
     const b = score(artifactThatIsSteady(), 4);

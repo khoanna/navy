@@ -43,6 +43,7 @@
  * UNITS: returns and quantiles are WAD over the horizon; times are seconds.
  */
 import { writeFileSync } from 'fs';
+import { resolve as resolvePath } from 'path';
 import { PrismaClient } from '@prisma/client';
 import { loadEra } from '../src/evaluation/dataset.js';
 import { parseArtifact } from '../src/policy/artifact.js';
@@ -309,7 +310,11 @@ function sweepNoTradeBandK(
 async function main(): Promise<void> {
   const outPath = arg('out') ?? REGISTERED_ARTIFACT_PATH;
   const subsample = resolveSubsample();
-  if (!subsample.registered && outPath.endsWith(REGISTERED_ARTIFACT_PATH)) {
+  // Resolved, not suffix-matched: `config//registered-artifact.json` and
+  // `config/../config/registered-artifact.json` both name the registered
+  // artifact and neither ends with the literal path.
+  const writesRegisteredArtifact = resolvePath(outPath) === resolvePath(REGISTERED_ARTIFACT_PATH);
+  if (!subsample.registered && writesRegisteredArtifact) {
     throw new Error(
       `--selection-subsample ${subsample.everyNth} is not the registered stride ` +
         `(${SELECTION_SUBSAMPLE}), so this run may not write ${REGISTERED_ARTIFACT_PATH}. ` +
@@ -673,10 +678,12 @@ async function main(): Promise<void> {
     ] as const) {
       const xs = scored.map((sp) => (sp.fit.loss as unknown as Record<string, number>)[term] ?? 0);
       const iqr = interquartileRange(xs);
-      console.log(
-        `    ${term.padEnd(20)} IQR=${iqr.toExponential(4)} ` +
-          `${iqr < MIN_DISCRIMINATING_IQR ? 'ZERO-WEIGHTED' : 'weighted'}`,
-      );
+      const status = winner.constantTerms.includes(term)
+        ? 'CONSTANT (z=0 at every point, contributes nothing)'
+        : iqr < MIN_DISCRIMINATING_IQR
+          ? 'ZERO-WEIGHTED'
+          : 'weighted';
+      console.log(`    ${term.padEnd(20)} IQR=${iqr.toExponential(4)} ${status}`);
     }
     console.log('[freeze] top 5 by normalized total (all seven terms):');
     for (const sp of scored.slice(0, 5)) {
@@ -687,6 +694,7 @@ async function main(): Promise<void> {
           `H=${sp.point.horizonSeconds / 86_400}d cov=${sp.point.coverageTarget} ` +
           `turnover=${s.turnover.toFixed(4)} netApy=${(s.realizedNetReturn * 100).toFixed(4)}% ` +
           `sacrificed=${sacrificedReturn(s, gridBestNetReturn).toExponential(3)} ` +
+          `foregoneEdge=${s.foregoneEdge.toExponential(3)} ` +
           `rebalances=${s.rebalances}/${s.originsScored}`,
       );
     }
@@ -720,6 +728,7 @@ async function main(): Promise<void> {
           minDiscriminatingIqr: MIN_DISCRIMINATING_IQR,
           minSelectionMargin: MIN_SELECTION_MARGIN,
           zeroWeighted: winner.zeroWeighted,
+          constantTerms: winner.constantTerms,
           points: scored.map((sp) => ({
             point: sp.point,
             total: sp.total,
@@ -815,6 +824,11 @@ async function main(): Promise<void> {
         selectionNearTieResolved: nearTie,
         selectionResolvedBy: tieResolution,
         selectionZeroWeightedTerms: winner.zeroWeighted,
+        // §7.3's "reported as a diagnostic and given zero weight" clause. At
+        // MIN_DISCRIMINATING_IQR = 0 the zero-weighting is implicit (a
+        // constant term z-scores to 0 at every point), so the REPORT is what
+        // this field preserves. See ScoredPoint#constantTerms.
+        selectionConstantTerms: winner.constantTerms,
         selectionTermIqr: Object.fromEntries(
           (
             [
@@ -857,6 +871,18 @@ async function main(): Promise<void> {
         gridBestNetReturn,
         accuracyOnlySelection: accuracyOnly.reason,
         decisionScore: decisionScores.get(chosen.row.point) ?? null,
+        // §7.3's third named quantity — "the return foregone by every hurdle
+        // rejection" — reported for every candidate. It is NOT the seventh
+        // loss term (see decision-score.ts#sacrificedReturn for why a
+        // leg-level statistic cannot see non-trading upstream of the cost
+        // gate), but the paper asks for it to be scored, so it is scored.
+        foregoneEdgeByPoint: Object.fromEntries(
+          scored.map((sp) => [
+            `${sp.point.method}|${JSON.stringify(sp.point.methodParams)}|` +
+              `${sp.point.horizonSeconds}|${sp.point.coverageTarget}`,
+            decisionScores.get(sp.point)?.foregoneEdge ?? null,
+          ]),
+        ),
         loss: chosen.row.loss,
         coverageByMarket: chosen.row.coverageByMarket,
         noTradeBandKSweep: kSweep,

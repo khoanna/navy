@@ -300,7 +300,22 @@ export interface ScoredPoint {
   fit: FitPoint;
   normalized: Record<string, number>;
   total: number;
+  /** Terms dropped by the `minIqr` gate. Empty at the registered threshold. */
   zeroWeighted: string[];
+  /**
+   * §7.3 requires a non-discriminating term to be "reported as a diagnostic
+   * and given zero weight". At `MIN_DISCRIMINATING_IQR = 0` the zero-weighting
+   * happens implicitly — `sd === 0` makes the z-score 0 at every point via the
+   * `|| 1` fallback below — so this list is what keeps the REPORTING half of
+   * that clause alive. It names every term with zero sample standard
+   * deviation across the grid.
+   *
+   * NOTE THE LIMIT. Standardization is scale-free, so a term that is pure
+   * noise still takes its full weight on its own z-scores; `0` guards only
+   * against terms that are EXACTLY constant. Detecting an uninformative but
+   * non-constant term is a different test than this one.
+   */
+  constantTerms: string[];
 }
 
 const LOSS_TERMS = [
@@ -358,14 +373,18 @@ export function scoreGrid(
   fits: ReadonlyArray<{ point: GridPoint; fit: FitPoint }>,
   opts: { minIqr: number },
 ): ScoredPoint[] {
-  const stats: Record<string, { mean: number; sd: number; iqr: number }> = {};
+  const stats: Record<string, { mean: number; sd: number; iqr: number; constant: boolean }> = {};
   for (const term of LOSS_TERMS) {
     const xs = fits.map((f) => (f.fit.loss as unknown as Record<string, number>)[term] ?? 0);
     const mean = xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length);
-    const sd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, xs.length - 1)) || 1;
-    stats[term] = { mean, sd, iqr: interquartileRange(xs) };
+    const rawSd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, xs.length - 1));
+    // The `|| 1` is what makes a constant term inert: z becomes (raw-mean)/1,
+    // i.e. 0 at every point. `constant` records that it fired, so §7.3's
+    // "reported as a diagnostic" clause survives the threshold being 0.
+    stats[term] = { mean, sd: rawSd || 1, iqr: interquartileRange(xs), constant: !(rawSd > 0) };
   }
   const zeroWeighted = LOSS_TERMS.filter((t) => stats[t]!.iqr < opts.minIqr);
+  const constantTerms = LOSS_TERMS.filter((t) => stats[t]!.constant);
 
   return fits
     .map(({ point, fit }) => {
@@ -378,7 +397,14 @@ export function scoreGrid(
         if (zeroWeighted.includes(term)) continue;
         total += (LOSS_WEIGHTS as unknown as Record<string, number>)[term]! * z;
       }
-      return { point, fit, normalized, total, zeroWeighted: [...zeroWeighted] };
+      return {
+        point,
+        fit,
+        normalized,
+        total,
+        zeroWeighted: [...zeroWeighted],
+        constantTerms: [...constantTerms],
+      };
     })
     .sort((a, b) => a.total - b.total);
 }
