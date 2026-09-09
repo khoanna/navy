@@ -158,4 +158,19 @@ describe('v0.6 era re-cut', () => {
   it("says in heldout-c's role that it is less burned, not pristine", () => {
     expect(REGISTERED_ERAS['heldout-c'].role).toMatch(/less burned, not pristine/i);
   });
+
+  it('pins heldout-c to exactly 86 days, the whole statistical power v0.6 validation has', () => {
+    // heldout-c is the ONLY sealed era with enough span to say anything about
+    // a yield claim (heldout-b is a 16-day stub -- too short and too
+    // dominated by one venue's liquidity failure, see disclosure 3). There is
+    // no larger held-out pool behind this one: everything earlier is either
+    // calibration or burned-a design data. A boundary edit that narrows this
+    // further does not trade some spare margin away -- it shrinks the only
+    // era that can adjudicate v0.6 at all, so the exact day count is pinned
+    // here rather than left to whatever the start/end boundaries happen to
+    // produce.
+    expect(eraBounds('heldout-c').start).toBe('2026-03-01T00:00:00.000Z');
+    expect(eraBounds('heldout-c').end).toBe('2026-05-25T23:59:59.000Z');
+    expect(eraBounds('heldout-c').days).toBe(86);
+  });
 });

@@ -10,13 +10,16 @@
  * 2026-08-23)." Every number the §11.5 gate could produce was therefore
  * computed on data the design had already read, which §2.2 rejects.
  *
- * The fix is not to wait for wall-clock time. Base mainnet archive state for
- * all three venues is available and verified back to at least 2024-09-03
- * (probed at block 19_300_000: Comet getUtilization = 591542423036707633,
- * Aave getReserveData returns strategy 0x46Da..134E, Moonwell getCash =
- * 12571903786612), and this repository has never read any of it. That makes
- * ~20 months of genuinely unseen history available today, of which 267 days
- * are reserved below as the primary held-out era.
+ * The fix is not to wait for wall-clock time. Base mainnet archive state is
+ * available back to the DEPLOYMENT FLOOR, block 11_707_031 =
+ * 2024-03-12T00:30:09Z, found by binary search as the earliest block at
+ * which all seven required contracts have code (Comet USDC, Aave Pool,
+ * mToken, Multicall3, GasPriceOracle, and both Chainlink feeds) -- Comet
+ * USDC has no code before it. The dataset was collected from 2024-03-15 and
+ * verified: full hourly coverage, 0 rows missing IRM parameters, 21_769
+ * origins in total. Of that, 86 days are reserved below (`heldout-c`) as
+ * the primary held-out era; see disclosure 3 for why that number is small
+ * and why it is used anyway.
  *
  * ---------------------------------------------------------------------------
  * TWO DISCLOSED DEVIATIONS. Both belong in the report, not in a footnote.
