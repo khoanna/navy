@@ -36,12 +36,15 @@ describe('stressedCoverage', () => {
     expect(r.worst).toBe(0);
   });
 
-  it('caps the credit at our own balance', () => {
+  it('caps the credit at our own balance, with ample cash covering every stress level', () => {
     const r = stressedCoverage({
       holdings: M({ a: 100n }), idleBase: 0n,
       venueCashByMarket: M({ a: 10_000n }), totalAssetsBase: 100n,
     });
     expect(r.liquidBase).toBe(100n);
+    // Implied by liquidBase === totalAssetsBase but not the same assertion:
+    // state explicitly that ample external cash covers every demand level.
+    expect(r.worst).toBe(1);
   });
 
   it('is worst-case over the registered demand set, which the 50% leg dominates', () => {

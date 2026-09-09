@@ -440,6 +440,43 @@ describe('replay stressedLiquidCoverage reporting', () => {
     expect(r.snapshots[2]!.stressedLiquidCoverage).toBe(0);
     expect(r.minStressedLiquidCoverage).toBe(0);
   });
+
+  it('reflects the vault\'s own venue balance, not just idle — a re-point that dropped `holdings` would read 0 here', () => {
+    // Zero-cash and zero-idle cases (above) collapse to 0 whether or not
+    // `holdings` is threaded through at all, so they cannot tell a correct
+    // re-point from a broken one. This fixture gives the venue cash STRICTLY
+    // between the vault's balance and 2x that balance, so the resulting
+    // liquid figure — and therefore the coverage ratio — depends on the
+    // vault's actual venue balance being passed in.
+    const EXTERNAL = 4_000_000_000n; // 4,000 USDC of cash beyond our own balance
+    const d = dataset(1, (_day, t) => [
+      marketSnapshot('aa', t, {
+        cashBase: TIER + EXTERNAL,
+        supplyRateE18: 0n, // keep totalAssets deterministic — no yield to net out
+      }),
+    ]);
+    const r = runReplay({
+      dataset: d,
+      evaluationId: 'e',
+      startDate: d.snapshots[0]!.timestamp,
+      endDate: d.snapshots[0]!.timestamp,
+      tier: TIER,
+      policy: deployAllTo('aa'),
+    });
+
+    const snap = r.snapshots[0]!;
+    // Confirm the setup: the whole tier is deployed to 'aa', nothing idle.
+    expect(snap.idleBase).toBe(0n);
+
+    // liquid = min(balance, cash - balance) = min(TIER, EXTERNAL) = EXTERNAL,
+    // since EXTERNAL < TIER. The worst ratio is at the 50% demand level,
+    // which EXTERNAL does not fully cover.
+    const demand50 = (snap.totalAssets * 5000n) / 10_000n;
+    const expectedWorst = Number(EXTERNAL) / Number(demand50);
+    expect(snap.stressedLiquidCoverage).toBeCloseTo(expectedWorst, 12);
+    expect(snap.stressedLiquidCoverage).toBeGreaterThan(0);
+    expect(snap.stressedLiquidCoverage).toBeLessThan(1);
+  });
 });
 
 describe('annualizedSharePriceGrowth', () => {

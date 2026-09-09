@@ -62,5 +62,10 @@ describe('coverage parity between optimiser and replay', () => {
     expect(callSite).toMatch(/holdings:\s*vault\.getState\(\)\.strategyBalances/);
     expect(callSite).toMatch(/idleBase:\s*vault\.getState\(\)\.idleBase/);
     expect(callSite).toMatch(/totalAssetsBase:\s*vault\.getState\(\)\.totalAssets/);
+    // The hardest argument to get right: it must be a Map built from THIS
+    // snapshot's per-market cash, not some other source or a stale map.
+    expect(callSite).toMatch(
+      /venueCashByMarket:\s*new Map\(snapshot\.snapshots\.map\(\s*\(m\)\s*=>\s*\[m\.marketId,\s*m\.cashBase\]\s*\)\)/,
+    );
   });
 });
