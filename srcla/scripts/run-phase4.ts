@@ -8,10 +8,14 @@
  * harness that produced every earlier version of that file (defect V5).
  *
  * BOTH eras are reported, and the report says why:
- *   held-out A  267d, statistically powered, but PRECEDES the burned window,
- *               so it carries the disclosed design-knowledge caveat.
- *   held-out B  chronologically after everything including the burn, and
- *               therefore temporally clean, but short and low-powered.
+ *   heldout-c  86d, the v0.6 VALIDATION era. LESS BURNED, NOT PRISTINE: its
+ *              aggregate statistics were read while diagnosing v0.5, so it is
+ *              used because the alternative, heldout-b alone, is too short
+ *              and too dominated by one venue's liquidity failure to
+ *              adjudicate a yield claim -- not because it is clean.
+ *   heldout-b  SECONDARY, chronologically after everything including the
+ *              burned window and growing with the live collector -- clean
+ *              but low power; reported for temporal purity, not significance.
  * Neither alone is sufficient evidence. Reporting only the flattering one
  * would be the choice this whole phase exists to make impossible.
  *
