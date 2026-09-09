@@ -29,9 +29,9 @@
  * RUNTIME. P18's two decision-focused loss terms are NOT opt-in: a selection
  * made without them is the v0.6 selection, and there must be no flag that
  * quietly produces one. Measured cost on the registered 81-point grid over
- * the 443-day calibration era: 94.5 ms per decision at
+ * the 443-day calibration era: 63 ms per decision on average at
  * SELECTION_QUANTUM_STEPS allocation quanta, 886 origins per candidate after
- * the stride, i.e. ~84 s per grid point and ~113 minutes for the sweep.
+ * the stride, i.e. ~56 s per grid point and ~76 minutes for the sweep.
  * Budget for that; it is the price of a forecast selection that can see what
  * its consumer does with the forecast. See SELECTION_QUANTUM_STEPS for what
  * the registered quantum would have cost instead.
@@ -138,9 +138,10 @@ const SELECTION_TIER_BASE = 1_000_000_000_000n;
  * scenarios) plus a portfolio lower bound over the artifact's residual panel,
  * which on this era is 10,608 rows x 3 venues.
  *
- *   5 quanta  ->     56 leaves ->  94.5 ms/decision  -> ~38 min per horizon
- *                                                       group, ~113 min for
- *                                                       the 81-point grid.
+ *   5 quanta  ->     56 leaves ->  63 ms/decision on average (92 ms at
+ *                                    H=1d, 57 ms at H=7d, 41 ms at H=14d)
+ *                                    -> 4,547 s, ~76 min, for the 81-point
+ *                                    grid over the calibration era.
  *   50 quanta -> 23,426 leaves -> a 420x larger enumeration. A partial probe
  *                                 could not get below 12 s/decision even on
  *                                 early origins, where `admit` short-circuits
