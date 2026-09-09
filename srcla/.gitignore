@@ -31,10 +31,17 @@ config/*.grid.json
 
 # The P18 selection sweep whose numbers the Task 7 report quotes (winner, the
 # per-term IQR table, the -20.785 decomposition, the per-horizon churn
-# figures). Produced by scripts/freeze-artifact.ts at commit 6f2ad24f over the
-# calibration era, registered stride 12, 4,587 s. It is NOT the registered
-# artifact's sidecar -- config/registered-artifact.json still carries the
-# pre-P18 selection -- so it is named for the sweep rather than for an
-# artifact it does not describe. Committed for the same reason as above: it is
-# the only record of those numbers and reproducing it costs ~76 minutes.
+# figures). Produced by scripts/freeze-artifact.ts over the calibration era at
+# the registered stride of 12, 4,638 s. It is NOT the registered artifact's
+# sidecar -- config/registered-artifact.json still carries the pre-P18
+# selection -- so it is named for the sweep rather than for an artifact it
+# does not describe. Committed for the same reason as above: it is the only
+# record of those numbers and reproducing it costs ~77 minutes.
+#
+# Two sweeps produced it. The first (commit 6f2ad24f) is what the report's
+# numbers were read from; this file is the second (commit 9a30ec68), which
+# adds the `foregoneEdge` and `constantTerms` diagnostics and reproduces every
+# loss quantity of the first EXACTLY -- same winner, same total to all digits,
+# same seven IQRs. That equality is itself the check that the diagnostics do
+# not perturb the ranking.
 !config/p18-selection-grid.json

@@ -12,6 +12,7 @@
   "minDiscriminatingIqr": 0,
   "minSelectionMargin": 0.001,
   "zeroWeighted": [],
+  "constantTerms": [],
   "points": [
     {
       "point": {
@@ -47,6 +48,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 1.7893946507939637e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -90,6 +92,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 1.9026460136616445e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -133,6 +136,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 1.9413273627498984e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -176,6 +180,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 2.0402215111009204e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -219,6 +224,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 1.7633670759802332e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -262,6 +268,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 2.0843435572981403e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -305,6 +312,7 @@
       "decisionScore": {
         "turnover": 17.175014744856615,
         "realizedNetReturn": 0.03342732300588818,
+        "foregoneEdge": 7.639222685187337e-7,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -348,6 +356,7 @@
       "decisionScore": {
         "turnover": 17.174517184718873,
         "realizedNetReturn": 0.03342737301501021,
+        "foregoneEdge": 0.0000010385674565954218,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -391,6 +400,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 1.7373505007272681e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -434,6 +444,7 @@
       "decisionScore": {
         "turnover": 24.886689293422315,
         "realizedNetReturn": 0.04412778578352025,
+        "foregoneEdge": 0.00005971208146749909,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -477,6 +488,7 @@
       "decisionScore": {
         "turnover": 17.174517184718873,
         "realizedNetReturn": 0.03342737301501021,
+        "foregoneEdge": 0.0000013411089350281466,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -520,6 +532,7 @@
       "decisionScore": {
         "turnover": 17.174517184718873,
         "realizedNetReturn": 0.03342737301501021,
+        "foregoneEdge": 0.0000015623933699046874,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -563,6 +576,7 @@
       "decisionScore": {
         "turnover": 17.174719907382883,
         "realizedNetReturn": 0.03342743134275257,
+        "foregoneEdge": 2.019897037529116e-7,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -606,6 +620,7 @@
       "decisionScore": {
         "turnover": 24.886689293422315,
         "realizedNetReturn": 0.04412778578352025,
+        "foregoneEdge": 0.000059580961768500834,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -649,6 +664,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 2.312216147808717e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -692,6 +708,7 @@
       "decisionScore": {
         "turnover": 2.0263649328318887,
         "realizedNetReturn": 0.038122325597164414,
+        "foregoneEdge": 2.354056758898589e-9,
         "rebalances": 43,
         "originsScored": 886
       },
@@ -735,6 +752,7 @@
       "decisionScore": {
         "turnover": 17.173028716635677,
         "realizedNetReturn": 0.03342594085201357,
+        "foregoneEdge": 0.000001920423764547776,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -778,6 +796,7 @@
       "decisionScore": {
         "turnover": 17.174517184718873,
         "realizedNetReturn": 0.03342737301501021,
+        "foregoneEdge": 0.000001236047781987249,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -821,6 +840,7 @@
       "decisionScore": {
         "turnover": 17.175014744856615,
         "realizedNetReturn": 0.03342732300588818,
+        "foregoneEdge": 4.690095950849332e-7,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -864,6 +884,7 @@
       "decisionScore": {
         "turnover": 24.886689293422315,
         "realizedNetReturn": 0.04412778578352025,
+        "foregoneEdge": 0.00006002768343762759,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -907,6 +928,7 @@
       "decisionScore": {
         "turnover": 17.175014744856615,
         "realizedNetReturn": 0.03342732300588818,
+        "foregoneEdge": 7.800360651065743e-7,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -950,6 +972,7 @@
       "decisionScore": {
         "turnover": 25.879227206190713,
         "realizedNetReturn": 0.044082062845886366,
+        "foregoneEdge": 0.000058311421709220215,
         "rebalances": 102,
         "originsScored": 886
       },
@@ -993,6 +1016,7 @@
       "decisionScore": {
         "turnover": 24.886689293422315,
         "realizedNetReturn": 0.04412778578352025,
+        "foregoneEdge": 0.00006457265144820409,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -1036,6 +1060,7 @@
       "decisionScore": {
         "turnover": 26.029625424361928,
         "realizedNetReturn": 0.04403931608824063,
+        "foregoneEdge": 0.0000409848096681214,
         "rebalances": 99,
         "originsScored": 886
       },
@@ -1079,6 +1104,7 @@
       "decisionScore": {
         "turnover": 24.886651852807997,
         "realizedNetReturn": 0.04413286834086106,
+        "foregoneEdge": 0.0000667443038471126,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -1122,6 +1148,7 @@
       "decisionScore": {
         "turnover": 17.752165897945577,
         "realizedNetReturn": 0.0433981397289406,
+        "foregoneEdge": 0.00003707623435575855,
         "rebalances": 83,
         "originsScored": 886
       },
@@ -1165,6 +1192,7 @@
       "decisionScore": {
         "turnover": 17.612101319020688,
         "realizedNetReturn": 0.04341110018565262,
+        "foregoneEdge": 0.000037767828262292566,
         "rebalances": 82,
         "originsScored": 886
       },
@@ -1208,6 +1236,7 @@
       "decisionScore": {
         "turnover": 17.612101319020688,
         "realizedNetReturn": 0.04341110018565262,
+        "foregoneEdge": 0.0000380330998292705,
         "rebalances": 82,
         "originsScored": 886
       },
@@ -1251,6 +1280,7 @@
       "decisionScore": {
         "turnover": 23.672829541012483,
         "realizedNetReturn": 0.04410464454310849,
+        "foregoneEdge": 0.00004832621854500375,
         "rebalances": 90,
         "originsScored": 886
       },
@@ -1294,6 +1324,7 @@
       "decisionScore": {
         "turnover": 23.832077110086118,
         "realizedNetReturn": 0.04387832199472711,
+        "foregoneEdge": 0.000041318812175022656,
         "rebalances": 88,
         "originsScored": 886
       },
@@ -1337,6 +1368,7 @@
       "decisionScore": {
         "turnover": 19.868309121203705,
         "realizedNetReturn": 0.04357151926175771,
+        "foregoneEdge": 0.00009201491404779224,
         "rebalances": 87,
         "originsScored": 886
       },
@@ -1380,6 +1412,7 @@
       "decisionScore": {
         "turnover": 20.792232003027053,
         "realizedNetReturn": 0.04386249283727624,
+        "foregoneEdge": 0.00009486824872407846,
         "rebalances": 92,
         "originsScored": 886
       },
@@ -1423,6 +1456,7 @@
       "decisionScore": {
         "turnover": 23.672829541012483,
         "realizedNetReturn": 0.04410464454310849,
+        "foregoneEdge": 0.000048486612896245904,
         "rebalances": 90,
         "originsScored": 886
       },
@@ -1466,6 +1500,7 @@
       "decisionScore": {
         "turnover": 24.958479000431314,
         "realizedNetReturn": 0.0441699848593152,
+        "foregoneEdge": 0.00007724811473531553,
         "rebalances": 100,
         "originsScored": 886
       },
@@ -1509,6 +1544,7 @@
       "decisionScore": {
         "turnover": 19.868594656214093,
         "realizedNetReturn": 0.043549647606408386,
+        "foregoneEdge": 0.00007779819592335301,
         "rebalances": 87,
         "originsScored": 886
       },
@@ -1552,6 +1588,7 @@
       "decisionScore": {
         "turnover": 19.30289925007883,
         "realizedNetReturn": 0.04364339729460683,
+        "foregoneEdge": 0.00008818590357886631,
         "rebalances": 85,
         "originsScored": 886
       },
@@ -1595,6 +1632,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 8.27841367615635e-9,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -1638,6 +1676,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 7.947921665626052e-9,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -1681,6 +1720,7 @@
       "decisionScore": {
         "turnover": 22.31322158502424,
         "realizedNetReturn": 0.04321015802444242,
+        "foregoneEdge": 0.000025881387654698962,
         "rebalances": 92,
         "originsScored": 886
       },
@@ -1724,6 +1764,7 @@
       "decisionScore": {
         "turnover": 23.832077110086118,
         "realizedNetReturn": 0.04387832199472711,
+        "foregoneEdge": 0.000045374089284497164,
         "rebalances": 88,
         "originsScored": 886
       },
@@ -1767,6 +1808,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 2.3693915923415523e-8,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -1810,6 +1852,7 @@
       "decisionScore": {
         "turnover": 17.765133270911235,
         "realizedNetReturn": 0.04335920927911013,
+        "foregoneEdge": 0.000026733537285538884,
         "rebalances": 80,
         "originsScored": 886
       },
@@ -1853,6 +1896,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 9.463742966627612e-9,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -1896,6 +1940,7 @@
       "decisionScore": {
         "turnover": 23.672829541012483,
         "realizedNetReturn": 0.04410464454310849,
+        "foregoneEdge": 0.000050275429958261,
         "rebalances": 90,
         "originsScored": 886
       },
@@ -1939,6 +1984,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 1.5695158392861337e-7,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -1982,6 +2028,7 @@
       "decisionScore": {
         "turnover": 25.088812689450872,
         "realizedNetReturn": 0.04323594350399146,
+        "foregoneEdge": 0.000016900714411680253,
         "rebalances": 99,
         "originsScored": 886
       },
@@ -2025,6 +2072,7 @@
       "decisionScore": {
         "turnover": 25.32652217172441,
         "realizedNetReturn": 0.04410625213671186,
+        "foregoneEdge": 0.00007892407728622486,
         "rebalances": 101,
         "originsScored": 886
       },
@@ -2068,6 +2116,7 @@
       "decisionScore": {
         "turnover": 21.778025926933754,
         "realizedNetReturn": 0.0440254957092152,
+        "foregoneEdge": 0.00011769249078837963,
         "rebalances": 95,
         "originsScored": 886
       },
@@ -2111,6 +2160,7 @@
       "decisionScore": {
         "turnover": 22.570099704943107,
         "realizedNetReturn": 0.04402056197659823,
+        "foregoneEdge": 0.00009993950887870597,
         "rebalances": 98,
         "originsScored": 886
       },
@@ -2154,6 +2204,7 @@
       "decisionScore": {
         "turnover": 23.672645678997,
         "realizedNetReturn": 0.044139409468154193,
+        "foregoneEdge": 0.00005885016153542363,
         "rebalances": 91,
         "originsScored": 886
       },
@@ -2197,6 +2248,7 @@
       "decisionScore": {
         "turnover": 17.50157396269311,
         "realizedNetReturn": 0.04341651777092877,
+        "foregoneEdge": 0.00004041279968323391,
         "rebalances": 81,
         "originsScored": 886
       },
@@ -2240,6 +2292,7 @@
       "decisionScore": {
         "turnover": 22.149469211703337,
         "realizedNetReturn": 0.04383186975478308,
+        "foregoneEdge": 0.00011462431452226344,
         "rebalances": 98,
         "originsScored": 886
       },
@@ -2283,6 +2336,7 @@
       "decisionScore": {
         "turnover": 23.572800592748198,
         "realizedNetReturn": 0.04552762320176601,
+        "foregoneEdge": 0.00013010089564406132,
         "rebalances": 95,
         "originsScored": 886
       },
@@ -2326,6 +2380,7 @@
       "decisionScore": {
         "turnover": 23.311846121841782,
         "realizedNetReturn": 0.043827545160115264,
+        "foregoneEdge": 0.000029214721911200515,
         "rebalances": 88,
         "originsScored": 886
       },
@@ -2369,6 +2424,7 @@
       "decisionScore": {
         "turnover": 24.20933420629997,
         "realizedNetReturn": 0.04551208379198132,
+        "foregoneEdge": 0.00012407232980098134,
         "rebalances": 97,
         "originsScored": 886
       },
@@ -2412,6 +2468,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 3.6589668903860614e-7,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -2455,6 +2512,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 1.5942997857606022e-7,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -2498,6 +2556,7 @@
       "decisionScore": {
         "turnover": 24.756238750762762,
         "realizedNetReturn": 0.04519966774513383,
+        "foregoneEdge": 0.00012083069760580039,
         "rebalances": 98,
         "originsScored": 886
       },
@@ -2541,6 +2600,7 @@
       "decisionScore": {
         "turnover": 23.572800592748198,
         "realizedNetReturn": 0.04552762320176601,
+        "foregoneEdge": 0.00012986332819102297,
         "rebalances": 95,
         "originsScored": 886
       },
@@ -2584,6 +2644,7 @@
       "decisionScore": {
         "turnover": 23.845877509033915,
         "realizedNetReturn": 0.04500404655417788,
+        "foregoneEdge": 0.0001238799750096069,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -2627,6 +2688,7 @@
       "decisionScore": {
         "turnover": 17.50157396269311,
         "realizedNetReturn": 0.04341651777092877,
+        "foregoneEdge": 0.0000411477602744808,
         "rebalances": 81,
         "originsScored": 886
       },
@@ -2670,6 +2732,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 8.938763427986801e-9,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -2713,6 +2776,7 @@
       "decisionScore": {
         "turnover": 23.672829541012483,
         "realizedNetReturn": 0.04410464454310849,
+        "foregoneEdge": 0.00005349125051694123,
         "rebalances": 90,
         "originsScored": 886
       },
@@ -2756,6 +2820,7 @@
       "decisionScore": {
         "turnover": 24.688105702760303,
         "realizedNetReturn": 0.04519118992449492,
+        "foregoneEdge": 0.00011009267458521763,
         "rebalances": 98,
         "originsScored": 886
       },
@@ -2799,6 +2864,7 @@
       "decisionScore": {
         "turnover": 24.103102613646023,
         "realizedNetReturn": 0.04516058101865418,
+        "foregoneEdge": 0.00011850427629735553,
         "rebalances": 96,
         "originsScored": 886
       },
@@ -2842,6 +2908,7 @@
       "decisionScore": {
         "turnover": 24.50640404052951,
         "realizedNetReturn": 0.0454431812730034,
+        "foregoneEdge": 0.00013651363338954494,
         "rebalances": 97,
         "originsScored": 886
       },
@@ -2885,6 +2952,7 @@
       "decisionScore": {
         "turnover": 23.165482562009966,
         "realizedNetReturn": 0.044082183063074584,
+        "foregoneEdge": 0.00006639230261933146,
         "rebalances": 89,
         "originsScored": 886
       },
@@ -2928,6 +2996,7 @@
       "decisionScore": {
         "turnover": 23.02000730479533,
         "realizedNetReturn": 0.045286705289798355,
+        "foregoneEdge": 0.00011667891848370287,
         "rebalances": 92,
         "originsScored": 886
       },
@@ -2971,6 +3040,7 @@
       "decisionScore": {
         "turnover": 23.021097292835044,
         "realizedNetReturn": 0.04535448010744922,
+        "foregoneEdge": 0.00012780496981950058,
         "rebalances": 93,
         "originsScored": 886
       },
@@ -3014,6 +3084,7 @@
       "decisionScore": {
         "turnover": 22.06691946728698,
         "realizedNetReturn": 0.04513568474497618,
+        "foregoneEdge": 0.0001228005761568897,
         "rebalances": 88,
         "originsScored": 886
       },
@@ -3057,6 +3128,7 @@
       "decisionScore": {
         "turnover": 29.593732095597574,
         "realizedNetReturn": 0.045039137973103466,
+        "foregoneEdge": 0.00004004275145095771,
         "rebalances": 107,
         "originsScored": 886
       },
@@ -3100,6 +3172,7 @@
       "decisionScore": {
         "turnover": 13.89310077313356,
         "realizedNetReturn": 0.03311640450550161,
+        "foregoneEdge": 8.413723922201163e-9,
         "rebalances": 94,
         "originsScored": 886
       },
@@ -3143,6 +3216,7 @@
       "decisionScore": {
         "turnover": 30.11492333504533,
         "realizedNetReturn": 0.045031713719184824,
+        "foregoneEdge": 0.000021768988514062397,
         "rebalances": 108,
         "originsScored": 886
       },
@@ -3186,6 +3260,7 @@
       "decisionScore": {
         "turnover": 24.6511276373442,
         "realizedNetReturn": 0.04558710873133557,
+        "foregoneEdge": 0.00013302865743107007,
         "rebalances": 97,
         "originsScored": 886
       },
@@ -3229,6 +3304,7 @@
       "decisionScore": {
         "turnover": 24.825256772666048,
         "realizedNetReturn": 0.04547569992788306,
+        "foregoneEdge": 0.00013305551308820604,
         "rebalances": 98,
         "originsScored": 886
       },
@@ -3272,6 +3348,7 @@
       "decisionScore": {
         "turnover": 23.330244445811445,
         "realizedNetReturn": 0.04519359924968977,
+        "foregoneEdge": 0.0001341049711893107,
         "rebalances": 91,
         "originsScored": 886
       },
@@ -3315,6 +3392,7 @@
       "decisionScore": {
         "turnover": 17.765133270911235,
         "realizedNetReturn": 0.04335920927911013,
+        "foregoneEdge": 0.000028018448772282036,
         "rebalances": 80,
         "originsScored": 886
       },
@@ -3358,6 +3436,7 @@
       "decisionScore": {
         "turnover": 29.891538431611853,
         "realizedNetReturn": 0.04498594301097802,
+        "foregoneEdge": 0.00004576677895337856,
         "rebalances": 106,
         "originsScored": 886
       },
@@ -3401,6 +3480,7 @@
       "decisionScore": {
         "turnover": 32.50476475766956,
         "realizedNetReturn": 0.04487468420187464,
+        "foregoneEdge": 0.000015788117584462968,
         "rebalances": 116,
         "originsScored": 886
       },
@@ -3444,6 +3524,7 @@
       "decisionScore": {
         "turnover": 17.50153282409007,
         "realizedNetReturn": 0.0434014584506966,
+        "foregoneEdge": 0.00004609830401381296,
         "rebalances": 80,
         "originsScored": 886
       },
@@ -3487,6 +3568,7 @@
       "decisionScore": {
         "turnover": 17.50153282409007,
         "realizedNetReturn": 0.0434014584506966,
+        "foregoneEdge": 0.00004563776591281927,
         "rebalances": 80,
         "originsScored": 886
       },
