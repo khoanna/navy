@@ -269,10 +269,28 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).toContain('**heldout-b** (open-ended,');
   });
 
-  it('states BOTH disclosed era deviations', () => {
+  // v0.6 re-cut the eras. This test previously PINNED the v0.5 text, so it
+  // required the report to keep publishing claims about `heldout-a` -- an era
+  // `eras.ts` no longer defines -- including the assertion that nobody had
+  // looked at Sep 2025 - May 2026, which reading v0.5's diagnosis made false.
+  // A test that pins prose is only as honest as the prose it pinned, so this
+  // one now also asserts the retired claims are GONE.
+  it('states all THREE disclosed era deviations against the v0.6 era set', () => {
+    expect(md).toMatch(/\*\*Three deviations are disclosed, not buried:\*\*/);
     expect(md).toMatch(/lies in \*\*neither\*\* era/);
-    expect(md).toMatch(/Held-out A \*\*precedes\*\* the burned window/);
-    expect(md).toMatch(/A for statistical power, B for temporal purity/);
+    expect(md).toMatch(/`heldout-c` \(Mar–May 2026\) \*\*precedes\*\* the burned window/);
+    expect(md).toMatch(/`heldout-c` for what statistical power exists/);
+    expect(md).toMatch(/`heldout-b` for temporal purity/);
+    expect(md).toMatch(/`heldout-c` is \*\*less burned, not pristine\.\*\*/);
+  });
+
+  it('no longer publishes the retired v0.5 held-out-A claims', () => {
+    // `heldout-a` does not exist in eras.ts; and the era it covered was read
+    // while diagnosing v0.5, so "nobody has looked at" it is now untrue.
+    expect(md).not.toMatch(/Nobody has looked at/i);
+    expect(md).not.toMatch(/Held-out A \*\*precedes\*\*/);
+    expect(md).not.toMatch(/A for statistical power, B for temporal purity/);
+    expect(md).not.toMatch(/Two deviations are disclosed/);
   });
 
   it('says withdrawals are a registered schedule, not observed', () => {

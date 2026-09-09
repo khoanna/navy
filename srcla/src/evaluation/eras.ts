@@ -22,32 +22,40 @@
  * and why it is used anyway.
  *
  * ---------------------------------------------------------------------------
- * TWO DISCLOSED DEVIATIONS. Both belong in the report, not in a footnote.
+ * THREE DISCLOSED DEVIATIONS. All belong in the report, not in a footnote.
  *
  * 1. Paper §4.1's LETTER says the burned window "lies inside the calibration
  *    era". Here it lies in NEITHER era. Putting it in calibration would place
- *    fitting data AFTER held-out A in time, inverting walk-forward order and
+ *    fitting data AFTER `heldout-c` in time, inverting walk-forward order and
  *    creating exactly the look-ahead §7.3 forbids. Excluding it satisfies
  *    §4.1's actual purpose -- the window must never be held-out -- strictly
  *    more than including it would. This is a paper-owner decision recorded
- *    here; if the owner rules otherwise, held-out A must be abandoned and only
- *    held-out B survives.
+ *    here; if the owner rules otherwise, `heldout-c` must be abandoned and
+ *    only `heldout-b` survives.
  *
- * 2. Held-out A PRECEDES the burned window in time. The amendments P1-P8 and
- *    the code were designed with knowledge of what happened in May-Aug 2026.
- *    Nobody has looked at Sep 2025 - May 2026, so there is no direct
- *    contamination -- but a designer who knew the later period could in
- *    principle have chosen mechanisms that happen to suit the earlier one.
- *    Held-out B is chronologically clean and carries no such caveat, which is
- *    why BOTH are reported: A for statistical power, B for temporal purity.
- *    Neither alone is sufficient evidence.
+ * 2. `heldout-c` PRECEDES the burned window in time. The amendments P1-P8
+ *    and the code were designed with knowledge of what happened in May-Aug
+ *    2026, and `heldout-c` is Mar-May 2026 -- earlier. There is no direct
+ *    contamination from that knowledge, but a designer who knew the later
+ *    period could in principle have chosen mechanisms that happen to suit the
+ *    earlier one. `heldout-b` is chronologically after everything, including
+ *    the burned window, and carries no such caveat -- but it is 16 days long.
+ *    This is why BOTH sealed eras are reported: `heldout-c` for what little
+ *    statistical power exists, `heldout-b` for temporal purity. Neither alone
+ *    is sufficient evidence.
+ *
+ *    (In v0.5 this disclosure was about `heldout-a`, 2025-09-01 -> 2026-05-25.
+ *    Reading that era's aggregates while diagnosing v0.5 burned it; it is now
+ *    `burned-a`, is design data, and is reported by nothing. Disclosure 3 is
+ *    the residue of that burn.)
  *
  * ---------------------------------------------------------------------------
  * 3. `heldout-c` is LESS BURNED, NOT PRISTINE. Aggregate statistics spanning
  *    it -- net APY, worst stressed coverage, total cost and turnover over the
- *    whole of former held-out A -- were read while diagnosing v0.5. What is
- *    known is the era-wide direction, not this period's structure. It is used
- *    because the alternative, the 16-day `heldout-b`, is too short and too
+ *    whole of former held-out A (now `burned-a`) -- were read while diagnosing
+ *    v0.5. What is known is the era-wide direction, not this period's
+ *    structure. It is used because the alternative, `heldout-b`, is too
+ *    short (16 days) and too
  *    dominated by a single venue's liquidity failure to adjudicate a yield
  *    claim.
  *

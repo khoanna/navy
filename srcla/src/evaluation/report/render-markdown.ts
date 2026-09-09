@@ -490,22 +490,32 @@ export function renderReport(params: ReportParams): string {
   out.push('');
   out.push(eraTable());
   out.push('');
-  out.push('**Two deviations are disclosed, not buried:**');
+  out.push('**Three deviations are disclosed, not buried:**');
   out.push('');
   out.push(
     '1. Paper §4.1 says the burned window "lies inside the calibration era". Here it ' +
       'lies in **neither** era. Putting it in calibration would place fitting data *after* ' +
-      'held-out A in time, inverting walk-forward order and creating exactly the look-ahead ' +
+      '`heldout-c` in time, inverting walk-forward order and creating exactly the look-ahead ' +
       '§7.3 forbids. Excluding it satisfies §4.1\'s purpose — the window must never be ' +
       'held-out — strictly more than including it would. This is a paper-owner decision.',
   );
   out.push(
-    '2. Held-out A **precedes** the burned window in time. The amendments P1–P8 and the ' +
-      'code were designed with knowledge of May–Aug 2026. Nobody has looked at Sep 2025 – ' +
-      'May 2026, so there is no direct contamination, but a designer who knew the later ' +
-      'period could in principle have chosen mechanisms that suit the earlier one. ' +
-      'Held-out B is chronologically clean and carries no such caveat. **Both are reported: ' +
-      'A for statistical power, B for temporal purity. Neither alone is sufficient.**',
+    '2. `heldout-c` (Mar–May 2026) **precedes** the burned window in time. The amendments ' +
+      'P1–P8 and the code were designed with knowledge of May–Aug 2026, so a designer who ' +
+      'knew the later period could in principle have chosen mechanisms that suit the ' +
+      'earlier one. `heldout-b` is chronologically after everything, including the burned ' +
+      'window, and carries no such caveat — but it is only 16 days. **Both sealed eras are ' +
+      'reported: `heldout-c` for what statistical power exists, `heldout-b` for temporal ' +
+      'purity. Neither alone is sufficient.**',
+  );
+  out.push(
+    '3. `heldout-c` is **less burned, not pristine.** It was carved out of the era this ' +
+      "project called held-out A in v0.5. That era's *aggregate* statistics — net APY, " +
+      'worst stressed coverage, total cost and turnover — were read while diagnosing v0.5, ' +
+      'which is why the remainder of it is now `burned-a` and is reported by nothing. What ' +
+      "was learned is that era's overall direction, not this 86-day period's structure, so " +
+      '`heldout-c` is weaker evidence than a never-seen era would be and stronger than ' +
+      '`burned-a`. It is used because `heldout-b` alone cannot adjudicate a yield claim.',
   );
   out.push('');
 
