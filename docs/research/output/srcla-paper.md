@@ -1,8 +1,8 @@
 # Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
 
-**Research report version:** 0.5
+**Research report version:** 0.6
 
-**Date:** 2026-09-07
+**Date:** 2026-09-09
 
 **Release scope:** Base-native research release specification
 
@@ -37,6 +37,36 @@ violates this is rejected under §2.2.
 | P6 | Venue free cash gains a registered lower prediction bound | §7.2 | Feeds P3's exit term and P4's exitable fraction |
 | P7 | B2 is reserve-matched; the unconstrained form is retained as a diagnostic | §11.2 | The report had to introduce "B2r" mid-evaluation because B2 held no reserve |
 | P8 | Action rule gains an uncertainty-driven no-trade band; cadence/horizon relationship stated | §9.1 | Movement cost is ~$0.0105 per rebalance yet H3 still helped by 0.06–0.09 pp — the gain is churn suppression |
+
+## Amendment Record (v0.5 → v0.6)
+
+The v0.5 registered evaluation ran to completion on 267 days of sealed held-out
+data and returned `FAIL`. Four of nine §11.5 checks passed; five did not. `FAIL`
+is a legitimate outcome — §11.5 requires publishing one rather than retuning
+against held-out data. The four amendments below close three defects that
+evaluation *diagnosed* — each a flaw in the specification or the
+implementation, not a property of the market — and are registered here, before
+the code they justify is written.
+
+**Second burned-window declaration.** The window `2025-06-01 → 2026-02-28` was
+inspected while diagnosing v0.5 and is therefore design data. Additionally,
+**aggregate statistics spanning `2026-03-01 → 2026-05-25` were read** — net
+APY, worst stressed coverage, total cost and turnover over the whole of the
+former held-out era. That era (`heldout-c`) is therefore *less burned, not pristine*, and every result drawn from it carries this caveat. It is used
+because the alternative, the 16-day `heldout-b`, is too short and too
+dominated by a single venue's liquidity failure to adjudicate a yield claim.
+
+| ID | Amendment | Section | Evidence |
+|---|---|---|---|
+| P9 | Where `C_move ≪ k·σ` the movement gate reduces to the no-trade band alone; `k` must be registered by a turnover-vs-return sweep, never asserted | §9.1 | SRCLA's measured movement cost over 267d: $0.01 (0.02 bps/yr). B1 at 182× NAV turnover: $0.13 (0.17 bps/yr). At `k=1.0` the band is ≈$50 on a 500k move against `C_move` ≈$0.0001. SRCLA forfeited ~20 bps/yr to save $0.12 |
+| P10 | The optimiser's liquidity feasibility test and §11.4's coverage metric are the same function | §8.2, §11.4 | SRCLA scored 0.836 @1M and 0.792 @10M while its own stress test reported the allocation feasible |
+| P11 | Stressed coverage is reported as a distribution (min, p05, median). **The gate remains on the minimum.** | §11.4 | The metric is the worst of 6,408 origins. Worst-case universe cash $3.6M against a $89M average — one dry hour sets the score |
+| P12 | Where a tier's registered stress demand exceeds observed worst-case universe liquidity, the coverage check reports **CAPACITY-INFEASIBLE** | §11.1, §11.4 | The 10M tier needs $5M liquid against a $3.6M worst-case universe |
+
+**P12 is not gate-softening.** `CAPACITY-INFEASIBLE` does not verify and does
+not pass; the overall gate still blocks, exactly as the existing `null` /
+NOT PRODUCED outcome does. It only distinguishes "the policy allocated badly"
+from "no policy could have satisfied this".
 
 ## 1. Introduction
 
@@ -420,6 +450,8 @@ repeated entry and exit incur self-impact and reversal risk that execution cost 
 not capture. Decisions are evaluated hourly while the forecast horizon is measured in
 days; the band, not the cadence, governs how often capital actually moves. Base costs include both L2 execution and L1 data availability [47]. Cooldown, minimum turnover, maximum turnover, and reversal allowances prevent repeated small moves. A market that becomes ineligible invokes a bounded safety unwind and bypasses the economic gate.
 
+Where measured $C_{\mathrm{move}}$ is negligible against $k\hat\sigma$ — as it is on Base, where a full three-venue rebalance costs on the order of a hundredth of a cent — the action rule reduces to the no-trade band alone. $k$ is therefore not a nuisance parameter: it is the gate. It **must** be registered by a turnover-versus-return sweep over the calibration era before any held-out evaluation, and a value asserted without such a sweep makes every result that depends on it provisional.
+
 ### 9.2 Base interest and incentives
 
 Base lending interest requires no harvest. Aave aUSDC indexed value, Compound's positive base balance, and Moonwell's mUSDC exchange rate grow and return with principal.
@@ -541,6 +573,8 @@ delays, costs, and rules fixed.
 Forecast metrics include bias, mean absolute error, root mean squared error, mean absolute scaled error, pinball loss, lower-bound coverage, exception independence, exceedance shortfall, and sharpness. Controller metrics include realized net APY, share-price growth, cohort profit, Base L2 and L1 data fees, swap costs, turnover, reversals, drawdown, expected shortfall, withdrawal success, stressed liquid coverage, unavailable assets, dependency concentration, and policy violations.
 
 Pinned Base-fork jobs validate exact adapter math, transaction success, gas, L1 data fee, swap output, protocol rounding, and balance deltas. Historical ETH/USD and USDC/USD oracle rounds convert transaction cost consistently. DEX price impact already embedded in executed output is not subtracted twice.
+
+Stressed liquid coverage is reported as a distribution — minimum, 5th percentile and median over the era's origins — and the gate tests the **minimum**. Where a tier's registered stress demand exceeds the observed worst-case liquidity of the whole admitted venue set, the coverage check reports **CAPACITY-INFEASIBLE**: it **does not verify and does not pass**, and the release gate still blocks. The distinction exists so that "the policy allocated badly" is separable from "no policy could have satisfied this on the admitted venues".
 
 ### 11.5 Two mandatory release gates
 
