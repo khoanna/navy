@@ -64,6 +64,21 @@ function arg(name: string): string | undefined {
 /** §7.3's availability lag: an outcome is usable only once it is readable. */
 const AVAILABILITY_LAG_SECONDS = 900;
 
+/** Registered until the P18 sweep resolves them (see the plan's open registrations). */
+const PAYBACK_SECONDS = 30 * 24 * 60 * 60;
+const ADJUSTMENT_RATE = 1;
+
+/**
+ * Overlapping horizons mean W consecutive labels carry far less than W
+ * independent observations. The registered deflation is the Newey-West style
+ * ratio of the window to the overlap factor, floored at 1.
+ */
+function effectiveWindow(point: { methodParams: Record<string, number>; horizonSeconds: number }, horizonSeconds: number): number {
+  const w = point.methodParams['windowObservations'] ?? 24;
+  const overlap = Math.max(1, horizonSeconds / 3600);
+  return Math.max(1, w / overlap);
+}
+
 /**
  * Score each candidate `k` by RUNNING THE POLICY, on the calibration era.
  *
@@ -321,14 +336,23 @@ async function main(): Promise<void> {
       minObservations,
       availabilityLagSeconds: AVAILABILITY_LAG_SECONDS,
       noTradeBandK: k,
+      paybackSeconds: PAYBACK_SECONDS,
+      adjustmentRate: ADJUSTMENT_RATE,
+      edgeWindowEffective: effectiveWindow(chosen.row.point, horizon),
+      ...(panel !== undefined
+        ? {
+            residualPanel: {
+              marketIds: panel.marketIds,
+              originsSeconds: panel.originsSeconds,
+              rows: panel.rows.map((r) => r.map((v) => v.toString())),
+            },
+          }
+        : {}),
       pinnedConfigDigests,
       configDigest: 'registered-2026-09-08',
     });
 
-    const kBaseArtifact: PolicyArtifact = {
-      ...parseArtifact(artifactJsonFor(1.0), { requireProvisional: false }),
-      ...(panel !== undefined ? { residualPanel: panel } : {}),
-    };
+    const kBaseArtifact: PolicyArtifact = parseArtifact(artifactJsonFor(1.0), { requireProvisional: false });
 
     const gas = await loadGasSeries(
       prisma,

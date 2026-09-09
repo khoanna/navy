@@ -276,6 +276,22 @@ export interface PolicyArtifact {
   availabilityLagSeconds: number;
   /** P8 band multiplier. */
   noTradeBandK: number;
+  /**
+   * §9.1's registered payback period, in seconds. A move must repay its own
+   * movement cost within this window at the conservative bound. Registered
+   * jointly with `noTradeBandK` and `adjustmentRate` by the turnover-vs-return
+   * sweep (paper P15, P18).
+   */
+  paybackSeconds: number;
+  /** §9.1.4's partial-adjustment rate lambda, in (0, 1]. */
+  adjustmentRate: number;
+  /**
+   * HAC-adjusted effective sample size of the estimation window, used as the
+   * denominator of the edge standard error (§9.1.3). Overlapping horizons make
+   * the nominal observation count an overstatement, so this is NOT
+   * `methodParams.windowObservations`.
+   */
+  edgeWindowEffective: number;
   configDigest: string;
   /** Paper §6.2 — market id -> pinned configuration digest at registration. */
   pinnedConfigDigests: Record<string, string>;

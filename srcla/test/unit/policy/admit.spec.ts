@@ -75,6 +75,9 @@ const artifact: PolicyArtifact = {
   minObservations: 30,
   availabilityLagSeconds: 0,
   noTradeBandK: 1,
+  paybackSeconds: 2_592_000,
+  adjustmentRate: 1,
+  edgeWindowEffective: 24,
   configDigest: '0xartifact',
   pinnedConfigDigests: { aave: '0xdigest' },
 };

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { hashData } from '../domain/hashing.js';
-import type { PolicyArtifact } from './types.js';
+import type { PolicyArtifact, ResidualPanel } from './types.js';
 
 /**
  * §7.3 — the selected parameter artifact and its content hash are immutable for
@@ -22,6 +22,28 @@ function need<T>(value: T | undefined | null, field: string): T {
     throw new Error(`bootstrap-artifact.json is missing required field '${field}'`);
   }
   return value;
+}
+
+/**
+ * P23: a registered artifact must carry the panel P2 and P8 actually read; a
+ * silent absence let the run degrade to a frozen scalar without saying so.
+ */
+function parsePanel(raw: unknown, required: boolean): ResidualPanel | undefined {
+  if (raw === undefined || raw === null) {
+    if (required) {
+      throw new Error(
+        'registered artifact is missing residualPanel: P2 and P9.1.3 both read it, and a ' +
+        'silent fallback to portfolioResidualQuantileWad is the v0.6 defect P23 removes',
+      );
+    }
+    return undefined;
+  }
+  const p = raw as { marketIds: string[]; originsSeconds: number[]; rows: string[][] };
+  return {
+    marketIds: p.marketIds,
+    originsSeconds: p.originsSeconds,
+    rows: p.rows.map((r) => r.map((v) => BigInt(v))),
+  };
 }
 
 function needBigInt(raw: unknown, field: string): bigint {
@@ -164,6 +186,24 @@ export function parseArtifact(
     minObservations: need(raw['minObservations'], 'minObservations') as number,
     availabilityLagSeconds: need(raw['availabilityLagSeconds'], 'availabilityLagSeconds') as number,
     noTradeBandK: need(raw['noTradeBandK'], 'noTradeBandK') as number,
+    ...(requireProvisional
+      ? {
+          paybackSeconds: (raw['paybackSeconds'] as number) ?? 0,
+          adjustmentRate: (raw['adjustmentRate'] as number) ?? 1,
+          edgeWindowEffective: (raw['edgeWindowEffective'] as number) ?? 1,
+        }
+      : {
+          paybackSeconds: need(raw['paybackSeconds'], 'paybackSeconds') as number,
+          adjustmentRate: need(raw['adjustmentRate'], 'adjustmentRate') as number,
+          edgeWindowEffective: need(raw['edgeWindowEffective'], 'edgeWindowEffective') as number,
+        }),
+    // Ruling R3: parse once into a local, then spread from it — the brief's
+    // draft called parsePanel twice (once in the condition, once in the
+    // value), which would double-evaluate it.
+    ...(() => {
+      const panel = parsePanel(raw['residualPanel'], !requireProvisional);
+      return panel !== undefined ? { residualPanel: panel } : {};
+    })(),
     pinnedConfigDigests: need(raw['pinnedConfigDigests'], 'pinnedConfigDigests') as Record<string, string>,
     configDigest: need(raw['configDigest'], 'configDigest') as string,
     ...(provisional !== undefined ? { _provisional: provisional } : {}),
