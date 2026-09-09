@@ -36,10 +36,11 @@
  * UNITS: returns and residuals are WAD over the horizon (not annualized).
  */
 import type { CompletedLabel } from '../policy/types.js';
+import { forecastUtilization } from './state-space.js';
 
 const WAD = 10n ** 18n;
 
-export type ForecastMethod = 'rolling' | 'ew-residual' | 'direct-arx';
+export type ForecastMethod = 'rolling' | 'ew-residual' | 'direct-arx' | 'state-space';
 
 /** §7.2's registered horizons, in seconds. */
 export const REGISTERED_HORIZONS = [86_400, 604_800, 1_209_600] as const;
@@ -70,15 +71,23 @@ export const METHOD_PARAMS: Readonly<Record<ForecastMethod, Array<Record<string,
     'ew-residual': [{ decay: 0.9 }, { decay: 0.97 }, { decay: 0.99 }],
     // AR(1) on the label series: mu = mean + phi * (last - mean).
     'direct-arx': [{ phi: 0.3 }, { phi: 0.6 }, { phi: 0.9 }],
+    // P19 — exponentially-weighted level, half-life in observations. See
+    // `meanForecast`'s 'state-space' branch for what this candidate can and
+    // cannot do inside a label-only sweep.
+    'state-space': [
+      { halfLifeObservations: 12 },
+      { halfLifeObservations: 24 },
+      { halfLifeObservations: 72 },
+    ],
   });
 
 /**
- * The full registered grid: 3 methods x their parameters x 3 horizons x 3
+ * The full registered grid: 4 methods x their parameters x 3 horizons x 3
  * coverage targets.
  */
 export function registeredGrid(): GridPoint[] {
   const out: GridPoint[] = [];
-  for (const method of ['rolling', 'ew-residual', 'direct-arx'] as const) {
+  for (const method of ['rolling', 'ew-residual', 'direct-arx', 'state-space'] as const) {
     for (const methodParams of METHOD_PARAMS[method]) {
       for (const horizonSeconds of REGISTERED_HORIZONS) {
         for (const coverageTarget of REGISTERED_COVERAGES) {
@@ -158,11 +167,32 @@ export function meanForecast(
     return weightedSum / weightTotal;
   }
 
-  // direct-arx: AR(1) pull of the latest observation toward the sample mean.
-  const phi = BigInt(Math.round((params.phi ?? 0.6) * 1e9));
-  const mean = history.reduce((a, b) => a + b, 0n) / BigInt(history.length);
-  const last = history[history.length - 1]!;
-  return mean + ((last - mean) * phi) / 1_000_000_000n;
+  if (method === 'direct-arx') {
+    // AR(1) pull of the latest observation toward the sample mean.
+    const phi = BigInt(Math.round((params.phi ?? 0.6) * 1e9));
+    const mean = history.reduce((a, b) => a + b, 0n) / BigInt(history.length);
+    const last = history[history.length - 1]!;
+    return mean + ((last - mean) * phi) / 1_000_000_000n;
+  }
+
+  // state-space (P19): forecast the smooth bounded state and map it through
+  // the venue's own IRM (`state-space.ts#stateSpaceForecast`). THIS SWEEP'S
+  // ONLY INPUT IS `history`, the horizon-scaled REALIZED RETURN series
+  // derived from `CompletedLabel.realizedReturnWad` -- `CompletedLabel`
+  // carries no utilization or per-origin IRM parameters (those live on
+  // `MarketObservation`/`MarketSnapshot`, which this label-only calibration
+  // sweep never sees, and reaching them here would mean a schema change to
+  // `CompletedLabel` that is out of this candidate's scope). So here the
+  // candidate runs only the STATE half of P19 -- `forecastUtilization`'s
+  // half-life-parameterized exponential level, applied directly to the
+  // return series -- with no IRM mapping applied. The IRM half
+  // (`supplyRateAt`) is implemented and unit-tested standalone in
+  // `state-space.ts` and is exercised end to end only once a genuine
+  // per-origin utilization+IRM series is threaded through this sweep. It
+  // still competes on the same loss as every other method, on this
+  // degraded input, and wins only if it wins.
+  const halfLife = params.halfLifeObservations ?? 24;
+  return forecastUtilization(history, { halfLifeObservations: halfLife });
 }
 
 export interface SelectionLoss {

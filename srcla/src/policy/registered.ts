@@ -9,7 +9,7 @@ export type HorizonSeconds = (typeof REGISTERED_HORIZONS_SECONDS)[number];
 export const REGISTERED_COVERAGE_TARGETS = [0.9, 0.95, 0.99] as const;
 export type CoverageTarget = (typeof REGISTERED_COVERAGE_TARGETS)[number];
 
-export const REGISTERED_METHODS = ['rolling', 'ew-residual', 'arx'] as const;
+export const REGISTERED_METHODS = ['rolling', 'ew-residual', 'arx', 'state-space'] as const;
 export type ForecastMethod = (typeof REGISTERED_METHODS)[number];
 
 /** §11.1 — exactly these four, in USDC base units (6 decimals). */

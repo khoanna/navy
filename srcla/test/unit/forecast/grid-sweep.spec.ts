@@ -17,8 +17,8 @@ import type { CompletedLabel } from '../../../src/policy/types.js';
 describe('registeredGrid (closes F1)', () => {
   const grid = registeredGrid();
 
-  it('crosses 3 methods x 3 horizons x 3 coverage targets, per the amended §7.2 grid', () => {
-    expect(new Set(grid.map((p) => p.method)).size).toBe(3);
+  it('crosses 4 methods x 3 horizons x 3 coverage targets, per the amended §7.2 grid (P19)', () => {
+    expect(new Set(grid.map((p) => p.method)).size).toBe(4);
     expect(new Set(grid.map((p) => p.horizonSeconds))).toEqual(new Set(REGISTERED_HORIZONS));
     expect(new Set(grid.map((p) => p.coverageTarget))).toEqual(new Set(REGISTERED_COVERAGES));
   });
@@ -35,8 +35,9 @@ describe('registeredGrid (closes F1)', () => {
     expect(grid.filter((p) => p.coverageTarget === 0.99).length).toBe(grid.length / 3);
   });
 
-  it('sweeps method parameters as well, so the grid is 81 points not 9', () => {
-    expect(grid.length).toBe(3 * 3 * 3 * 3);
+  it('sweeps method parameters as well, so the grid is 108 points not 9 (P19 adds a 4th method)', () => {
+    // 4 methods x 3 params each = 12 method-configs; x 3 horizons x 3 coverages.
+    expect(grid.length).toBe(12 * 3 * 3);
   });
 });
 
@@ -94,9 +95,17 @@ describe('meanForecast', () => {
       ['rolling', { windowObservations: 24 }],
       ['ew-residual', { decay: 0.97 }],
       ['direct-arx', { phi: 0.6 }],
+      ['state-space', { halfLifeObservations: 24 }],
     ] as const) {
       expect(meanForecast(m, p as Record<string, number>, flat)).toBe(10n ** 15n);
     }
+  });
+
+  it('weights recent observations more heavily under state-space (P19)', () => {
+    const rising = Array.from({ length: 50 }, (_, i) => BigInt(i) * 10n ** 14n);
+    const fast = meanForecast('state-space', { halfLifeObservations: 4 }, rising);
+    const slow = meanForecast('state-space', { halfLifeObservations: 200 }, rising);
+    expect(fast).toBeGreaterThan(slow);
   });
 
   it('weights recent observations more heavily under ew-residual', () => {
