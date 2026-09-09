@@ -365,6 +365,31 @@ describe('P17/I2 hurdles are priced at the absolute post-move level', () => {
     expect(leg.edgeWad).toBe(pct(3) - pct(20));
     expect(leg.clears).toBe(false);
   });
+
+  it('discriminates the SOURCE level from zero: a smaller rotation lands on a different curve step', () => {
+    // The test above rotates 4,000 out of an 8,000 position, landing 'src' at
+    // 4,000 — but steppedCurve reads 20% at BOTH x=4,000 and x=0 (points[4]
+    // and points[0] are the same step), so that assertion would not move if
+    // the source were still priced at 0n. Rotate a SMALLER amount — 2,000 out
+    // of 8,000 — so the post-move level (6,000) lands on the curve's 0% step
+    // while the zero level (0) is still on its 20% step; the two readings
+    // now disagree, and edgeWad must reflect the 6,000 reading.
+    const src = steppedCurve('src');
+    const dst = flatCurve('dst', pct(3));
+    const current = new Map([['src', 8_000_000_000n], ['dst', 0n]]);
+    const target = new Map([['src', 6_000_000_000n], ['dst', 2_000_000_000n]]);
+    const leg = planLegs(current, target, input(), artifact(), [src, dst], params())[0]!;
+
+    expect(leg.kind).toBe('rotate');
+    expect(leg.fromMarketId).toBe('src');
+    expect(leg.amountBase).toBe(2_000_000_000n);
+    // Non-vacuity: the post-move (6,000) and zero readings genuinely differ.
+    expect(rateAt(src, 6_000_000_000n)).toBe(0n);
+    expect(rateAt(src, 0n)).toBe(pct(20));
+    // edge = bound(dst @ 2,000) - bound(src @ post-move 6,000) = 3% - 0%.
+    expect(leg.edgeWad).toBe(pct(3));
+    expect(leg.clears).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
