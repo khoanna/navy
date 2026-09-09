@@ -28,3 +28,13 @@ phase4-run.log
 # iteration output and is not evidence of anything registered.
 config/*.grid.json
 !config/registered-artifact.grid.json
+
+# The P18 selection sweep whose numbers the Task 7 report quotes (winner, the
+# per-term IQR table, the -20.785 decomposition, the per-horizon churn
+# figures). Produced by scripts/freeze-artifact.ts at commit 6f2ad24f over the
+# calibration era, registered stride 12, 4,587 s. It is NOT the registered
+# artifact's sidecar -- config/registered-artifact.json still carries the
+# pre-P18 selection -- so it is named for the sweep rather than for an
+# artifact it does not describe. Committed for the same reason as above: it is
+# the only record of those numbers and reproducing it costs ~76 minutes.
+!config/p18-selection-grid.json

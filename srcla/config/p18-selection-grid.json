@@ -1,0 +1,3500 @@
+{
+  "era": {
+    "start": "2024-03-15T00:00:00.000Z",
+    "end": "2025-05-31T23:59:59.000Z",
+    "days": 443
+  },
+  "selectionSubsample": 12,
+  "selectionSubsampleRegistered": true,
+  "selectionQuantumSteps": 5,
+  "selectionTierBase": "1000000000000",
+  "gridBestNetReturn": 0.04558710873133557,
+  "minDiscriminatingIqr": 0,
+  "minSelectionMargin": 0.001,
+  "zeroWeighted": [],
+  "points": [
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -20.785166131549,
+      "loss": {
+        "pointError": 0.00007461526954274143,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 1.442357526646947e-7,
+        "sharpness": 0.00010221712299503155,
+        "downsideRate": 0.606143256055588,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.6065619278333645,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": -0.0908909587079554,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": -0.6763287667797732,
+        "sharpness": -0.3473096797246082,
+        "downsideRate": 0.6707693439621814,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -20.73695443491423,
+      "loss": {
+        "pointError": 0.00001964519750493255,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.0000010462156381889904,
+        "sharpness": 0.000050792844094087735,
+        "downsideRate": 0.5627962854730827,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.5631387849387984,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": -0.5776284927037085,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": -0.33126921136221454,
+        "sharpness": -0.6605740447545992,
+        "downsideRate": -0.36294701998009665,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -20.059434269390216,
+      "loss": {
+        "pointError": 0.000025088787993580046,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.0000013550904934093584,
+        "sharpness": 0.00006546884196339098,
+        "downsideRate": 0.5625365283459965,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.5628933537754117,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": -0.5294277224972478,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": -0.21310668697282548,
+        "sharpness": -0.571171388033546,
+        "downsideRate": -0.36914157497001227,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -17.91788831741101,
+      "loss": {
+        "pointError": 0.00005645314915861385,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.0000021140931510454247,
+        "sharpness": 0.00014430189751297708,
+        "downsideRate": 0.5697447886226379,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.570176189954281,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": -0.25170911593765494,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": 0.07725579650141591,
+        "sharpness": -0.09093933387708308,
+        "downsideRate": -0.19724267399983567,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -17.08312712609617,
+      "loss": {
+        "pointError": 0.00029734847495069115,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 5.732462483814016e-7,
+        "sharpness": 0.00040835203451848406,
+        "downsideRate": 0.6051691668290149,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.6059657843204396,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": 1.8813205942379438,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": -0.5122074007745598,
+        "sharpness": 1.5175907276614975,
+        "downsideRate": 0.6475397627499953,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -16.967934669514396,
+      "loss": {
+        "pointError": 0.00006515475243113975,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.00000257426640674839,
+        "sharpness": 0.0001668153155118817,
+        "downsideRate": 0.5665627638158321,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.5670164243260257,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": -0.17465997334665576,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": 0.25329872337402254,
+        "sharpness": 0.04620700526102764,
+        "downsideRate": -0.27312597262631244,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -14.026623073758763,
+      "loss": {
+        "pointError": 0.000016067043030596583,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 2.3874583488306633e-7,
+        "sharpness": 0.00008260668277583433,
+        "downsideRate": 0.5349817903009393,
+        "turnover": 17.175014744856615,
+        "sacrificedReturn": 0.012159785725447389,
+        "total": 0.5353662121871984,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": -0.6093115889873784,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.6401731856231134,
+        "sharpness": -0.4667717749551291,
+        "downsideRate": -1.026252861838453,
+        "turnover": -0.25770138727870107,
+        "sacrificedReturn": 1.646723556506467
+      },
+      "decisionScore": {
+        "turnover": 17.175014744856615,
+        "realizedNetReturn": 0.03342732300588818,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -13.781499557950838,
+      "loss": {
+        "pointError": 0.00002071626746680976,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 2.934855037768241e-7,
+        "sharpness": 0.00010924371372371049,
+        "downsideRate": 0.5357485144719187,
+        "turnover": 17.174517184718873,
+        "sacrificedReturn": 0.012159735716325358,
+        "total": 0.5361511777964324,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": -0.5681446056965664,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.6192320913533614,
+        "sharpness": -0.30450537541564043,
+        "downsideRate": -1.0079684163161766,
+        "turnover": -0.25776868824851135,
+        "sacrificedReturn": 1.6467128957784518
+      },
+      "decisionScore": {
+        "turnover": 17.174517184718873,
+        "realizedNetReturn": 0.03342737301501021,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -13.352276724556663,
+      "loss": {
+        "pointError": 0.000520130320514233,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.0000010046012388646905,
+        "sharpness": 0.0007144515807286475,
+        "downsideRate": 0.6052016364699007,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.6063762423549464,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": 3.8539628358933253,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": -0.34718912971101995,
+        "sharpness": 3.3822756980468647,
+        "downsideRate": 0.6483140821237346,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -13.251829742060185,
+      "loss": {
+        "pointError": 0.000038820499803775486,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 4.2265609702798573e-7,
+        "sharpness": 0.00004736523527543894,
+        "downsideRate": 0.6226119736758035,
+        "turnover": 24.886689293422315,
+        "sacrificedReturn": 0.0014593229478153183,
+        "total": 0.6230599521592199,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": -0.4078390234786663,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": -0.5698168569389489,
+        "sharpness": -0.6814542150378524,
+        "downsideRate": 1.0635068909784886,
+        "turnover": 0.7853949876351206,
+        "sacrificedReturn": -0.6343547483819523
+      },
+      "decisionScore": {
+        "turnover": 24.886689293422315,
+        "realizedNetReturn": 0.04412778578352025,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -12.759061794911212,
+      "loss": {
+        "pointError": 0.000042830047091283985,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 4.330501990441986e-7,
+        "sharpness": 0.0001899390771003017,
+        "downsideRate": 0.5489106127404,
+        "turnover": 17.174517184718873,
+        "sacrificedReturn": 0.012159735716325358,
+        "total": 0.5493764353497028,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": -0.37233612004752425,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.5658405108161144,
+        "sharpness": 0.18707141106154018,
+        "downsideRate": -0.6940854348504164,
+        "turnover": -0.25776868824851135,
+        "sacrificedReturn": 1.6467128957784518
+      },
+      "decisionScore": {
+        "turnover": 17.174517184718873,
+        "realizedNetReturn": 0.03342737301501021,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -12.504604421749725,
+      "loss": {
+        "pointError": 0.000050698512661184807,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 5.685045153038943e-7,
+        "sharpness": 0.00023082481699455737,
+        "downsideRate": 0.5405724873809981,
+        "turnover": 17.174517184718873,
+        "sacrificedReturn": 0.012159735716325358,
+        "total": 0.5410672985973992,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": -0.30266407149736424,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.5140213883522122,
+        "sharpness": 0.4361375257546974,
+        "downsideRate": -0.8929287799051814,
+        "turnover": -0.25776868824851135,
+        "sacrificedReturn": 1.6467128957784518
+      },
+      "decisionScore": {
+        "turnover": 17.174517184718873,
+        "realizedNetReturn": 0.03342737301501021,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -12.26380099912233,
+      "loss": {
+        "pointError": 0.000038820499803775486,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 5.8797770183857265e-9,
+        "sharpness": 0.000055410136396149244,
+        "downsideRate": 0.6226119736758035,
+        "turnover": 17.174719907382883,
+        "sacrificedReturn": 0.012159677388583,
+        "total": 0.6230043864153565,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": -0.4078390234786663,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.729257942044172,
+        "sharpness": -0.632446608219235,
+        "downsideRate": 1.0635068909784886,
+        "turnover": -0.2577412675794193,
+        "sacrificedReturn": 1.646700461722988
+      },
+      "decisionScore": {
+        "turnover": 17.174719907382883,
+        "realizedNetReturn": 0.03342743134275257,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -11.97246732574511,
+      "loss": {
+        "pointError": 0.000016067043030596583,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.0000023230504449654084,
+        "sharpness": 0.000026202261415191967,
+        "downsideRate": 0.5349817903009393,
+        "turnover": 24.886689293422315,
+        "sacrificedReturn": 0.0014593229478153183,
+        "total": 0.5354059358123922,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": -0.6093115889873784,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 0.15719406574494166,
+        "sharpness": -0.8103739725953063,
+        "downsideRate": -1.026252861838453,
+        "turnover": 0.7853949876351206,
+        "sacrificedReturn": -0.6343547483819523
+      },
+      "decisionScore": {
+        "turnover": 24.886689293422315,
+        "realizedNetReturn": 0.04412778578352025,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -11.889755140078176,
+      "loss": {
+        "pointError": 0.00013544706698230042,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.0000043773190969313596,
+        "sharpness": 0.00033266240850056785,
+        "downsideRate": 0.5876030911098123,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.5882189827445024,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": 0.4477497593521322,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": 0.943070823233349,
+        "sharpness": 1.0565076917761886,
+        "downsideRate": 0.2286329815569073,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.95
+      },
+      "total": -11.676970879242841,
+      "loss": {
+        "pointError": 0.00013303523123060364,
+        "coverageDeviation": 0.0000292226767972803,
+        "exceedanceShortfall": 0.000004675072390439328,
+        "sharpness": 0.0003308437946636033,
+        "downsideRate": 0.5737710240924735,
+        "turnover": 2.0263649328318887,
+        "sacrificedReturn": 0.007464783134171156,
+        "total": 0.574385083350961,
+        "observations": 30798,
+        "achievedCoverage": 0.9500292226767972
+      },
+      "normalized": {
+        "pointError": 0.4263939389454162,
+        "coverageDeviation": -1.5133860030511055,
+        "exceedanceShortfall": 1.0569787060263807,
+        "sharpness": 1.045429132756064,
+        "downsideRate": -0.10122707165613581,
+        "turnover": -2.306737767671708,
+        "sacrificedReturn": 0.6458632409374715
+      },
+      "decisionScore": {
+        "turnover": 2.0263649328318887,
+        "realizedNetReturn": 0.038122325597164414,
+        "rebalances": 43,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500292226767972,
+        "compound-v3-usdc": 0.9500292226767972,
+        "moonwell-usdc": 0.9500292226767972
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -11.193185632117054,
+      "loss": {
+        "pointError": 0.00009713231889964599,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 5.562991376494708e-7,
+        "sharpness": 0.0003928190558504254,
+        "downsideRate": 0.558590505399016,
+        "turnover": 17.173028716635677,
+        "sacrificedReturn": 0.012161167879321998,
+        "total": 0.5592126865141952,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": 0.10848831569616182,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.5186906523288592,
+        "sharpness": 1.422967549593278,
+        "downsideRate": -0.4632443101316665,
+        "turnover": -0.2579700213898386,
+        "sacrificedReturn": 1.6470181980825285
+      },
+      "decisionScore": {
+        "turnover": 17.173028716635677,
+        "realizedNetReturn": 0.03342594085201357,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -11.085059402904072,
+      "loss": {
+        "pointError": 0.00009127323453436626,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 4.970185848606986e-7,
+        "sharpness": 0.0003406760358181945,
+        "downsideRate": 0.576736310778864,
+        "turnover": 17.174517184718873,
+        "sacrificedReturn": 0.012159735716325358,
+        "total": 0.5773262648968979,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": 0.05660851693097531,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.5413688977293214,
+        "sharpness": 1.1053247860922593,
+        "downsideRate": -0.030512432771102112,
+        "turnover": -0.25776868824851135,
+        "sacrificedReturn": 1.6467128957784518
+      },
+      "decisionScore": {
+        "turnover": 17.174517184718873,
+        "realizedNetReturn": 0.03342737301501021,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -10.717134372358284,
+      "loss": {
+        "pointError": 0.00015431144538734804,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 2.0862324836312176e-8,
+        "sharpness": 0.00022100306676003362,
+        "downsideRate": 0.6222286115903137,
+        "turnover": 17.175014744856615,
+        "sacrificedReturn": 0.012159785725447389,
+        "total": 0.6228193866533714,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": 0.614786124502248,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.723526249606185,
+        "sharpness": 0.3763057805856897,
+        "downsideRate": 1.0543646682173506,
+        "turnover": -0.25770138727870107,
+        "sacrificedReturn": 1.646723556506467
+      },
+      "decisionScore": {
+        "turnover": 17.175014744856615,
+        "realizedNetReturn": 0.03342732300588818,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -10.415979887644907,
+      "loss": {
+        "pointError": 0.00002071626746680976,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.0000030942535830324046,
+        "sharpness": 0.000033387915283869174,
+        "downsideRate": 0.5357485144719187,
+        "turnover": 24.886689293422315,
+        "sacrificedReturn": 0.0014593229478153183,
+        "total": 0.5361847580504325,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": -0.5681446056965664,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 0.4522239397241611,
+        "sharpness": -0.766600693813265,
+        "downsideRate": -1.0079684163161766,
+        "turnover": 0.7853949876351206,
+        "sacrificedReturn": -0.6343547483819523
+      },
+      "decisionScore": {
+        "turnover": 24.886689293422315,
+        "realizedNetReturn": 0.04412778578352025,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.99
+      },
+      "total": -9.165276905552211,
+      "loss": {
+        "pointError": 0.000269879484718232,
+        "coverageDeviation": 0.000032585777266613825,
+        "exceedanceShortfall": 3.6580719471572645e-8,
+        "sharpness": 0.0003866624224589242,
+        "downsideRate": 0.6219730368666538,
+        "turnover": 17.175014744856615,
+        "sacrificedReturn": 0.012159785725447389,
+        "total": 0.622762288238865,
+        "observations": 31302,
+        "achievedCoverage": 0.9900325857772666
+      },
+      "normalized": {
+        "pointError": 1.6380939061247384,
+        "coverageDeviation": -1.33815747023018,
+        "exceedanceShortfall": -0.7175130531349931,
+        "sharpness": 1.3854628165891236,
+        "downsideRate": 1.0482698530432566,
+        "turnover": -0.25770138727870107,
+        "sacrificedReturn": 1.646723556506467
+      },
+      "decisionScore": {
+        "turnover": 17.175014744856615,
+        "realizedNetReturn": 0.03342732300588818,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900325857772666,
+        "compound-v3-usdc": 0.9900325857772666,
+        "moonwell-usdc": 0.9900325857772666
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -9.083013225088054,
+      "loss": {
+        "pointError": 0.00015431144538734804,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.0000016910847899996882,
+        "sharpness": 0.00018898276198190227,
+        "downsideRate": 0.6222286115903137,
+        "turnover": 25.879227206190713,
+        "sacrificedReturn": 0.0015050458854492035,
+        "total": 0.6228692319261319,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": 0.614786124502248,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": -0.08456940530506084,
+        "sharpness": 0.18124576887974037,
+        "downsideRate": 1.0543646682173506,
+        "turnover": 0.9196476317597104,
+        "sacrificedReturn": -0.6246077305903067
+      },
+      "decisionScore": {
+        "turnover": 25.879227206190713,
+        "realizedNetReturn": 0.044082062845886366,
+        "rebalances": 102,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -6.955773337633025,
+      "loss": {
+        "pointError": 0.000042830047091283985,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.000004571232674916796,
+        "sharpness": 0.00007454672099718366,
+        "downsideRate": 0.5489106127404,
+        "turnover": 24.886689293422315,
+        "sacrificedReturn": 0.0014593229478153183,
+        "total": 0.5493969343968543,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": -0.37233612004752425,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 1.0172539996909804,
+        "sharpness": -0.5158711276873005,
+        "downsideRate": -0.6940854348504164,
+        "turnover": 0.7853949876351206,
+        "sacrificedReturn": -0.6343547483819523
+      },
+      "decisionScore": {
+        "turnover": 24.886689293422315,
+        "realizedNetReturn": 0.04412778578352025,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -5.144006595842055,
+      "loss": {
+        "pointError": 0.000269879484718232,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.000002957408482867724,
+        "sharpness": 0.0003306688427178118,
+        "downsideRate": 0.6219730368666538,
+        "turnover": 26.029625424361928,
+        "sacrificedReturn": 0.0015477926430949376,
+        "total": 0.6228063999006351,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": 1.6380939061247384,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 0.3998727618523304,
+        "sharpness": 1.0443633674914756,
+        "downsideRate": 1.0482698530432566,
+        "turnover": 0.9399907926620427,
+        "sacrificedReturn": -0.6154951619569353
+      },
+      "decisionScore": {
+        "turnover": 26.029625424361928,
+        "realizedNetReturn": 0.04403931608824063,
+        "rebalances": 99,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": -4.7778632980066655,
+      "loss": {
+        "pointError": 0.000050698512661184807,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.000005756941146697967,
+        "sharpness": 0.00008844451770781784,
+        "downsideRate": 0.5405724873809981,
+        "turnover": 24.886651852807997,
+        "sacrificedReturn": 0.0014542403904745094,
+        "total": 0.5410795549437365,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": -0.30266407149736424,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 1.4708561749654565,
+        "sharpness": -0.43120908565343913,
+        "downsideRate": -0.8929287799051814,
+        "turnover": 0.7853899233434648,
+        "sacrificedReturn": -0.6354382259402973
+      },
+      "decisionScore": {
+        "turnover": 24.886651852807997,
+        "realizedNetReturn": 0.04413286834086106,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": -3.581860227508511,
+      "loss": {
+        "pointError": 0.00007461526954274143,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 7.304176513484313e-7,
+        "sharpness": 0.00009430893081427306,
+        "downsideRate": 0.606143256055588,
+        "turnover": 17.752165897945577,
+        "sacrificedReturn": 0.002188969002394972,
+        "total": 0.6068531314147381,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": -0.0908909587079554,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": -0.4520802346342276,
+        "sharpness": -0.3954844884917367,
+        "downsideRate": 0.6707693439621814,
+        "turnover": -0.17963477907667313,
+        "sacrificedReturn": -0.4788119629962352
+      },
+      "decisionScore": {
+        "turnover": 17.752165897945577,
+        "realizedNetReturn": 0.0433981397289406,
+        "rebalances": 83,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": -2.41023624661158,
+      "loss": {
+        "pointError": 0.00001964519750493255,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.0000022582401201856888,
+        "sharpness": 0.000033851618385362114,
+        "downsideRate": 0.5627962854730827,
+        "turnover": 17.612101319020688,
+        "sacrificedReturn": 0.0021760085456829503,
+        "total": 0.5634286012163247,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": -0.5776284927037085,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 0.13240036223351756,
+        "sharpness": -0.7637759258095864,
+        "downsideRate": -0.36294701998009665,
+        "turnover": -0.19858019146542027,
+        "sacrificedReturn": -0.48157481701868343
+      },
+      "decisionScore": {
+        "turnover": 17.612101319020688,
+        "realizedNetReturn": 0.04341110018565262,
+        "rebalances": 82,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": -1.0133322415686647,
+      "loss": {
+        "pointError": 0.000025088787993580046,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000002951721129143111,
+        "sharpness": 0.00004318045045128634,
+        "downsideRate": 0.5625365283459965,
+        "turnover": 17.612101319020688,
+        "sacrificedReturn": 0.0021760085456829503,
+        "total": 0.5631824195008048,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": -0.5294277224972478,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 0.39769701959996656,
+        "sharpness": -0.7069469198213365,
+        "downsideRate": -0.36914157497001227,
+        "turnover": -0.19858019146542027,
+        "sacrificedReturn": -0.48157481701868343
+      },
+      "decisionScore": {
+        "turnover": 17.612101319020688,
+        "realizedNetReturn": 0.04341110018565262,
+        "rebalances": 82,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 0.6312215503542149,
+      "loss": {
+        "pointError": 0.000016067043030596583,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.0000012196401933660336,
+        "sharpness": 0.00004164787867361225,
+        "downsideRate": 0.5349817903009393,
+        "turnover": 23.672829541012483,
+        "sacrificedReturn": 0.0014824641882270825,
+        "total": 0.5356956631338807,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": -0.6093115889873784,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": -0.2649242730013175,
+        "sharpness": -0.7162829792675127,
+        "downsideRate": -1.026252861838453,
+        "turnover": 0.6212059130808812,
+        "sacrificedReturn": -0.6294215989894021
+      },
+      "decisionScore": {
+        "turnover": 23.672829541012483,
+        "realizedNetReturn": 0.04410464454310849,
+        "rebalances": 90,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 1.0045179304891105,
+      "loss": {
+        "pointError": 0.000038820499803775486,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 1.0262332436923413e-7,
+        "sharpness": 0.000051780479909763915,
+        "downsideRate": 0.6226119736758035,
+        "turnover": 23.832077110086118,
+        "sacrificedReturn": 0.0017087867366084586,
+        "total": 0.6233480811817912,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": -0.4078390234786663,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": -0.6922479310958712,
+        "sharpness": -0.6545576044020832,
+        "downsideRate": 1.0635068909784886,
+        "turnover": 0.6427460547152869,
+        "sacrificedReturn": -0.5811751384625742
+      },
+      "decisionScore": {
+        "turnover": 23.832077110086118,
+        "realizedNetReturn": 0.04387832199472711,
+        "rebalances": 88,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 1.0580690877901482,
+      "loss": {
+        "pointError": 0.000013362820152097973,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 2.8016136512065033e-7,
+        "sharpness": 0.00008278756186608224,
+        "downsideRate": 0.5075628663263377,
+        "turnover": 19.868309121203705,
+        "sacrificedReturn": 0.002015589469577861,
+        "total": 0.508356403201066,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.6332563779690988,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.624329346219914,
+        "sharpness": -0.46566990294905075,
+        "downsideRate": -1.6801253242816332,
+        "turnover": 0.1065989450098222,
+        "sacrificedReturn": -0.5157722607926565
+      },
+      "decisionScore": {
+        "turnover": 19.868309121203705,
+        "realizedNetReturn": 0.04357151926175771,
+        "rebalances": 87,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 1.1000592763509598,
+      "loss": {
+        "pointError": 0.000009760102594090443,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 2.034205940404593e-7,
+        "sharpness": 0.00005803753289451894,
+        "downsideRate": 0.5173000567214975,
+        "turnover": 20.792232003027053,
+        "sacrificedReturn": 0.0017246158940593323,
+        "total": 0.5180772321603265,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.6651569703252752,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.6536871365390841,
+        "sharpness": -0.6164411393369345,
+        "downsideRate": -1.4479177924740796,
+        "turnover": 0.23157058413444168,
+        "sacrificedReturn": -0.5778007472426608
+      },
+      "decisionScore": {
+        "turnover": 20.792232003027053,
+        "realizedNetReturn": 0.04386249283727624,
+        "rebalances": 92,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 1.5035822277483206,
+      "loss": {
+        "pointError": 0.00002071626746680976,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.0000016252354371579823,
+        "sharpness": 0.000053825269046877185,
+        "downsideRate": 0.5357485144719187,
+        "turnover": 23.672829541012483,
+        "sacrificedReturn": 0.0014824641882270825,
+        "total": 0.5364751532007019,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": -0.5681446056965664,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": -0.1097605972382217,
+        "sharpness": -0.6421012397364377,
+        "downsideRate": -1.0079684163161766,
+        "turnover": 0.6212059130808812,
+        "sacrificedReturn": -0.6294215989894021
+      },
+      "decisionScore": {
+        "turnover": 23.672829541012483,
+        "realizedNetReturn": 0.04410464454310849,
+        "rebalances": 90,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": 1.5180441088077017,
+      "loss": {
+        "pointError": 0.00009127323453436626,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.00000831126347212954,
+        "sharpness": 0.00015169167490153567,
+        "downsideRate": 0.576736310778864,
+        "turnover": 24.958479000431314,
+        "sacrificedReturn": 0.0014171238720203719,
+        "total": 0.5773283482536996,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": 0.05660851693097531,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 2.4480324292831828,
+        "sharpness": -0.045922583602393194,
+        "downsideRate": -0.030512432771102112,
+        "turnover": 0.7951054056079772,
+        "sacrificedReturn": -0.6433505645707075
+      },
+      "decisionScore": {
+        "turnover": 24.958479000431314,
+        "realizedNetReturn": 0.0441699848593152,
+        "rebalances": 100,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 2.0017818427525795,
+      "loss": {
+        "pointError": 0.00001705955814661305,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 2.2051200680517618e-7,
+        "sharpness": 0.00008361638186000746,
+        "downsideRate": 0.5498518938677759,
+        "turnover": 19.868594656214093,
+        "sacrificedReturn": 0.002037461124927184,
+        "total": 0.550649243643704,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.6005232730526441,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.6471486810982257,
+        "sharpness": -0.46062093046620317,
+        "downsideRate": -0.6716382443925158,
+        "turnover": 0.10663756704092205,
+        "sacrificedReturn": -0.5111097560443919
+      },
+      "decisionScore": {
+        "turnover": 19.868594656214093,
+        "realizedNetReturn": 0.043549647606408386,
+        "rebalances": 87,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 2.2843086263830594,
+      "loss": {
+        "pointError": 0.000023420033514978064,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 1.8651907909435886e-7,
+        "sharpness": 0.00009174987186895288,
+        "downsideRate": 0.5699565135186235,
+        "turnover": 19.30289925007883,
+        "sacrificedReturn": 0.0019437114367287373,
+        "total": 0.5707641205502859,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.544203861760817,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.6601529450640654,
+        "sharpness": -0.4110736614021483,
+        "downsideRate": -0.1921935670681815,
+        "turnover": 0.03012048586367728,
+        "sacrificedReturn": -0.5310949084890653
+      },
+      "decisionScore": {
+        "turnover": 19.30289925007883,
+        "realizedNetReturn": 0.04364339729460683,
+        "rebalances": 85,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 2.4125728451090875,
+      "loss": {
+        "pointError": 0.00001964519750493255,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 1.923296625217833e-7,
+        "sharpness": 0.00008362705639264293,
+        "downsideRate": 0.5627962854730827,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.5635016047366345,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": -0.5776284927037085,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.6579300603120198,
+        "sharpness": -0.4605559037753188,
+        "downsideRate": -0.36294701998009665,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 2.630937801696657,
+      "loss": {
+        "pointError": 0.000025088787993580046,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 2.4697756815790645e-7,
+        "sharpness": 0.00010720933602219402,
+        "downsideRate": 0.5625365283459965,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.56325935557938,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": -0.5294277224972478,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.6370240708039052,
+        "sharpness": -0.3168983161144167,
+        "downsideRate": -0.36914157497001227,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 2.653559435676506,
+      "loss": {
+        "pointError": 0.00002124906842019685,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 2.6561688661201677e-7,
+        "sharpness": 0.00010833836531021221,
+        "downsideRate": 0.5320161341148295,
+        "turnover": 22.31322158502424,
+        "sacrificedReturn": 0.002376950706893151,
+        "total": 0.5328302599171554,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.5634268708901823,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.6298934517709509,
+        "sharpness": -0.3100205406633974,
+        "downsideRate": -1.0969763123636347,
+        "turnover": 0.4373026478089957,
+        "sacrificedReturn": -0.4387388374915052
+      },
+      "decisionScore": {
+        "turnover": 22.31322158502424,
+        "realizedNetReturn": 0.04321015802444242,
+        "rebalances": 92,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 3.0695381498447976,
+      "loss": {
+        "pointError": 0.00015431144538734804,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 4.05578865550937e-7,
+        "sharpness": 0.0002067593612341664,
+        "downsideRate": 0.6222286115903137,
+        "turnover": 23.832077110086118,
+        "sacrificedReturn": 0.0017087867366084586,
+        "total": 0.6231592142602531,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": 0.614786124502248,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": -0.5763498872157914,
+        "sharpness": 0.28953654506894094,
+        "downsideRate": 1.0543646682173506,
+        "turnover": 0.6427460547152869,
+        "sacrificedReturn": -0.5811751384625742
+      },
+      "decisionScore": {
+        "turnover": 23.832077110086118,
+        "realizedNetReturn": 0.04387832199472711,
+        "rebalances": 88,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 3.394426040339886,
+      "loss": {
+        "pointError": 0.00005645314915861385,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 2.392625577190653e-7,
+        "sharpness": 0.00021510193958563747,
+        "downsideRate": 0.5697447886226379,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.5705528879439159,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": -0.25170911593765494,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.6399755092060165,
+        "sharpness": 0.3403575301336157,
+        "downsideRate": -0.19724267399983567,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 3.4537364102034704,
+      "loss": {
+        "pointError": 0.00029734847495069115,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000002925243287547453,
+        "sharpness": 0.00037664765632919653,
+        "downsideRate": 0.6051691668290149,
+        "turnover": 17.765133270911235,
+        "sacrificedReturn": 0.002227899452225443,
+        "total": 0.6062539188845113,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": 1.8813205942379438,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 0.3875677114013658,
+        "sharpness": 1.3244552649111279,
+        "downsideRate": 0.6475397627499953,
+        "turnover": -0.17788078652324657,
+        "sacrificedReturn": -0.47051293833223035
+      },
+      "decisionScore": {
+        "turnover": 17.765133270911235,
+        "realizedNetReturn": 0.04335920927911013,
+        "rebalances": 80,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 3.6522715522456934,
+      "loss": {
+        "pointError": 0.00007461526954274143,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 8.82904043810375e-9,
+        "sharpness": 0.00010668866663409804,
+        "downsideRate": 0.606143256055588,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.606914158693188,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": -0.0908909587079554,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.7281296779434425,
+        "sharpness": -0.32007010906394207,
+        "downsideRate": 0.6707693439621814,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 3.6942005661741195,
+      "loss": {
+        "pointError": 0.000042830047091283985,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.0000024243540650480155,
+        "sharpness": 0.000103853845974748,
+        "downsideRate": 0.5489106127404,
+        "turnover": 23.672829541012483,
+        "sacrificedReturn": 0.0014824641882270825,
+        "total": 0.5496883751304111,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": -0.37233612004752425,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": 0.1959485686655637,
+        "sharpness": -0.33733915615229887,
+        "downsideRate": -0.6940854348504164,
+        "turnover": 0.6212059130808812,
+        "sacrificedReturn": -0.6294215989894021
+      },
+      "decisionScore": {
+        "turnover": 23.672829541012483,
+        "realizedNetReturn": 0.04410464454310849,
+        "rebalances": 90,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 3.6998787712789705,
+      "loss": {
+        "pointError": 0.00006515475243113975,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 3.351182314655576e-7,
+        "sharpness": 0.00025480644131974214,
+        "downsideRate": 0.5665627638158321,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.5673998962696184,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": -0.17465997334665576,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.6033051613434486,
+        "sharpness": 0.5822278254570606,
+        "downsideRate": -0.27312597262631244,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 3.753249858317938,
+      "loss": {
+        "pointError": 0.000025439055275548012,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 1.8000251172089256e-7,
+        "sharpness": 0.00010381822572654515,
+        "downsideRate": 0.5532236717716015,
+        "turnover": 25.088812689450872,
+        "sacrificedReturn": 0.002351165227344111,
+        "total": 0.5540392994191164,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.5263262487908422,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.6626459095711728,
+        "sharpness": -0.33755614615534724,
+        "downsideRate": -0.5912298110481515,
+        "turnover": 0.8127345985529429,
+        "sacrificedReturn": -0.4442356743295728
+      },
+      "decisionScore": {
+        "turnover": 25.088812689450872,
+        "realizedNetReturn": 0.04323594350399146,
+        "rebalances": 99,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.9
+      },
+      "total": 3.980131972717623,
+      "loss": {
+        "pointError": 0.00009713231889964599,
+        "coverageDeviation": 0.000038336208548983564,
+        "exceedanceShortfall": 0.000009704879057069766,
+        "sharpness": 0.00016381401748827632,
+        "downsideRate": 0.558590505399016,
+        "turnover": 25.32652217172441,
+        "sacrificedReturn": 0.001480856594623707,
+        "total": 0.5592014312074349,
+        "observations": 31302,
+        "achievedCoverage": 0.900038336208549
+      },
+      "normalized": {
+        "pointError": 0.10848831569616182,
+        "coverageDeviation": -1.038541194747072,
+        "exceedanceShortfall": 2.9811711188260572,
+        "sharpness": 0.0279238180248668,
+        "downsideRate": -0.4632443101316665,
+        "turnover": 0.844887653986057,
+        "sacrificedReturn": -0.6297642988303288
+      },
+      "decisionScore": {
+        "turnover": 25.32652217172441,
+        "realizedNetReturn": 0.04410625213671186,
+        "rebalances": 101,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.900038336208549,
+        "compound-v3-usdc": 0.900038336208549,
+        "moonwell-usdc": 0.900038336208549
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 4.372149004292483,
+      "loss": {
+        "pointError": 0.0000063887039269017305,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 3.3595370520644474e-8,
+        "sharpness": 0.000009686875601600215,
+        "downsideRate": 0.6687464549064095,
+        "turnover": 21.778025926933754,
+        "sacrificedReturn": 0.0015616130221203714,
+        "total": 0.6694952344918073,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.69500932839123,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.7186551220417458,
+        "sharpness": -0.9109817392124321,
+        "downsideRate": 2.16369838185312,
+        "turnover": 0.3649110229669391,
+        "sacrificedReturn": -0.6125489934205472
+      },
+      "decisionScore": {
+        "turnover": 21.778025926933754,
+        "realizedNetReturn": 0.0440254957092152,
+        "rebalances": 95,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 4.440598128252019,
+      "loss": {
+        "pointError": 0.000024203133997419035,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 2.4776245684638697e-8,
+        "sharpness": 0.00003393773684441528,
+        "downsideRate": 0.6534946744816286,
+        "turnover": 22.570099704943107,
+        "sacrificedReturn": 0.0015665467547373371,
+        "total": 0.6542733498320942,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.5372698268657558,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.7220289481590713,
+        "sharpness": -0.7632513128258124,
+        "downsideRate": 1.7999817300898326,
+        "turnover": 0.4720484911397264,
+        "sacrificedReturn": -0.611497241672183
+      },
+      "decisionScore": {
+        "turnover": 22.570099704943107,
+        "realizedNetReturn": 0.04402056197659823,
+        "rebalances": 98,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 4.606932465131191,
+      "loss": {
+        "pointError": 0.000050698512661184807,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.000002943587908734949,
+        "sharpness": 0.00012716432702600705,
+        "downsideRate": 0.5405724873809981,
+        "turnover": 23.672645678997,
+        "sacrificedReturn": 0.0014476992631813762,
+        "total": 0.5413723696463232,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": -0.30266407149736424,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": 0.3945855916588413,
+        "sharpness": -0.19533730019759568,
+        "downsideRate": -0.8929287799051814,
+        "turnover": 0.6211810435404685,
+        "sacrificedReturn": -0.6368326351231478
+      },
+      "decisionScore": {
+        "turnover": 23.672645678997,
+        "realizedNetReturn": 0.044139409468154193,
+        "rebalances": 91,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 4.646718425559357,
+      "loss": {
+        "pointError": 0.00005645314915861385,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000005607739880424279,
+        "sharpness": 0.00009682439213848723,
+        "downsideRate": 0.5697447886226379,
+        "turnover": 17.50157396269311,
+        "sacrificedReturn": 0.0021705909604068027,
+        "total": 0.5704621462032112,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": -0.25170911593765494,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 1.4137780477983415,
+        "sharpness": -0.3801609018254978,
+        "downsideRate": -0.19724267399983567,
+        "turnover": -0.21353034061759715,
+        "sacrificedReturn": -0.48272971438107937
+      },
+      "decisionScore": {
+        "turnover": 17.50157396269311,
+        "realizedNetReturn": 0.04341651777092877,
+        "rebalances": 81,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.99
+      },
+      "total": 4.690799097756557,
+      "loss": {
+        "pointError": 0.00004223335771561787,
+        "coverageDeviation": 0.00007373794668175115,
+        "exceedanceShortfall": 4.231820727513109e-8,
+        "sharpness": 0.00005902582336907588,
+        "downsideRate": 0.6523917564757042,
+        "turnover": 22.149469211703337,
+        "sacrificedReturn": 0.001755238976552491,
+        "total": 0.6532010938029583,
+        "observations": 31734,
+        "achievedCoverage": 0.9900737379466817
+      },
+      "normalized": {
+        "pointError": -0.37761956073636727,
+        "coverageDeviation": 0.8060051364973301,
+        "exceedanceShortfall": -0.715318131693304,
+        "sharpness": -0.6104207109596376,
+        "downsideRate": 1.7736799060986839,
+        "turnover": 0.4151531774288772,
+        "sacrificedReturn": -0.571272651163492
+      },
+      "decisionScore": {
+        "turnover": 22.149469211703337,
+        "realizedNetReturn": 0.04383186975478308,
+        "rebalances": 98,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900737379466817,
+        "compound-v3-usdc": 0.9900737379466817,
+        "moonwell-usdc": 0.9900737379466817
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 4.738633331122596,
+      "loss": {
+        "pointError": 0.000009760102594090443,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.0000018207389220621537,
+        "sharpness": 0.000016192336084877386,
+        "downsideRate": 0.5173000567214975,
+        "turnover": 23.572800592748198,
+        "sacrificedReturn": 0.000059485529569559825,
+        "total": 0.5180833033193781,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.6651569703252752,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": -0.03496918928525613,
+        "sharpness": -0.8713520352850891,
+        "downsideRate": -1.4479177924740796,
+        "turnover": 0.6076757993988504,
+        "sacrificedReturn": -0.9327660256779454
+      },
+      "decisionScore": {
+        "turnover": 23.572800592748198,
+        "realizedNetReturn": 0.04552762320176601,
+        "rebalances": 95,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 5.033725771241976,
+      "loss": {
+        "pointError": 0.000269879484718232,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 7.10460325211664e-7,
+        "sharpness": 0.0003617432574786092,
+        "downsideRate": 0.6219730368666538,
+        "turnover": 23.311846121841782,
+        "sacrificedReturn": 0.0017595635712203059,
+        "total": 0.6230982239313446,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": 1.6380939061247384,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": -0.45971506795434447,
+        "sharpness": 1.2336612442292498,
+        "downsideRate": 1.0482698530432566,
+        "turnover": 0.5723785807590073,
+        "sacrificedReturn": -0.5703507528045901
+      },
+      "decisionScore": {
+        "turnover": 23.311846121841782,
+        "realizedNetReturn": 0.043827545160115264,
+        "rebalances": 88,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 5.226490329795114,
+      "loss": {
+        "pointError": 0.0000063887039269017305,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 1.2241292203611183e-7,
+        "sharpness": 0.000007163118604539198,
+        "downsideRate": 0.6687464549064095,
+        "turnover": 24.20933420629997,
+        "sacrificedReturn": 0.00007502493935424709,
+        "total": 0.6695133238668827,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.69500932839123,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": -0.6846772636315342,
+        "sharpness": -0.9263558611266591,
+        "downsideRate": 2.16369838185312,
+        "turnover": 0.6937745968293179,
+        "sacrificedReturn": -0.9294534016104409
+      },
+      "decisionScore": {
+        "turnover": 24.20933420629997,
+        "realizedNetReturn": 0.04551208379198132,
+        "rebalances": 97,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 5.311111864803111,
+      "loss": {
+        "pointError": 0.00013303523123060364,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 4.030379629575817e-7,
+        "sharpness": 0.0004873711261531043,
+        "downsideRate": 0.5737710240924735,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.5747926589661334,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": 0.4263939389454162,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.5773219296452219,
+        "sharpness": 1.998956068998577,
+        "downsideRate": -0.10122707165613581,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 5.487454191331796,
+      "loss": {
+        "pointError": 0.00013544706698230042,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 3.1660246690545214e-7,
+        "sharpness": 0.00048423882085891844,
+        "downsideRate": 0.5876030911098123,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.5886251394890966,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": 0.4477497593521322,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.6103885138548102,
+        "sharpness": 1.9798748169123137,
+        "downsideRate": 0.2286329815569073,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 5.790820814696049,
+      "loss": {
+        "pointError": 0.000024203133997419035,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 3.100545211299431e-7,
+        "sharpness": 0.00002805673433445727,
+        "downsideRate": 0.6534946744816286,
+        "turnover": 24.756238750762762,
+        "sacrificedReturn": 0.0003874409862017411,
+        "total": 0.6542907428880327,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.5372698268657558,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": -0.6128934824183631,
+        "sharpness": -0.7990769686521301,
+        "downsideRate": 1.7999817300898326,
+        "turnover": 0.7677499888353426,
+        "sacrificedReturn": -0.8628539020025813
+      },
+      "decisionScore": {
+        "turnover": 24.756238750762762,
+        "realizedNetReturn": 0.04519966774513383,
+        "rebalances": 98,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 5.99268495612022,
+      "loss": {
+        "pointError": 0.000013362820152097973,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.0000025713208264567517,
+        "sharpness": 0.000022316437040725066,
+        "downsideRate": 0.5075628663263377,
+        "turnover": 23.572800592748198,
+        "sacrificedReturn": 0.000059485529569559825,
+        "total": 0.5083565306017763,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.6332563779690988,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": 0.252171868283137,
+        "sharpness": -0.83404548207102,
+        "downsideRate": -1.6801253242816332,
+        "turnover": 0.6076757993988504,
+        "sacrificedReturn": -0.9327660256779454
+      },
+      "decisionScore": {
+        "turnover": 23.572800592748198,
+        "realizedNetReturn": 0.04552762320176601,
+        "rebalances": 95,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 6.3041924047062246,
+      "loss": {
+        "pointError": 0.00004223335771561787,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 5.386588915688696e-7,
+        "sharpness": 0.00004904264730021739,
+        "downsideRate": 0.6523917564757042,
+        "turnover": 23.845877509033915,
+        "sacrificedReturn": 0.0005830621771576866,
+        "total": 0.6532174910841616,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.37761956073636727,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": -0.5254390683054422,
+        "sharpness": -0.6712358235685605,
+        "downsideRate": 1.7736799060986839,
+        "turnover": 0.6446127240131361,
+        "sacrificedReturn": -0.8211522238659289
+      },
+      "decisionScore": {
+        "turnover": 23.845877509033915,
+        "realizedNetReturn": 0.04500404655417788,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 6.495979831558163,
+      "loss": {
+        "pointError": 0.00006515475243113975,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000006548830300615724,
+        "sharpness": 0.00011257930027698984,
+        "downsideRate": 0.5665627638158321,
+        "turnover": 17.50157396269311,
+        "sacrificedReturn": 0.0021705909604068027,
+        "total": 0.5673014059058482,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": -0.17465997334665576,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 1.7737996482913785,
+        "sharpness": -0.2841857826873026,
+        "downsideRate": -0.27312597262631244,
+        "turnover": -0.21353034061759715,
+        "sacrificedReturn": -0.48272971438107937
+      },
+      "decisionScore": {
+        "turnover": 17.50157396269311,
+        "realizedNetReturn": 0.04341651777092877,
+        "rebalances": 81,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 6.620420399294835,
+      "loss": {
+        "pointError": 0.00029734847495069115,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 3.2936582120373975e-8,
+        "sharpness": 0.000426154377718034,
+        "downsideRate": 0.6051691668290149,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.6063226560652731,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": 1.8813205942379438,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.7189071467666424,
+        "sharpness": 1.6260383297989118,
+        "downsideRate": 0.6475397627499953,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 7.048587973506637,
+      "loss": {
+        "pointError": 0.00009127323453436626,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.000003423173570608658,
+        "sharpness": 0.0002192025037817269,
+        "downsideRate": 0.576736310778864,
+        "turnover": 23.672829541012483,
+        "sacrificedReturn": 0.0014824641882270825,
+        "total": 0.5776251847827495,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": 0.05660851693097531,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": 0.5780548883988517,
+        "sharpness": 0.36533718306422974,
+        "downsideRate": -0.030512432771102112,
+        "turnover": 0.6212059130808812,
+        "sacrificedReturn": -0.6294215989894021
+      },
+      "decisionScore": {
+        "turnover": 23.672829541012483,
+        "realizedNetReturn": 0.04410464454310849,
+        "rebalances": 90,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 7.188061788779991,
+      "loss": {
+        "pointError": 0.00001705955814661305,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.0000023709334833183476,
+        "sharpness": 0.000029073288252701335,
+        "downsideRate": 0.5498518938677759,
+        "turnover": 24.688105702760303,
+        "sacrificedReturn": 0.0003959188068406519,
+        "total": 0.5506516313700993,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.6005232730526441,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": 0.17551210164715364,
+        "sharpness": -0.7928843661592319,
+        "downsideRate": -0.6716382443925158,
+        "turnover": 0.7585341778029111,
+        "sacrificedReturn": -0.8610466369212448
+      },
+      "decisionScore": {
+        "turnover": 24.688105702760303,
+        "realizedNetReturn": 0.04519118992449492,
+        "rebalances": 98,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 7.714668864092478,
+      "loss": {
+        "pointError": 0.000023420033514978064,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.000002421306556588497,
+        "sharpness": 0.00003996407370145465,
+        "downsideRate": 0.5699565135186235,
+        "turnover": 24.103102613646023,
+        "sacrificedReturn": 0.00042652771268138906,
+        "total": 0.570768308754406,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.544203861760817,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": 0.19478272014604658,
+        "sharpness": -0.7265403150379053,
+        "downsideRate": -0.1921935670681815,
+        "turnover": 0.6794055011807903,
+        "sacrificedReturn": -0.8545215629594317
+      },
+      "decisionScore": {
+        "turnover": 24.103102613646023,
+        "realizedNetReturn": 0.04516058101865418,
+        "rebalances": 96,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 8.338325996309868,
+      "loss": {
+        "pointError": 0.000009760102594090443,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 9.48112050718722e-7,
+        "sharpness": 0.000028226115390315498,
+        "downsideRate": 0.5173000567214975,
+        "turnover": 24.50640404052951,
+        "sacrificedReturn": 0.00014392745833217285,
+        "total": 0.5181794929037535,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.6651569703252752,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.36879951643956266,
+        "sharpness": -0.798045139911979,
+        "downsideRate": -1.4479177924740796,
+        "turnover": 0.7339568510504475,
+        "sacrificedReturn": -0.9147650610723795
+      },
+      "decisionScore": {
+        "turnover": 24.50640404052951,
+        "realizedNetReturn": 0.0454431812730034,
+        "rebalances": 97,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 604800,
+        "coverageTarget": 0.95
+      },
+      "total": 8.470164029540452,
+      "loss": {
+        "pointError": 0.00009713231889964599,
+        "coverageDeviation": 0.00006708836496072124,
+        "exceedanceShortfall": 0.000004401997461295812,
+        "sharpness": 0.00023661249121684355,
+        "downsideRate": 0.558590505399016,
+        "turnover": 23.165482562009966,
+        "sacrificedReturn": 0.0015049256682609854,
+        "total": 0.5594988376004377,
+        "observations": 31302,
+        "achievedCoverage": 0.9500670883649607
+      },
+      "normalized": {
+        "pointError": 0.10848831569616182,
+        "coverageDeviation": 0.4595401826626834,
+        "exceedanceShortfall": 0.952511727152266,
+        "sharpness": 0.471394648051684,
+        "downsideRate": -0.4632443101316665,
+        "turnover": 0.5525811557356127,
+        "sacrificedReturn": -0.624633357969759
+      },
+      "decisionScore": {
+        "turnover": 23.165482562009966,
+        "realizedNetReturn": 0.044082183063074584,
+        "rebalances": 89,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500670883649607,
+        "compound-v3-usdc": 0.9500670883649607,
+        "moonwell-usdc": 0.9500670883649607
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 24
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 8.618438203180652,
+      "loss": {
+        "pointError": 0.000013362820152097973,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 0.000001339388083850253,
+        "sharpness": 0.000039397179872191166,
+        "downsideRate": 0.5075628663263377,
+        "turnover": 23.02000730479533,
+        "sacrificedReturn": 0.0003004034415372142,
+        "total": 0.5084534471385583,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.6332563779690988,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.21911376822641665,
+        "sharpness": -0.7299936961889706,
+        "downsideRate": -1.6801253242816332,
+        "turnover": 0.5329038842837899,
+        "sacrificedReturn": -0.8814081887629661
+      },
+      "decisionScore": {
+        "turnover": 23.02000730479533,
+        "realizedNetReturn": 0.045286705289798355,
+        "rebalances": 92,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.97
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 9.332607658818635,
+      "loss": {
+        "pointError": 0.00001705955814661305,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 0.0000011810851512012108,
+        "sharpness": 0.000045568939125471516,
+        "downsideRate": 0.5498518938677759,
+        "turnover": 23.021097292835044,
+        "sacrificedReturn": 0.00023262862388635092,
+        "total": 0.5507484657829544,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.6005232730526441,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.2796738100165092,
+        "sharpness": -0.6923968200651256,
+        "downsideRate": -0.6716382443925158,
+        "turnover": 0.5330513182251165,
+        "sacrificedReturn": -0.8958561308168671
+      },
+      "decisionScore": {
+        "turnover": 23.021097292835044,
+        "realizedNetReturn": 0.04535448010744922,
+        "rebalances": 93,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 9.42676752180626,
+      "loss": {
+        "pointError": 0.000023420033514978064,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 9.892565519718016e-7,
+        "sharpness": 0.00005985904690995353,
+        "downsideRate": 0.5699565135186235,
+        "turnover": 22.06691946728698,
+        "sacrificedReturn": 0.0004514239863593894,
+        "total": 0.5708656318200666,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.544203861760817,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.35305936132289695,
+        "sharpness": -0.6053449131256248,
+        "downsideRate": -0.1921935670681815,
+        "turnover": 0.40398733548255433,
+        "sacrificedReturn": -0.8492142831772745
+      },
+      "decisionScore": {
+        "turnover": 22.06691946728698,
+        "realizedNetReturn": 0.04513568474497618,
+        "rebalances": 88,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 9.60520539313449,
+      "loss": {
+        "pointError": 0.00002124906842019685,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.0000030805119863845234,
+        "sharpness": 0.000036880571590786156,
+        "downsideRate": 0.5320161341148295,
+        "turnover": 29.593732095597574,
+        "sacrificedReturn": 0.0005479707582321039,
+        "total": 0.5328275126616109,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.5634268708901823,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": 0.4469669829935915,
+        "sharpness": -0.7453242698431417,
+        "downsideRate": -1.0969763123636347,
+        "turnover": 1.422078920883627,
+        "sacrificedReturn": -0.8286328605507481
+      },
+      "decisionScore": {
+        "turnover": 29.593732095597574,
+        "realizedNetReturn": 0.045039137973103466,
+        "rebalances": 107,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.99
+      },
+      "total": 9.613436553184975,
+      "loss": {
+        "pointError": 0.000520130320514233,
+        "coverageDeviation": 0.00006428988895379462,
+        "exceedanceShortfall": 5.7209272223315135e-8,
+        "sharpness": 0.0007456584433524373,
+        "downsideRate": 0.6052016364699007,
+        "turnover": 13.89310077313356,
+        "sacrificedReturn": 0.012470704225833962,
+        "total": 0.6067377809479901,
+        "observations": 30798,
+        "achievedCoverage": 0.9900642898889538
+      },
+      "normalized": {
+        "pointError": 3.8539628358933253,
+        "coverageDeviation": 0.31373043082809354,
+        "exceedanceShortfall": -0.7096214367523436,
+        "sharpness": 3.5723804153779657,
+        "downsideRate": 0.6483140821237346,
+        "turnover": -0.701619571989965,
+        "sacrificedReturn": 1.7130038156465488
+      },
+      "decisionScore": {
+        "turnover": 13.89310077313356,
+        "realizedNetReturn": 0.03311640450550161,
+        "rebalances": 94,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9900642898889538,
+        "compound-v3-usdc": 0.9900642898889538,
+        "moonwell-usdc": 0.9900642898889538
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.9
+      },
+      "total": 10.067621957931514,
+      "loss": {
+        "pointError": 0.000025439055275548012,
+        "coverageDeviation": 0.00007562866326338291,
+        "exceedanceShortfall": 0.000002953024857235385,
+        "sharpness": 0.000042686043583064916,
+        "downsideRate": 0.5532236717716015,
+        "turnover": 30.11492333504533,
+        "sacrificedReturn": 0.0005553950121507459,
+        "total": 0.5540415056055885,
+        "observations": 31734,
+        "achievedCoverage": 0.9000756286632634
+      },
+      "normalized": {
+        "pointError": -0.5263262487908422,
+        "coverageDeviation": 0.9045176536226911,
+        "exceedanceShortfall": 0.39819577111663046,
+        "sharpness": -0.7099587278028968,
+        "downsideRate": -0.5912298110481515,
+        "turnover": 1.4925762803197706,
+        "sacrificedReturn": -0.8270501902592167
+      },
+      "decisionScore": {
+        "turnover": 30.11492333504533,
+        "realizedNetReturn": 0.045031713719184824,
+        "rebalances": 108,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000756286632634,
+        "compound-v3-usdc": 0.9000756286632634,
+        "moonwell-usdc": 0.9000756286632634
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.9
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 10.135421136369597,
+      "loss": {
+        "pointError": 0.0000063887039269017305,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 7.530220128294933e-8,
+        "sharpness": 0.000007781204155903607,
+        "downsideRate": 0.6687464549064095,
+        "turnover": 24.6511276373442,
+        "sacrificedReturn": 0,
+        "total": 0.669607933185134,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.69500932839123,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.7026998433136054,
+        "sharpness": -0.9225906322907749,
+        "downsideRate": 2.16369838185312,
+        "turnover": 0.7535324514276663,
+        "sacrificedReturn": -0.9454468932044945
+      },
+      "decisionScore": {
+        "turnover": 24.6511276373442,
+        "realizedNetReturn": 0.04558710873133557,
+        "rebalances": 97,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.6
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 10.182478915477715,
+      "loss": {
+        "pointError": 0.000024203133997419035,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 1.0923532302861455e-7,
+        "sharpness": 0.000030688529408429965,
+        "downsideRate": 0.6534946744816286,
+        "turnover": 24.825256772666048,
+        "sacrificedReturn": 0.00011140880345250626,
+        "total": 0.6543855905186585,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.5372698268657558,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.6897184585938307,
+        "sharpness": -0.7830447047029317,
+        "downsideRate": 1.7999817300898326,
+        "turnover": 0.7770855031905783,
+        "sacrificedReturn": -0.9216972470620566
+      },
+      "decisionScore": {
+        "turnover": 24.825256772666048,
+        "realizedNetReturn": 0.04547569992788306,
+        "rebalances": 98,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 10.309653318872158,
+      "loss": {
+        "pointError": 0.00004223335771561787,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 1.8655880716479808e-7,
+        "sharpness": 0.00005365334013358303,
+        "downsideRate": 0.6523917564757042,
+        "turnover": 23.330244445811445,
+        "sacrificedReturn": 0.00039350948164579985,
+        "total": 0.6533125717592356,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.37761956073636727,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.660137746775785,
+        "sharpness": -0.6431485894125925,
+        "downsideRate": 1.7736799060986839,
+        "turnover": 0.574867174502997,
+        "sacrificedReturn": -0.8615602464300678
+      },
+      "decisionScore": {
+        "turnover": 23.330244445811445,
+        "realizedNetReturn": 0.04519359924968977,
+        "rebalances": 91,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "direct-arx",
+        "methodParams": {
+          "phi": 0.3
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 10.485189149252317,
+      "loss": {
+        "pointError": 0.000520130320514233,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000005119959776792444,
+        "sharpness": 0.0006589979864716312,
+        "downsideRate": 0.6052016364699007,
+        "turnover": 17.765133270911235,
+        "sacrificedReturn": 0.002227899452225443,
+        "total": 0.6066613191184781,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": 3.8539628358933253,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 1.2271739024044608,
+        "sharpness": 3.0444657109196327,
+        "downsideRate": 0.6483140821237346,
+        "turnover": -0.17788078652324657,
+        "sacrificedReturn": -0.47051293833223035
+      },
+      "decisionScore": {
+        "turnover": 17.765133270911235,
+        "realizedNetReturn": 0.04335920927911013,
+        "rebalances": 80,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 72
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 11.725082868270325,
+      "loss": {
+        "pointError": 0.00002124906842019685,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 0.0000015200136323798114,
+        "sharpness": 0.00005808079393146412,
+        "downsideRate": 0.5320161341148295,
+        "turnover": 29.891538431611853,
+        "sacrificedReturn": 0.0006011657203575521,
+        "total": 0.5329248461100905,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.5634268708901823,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.15001403277451866,
+        "sharpness": -0.6161776034826879,
+        "downsideRate": -1.0969763123636347,
+        "turnover": 1.4623607957950415,
+        "sacrificedReturn": -0.8172929889437583
+      },
+      "decisionScore": {
+        "turnover": 29.891538431611853,
+        "realizedNetReturn": 0.04498594301097802,
+        "rebalances": 106,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 86400,
+        "coverageTarget": 0.95
+      },
+      "total": 12.321900375590143,
+      "loss": {
+        "pointError": 0.000025439055275548012,
+        "coverageDeviation": 0.00008508224617131965,
+        "exceedanceShortfall": 0.0000011269999379931701,
+        "sharpness": 0.00006715191755661822,
+        "downsideRate": 0.5532236717716015,
+        "turnover": 32.50476475766956,
+        "sacrificedReturn": 0.0007124245294609297,
+        "total": 0.5541391442470585,
+        "observations": 31734,
+        "achievedCoverage": 0.9500850822461713
+      },
+      "normalized": {
+        "pointError": -0.5263262487908422,
+        "coverageDeviation": 1.3970802392379271,
+        "exceedanceShortfall": -0.3003645370756634,
+        "sharpness": -0.5609184954645433,
+        "downsideRate": -0.5912298110481515,
+        "turnover": 1.8158309650006577,
+        "sacrificedReturn": -0.7935753179469532
+      },
+      "decisionScore": {
+        "turnover": 32.50476475766956,
+        "realizedNetReturn": 0.04487468420187464,
+        "rebalances": 116,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9500850822461713,
+        "compound-v3-usdc": 0.9500850822461713,
+        "moonwell-usdc": 0.9500850822461713
+      }
+    },
+    {
+      "point": {
+        "method": "rolling",
+        "methodParams": {
+          "windowObservations": 168
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 18.914632106448973,
+      "loss": {
+        "pointError": 0.00013303523123060364,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000012449585708459413,
+        "sharpness": 0.00022721807758285445,
+        "downsideRate": 0.5737710240924735,
+        "turnover": 17.50153282409007,
+        "sacrificedReturn": 0.0021856502806389677,
+        "total": 0.5746643698269812,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": 0.4263939389454162,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 4.031180406261123,
+        "sharpness": 0.41416613489062404,
+        "downsideRate": -0.10122707165613581,
+        "turnover": -0.2135359051065329,
+        "sacrificedReturn": -0.479519433724829
+      },
+      "decisionScore": {
+        "turnover": 17.50153282409007,
+        "realizedNetReturn": 0.0434014584506966,
+        "rebalances": 80,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    },
+    {
+      "point": {
+        "method": "ew-residual",
+        "methodParams": {
+          "decay": 0.99
+        },
+        "horizonSeconds": 1209600,
+        "coverageTarget": 0.9
+      },
+      "total": 19.81907310037622,
+      "loss": {
+        "pointError": 0.00013544706698230042,
+        "coverageDeviation": 0.000058445353594338556,
+        "exceedanceShortfall": 0.000012754105377525987,
+        "sharpness": 0.00021761266084937382,
+        "downsideRate": 0.5876030911098123,
+        "turnover": 17.50153282409007,
+        "sacrificedReturn": 0.0021856502806389677,
+        "total": 0.5884955685700504,
+        "observations": 30798,
+        "achievedCoverage": 0.9000584453535944
+      },
+      "normalized": {
+        "pointError": 0.4477497593521322,
+        "coverageDeviation": 0.009211025179632145,
+        "exceedanceShortfall": 4.1476768196627765,
+        "sharpness": 0.35565224148905733,
+        "downsideRate": 0.2286329815569073,
+        "turnover": -0.2135359051065329,
+        "sacrificedReturn": -0.479519433724829
+      },
+      "decisionScore": {
+        "turnover": 17.50153282409007,
+        "realizedNetReturn": 0.0434014584506966,
+        "rebalances": 80,
+        "originsScored": 886
+      },
+      "coverageByMarket": {
+        "aave-v3-usdc": 0.9000584453535944,
+        "compound-v3-usdc": 0.9000584453535944,
+        "moonwell-usdc": 0.9000584453535944
+      }
+    }
+  ]
+}
