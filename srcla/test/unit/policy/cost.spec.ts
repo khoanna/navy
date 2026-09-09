@@ -149,8 +149,12 @@ describe('movementCostBase', () => {
   });
 
   it('scales proportional terms with notional', () => {
-    const small = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q, kind: 'deploy' }], PARAMS);
-    const large = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q * 100n, kind: 'deploy' }], PARAMS);
+    // P14: impact/slippageMev are now bps of the harvest (swap) leg only,
+    // not any move - a 'deploy' move no longer moves these terms at all,
+    // so the fixture uses 'harvest' to keep testing the proportional-scaling
+    // property the test is named for.
+    const small = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q, kind: 'harvest' }], PARAMS);
+    const large = movementCostBase(input([market('a')]), [{ adapter: '0xa', amountBase: Q * 100n, kind: 'harvest' }], PARAMS);
     expect(large.terms['slippageMev']!).toBeGreaterThan(small.terms['slippageMev']!);
   });
 });
@@ -499,5 +503,40 @@ describe('costGate churn brakes read persisted history (NEW-19)', () => {
       PARAMS
     );
     expect(r.reason).not.toContain('REVERSAL_ALLOWANCE');
+  });
+});
+
+describe('P14: movement cost attributed by leg', () => {
+  it('charges no impact or slippage to a lending deposit', () => {
+    const moves = [{ adapter: 'a', amountBase: 1_000_000_000_000n, kind: 'deploy' as const }];
+    const { terms } = movementCostBase(input([market('a')]), moves, PARAMS);
+    expect(terms['impact']).toBe(0n);
+    expect(terms['slippageMev']).toBe(0n);
+    expect(terms['entry']).toBeGreaterThan(0n);
+  });
+
+  it('charges no impact or slippage to a lending withdrawal', () => {
+    const moves = [{ adapter: 'a', amountBase: 1_000_000_000_000n, kind: 'divest' as const }];
+    const { terms } = movementCostBase(input([market('a')]), moves, PARAMS);
+    expect(terms['impact']).toBe(0n);
+    expect(terms['slippageMev']).toBe(0n);
+    expect(terms['exit']).toBeGreaterThan(0n);
+  });
+
+  it('still charges impact and slippage to a harvest swap', () => {
+    const moves = [{ adapter: 'a', amountBase: 1_000_000_000_000n, kind: 'harvest' as const }];
+    const { terms } = movementCostBase(input([market('a')]), moves, PARAMS);
+    expect(terms['impact']).toBeGreaterThan(0n);
+    expect(terms['slippageMev']).toBeGreaterThan(0n);
+  });
+
+  it('a lending plan and a harvest plan of equal notional differ by exactly impact + slippage', () => {
+    const n = 1_000_000_000_000n;
+    const lend = movementCostBase(input([market('a')]), [{ adapter: 'a', amountBase: n, kind: 'deploy' as const }], PARAMS);
+    const harv = movementCostBase(input([market('a')]), [{ adapter: 'a', amountBase: n, kind: 'harvest' as const }], PARAMS);
+    const bpsPart = harv.terms['impact']! + harv.terms['slippageMev']!;
+    expect(bpsPart).toBeGreaterThan(0n);
+    // the harvest also carries approve/reset + swap gas; isolate the bps terms
+    expect(lend.terms['impact']! + lend.terms['slippageMev']!).toBe(0n);
   });
 });

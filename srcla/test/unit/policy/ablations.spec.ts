@@ -318,9 +318,24 @@ describe('decide: H1 capacity switch reaches the kernel', () => {
 
 describe('decide: H3 cost switch', () => {
   /** Cost params so punitive that no move can ever clear the gate. */
+  // P14: impact/slippage/MEV are now charged only to a harvest (swap) leg,
+  // not to the lending deploy/divest moves this fixture produces, so
+  // inflating those three bps alone no longer makes the move uneconomic.
+  // Punitive gas-derived terms (gasPerAction drives entry/exit; unaffected
+  // by move kind) replace them as the lever that dominates any realistic
+  // gain, keeping this test's point - "the live gate genuinely blocks,
+  // the ablated one does not" - intact.
   const PUNITIVE = {
     ...OPTS,
-    cost: { ...OPTS.cost, slippageBps: 5_000, mevBps: 1_000, impactBps: 1_000, bufferBps: 5_000 },
+    cost: {
+      ...OPTS.cost,
+      slippageBps: 5_000,
+      mevBps: 1_000,
+      impactBps: 1_000,
+      bufferBps: 5_000,
+      gasPerAction: 10_000_000_000_000n,
+      planGasOverhead: 10_000_000_000_000n,
+    },
   };
 
   it('blocks the rebalance when the gate is live and permits it when ablated', () => {

@@ -125,7 +125,6 @@ export function movementCostBase(
   p: CostParams
 ): { totalBase: bigint; terms: Record<string, bigint> } {
   const n = BigInt(moves.length);
-  const notional = moves.reduce((s, m) => s + m.amountBase, 0n);
   const { gas } = input;
 
   const divestCount = BigInt(moves.filter((m) => m.kind === 'divest').length);
@@ -174,7 +173,15 @@ export function movementCostBase(
   const approveResetWei = harvestCount * 2n * p.approveResetGas * gas.l2BaseFeeWei;
   const swapWei = harvestCount * p.swapGas * gas.l2BaseFeeWei;
 
-  const bpsOf = (bps: number) => (notional * BigInt(bps)) / 10_000n;
+  // P14 - impact, slippage and MEV are properties of the §9.4 Uniswap route.
+  // A lending supply/withdraw executes at the protocol index: there is no
+  // quoted price to slip against and no sandwich surface, and the rate effect
+  // of size is already priced by §6.1's post-deposit curve. Charging bps here
+  // as well both invents a cost and double-counts that curve.
+  const swapNotional = moves
+    .filter((m) => m.kind === 'harvest')
+    .reduce((s, m) => s + m.amountBase, 0n);
+  const bpsOfSwap = (bps: number) => (swapNotional * BigInt(bps)) / 10_000n;
 
   const terms: Record<string, bigint> = {
     l2: weiToUsdcBase(l2Wei, gas.ethUsdE8, gas.usdcUsdE8),
@@ -184,8 +191,8 @@ export function movementCostBase(
     claim: weiToUsdcBase(claimWei, gas.ethUsdE8, gas.usdcUsdE8),
     approveReset: weiToUsdcBase(approveResetWei, gas.ethUsdE8, gas.usdcUsdE8),
     swap: weiToUsdcBase(swapWei, gas.ethUsdE8, gas.usdcUsdE8),
-    impact: bpsOf(p.impactBps),
-    slippageMev: bpsOf(p.slippageBps + p.mevBps),
+    impact: bpsOfSwap(p.impactBps),
+    slippageMev: bpsOfSwap(p.slippageBps + p.mevBps),
     failure: 0n,
     buffer: 0n,
   };
