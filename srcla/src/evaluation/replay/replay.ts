@@ -102,8 +102,50 @@ export interface ReplayResult {
   withdrawals: WithdrawalOutcome[];
   /** USDC base units. Already charged against NAV — see runReplay. */
   totalCosts: bigint;
-  /** Worst `stressedLiquidCoverage` over the whole replay; 1 when never squeezed. */
+  /**
+   * Worst `stressedLiquidCoverage` over the whole replay; 1 when never
+   * squeezed. This is what the §11.5 gate (`gates.ts`) actually tests — see
+   * `coverageDistribution` below for the figures that distinguish a single
+   * bad hour from chronic illiquidity, which this minimum alone cannot.
+   */
   minStressedLiquidCoverage: number;
+  /**
+   * The full shape of the `stressedLiquidCoverage` series, not just its
+   * worst point. `minStressedLiquidCoverage` is the single worst origin out
+   * of thousands, so one market-wide dry hour scores identically to chronic
+   * illiquidity — this field lets a reader tell them apart. It does NOT
+   * change what the gate tests: the gate reads `minStressedLiquidCoverage`
+   * (== `coverageDistribution.min`) exclusively.
+   */
+  coverageDistribution: CoverageDistribution;
+}
+
+/** min/p05/median over a `stressedLiquidCoverage` series. */
+export interface CoverageDistribution {
+  min: number;
+  p05: number;
+  median: number;
+}
+
+/**
+ * Summarize a `stressedLiquidCoverage` series as min/p05/median.
+ *
+ * An empty series returns all-1s rather than all-0s: no measurement was
+ * taken, so nothing was observed to be illiquid — a 0 would misreport an
+ * absence of data as maximal stress.
+ */
+export function coverageDistribution(series: readonly number[]): CoverageDistribution {
+  if (series.length === 0) return { min: 1, p05: 1, median: 1 };
+  const sorted = [...series].sort((a, b) => a - b);
+  const percentile = (p: number): number => {
+    const idx = p * (sorted.length - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    if (lo === hi) return sorted[lo]!;
+    const frac = idx - lo;
+    return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * frac;
+  };
+  return { min: sorted[0]!, p05: percentile(0.05), median: percentile(0.5) };
 }
 
 /**
@@ -180,6 +222,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
   let totalTurnover = 0n;
   let totalCosts = 0n;
   let minStressedLiquidCoverage = 1;
+  const coverageSeries: number[] = [];
   const initialSharePrice = vault.currentSharePrice();
 
   const requestsByIndex = new Map<number, WithdrawalRequest[]>();
@@ -266,6 +309,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       totalAssetsBase: vault.getState().totalAssets,
     }).worst;
     if (coverage < minStressedLiquidCoverage) minStressedLiquidCoverage = coverage;
+    coverageSeries.push(coverage);
 
     snapshots.push({
       timestamp: snapshot.timestamp,
@@ -292,6 +336,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     withdrawals: withdrawalOutcomes,
     totalCosts,
     minStressedLiquidCoverage,
+    coverageDistribution: coverageDistribution(coverageSeries),
   };
 }
 

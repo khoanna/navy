@@ -91,13 +91,16 @@ function resultsTable(out: RegisteredEvaluationResult): string {
           `| \`${r.policy.id}\` | ${r.policy.section} | ${pct(r.replay.realizedNetApy)} | ` +
           `${r.rebalances} | ${usdc(r.replay.totalTurnover)} | ${usdc(r.replay.totalCosts)} | ` +
           `${r.replay.withdrawalSuccessRate === null ? '**not measured**' : pct(r.replay.withdrawalSuccessRate, 1)} | ` +
+          `${pct(r.replay.coverageDistribution.min, 3)} | ${pct(r.replay.coverageDistribution.p05, 3)} | ` +
+          `${pct(r.replay.coverageDistribution.median, 3)} | ` +
           `${r.inertVsSrcla ? '**INERT**' : '—'} |`,
       );
     sections.push(
       `#### Tier ${usdc(BigInt(tier))} USDC\n\n` +
         [
-          '| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Ablation |',
-          '|---|---|---|---|---|---|---|---|',
+          '| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | ' +
+            'Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Ablation |',
+          '|---|---|---|---|---|---|---|---|---|---|---|',
           ...rows,
         ].join('\n'),
     );
@@ -250,6 +253,13 @@ export function renderReport(params: ReportParams): string {
       `${run.datasetOrigins} origins. Manifest \`${run.provenance.manifestHash}\`, dataset ` +
         `\`${run.provenance.datasetHash}\`, result \`${run.provenance.resultHash}\`. ` +
         `Reproduce with \`pnpm run evaluation:verify\`.`,
+    );
+    out.push('');
+    out.push(
+      '`stressedLiquidCoverage` is measured every origin; the §11.5 gate tests only the ' +
+        '**minimum** over the whole run, so one market-wide dry hour scores identically to ' +
+        'chronic illiquidity. The p05 and median columns below distinguish the two — neither ' +
+        'is what the gate tests.',
     );
     out.push('');
     out.push(resultsTable(run.evaluation));

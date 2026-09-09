@@ -97,6 +97,7 @@ function run(
       withdrawals: [],
       totalCosts: 0n,
       minStressedLiquidCoverage: opts.minStressed ?? 1,
+      coverageDistribution: { min: opts.minStressed ?? 1, p05: opts.minStressed ?? 1, median: 1 },
     },
   } as PolicyRunResult;
 }
