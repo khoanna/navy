@@ -214,4 +214,43 @@ describe('optimize — least-infeasible fallback', () => {
     // The fallback still deploys -- into the only hard-feasible venue.
     expect(out.target.get('a') ?? 0n).toBe(Q_BIG);
   });
+
+  it('does not freeze on the first candidate on a coverage tie -- a later, equally-good one may still displace it', () => {
+    // `liquid = idle + min(balance, venueCash - balance)`, so on a coverage
+    // TIE (two candidates scoring identically -- the flat part of the
+    // liquid-vs-deployment curve, not just a coincidence) a STRICT `>`
+    // comparison keeps whichever candidate the search reaches FIRST and
+    // never lets an equally-good later one take over. That is the bug: the
+    // fallback exists to find the least-infeasible candidate, and freezing
+    // on "first found" rather than continuing to consider ties is an
+    // arbitrary artifact of sort order, not a reasoned choice among equals.
+    // `>=` fixes this by letting a later tie keep displacing the incumbent.
+    //
+    // Two markets with IDENTICAL cash (6,000 USDC, matching the one
+    // deployable quantum exactly) score IDENTICAL coverage (0.80) whichever
+    // one receives it -- a genuine tie, not an approximation.
+    const ms = [
+      market('a', { cash: 6_000_000_000n }),
+      market('e', { cash: 6_000_000_000n }),
+    ];
+    const curves = [
+      curve('a', Array(11).fill(WAD / 20n)),
+      curve('e', Array(11).fill(WAD / 20n)),
+    ];
+    const opts = { ...OPTS, quantumBase: Q_BIG };
+
+    const onlyA = new Map([['a', Q_BIG], ['e', 0n]]);
+    const onlyE = new Map([['a', 0n], ['e', Q_BIG]]);
+    expect(covOf(onlyA, ms)).toBeLessThan(0.99);
+    // Precondition: this really is an exact tie, not merely "close".
+    expect(covOf(onlyE, ms)).toBe(covOf(onlyA, ms));
+
+    const out = optimize(input(ms), curves, artifact(), opts);
+
+    // 'e' sorts AFTER 'a', so it is the later candidate evaluated at the
+    // tie. Under `>` the search would freeze on 'a' (evaluated first);
+    // under `>=` 'e' displaces it.
+    expect(out.target.get('e') ?? 0n).toBe(Q_BIG);
+    expect(out.target.get('a') ?? 0n).toBe(0n);
+  });
 });

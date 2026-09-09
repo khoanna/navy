@@ -408,12 +408,16 @@ export function optimize(
   };
 
   let target = runGreedy(feasible);
-  // The predicate that actually produced `target` -- passed to
-  // `verifyExhaustively` below so regret is measured against the same
-  // feasible set the greedy search was allowed to choose from, per the
-  // ruling in task-7: measuring it against a different feasible set (e.g.
-  // the floor-constrained one when the fallback fired) makes the number
-  // meaningless.
+  // The predicate the LAST search ran under -- passed to `verifyExhaustively`
+  // below so regret is measured against the same feasible set the greedy
+  // search was allowed to choose from, per the ruling in task-7: measuring
+  // it against a different feasible set (e.g. the floor-constrained one when
+  // the fallback fired) makes the number meaningless. Note this is not
+  // always literally "the predicate that produced `target`": on the
+  // `bestCandidate === null` path below, `target` keeps the EMPTY map the
+  // primary (`feasible`) search produced, yet `searchedFeasible` is still
+  // set to `hardFeasible`, because that is what the fallback actually
+  // searched under even though it found nothing better to return.
   let searchedFeasible = feasible;
 
   // FALLBACK (only when the floor is live and no candidate cleared it, i.e.
@@ -425,14 +429,15 @@ export function optimize(
   // an empty one.
   //
   // This is its OWN search, not a re-read of the primary greedy's path: it
-  // re-walks the same greedy progression under `hardFeasible` alone, but at
-  // every step tracks the coverage of EVERY hard-feasible single-quantum
-  // trial it evaluates -- not only the one the objective ranking would have
-  // accepted -- and returns whichever trial scored the highest coverage
-  // across the whole search. Objective and coverage can rank candidates
-  // differently (a thin, high-rate venue vs. a deeper, low-rate one), and
-  // the fallback's job is to answer "what's the least-infeasible thing we
-  // could do", not "what would the objective-only search have done anyway".
+  // re-walks the same greedy progression under `hardFeasible` alone, and at
+  // every step tracks the coverage of every hard-feasible single-quantum
+  // trial evaluated ALONG THAT PATH -- i.e. the trials considered from each
+  // baseline the objective-driven progression actually reaches, not the
+  // full hard-feasible candidate set (which is O(quanta^markets) and not
+  // searched here). Objective and coverage can rank a given step's trials
+  // differently (a thin, high-rate venue vs. a deeper, low-rate one), so the
+  // best-coverage trial seen along the path need not be the one the
+  // objective ranking would itself have advanced to.
   const deployedAny = [...target.values()].some((v) => v > 0n);
   if (!deployedAny && disable.coverageFloor !== true) {
     searchedFeasible = hardFeasible;
@@ -462,8 +467,18 @@ export function optimize(
         // one this fallback exists to fix and must be left alone.
         if (value <= baselineValue) continue;
 
+        // >= , not > : coverage is FLAT across a plateau (deploying x into a
+        // venue with cash C leaves `liquid` unchanged for x <= C/2, since
+        // the q removed from idle is exactly offset by
+        // min(q, C-q) = q), then decreases past it. A strict `>` would let
+        // the FIRST candidate on that plateau win, i.e. the search would
+        // stop at one quantum and idle the rest -- defeating the fallback's
+        // purpose of not stranding the vault in cash. `>=` lets a later,
+        // larger-deployment candidate at the SAME coverage keep displacing
+        // the incumbent, so the walk advances to the edge of the plateau
+        // and only stops once coverage genuinely starts to degrade.
         const cov = coverageOf(trial);
-        if (cov > bestCoverage) {
+        if (cov >= bestCoverage) {
           bestCoverage = cov;
           bestCandidate = trial;
         }
