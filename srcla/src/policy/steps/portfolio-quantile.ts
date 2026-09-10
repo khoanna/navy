@@ -79,7 +79,10 @@ export function portfolioResidualQuantileFor(
   artifact: PolicyArtifact,
   target: ReadonlyMap<string, bigint>,
 ): bigint {
-  const panel = artifact.residualPanel;
+  // The RELATIVE model-residual panel governs when present; see
+  // `PolicyArtifact.relativeResidualPanel` for why it is a separate field
+  // from `residualPanel` rather than a reinterpretation of it.
+  const panel = artifact.relativeResidualPanel ?? artifact.residualPanel;
   if (panel === undefined || panel.rows.length === 0 || panel.marketIds.length === 0) {
     return artifact.portfolioResidualQuantileWad;
   }
@@ -137,7 +140,7 @@ export function portfolioQuantileProvenance(
   artifact: PolicyArtifact,
   target: ReadonlyMap<string, bigint>,
 ): 'calibrated-panel' | 'frozen-scalar' {
-  const panel = artifact.residualPanel;
+  const panel = artifact.relativeResidualPanel ?? artifact.residualPanel;
   if (panel === undefined || panel.rows.length === 0 || panel.marketIds.length === 0) {
     return 'frozen-scalar';
   }
@@ -250,4 +253,59 @@ export function buildResidualPanel(
   if (rows.every((row) => row.every((v) => v === 0n))) return undefined;
 
   return { marketIds, originsSeconds: origins, rows };
+}
+
+/**
+ * P2's panel built from MODEL residuals, expressed RELATIVE to the forecast
+ * each was measured against — `(realized - forecast) / forecast`, WAD.
+ *
+ * This replaces `buildResidualPanel` for a registered artifact. See
+ * `ResidualPanel.relative` for the two defects it corrects and the measured
+ * size of each; in short, the shipped panel measured how far realized returns
+ * wander from their own 15-month mean, which is not a forecast error and is
+ * 2.7x larger than one.
+ *
+ * An observation whose forecast is not strictly positive is DROPPED, not
+ * clamped: there is no relative error against a level of zero, and
+ * substituting one would invent a haircut nobody calibrated. Origins are
+ * intersected across venues exactly as the absolute builder does, so the
+ * portfolio series still reads one aligned row per origin and cross-venue
+ * correlation survives.
+ */
+export function buildRelativeResidualPanel(
+  observationsByMarket: Readonly<Record<string, readonly {
+    originSeconds: number;
+    residualWad: bigint;
+    forecastWad: bigint;
+  }[]>>,
+  minObservations: number,
+): ResidualPanel | undefined {
+  const byMarket = new Map<string, Map<number, bigint>>();
+  for (const [marketId, obs] of Object.entries(observationsByMarket)) {
+    const m = new Map<number, bigint>();
+    for (const o of obs) {
+      if (o.forecastWad <= 0n) continue;
+      m.set(o.originSeconds, (o.residualWad * WAD) / o.forecastWad);
+    }
+    if (m.size > 0) byMarket.set(marketId, m);
+  }
+
+  const marketIds = [...byMarket.keys()]
+    .filter((id) => byMarket.get(id)!.size >= minObservations)
+    .sort();
+  if (marketIds.length === 0) return undefined;
+
+  const origins = [...byMarket.get(marketIds[0]!)!.keys()]
+    .filter((t) => marketIds.every((id) => byMarket.get(id)!.has(t)))
+    .sort((a, b) => a - b);
+  if (origins.length < minObservations) return undefined;
+
+  const rows = origins.map((t) => marketIds.map((id) => byMarket.get(id)!.get(t)!));
+
+  // Same refusal as the absolute builder, and for the same reason: an
+  // all-zero panel has measured nothing, and returning it would make
+  // q^p_alpha(w) identically 0 — the most optimistic value available.
+  if (rows.every((row) => row.every((v) => v === 0n))) return undefined;
+
+  return { marketIds, originsSeconds: origins, rows, relative: true };
 }

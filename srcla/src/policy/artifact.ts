@@ -210,6 +210,15 @@ export function parseArtifact(
       const panel = parsePanel(raw['residualPanel'], !requireProvisional);
       return panel !== undefined ? { residualPanel: panel } : {};
     })(),
+    // OPTIONAL, and NOT required even for a registered artifact: one frozen
+    // before P2 gained its relative model-residual form carries only the
+    // absolute panel, and `portfolioLowerBound` must keep applying that one
+    // additively rather than be handed a haircut in units it was not
+    // calibrated in.
+    ...(() => {
+      const rel = parsePanel(raw['relativeResidualPanel'], false);
+      return rel !== undefined ? { relativeResidualPanel: { ...rel, relative: true } } : {};
+    })(),
     pinnedConfigDigests: need(raw['pinnedConfigDigests'], 'pinnedConfigDigests') as Record<string, string>,
     configDigest: need(raw['configDigest'], 'configDigest') as string,
     ...(provisional !== undefined ? { _provisional: provisional } : {}),

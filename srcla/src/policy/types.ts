@@ -347,6 +347,37 @@ export interface ResidualPanel {
   marketIds: string[];
   originsSeconds: number[];
   rows: bigint[][];
+  /**
+   * `true` when each row entry is a RELATIVE residual — `(realized -
+   * forecast) / forecast`, WAD — rather than the absolute `realized - mean`
+   * the panel originally carried.
+   *
+   * Two defects are corrected together, and both live in the term that
+   * actually gates SRCLA: `optimize.ts#portfolioLowerBound` applies the
+   * PORTFOLIO quantile, not the per-venue one, so the per-venue map's form is
+   * irrelevant to the decision.
+   *
+   *   BASIS. The original panel measured `realized - the venue's own mean
+   *   realized return over the calibration era`. That is the dispersion of
+   *   realized returns, NOT forecast error: a perfect forecaster and a
+   *   coin-flip forecaster receive the identical haircut, and the method the
+   *   grid sweep selected earns no credit for being better. Measured, the
+   *   mean-based portfolio quantile is -2.566% APY on an equal three-venue
+   *   mix against -0.890% to -1.159% for the same venues' MODEL residuals:
+   *   a factor of 2.7.
+   *
+   *   FORM. It was applied as `mu + q * notional`. `mu` is evaluated at the
+   *   candidate allocation, so §6's capacity curves have already compressed
+   *   it by the vault's own market impact; a constant per-unit haircut then
+   *   consumes a growing share of a shrinking edge. At -2.566% against venue
+   *   rates of 3-6% it removes roughly two thirds of the edge before size is
+   *   even considered.
+   *
+   * A panel WITHOUT this flag is the legacy absolute form and
+   * `portfolioLowerBound` keeps applying it additively — an artifact frozen
+   * before this field must not have its haircut silently reinterpreted.
+   */
+  relative?: boolean;
 }
 
 export interface PolicyArtifact {
@@ -447,6 +478,21 @@ export interface PolicyArtifact {
    * and cross-venue correlation), independently of `q^p_alpha(w)`.
    */
   residualPanel?: ResidualPanel;
+  /**
+   * P2's panel in RELATIVE, MODEL-residual form — used ONLY by
+   * `optimize.ts#portfolioLowerBound`.
+   *
+   * WHY THIS IS A SECOND FIELD AND NOT A FLAG ON THE FIRST. `residualPanel`
+   * has two consumers with incompatible unit expectations:
+   * `hurdles.ts#columnSigma` reads its columns as ABSOLUTE horizon-return
+   * residuals to build §9.1.3's edge standard error, while
+   * `portfolioLowerBound` wants a haircut proportional to the forecast.
+   * Reinterpreting one panel as relative silently inflated `columnSigma` by
+   * roughly three orders of magnitude, which made the rotation hurdle
+   * unclearable and drove the controller to ZERO rebalances across every
+   * grid candidate. Two panels, two units, no reinterpretation.
+   */
+  relativeResidualPanel?: ResidualPanel;
   minObservations: number;
   availabilityLagSeconds: number;
   /**

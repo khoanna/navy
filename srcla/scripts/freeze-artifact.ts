@@ -60,12 +60,14 @@ import {
   registeredGrid,
   nearTieResolution,
   resolveNearTie,
+  residualsFor,
   scoreGrid,
   selectPoint,
   sweep,
   MIN_DISCRIMINATING_IQR,
   MIN_SELECTION_MARGIN,
   type GridPoint,
+  type ResidualObservations,
   type ScoredPoint,
   type SweepRow,
 } from '../src/forecast/grid-sweep.js';
@@ -75,7 +77,10 @@ import {
   scoreCandidateDecisions,
   type DecisionScore,
 } from '../src/forecast/decision-score.js';
-import { buildResidualPanel } from '../src/policy/steps/portfolio-quantile.js';
+import {
+  buildRelativeResidualPanel,
+  buildResidualPanel,
+} from '../src/policy/steps/portfolio-quantile.js';
 import { buildIdentityPin, regimeOf } from '../src/domain/config-digest.js';
 import {
   buildWithdrawalSchedule,
@@ -444,6 +449,22 @@ async function main(): Promise<void> {
       panelByHorizon.set(h, v);
       return v;
     };
+    // P2's panel from MODEL residuals, expressed relative to the forecast.
+    // Keyed by the GRID POINT, not the horizon: a model residual depends on
+    // the model, so one panel per horizon would silently attribute one
+    // candidate's errors to another. See `ResidualPanel.relative`.
+    const relPanelByPoint = new Map<string, ReturnType<typeof buildRelativeResidualPanel>>();
+    const relativePanelOf = (
+      point: SweepRow['point'],
+    ): ReturnType<typeof buildRelativeResidualPanel> => {
+      const key = `${point.method}|${JSON.stringify(point.methodParams)}|${point.horizonSeconds}`;
+      if (relPanelByPoint.has(key)) return relPanelByPoint.get(key);
+      const observations: ResidualObservations = {};
+      residualsFor(point, horizonLabelsOf(point.horizonSeconds as HorizonSeconds), minObservations, observations);
+      const v = buildRelativeResidualPanel(observations, minObservations);
+      relPanelByPoint.set(key, v);
+      return v;
+    };
     const cashByKey = new Map<string, Record<string, bigint>>();
     const cashQuantilesOf = (h: HorizonSeconds, coverage: number): Record<string, bigint> => {
       const key = `${h}:${coverage}`;
@@ -461,7 +482,13 @@ async function main(): Promise<void> {
      */
     const artifactJsonForRow = (row: SweepRow, k: number): Record<string, unknown> => {
       const h = row.point.horizonSeconds as HorizonSeconds;
+      // Prefer the model-residual relative panel; fall back to the legacy
+      // mean-residual absolute one only if the model path produced nothing.
+      // ABSOLUTE panel: unchanged semantics, and the only one
+      // `hurdles.ts#columnSigma` may read.
       const panel = panelOf(h);
+      // RELATIVE model-residual panel: consumed only by the portfolio bound.
+      const relPanel = relativePanelOf(row.point);
       // Portfolio scalar fallback: the most conservative solved per-venue
       // quantile. It governs only when no residual panel can be built, and
       // taking the most conservative rather than the mean keeps the fallback
@@ -515,6 +542,16 @@ async function main(): Promise<void> {
                 marketIds: panel.marketIds,
                 originsSeconds: panel.originsSeconds,
                 rows: panel.rows.map((r) => r.map((v) => v.toString())),
+              },
+            }
+          : {}),
+        ...(relPanel !== undefined
+          ? {
+              relativeResidualPanel: {
+                marketIds: relPanel.marketIds,
+                originsSeconds: relPanel.originsSeconds,
+                rows: relPanel.rows.map((r) => r.map((v) => v.toString())),
+                relative: true,
               },
             }
           : {}),

@@ -269,14 +269,28 @@ export function portfolioLowerBound(
   // exitable-weighted point forecast (USDC base units over the horizon).
   if (disable.uncertainty === true) return mu;
   if (disable.portfolioBound) return mu;
-  const notional = [...target.values()].reduce((s, v) => s + v, 0n);
   // q^p_alpha(w): a lower quantile of the PORTFOLIO residual series under
-  // THIS candidate's weights, not a frozen scalar. Applied once to total
-  // notional (the aggregation was already right); what changed is that the
-  // quantile now depends on the mix, so two candidates deploying the same
-  // total in different proportions no longer receive an identical term and
-  // P2 can actually change a ranking. See steps/portfolio-quantile.ts.
-  return mu + (portfolioResidualQuantileFor(artifact, target) * notional) / WAD;
+  // THIS candidate's weights, not a frozen scalar. The quantile depends on
+  // the mix, so two candidates deploying the same total in different
+  // proportions receive different terms and P2 can change a ranking.
+  const qp = portfolioResidualQuantileFor(artifact, target);
+
+  // RELATIVE panel (P29 at portfolio level): the quantile is a fraction of
+  // the forecast, so it scales with `mu` — which is evaluated at the
+  // candidate allocation and has therefore already been compressed by the
+  // vault's own market impact. The additive form below subtracts a constant
+  // per unit of notional from a per-unit forecast that shrinks with size, so
+  // past a certain vault size it exceeds the edge outright and no allocation
+  // can clear a movement hurdle. Measured: the mean-based additive quantile
+  // is -2.566% APY on an equal three-venue mix against venue rates of 3-6%.
+  if (artifact.relativeResidualPanel !== undefined) {
+    // Clamped at -WAD: the bound floors at zero and never inverts.
+    const scale = qp < -WAD ? 0n : WAD + qp;
+    return (mu * scale) / WAD;
+  }
+
+  const notional = [...target.values()].reduce((s, v) => s + v, 0n);
+  return mu + (qp * notional) / WAD;
 }
 
 /**
