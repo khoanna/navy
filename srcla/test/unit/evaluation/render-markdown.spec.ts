@@ -338,19 +338,22 @@ describe('renderReport — mandatory disclosures', () => {
       } as unknown as RegisteredGateResult,
     };
     const rendered = renderReport({ ...params, runs: [longDetailRun] });
-    const row = rendered.split('\n').find((l) => l.startsWith('| **FAIL** | Long detail |'))!;
+    // The gate table carries a Role column (P22 added one REPORTED check, and
+    // a reported NOT PRODUCED must not read as a block).
+    const prefix = '| **FAIL** | gates | Long detail | ';
+    const row = rendered.split('\n').find((l) => l.startsWith(prefix))!;
     expect(row).toBeDefined();
     expect(row).toMatch(/\u2026 \|$/);
     // Cut back to a word boundary: the last surviving token is WHOLE, not a
     // prefix of one. Every token in the fixture is the same 14-char word, so
     // a mid-word cut would leave a shorter fragment here.
-    const shown = row.slice('| **FAIL** | Long detail | '.length, -' |'.length).slice(0, -1);
+    const shown = row.slice(prefix.length, -' |'.length).slice(0, -1);
     expect(shown.split(' ').every((t) => t === 'liquiditycheck')).toBe(true);
     // More than the old 300-char cap survives, and the tail is still dropped.
     expect(row.length).toBeGreaterThan(400);
     expect(row).not.toContain('TRAILING');
     // A short detail is untouched and gains no ellipsis.
-    expect(rendered).toContain('| PASS | Short detail | all four tiers ran |');
+    expect(rendered).toContain('| PASS | gates | Short detail | all four tiers ran |');
   });
 
   it('distinguishes NOT PRODUCED from FAIL in the gate table', () => {
@@ -593,6 +596,41 @@ describe('renderReport — §11.5 sustainability sections', () => {
       runs: [{ ...base, gate: { ...base.gate, ...over } }],
     } as unknown as Parameters<typeof renderReport>[0];
   };
+
+  // P22 — the skill window is a POWER DISCLOSURE, so it must be rendered
+  // rather than left inside a check's detail string, and it must say the two
+  // opposite things it does to the two yield statements.
+  it('renders the skill window, the registered margin, and both directions of P22', () => {
+    const md = renderReport(
+      withVerdicts({
+        nonInferiorityMarginApy: 0.0043,
+        skillWindows: [
+          {
+            tier: '1000000000000',
+            hindsightApy: 0.051,
+            bestBaselineApy: 0.05,
+            bestBaselineId: 'b2',
+            windowApy: 0.001,
+            marginApy: 0.0043,
+            informative: false,
+            detail: 'narrow',
+          },
+        ],
+      }),
+    );
+    expect(md).toContain('### The skill window (P22)');
+    expect(md).toContain('43.0 bps');
+    expect(md).toContain('**NOT INFORMATIVE**');
+    expect(md).toMatch(/does \*\*not\*\* excuse the non-inferiority test/);
+    expect(md).toMatch(/deploy-and-hold would satisfy it too/);
+    // The window may never reach the redeemability half of the gate.
+    expect(md).toMatch(/yield can be beyond reach,\s+redeemability cannot/);
+  });
+
+  it('says NOT PRODUCED rather than inventing a window when none was measured', () => {
+    const md = renderReport(withVerdicts({ nonInferiorityMarginApy: 0.0043, skillWindows: [] }));
+    expect(md).toContain('_No skill window was produced._');
+  });
 
   it('reports sustainability BEFORE the per-policy table and the yield comparison', () => {
     const md = renderReport(withVerdicts({ sustainability: [verdict({})], scaleInvariant: true }));

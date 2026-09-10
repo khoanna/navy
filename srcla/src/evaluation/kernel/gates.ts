@@ -24,11 +24,15 @@
  */
 import {
   movingBlockBootstrap,
+  nonInferiorityTest,
   pairedDifferences,
   pairedHacTTest,
   periodReturns,
   REGISTERED_BOOTSTRAP_SEED,
+  REGISTERED_NONINFERIORITY_MARGIN,
+  REGISTERED_PERIODS_PER_YEAR,
   type BlockBootstrapResult,
+  type NonInferiorityResult,
   type PairedTestResult,
 } from '../metrics/significance.js';
 import {
@@ -58,6 +62,23 @@ export interface RegisteredGateCheck {
    */
   passed: boolean | null;
   detail: string;
+  /**
+   * `false` for a check that is REPORTED but never gates: it is excluded from
+   * `pass` and from `blockedReasons`. Absent means gating, so every existing
+   * check keeps blocking exactly as it did.
+   *
+   * There is one such check, and it exists for a measured reason. "Superiority:
+   * yield" is no longer a release criterion — over a 43 bps cross-sectional
+   * window it measures estimation noise, which is why §11.5's yield criterion
+   * became non-inferiority. Leaving it gating would guarantee a permanent
+   * block on a question the data cannot answer, and NOT INFORMATIVE would
+   * masquerade as a defect of the policy rather than of the universe.
+   *
+   * This flag is NOT a general escape hatch. The demonstration, completeness
+   * and sustainability checks all gate, always: yield can be beyond reach,
+   * redeemability cannot.
+   */
+  gating?: boolean;
 }
 
 /** One SRCLA-vs-baseline comparison at one tier. */
@@ -70,6 +91,51 @@ export interface BaselineComparison {
   test: PairedTestResult;
   /** Distribution-free cross-check on the same difference series. */
   bootstrap: BlockBootstrapResult;
+  /**
+   * §11.5's yield criterion (P21 part 2): is SRCLA no worse than this
+   * comparator by more than the registered margin? One-sided, HAC-corrected,
+   * with the same seeded block-bootstrap cross-check.
+   */
+  nonInferiority: NonInferiorityResult;
+  /** Periods per year derived from the replay's own snapshot cadence. */
+  periodsPerYear: number;
+}
+
+/**
+ * P22 — the SKILL WINDOW at one tier: the whole return that reallocation
+ * could have earned, measured rather than assumed.
+ *
+ * `windowApy = B5's bounded-hindsight return − the best SUSTAINABLE
+ * baseline's return, on the same era`. B5 is §11.2's non-deployable
+ * diagnostic upper bound: it is what a policy with bounded foresight would
+ * have made. The best sustainable baseline is what a policy with no skill at
+ * all would have made. The difference is therefore the ENTIRE budget any
+ * allocation skill could possibly have captured.
+ *
+ * When that budget is smaller than the registered non-inferiority margin, no
+ * policy could have demonstrated yield superiority at this resolution, and
+ * the superiority claim is NOT INFORMATIVE — a statement about the universe,
+ * not about the candidate.
+ *
+ * Three-valued: `informative` is `null` when the window could not be
+ * computed (no B5 run, or no sustainable baseline to measure against). It is
+ * never `false` by default, because "the window is narrow" and "there is no
+ * window" are different findings.
+ */
+export interface SkillWindow {
+  tier: string;
+  /** B5's realized net APY; `null` when no hindsight run was produced. */
+  hindsightApy: number | null;
+  /** Best realized net APY among SUSTAINABLE comparators at this tier. */
+  bestBaselineApy: number | null;
+  bestBaselineId: string | null;
+  /** `hindsightApy − bestBaselineApy`; `null` when either is absent. */
+  windowApy: number | null;
+  /** The registered margin the window was compared against. */
+  marginApy: number;
+  /** `true` wide enough to resolve a superiority claim, `false` not, `null` not produced. */
+  informative: boolean | null;
+  detail: string;
 }
 
 export interface RegisteredGateResult {
@@ -100,6 +166,14 @@ export interface RegisteredGateResult {
    * same thing.
    */
   excludedComparators: Array<{ baselineId: string; tier: string; reason: string }>;
+  /**
+   * P22, one per tier. Published whatever it says: it is the power disclosure
+   * that makes both yield statements readable, so it is part of the result
+   * rather than prose inside a check detail.
+   */
+  skillWindows: SkillWindow[];
+  /** The registered non-inferiority margin actually used, so the run record testifies to it. */
+  nonInferiorityMarginApy: number;
 }
 
 /**
@@ -147,13 +221,48 @@ export interface RegisteredGateOptions {
    * as before this option existed.
    */
   universeLiquidity?: { worstTotalCashBase: bigint; observedAtIso: string };
+  /**
+   * P21 part 2: the ANNUALIZED non-inferiority margin. Defaults to the
+   * registered 43 bps; exposed so a sensitivity run can restate it, never so
+   * a caller can widen it until the gate passes.
+   */
+  nonInferiorityMargin?: number;
 }
 
-const check = (name: string, passed: boolean | null, detail: string): RegisteredGateCheck => ({
-  name,
-  passed,
-  detail,
-});
+const check = (
+  name: string,
+  passed: boolean | null,
+  detail: string,
+  gating = true,
+): RegisteredGateCheck => ({ name, passed, detail, gating });
+
+const SECONDS_PER_YEAR = 365 * 86_400;
+
+/**
+ * Periods per year, derived from a replay's OWN snapshot cadence.
+ *
+ * The registered margin is quoted per year and the difference series is per
+ * period, so this conversion is load-bearing: assuming daily origins on an
+ * hourly dataset would shift the series by 24x the registered margin and call
+ * almost anything non-inferior. Derived from the median gap rather than the
+ * first one so a single duplicated or missing timestamp cannot set it.
+ *
+ * `null` when there are too few snapshots, or the cadence is degenerate.
+ */
+export function periodsPerYearFromSnapshots(
+  snapshots: readonly { timestamp: Date }[],
+): number | null {
+  if (snapshots.length < 2) return null;
+  const gaps: number[] = [];
+  for (let i = 1; i < snapshots.length; i++) {
+    const dt = (snapshots[i]!.timestamp.getTime() - snapshots[i - 1]!.timestamp.getTime()) / 1000;
+    if (dt > 0) gaps.push(dt);
+  }
+  if (gaps.length === 0) return null;
+  gaps.sort((x, y) => x - y);
+  const median = gaps[Math.floor(gaps.length / 2)]!;
+  return median > 0 ? SECONDS_PER_YEAR / median : null;
+}
 
 /**
  * Every (policy, tier) the registered protocol requires, whether or not the
@@ -174,7 +283,13 @@ export function requiredRuns(): string[] {
 export function compareToBaseline(
   srcla: PolicyRunResult,
   baseline: PolicyRunResult,
-  opts: { minPairedObservations?: number; bootstrapSeed?: number; bootstrapIterations?: number } = {},
+  opts: {
+    minPairedObservations?: number;
+    bootstrapSeed?: number;
+    bootstrapIterations?: number;
+    nonInferiorityMargin?: number;
+    significanceLevel?: number;
+  } = {},
 ): BaselineComparison {
   const a = periodReturns(srcla.replay.snapshots.map((s) => s.sharePriceWad));
   const b = periodReturns(baseline.replay.snapshots.map((s) => s.sharePriceWad));
@@ -195,6 +310,27 @@ export function compareToBaseline(
       : {}),
   });
 
+  // The cadence comes from the replay itself, not from an assumption. Both
+  // replays cover the same periods (`pairedDifferences` would have thrown
+  // otherwise), so SRCLA's snapshots are the cadence for the pair.
+  const periodsPerYear =
+    periodsPerYearFromSnapshots(srcla.replay.snapshots) ?? REGISTERED_PERIODS_PER_YEAR;
+
+  const nonInferiority = nonInferiorityTest(
+    a,
+    b,
+    opts.nonInferiorityMargin ?? REGISTERED_NONINFERIORITY_MARGIN,
+    {
+      periodsPerYear,
+      bootstrapSeed: opts.bootstrapSeed ?? REGISTERED_BOOTSTRAP_SEED,
+      bootstrapIterations: opts.bootstrapIterations ?? 2000,
+      ...(opts.minPairedObservations !== undefined
+        ? { minObservations: opts.minPairedObservations }
+        : {}),
+      ...(opts.significanceLevel !== undefined ? { alpha: opts.significanceLevel } : {}),
+    },
+  );
+
   return {
     tier: srcla.tier.toString(),
     baselineId: baseline.policy.id,
@@ -202,6 +338,72 @@ export function compareToBaseline(
     baselineNetApy: baseline.replay.realizedNetApy,
     test,
     bootstrap,
+    nonInferiority,
+    periodsPerYear,
+  };
+}
+
+/**
+ * P22 — the skill window at ONE tier. See {@link SkillWindow}.
+ *
+ * `sustainableComparatorIds` is the set of baseline ids ADMITTED at this tier
+ * by `qualifiesAsComparator` — the single admissibility predicate. Passing
+ * the admitted set in rather than re-deriving it here is deliberate: a second
+ * derivation is how the yield comparison and the window that qualifies it end
+ * up scoring different universes.
+ */
+export function skillWindow(
+  atTier: readonly PolicyRunResult[],
+  sustainableComparatorIds: ReadonlySet<string>,
+  marginApy: number = REGISTERED_NONINFERIORITY_MARGIN,
+): SkillWindow {
+  const tier = atTier[0]?.tier.toString() ?? '';
+  const hindsight = atTier.find((r) => r.policy.shape === 'hindsight');
+  const admitted = atTier.filter((r) => sustainableComparatorIds.has(r.policy.id));
+
+  let best: PolicyRunResult | undefined;
+  for (const r of admitted) {
+    if (best === undefined || r.replay.realizedNetApy > best.replay.realizedNetApy) best = r;
+  }
+
+  const none = (detail: string): SkillWindow => ({
+    tier,
+    hindsightApy: hindsight?.replay.realizedNetApy ?? null,
+    bestBaselineApy: best?.replay.realizedNetApy ?? null,
+    bestBaselineId: best?.policy.id ?? null,
+    windowApy: null,
+    marginApy,
+    informative: null,
+    detail,
+  });
+
+  if (hindsight === undefined) {
+    return none(
+      'NOT PRODUCED: no bounded-hindsight (B5) run at this tier, so the upper bound on ' +
+        'reallocation value is unknown and neither yield statement can be qualified',
+    );
+  }
+  if (best === undefined) {
+    return none(
+      'NOT PRODUCED: no SUSTAINABLE comparator at this tier, so there is no floor to measure ' +
+        'the hindsight bound against',
+    );
+  }
+
+  const windowApy = hindsight.replay.realizedNetApy - best.replay.realizedNetApy;
+  const informative = windowApy > marginApy;
+  return {
+    tier,
+    hindsightApy: hindsight.replay.realizedNetApy,
+    bestBaselineApy: best.replay.realizedNetApy,
+    bestBaselineId: best.policy.id,
+    windowApy,
+    marginApy,
+    informative,
+    detail:
+      `bounded hindsight ${(hindsight.replay.realizedNetApy * 100).toFixed(3)}% − best ` +
+      `sustainable baseline ${best.policy.id} ${(best.replay.realizedNetApy * 100).toFixed(3)}% ` +
+      `= ${(windowApy * 10_000).toFixed(1)} bps vs a ${(marginApy * 10_000).toFixed(1)} bps margin`,
   };
 }
 
@@ -516,15 +718,24 @@ export function evaluateRegisteredRelease(
     BigInt(x) < BigInt(y) ? -1 : BigInt(x) > BigInt(y) ? 1 : 0,
   );
 
-  const compareOpts: Parameters<typeof compareToBaseline>[2] = {};
+  const margin = opts.nonInferiorityMargin ?? REGISTERED_NONINFERIORITY_MARGIN;
+  const compareOpts: Parameters<typeof compareToBaseline>[2] = {
+    nonInferiorityMargin: margin,
+    significanceLevel: alpha,
+  };
   if (opts.minPairedObservations !== undefined) compareOpts.minPairedObservations = opts.minPairedObservations;
   if (opts.bootstrapSeed !== undefined) compareOpts.bootstrapSeed = opts.bootstrapSeed;
   if (opts.bootstrapIterations !== undefined) compareOpts.bootstrapIterations = opts.bootstrapIterations;
+
+  /** Baseline ids ADMITTED at each tier — the universe both yield statements are scored on. */
+  const admittedByTier = new Map<string, Set<string>>();
 
   for (const tier of tiers) {
     const atTier = out.results.filter((r) => r.tier.toString() === tier);
     const srcla = atTier.find((r) => r.policy.id === SRCLA_POLICY.id);
     if (srcla === undefined) continue; // already failed the completeness check
+    const admitted = new Set<string>();
+    admittedByTier.set(tier, admitted);
     for (const b of atTier) {
       if (b.policy.id === SRCLA_POLICY.id) continue;
       if (ablationIds.has(b.policy.id)) continue; // §11.3 evidence, not a §11.2 comparator
@@ -538,9 +749,25 @@ export function evaluateRegisteredRelease(
         });
         continue;
       }
+      admitted.add(b.policy.id);
       comparisons.push(compareToBaseline(srcla, b, compareOpts));
     }
   }
+
+  // P22 — the skill window, per tier, over the SAME admitted universe the
+  // yield comparison used. Computed here and published whatever it says.
+  const skillWindows = tiers.map((tier) =>
+    skillWindow(
+      out.results.filter((r) => r.tier.toString() === tier),
+      admittedByTier.get(tier) ?? new Set<string>(),
+      margin,
+    ),
+  );
+  const producedWindows = skillWindows.filter((w) => w.informative !== null);
+  const anyInformativeWindow = producedWindows.some((w) => w.informative === true);
+  /** Every window that could be measured is inside the margin. */
+  const windowNarrow = producedWindows.length > 0 && !anyInformativeWindow;
+  const windowSummary = skillWindows.map((w) => `${w.tier}: ${w.detail}`).join('; ');
 
   const noAdmissibleComparator = comparisons.length === 0 && excludedComparators.length > 0;
   const notProducedDetail = noAdmissibleComparator
@@ -568,27 +795,114 @@ export function evaluateRegisteredRelease(
         ),
   );
 
-  // Outperformance, on the same admissible deployable set.
-  const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
+  // -------------------------------------------------------------------------
+  // 4a. NON-INFERIORITY — §11.5's yield criterion (P21 part 2), GATING.
+  //
+  // It replaced outperformance because outperformance was unattainable, not
+  // because it was hard: the ENTIRE cross-sectional return available from
+  // reallocating among the three admitted venues is 18-43 bps a year, while
+  // failing to deploy costs 494. Whose point estimate lands on top over a
+  // window that narrow is decided by estimation noise.
+  //
+  // P22, and this is the half that must not be got wrong: a NARROW skill
+  // window does NOT excuse this check. A narrow window makes non-inferiority
+  // EASIER, so converting a pass into NOT INFORMATIVE would excuse the
+  // candidate from a test it can pass. The window is published beside the
+  // result as a POWER DISCLOSURE instead, and the verdict line says plainly
+  // that non-inferiority on such a universe is weak evidence of allocation
+  // quality — deploy-and-hold would satisfy it too.
+  // -------------------------------------------------------------------------
+  const marginBps = (margin * 10_000).toFixed(1);
+  const nonInferiorName = `Non-inferior to every sustainable baseline (margin ${marginBps} bps)`;
+  const weakEvidence = windowNarrow
+    ? ` POWER DISCLOSURE — skill window (${windowSummary}) is inside the ${marginBps} bps ` +
+      `margin: non-inferiority on such a universe is weak evidence of allocation quality, ` +
+      `because deploy-and-hold would also satisfy it.`
+    : '';
+  const inferior = comparisons.filter((c) => c.nonInferiority.nonInferior === false);
+  const unresolved = comparisons.filter((c) => c.nonInferiority.nonInferior === null);
   checks.push(
     comparisons.length === 0
       ? check(
-          'Outperforms every deployable baseline',
+          nonInferiorName,
           null,
-          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
+          (noAdmissibleComparator
+            ? `NO SUSTAINABLE COMPARATOR: every deployable baseline was itself unsustainable at ` +
+              `the criteria SRCLA is held to (${excludedComparators
+                .map((e) => `${e.baselineId}@${e.tier}: ${e.reason}`)
+                .join('; ')})`
+            : 'NOT PRODUCED: no SRCLA-vs-baseline comparison was available') + weakEvidence,
         )
       : check(
-          'Outperforms every deployable baseline',
-          notBeaten.length === 0,
-          notBeaten.length === 0
-            ? `ahead of all ${comparisons.length} admissible deployable comparisons`
-            : notBeaten
+          nonInferiorName,
+          inferior.length > 0 ? false : unresolved.length > 0 ? null : true,
+          (inferior.length > 0
+            ? `inferior by more than the margin: ${inferior
                 .map(
                   (c) =>
-                    `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ${(c.baselineNetApy * 100).toFixed(3)}%`,
+                    `${c.baselineId}@${c.tier} SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ` +
+                    `${(c.baselineNetApy * 100).toFixed(3)}% (one-sided p=${c.nonInferiority.pValue.toFixed(3)})`,
                 )
-                .join(', '),
+                .join(', ')}`
+            : unresolved.length > 0
+              ? `UNRESOLVED for ${unresolved
+                  .map((c) => `${c.baselineId}@${c.tier} (${c.nonInferiority.reason})`)
+                  .join(', ')}`
+              : `within ${marginBps} bps of all ${comparisons.length} sustainable comparators ` +
+                `(one-sided HAC p < ${alpha}, block-bootstrap agreeing)`) + weakEvidence,
         ),
+  );
+
+  // -------------------------------------------------------------------------
+  // 4b. SUPERIORITY — REPORTED, never gating (`gating: false`).
+  //
+  // The OTHER direction of P22, and it must not share a branch with the check
+  // above. Inside the skill window a superiority claim is NOT INFORMATIVE: no
+  // policy could have demonstrated yield superiority at that resolution, so a
+  // `false` here would be a statement about the universe masquerading as a
+  // defect of the policy. It is `null`, and it gates nothing — superiority
+  // stopped being a release criterion when non-inferiority replaced it.
+  // -------------------------------------------------------------------------
+  const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
+  const superiorityName = 'Superiority: yield above every sustainable baseline';
+  checks.push(
+    comparisons.length === 0
+      ? check(
+          superiorityName,
+          null,
+          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
+          false,
+        )
+      : producedWindows.length === 0
+        ? check(
+            superiorityName,
+            null,
+            `NOT PRODUCED: the skill window could not be measured (${windowSummary}), so a ` +
+              `superiority claim cannot be qualified`,
+            false,
+          )
+        : !anyInformativeWindow
+          ? check(
+              superiorityName,
+              null,
+              `NOT INFORMATIVE: the skill window is inside the ${marginBps} bps margin at every ` +
+                `tier (${windowSummary}). No policy could have demonstrated yield superiority ` +
+                `at this resolution, so the point-estimate ordering measures estimation noise.`,
+              false,
+            )
+          : check(
+              superiorityName,
+              notBeaten.length === 0,
+              (notBeaten.length === 0
+                ? `ahead of all ${comparisons.length} sustainable comparators`
+                : notBeaten
+                    .map(
+                      (c) =>
+                        `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ${(c.baselineNetApy * 100).toFixed(3)}%`,
+                    )
+                    .join(', ')) + ` — skill window: ${windowSummary}`,
+              false,
+            ),
   );
 
   // =========================================================================
@@ -617,16 +931,24 @@ export function evaluateRegisteredRelease(
   );
 
   // `=== true`, not truthiness: NOT PRODUCED must not verify.
-  const pass = checks.every((c) => c.passed === true);
+  //
+  // `gating !== false` excludes exactly the one REPORTED check (superiority);
+  // every other check has `gating: true` and blocks as it always did. A
+  // reported check is not evidence of a pass and not evidence of a block, so
+  // it appears in neither roll-up.
+  const gatingChecks = checks.filter((c) => c.gating !== false);
+  const pass = gatingChecks.every((c) => c.passed === true);
   return {
     pass,
     checks,
     comparisons,
-    blockedReasons: checks.filter((c) => c.passed !== true).map((c) => c.name),
+    blockedReasons: gatingChecks.filter((c) => c.passed !== true).map((c) => c.name),
     sustainability,
     comparatorSustainability,
     scaleInvariant: invariant,
     excludedComparators,
+    skillWindows,
+    nonInferiorityMarginApy: margin,
   };
 }
 

@@ -332,3 +332,203 @@ export function normalCdf(x: number): number {
 
 /** Registered default seed for every bootstrap in the evaluation. */
 export const REGISTERED_BOOTSTRAP_SEED = 20260908;
+
+// ===========================================================================
+// NON-INFERIORITY (P21 part 2, P22).
+//
+// WHY THIS REPLACED A SUPERIORITY TEST. Measured on the calibration era, the
+// ENTIRE cross-sectional return available from reallocating among the three
+// admitted venues is 18-43 basis points a year, against 494 basis points lost
+// by not deploying at all. Over a window that narrow, a criterion requiring
+// SRCLA to BEAT every deployable baseline is not a demanding test -- it is an
+// unattainable one, and what it actually measures is estimation noise. Whose
+// point estimate lands on top over a 43 bps spread is decided by the residual
+// wobble of the venue rate paths, not by allocation skill.
+//
+// So the release criterion becomes: SRCLA is NOT WORSE than a sustainable
+// comparator BY MORE THAN A REGISTERED MARGIN. That is a claim the data can
+// actually settle, and it is the claim the study needs -- the proposition is
+// that redeemable yield is scarce, not that SRCLA wins a yield contest.
+// ===========================================================================
+
+/**
+ * The registered non-inferiority margin, ANNUALIZED: 43 basis points.
+ *
+ * It is the measured zero-cost skill window -- the top of the 18-43 bps range
+ * of cross-sectional return available on the calibration era. Declaring
+ * SRCLA non-inferior at this margin says it gives up no more than the entire
+ * measured value of reallocation itself.
+ *
+ * REGISTERED, and UNCONFIRMED: the paper owner must confirm this value before
+ * the freeze. It is declared ONCE, here, and imported everywhere else -- a
+ * second copy is how the optimiser and the grader end up disagreeing about
+ * what was registered. It is serialised into the run record so the artifact
+ * can testify to the number that was actually used.
+ */
+export const REGISTERED_NONINFERIORITY_MARGIN = 0.0043;
+
+/**
+ * Periods per year assumed when a caller supplies no cadence.
+ *
+ * The margin is quoted per YEAR; the difference series is per PERIOD. Getting
+ * this conversion wrong in the permissive direction would shift a daily
+ * difference series by 43 bps A DAY and call a 25-percentage-point shortfall
+ * non-inferior. Callers that know their cadence (the gate derives it from the
+ * replay's own snapshot timestamps) must pass it.
+ */
+export const REGISTERED_PERIODS_PER_YEAR = 365;
+
+export interface NonInferiorityResult extends PairedTestResult {
+  /** The annualized margin the test was run at. */
+  marginApy: number;
+  /** Periods per year used to convert `marginApy` to a per-period shift. */
+  periodsPerYear: number;
+  /** `marginApy / periodsPerYear` -- what was actually added to each d_t. */
+  marginPerPeriod: number;
+  /** Significance level the verdict below was taken at. */
+  alpha: number;
+  /**
+   * Distribution-free cross-check on the SAME shifted series: `true` when the
+   * one-sided bootstrap lower bound clears zero, `false` when it does not,
+   * `null` when the bootstrap could not run.
+   */
+  bootstrap: BlockBootstrapResult;
+  bootstrapAgrees: boolean | null;
+  /**
+   * `true` non-inferior, `false` inferior by more than the margin, `null` the
+   * test could not settle it -- either because it was unusable, or because
+   * the HAC test and the distribution-free cross-check DISAGREE. Two methods
+   * disagreeing is not a pass; it is an unresolved comparison, and `null`
+   * never rolls up into a pass anywhere in this tree.
+   */
+  nonInferior: boolean | null;
+}
+
+/**
+ * One-sided paired non-inferiority test on after-cost per-period returns.
+ *
+ * H0 (what must be REJECTED to claim non-inferiority):
+ *     mean(a - b) <= -margin_per_period       "a is worse by at least the margin"
+ * H1: mean(a - b) >  -margin_per_period
+ *
+ * Implemented by shifting the paired difference series up by the per-period
+ * margin and testing the shifted mean against zero with the same Newey-West
+ * HAC standard error `pairedHacTTest` uses, then cross-checking with the same
+ * seeded moving-block bootstrap `compareToBaseline` already runs.
+ *
+ * `pValue` on the result is ONE-SIDED. That is the whole point: a two-sided
+ * p-value would also reject H0 when `a` is spectacularly BETTER than `b`,
+ * which is not a failure of non-inferiority.
+ *
+ * A DEGENERATE difference series (zero long-run variance) reports
+ * `usable: false` and `nonInferior: null` rather than a flattering pass --
+ * "the test could not run" is not evidence of non-inferiority.
+ *
+ * @param a - SRCLA's per-period after-cost returns (the candidate).
+ * @param b - the comparator's, over the SAME periods.
+ * @param marginApy - the non-inferiority margin, ANNUALIZED and non-negative.
+ * @throws when `marginApy` is negative or `periodsPerYear` is not positive.
+ *   A negative margin would silently invert the test into a superiority one.
+ */
+export function nonInferiorityTest(
+  a: readonly number[],
+  b: readonly number[],
+  marginApy: number = REGISTERED_NONINFERIORITY_MARGIN,
+  opts: {
+    periodsPerYear?: number;
+    lag?: number;
+    minObservations?: number;
+    alpha?: number;
+    bootstrapSeed?: number;
+    bootstrapIterations?: number;
+  } = {},
+): NonInferiorityResult {
+  if (!(marginApy >= 0)) {
+    throw new Error(
+      `nonInferiorityTest: margin must be non-negative (got ${marginApy}). ` +
+        'A negative margin inverts the test into a superiority test.',
+    );
+  }
+  const periodsPerYear = opts.periodsPerYear ?? REGISTERED_PERIODS_PER_YEAR;
+  if (!(periodsPerYear > 0)) {
+    throw new Error(`nonInferiorityTest: periodsPerYear must be positive (got ${periodsPerYear}).`);
+  }
+  const alpha = opts.alpha ?? 0.05;
+  const marginPerPeriod = marginApy / periodsPerYear;
+
+  const shifted = pairedDifferences(a, b).map((d) => d + marginPerPeriod);
+  const zeros = shifted.map(() => 0);
+
+  // DEGENERACY, checked on the RANGE rather than left to the variance.
+  //
+  // Shifting a constant difference series leaves a constant series, whose
+  // long-run variance is zero in exact arithmetic — but `neweyWestVariance`
+  // subtracts a floating-point mean, so the deviations come out at ~1e-19
+  // instead of 0. That is a standard error small enough to make a t-statistic
+  // of ~1e15 and hand back p = 0: the most spectacular possible pass, on a
+  // series carrying no information at all. Two policies with identical
+  // after-cost returns every period is precisely the case where the answer
+  // must be "this test cannot settle it".
+  const range =
+    shifted.length === 0 ? 0 : Math.max(...shifted) - Math.min(...shifted);
+  const magnitude = Math.max(...shifted.map((v) => Math.abs(v)), 0);
+  const degenerate = shifted.length > 0 && range <= magnitude * 1e-12;
+
+  const hacOpts: { lag?: number; minObservations?: number } = {};
+  if (opts.lag !== undefined) hacOpts.lag = opts.lag;
+  if (opts.minObservations !== undefined) hacOpts.minObservations = opts.minObservations;
+  const hac = pairedHacTTest(shifted, zeros, hacOpts);
+
+  // `alpha * 2` so the percentile interval's LOWER endpoint is the one-sided
+  // alpha-quantile: `movingBlockBootstrap` cuts at alpha/2 on each side.
+  const bootstrap = movingBlockBootstrap(shifted, {
+    seed: opts.bootstrapSeed ?? REGISTERED_BOOTSTRAP_SEED,
+    iterations: opts.bootstrapIterations ?? 2000,
+    alpha: Math.min(1, alpha * 2),
+    ...(opts.minObservations !== undefined ? { minObservations: opts.minObservations } : {}),
+  });
+
+  const common = { marginApy, periodsPerYear, marginPerPeriod, alpha, bootstrap };
+
+  if (degenerate) {
+    return {
+      ...hac,
+      pValue: 1,
+      usable: false,
+      reason: 'DEGENERATE: the paired difference series has zero long-run variance',
+      ...common,
+      bootstrapAgrees: null,
+      nonInferior: null,
+    };
+  }
+
+  if (!hac.usable) {
+    return { ...hac, pValue: 1, ...common, bootstrapAgrees: null, nonInferior: null };
+  }
+
+  const pValue = 1 - normalCdf(hac.tStatistic);
+  const hacSays = pValue < alpha;
+  const bootstrapAgrees = bootstrap.usable ? bootstrap.lower > 0 : null;
+  const nonInferior =
+    bootstrapAgrees === null
+      ? null
+      : bootstrapAgrees === hacSays
+        ? hacSays
+        : // HAC and the distribution-free cross-check disagree: unresolved.
+          null;
+
+  return {
+    ...hac,
+    pValue,
+    ...common,
+    bootstrapAgrees,
+    nonInferior,
+    reason:
+      nonInferior === null && bootstrapAgrees !== null
+        ? `UNRESOLVED: HAC says ${hacSays ? 'non-inferior' : 'inferior'} but the ` +
+          `block bootstrap disagrees (lower bound ${bootstrap.lower.toExponential(3)})`
+        : bootstrapAgrees === null
+          ? `BOOTSTRAP_UNUSABLE: ${bootstrap.reason}`
+          : 'OK',
+  };
+}

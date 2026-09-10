@@ -171,6 +171,10 @@ function completeForkResults(): ForkReplayResult[] {
 const named = (r: ReturnType<typeof evaluateRegisteredRelease>, name: string) =>
   r.checks.find((c) => c.name === name)!;
 
+/** The yield gate, matched on its prefix so the registered margin can move. */
+const nonInferiorityCheck = (r: ReturnType<typeof evaluateRegisteredRelease>) =>
+  r.checks.find((c) => c.name.startsWith('Non-inferior'))!;
+
 /**
  * P20/P21 fixture: a COMPLETE evaluation with a few named policies nudged
  * directly on the replay fields those tests care about
@@ -510,7 +514,10 @@ describe('evaluateRegisteredRelease: statistical criterion', () => {
     expect(gate.comparisons.map((c) => c.baselineId)).toContain('b0');
   });
 
-  it('BLOCKS when SRCLA does not outperform a deployable baseline', () => {
+  // Renamed by P21 part 2: outperformance was replaced by NON-INFERIORITY at
+  // a registered margin. An edge of -0.00006/day is -2.19%/yr, two orders of
+  // magnitude outside the 43 bps margin, so it still BLOCKS.
+  it('BLOCKS when SRCLA trails a sustainable baseline by more than the margin', () => {
     const results = completeResults((id) => (id === 'srcla' ? { edge: -0.00006 } : {}));
     const gate = evaluateRegisteredRelease(evaluation({ results }), {
       forkResults: completeForkResults(),
@@ -518,7 +525,7 @@ describe('evaluateRegisteredRelease: statistical criterion', () => {
       bootstrapIterations: 200,
     });
 
-    expect(named(gate, 'Outperforms every deployable baseline').passed).toBe(false);
+    expect(nonInferiorityCheck(gate).passed).toBe(false);
   });
 });
 
@@ -642,9 +649,9 @@ describe('P20: safety is scoped to SRCLA; comparators are measured, not gating',
     expect(distinguishable.passed).toBeNull();
     expect(distinguishable.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
 
-    const outperforms = gate.checks.find((c) => c.name === 'Outperforms every deployable baseline')!;
-    expect(outperforms.passed).toBeNull();
-    expect(outperforms.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
+    const nonInferior = nonInferiorityCheck(gate);
+    expect(nonInferior.passed).toBeNull();
+    expect(nonInferior.detail).toMatch(/NO SUSTAINABLE COMPARATOR/);
   });
 });
 
@@ -689,7 +696,8 @@ describe('§11.5: sustainability first, yield second', () => {
     expect(at('Demonstration')).toBeLessThan(at('Every registered tier ran'));
     expect(at('Every registered policy ran')).toBeLessThan(at('Safety: withdrawal success'));
     expect(at('Sustainability S4')).toBeLessThan(at('Statistically distinguishable'));
-    expect(at('scale invariance')).toBeLessThan(at('Outperforms every deployable baseline'));
+    expect(at('scale invariance')).toBeLessThan(at('Non-inferior to every sustainable baseline'));
+    expect(at('Non-inferior to every sustainable baseline')).toBeLessThan(at('Superiority: yield'));
     expect(at('Price of unsustainability')).toBe(names.length - 1);
   });
 

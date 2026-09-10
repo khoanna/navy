@@ -339,6 +339,12 @@ function serialisableRun(run: RunSummary): Record<string, unknown> {
       comparatorSustainability: run.gate.comparatorSustainability,
       scaleInvariant: run.gate.scaleInvariant,
       excludedComparators: run.gate.excludedComparators,
+      // P21 part 2 / P22. The margin is serialised beside the windows so the
+      // run record testifies to the number that was actually used: a
+      // registered constant nobody can read out of the artifact is not a
+      // registration.
+      nonInferiorityMarginApy: run.gate.nonInferiorityMarginApy,
+      skillWindows: run.gate.skillWindows,
     },
   };
 }

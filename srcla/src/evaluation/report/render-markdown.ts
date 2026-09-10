@@ -18,7 +18,11 @@
  * UNITS: money is USDC base units (6 dp); APYs are dimensionless fractions.
  */
 import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
-import { ablationContributions, type RegisteredGateResult } from '../kernel/gates.js';
+import {
+  ablationContributions,
+  type RegisteredGateResult,
+  type SkillWindow,
+} from '../kernel/gates.js';
 import {
   REGISTERED_DEMONSTRATION_FLOOR,
   type SustainabilityVerdict,
@@ -298,9 +302,67 @@ function gateDetail(detail: string): string {
 function gateTable(gate: RegisteredGateResult): string {
   const rows = gate.checks.map((c) => {
     const mark = c.passed === true ? 'PASS' : c.passed === false ? '**FAIL**' : '**NOT PRODUCED**';
-    return `| ${mark} | ${c.name} | ${gateDetail(c.detail)} |`;
+    // A REPORTED check is not part of the verdict. Printing it in the same
+    // column as the gating ones without saying so would read as a block that
+    // the `pass` line then contradicts.
+    const gating = c.gating === false ? 'reported' : 'gates';
+    return `| ${mark} | ${gating} | ${c.name} | ${gateDetail(c.detail)} |`;
   });
-  return ['| Verdict | Check | Detail |', '|---|---|---|', ...rows].join('\n');
+  return ['| Verdict | Role | Check | Detail |', '|---|---|---|---|', ...rows].join('\n');
+}
+
+/**
+ * P22 — the skill window, published as a POWER DISCLOSURE beside both yield
+ * statements.
+ *
+ * It is the whole budget any allocation skill could have captured: bounded
+ * hindsight (B5, §11.2's non-deployable upper bound) minus the best
+ * SUSTAINABLE baseline, on the same era. It qualifies the two yield
+ * statements in OPPOSITE directions, which is why it is printed once, here,
+ * rather than folded into either check's prose:
+ *
+ *   - a SUPERIORITY claim inside the window is NOT INFORMATIVE — no policy
+ *     could have demonstrated it at that resolution;
+ *   - a NON-INFERIORITY pass inside the window still stands, because a narrow
+ *     window makes non-inferiority EASIER — but it is weak evidence of
+ *     allocation quality, since deploy-and-hold would satisfy it too.
+ */
+function skillWindowTable(gate: RegisteredGateResult): string {
+  const windows: SkillWindow[] = gate.skillWindows ?? [];
+  const marginBps = (gate.nonInferiorityMarginApy * 10_000).toFixed(1);
+  if (windows.length === 0) return '_No skill window was produced._';
+
+  const rows = windows
+    .slice()
+    .sort((a, b) => (BigInt(a.tier || '0') < BigInt(b.tier || '0') ? -1 : 1))
+    .map(
+      (w) =>
+        `| ${w.tier === '' ? '—' : usdc(BigInt(w.tier))} | ` +
+        `${w.hindsightApy === null ? '—' : pct(w.hindsightApy)} | ` +
+        `${w.bestBaselineId ?? '—'} | ` +
+        `${w.bestBaselineApy === null ? '—' : pct(w.bestBaselineApy)} | ` +
+        `${w.windowApy === null ? '—' : `${(w.windowApy * 10_000).toFixed(1)} bps`} | ` +
+        `${w.informative === true ? 'INFORMATIVE' : w.informative === false ? '**NOT INFORMATIVE**' : '**NOT PRODUCED**'} |`,
+    );
+
+  return [
+    `Registered non-inferiority margin: **${marginBps} bps** annualized (` +
+      '`REGISTERED_NONINFERIORITY_MARGIN`, an **unconfirmed** registration the paper owner ' +
+      'must confirm before the freeze). The window below is bounded hindsight minus the best ' +
+      'SUSTAINABLE baseline — the entire return reallocation could have earned.',
+    '',
+    '| Tier | Bounded hindsight (B5) | Best sustainable baseline | its net APY | Skill window | Superiority resolvable? |',
+    '|---|---|---|---|---|---|',
+    ...rows,
+    '',
+    'A window narrower than the margin means **no policy could have demonstrated yield ' +
+      'superiority at this resolution**, so the superiority line is reported NOT INFORMATIVE ' +
+      'and gates nothing. It does **not** excuse the non-inferiority test: a narrow window ' +
+      'makes non-inferiority *easier*, so a pass there is disclosed as weak evidence of ' +
+      'allocation quality — deploy-and-hold would satisfy it too. The window never touches ' +
+      'the demonstration, completeness or sustainability checks: yield can be beyond reach, ' +
+      'redeemability cannot.',
+  ].join('\n');
 }
 
 /**
@@ -741,6 +803,10 @@ export function renderReport(params: ReportParams): string {
     );
     out.push('');
     out.push(resultsTable(run.evaluation));
+    out.push('');
+    out.push('### The skill window (P22) — is either yield statement informative?');
+    out.push('');
+    out.push(skillWindowTable(run.gate));
     out.push('');
     out.push('### SRCLA against each deployable baseline');
     out.push('');
