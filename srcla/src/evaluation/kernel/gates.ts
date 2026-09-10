@@ -67,16 +67,25 @@ export interface RegisteredGateCheck {
    * `pass` and from `blockedReasons`. Absent means gating, so every existing
    * check keeps blocking exactly as it did.
    *
-   * There is one such check, and it exists for a measured reason. "Superiority:
-   * yield" is no longer a release criterion — over a 43 bps cross-sectional
-   * window it measures estimation noise, which is why §11.5's yield criterion
-   * became non-inferiority. Leaving it gating would guarantee a permanent
-   * block on a question the data cannot answer, and NOT INFORMATIVE would
-   * masquerade as a defect of the policy rather than of the universe.
+   * The set that may carry it is CLOSED, enumerated in
+   * `test/unit/evaluation/non-inferiority.spec.ts`, and has exactly two
+   * members — anything else marked non-gating fails that test rather than
+   * quietly ceasing to block:
    *
-   * This flag is NOT a general escape hatch. The demonstration, completeness
-   * and sustainability checks all gate, always: yield can be beyond reach,
-   * redeemability cannot.
+   *   1. the two-sided distinguishability statistic, which v0.8 dropped from
+   *      §11.5's rejection list (the word "indistinguishab*" appears nowhere
+   *      in the v0.8 paper) and which is retained only as published
+   *      resolution information;
+   *   2. the NOT INFORMATIVE branch of a claimed yield superiority, which the
+   *      paper says "neither passes nor fails" — inside the skill window the
+   *      claim can be neither supported nor refuted, so a `false` there would
+   *      be a statement about the universe masquerading as a defect of the
+   *      policy. Every OTHER branch of that check gates: an unsupported claim
+   *      is a §11.5 rejection condition.
+   *
+   * This flag is NOT a general escape hatch. The demonstration, completeness,
+   * sustainability and non-inferiority checks all gate, always: yield can be
+   * beyond reach, redeemability cannot.
    */
   gating?: boolean;
 }
@@ -97,6 +106,15 @@ export interface BaselineComparison {
    * with the same seeded block-bootstrap cross-check.
    */
   nonInferiority: NonInferiorityResult;
+  /**
+   * The same one-sided machinery at a ZERO margin, which is exactly a
+   * SUPERIORITY test: reject `mean(SRCLA − baseline) <= 0`. A point-estimate
+   * ordering (`srclaNetApy > baselineNetApy`) is not a test, and a one-basis
+   * -point noise advantage would satisfy it — the very defect §11.5 was
+   * rewritten to remove. Since an unsupported superiority claim now GATES,
+   * the claim has to be settled by a test rather than by a ranking.
+   */
+  superiority: NonInferiorityResult;
   /** Periods per year derived from the replay's own snapshot cadence. */
   periodsPerYear: number;
 }
@@ -227,6 +245,20 @@ export interface RegisteredGateOptions {
    * a caller can widen it until the gate passes.
    */
   nonInferiorityMargin?: number;
+  /**
+   * Dimensions on which the RELEASE ACTUALLY CLAIMS superiority.
+   *
+   * §11.5 rejects an UNSUPPORTED CLAIM; it does not require a superiority
+   * claim to be made. So the superiority check is present only when the claim
+   * is, and when present it GATES — an unsupported claim is a rejection
+   * condition, not a footnote. The one exception is the NOT INFORMATIVE
+   * branch, which the paper says "neither passes nor fails": inside the skill
+   * window no policy could have demonstrated superiority, so the claim can be
+   * neither supported nor refuted and the check is reported, not gating.
+   *
+   * Default: no claim, and therefore no superiority check at all.
+   */
+  claimedSuperiorityDimensions?: readonly 'yield'[];
 }
 
 const check = (
@@ -331,6 +363,17 @@ export function compareToBaseline(
     },
   );
 
+  // Superiority is the SAME one-sided test at a zero margin.
+  const superiority = nonInferiorityTest(a, b, 0, {
+    periodsPerYear,
+    bootstrapSeed: opts.bootstrapSeed ?? REGISTERED_BOOTSTRAP_SEED,
+    bootstrapIterations: opts.bootstrapIterations ?? 2000,
+    ...(opts.minPairedObservations !== undefined
+      ? { minObservations: opts.minPairedObservations }
+      : {}),
+    ...(opts.significanceLevel !== undefined ? { alpha: opts.significanceLevel } : {}),
+  });
+
   return {
     tier: srcla.tier.toString(),
     baselineId: baseline.policy.id,
@@ -339,6 +382,7 @@ export function compareToBaseline(
     test,
     bootstrap,
     nonInferiority,
+    superiority,
     periodsPerYear,
   };
 }
@@ -763,11 +807,22 @@ export function evaluateRegisteredRelease(
       margin,
     ),
   );
+  // PER TIER, and that is the whole point. §11.5 defines the window against
+  // "the best baseline that is itself sustainable AT THAT TIER", and B4 held
+  // 1.000 coverage at 1M and 0.590 at 10M on the same era — the admitted
+  // universe genuinely differs by tier, so the window does too. Collapsing to
+  // a single global flag scored superiority at tiers where it was not
+  // resolvable AND, worse, suppressed the mandated weak-evidence disclosure
+  // at the narrow tiers whenever any one tier happened to be wide.
+  const windowByTier = new Map<string, SkillWindow>(skillWindows.map((w) => [w.tier, w]));
   const producedWindows = skillWindows.filter((w) => w.informative !== null);
-  const anyInformativeWindow = producedWindows.some((w) => w.informative === true);
-  /** Every window that could be measured is inside the margin. */
-  const windowNarrow = producedWindows.length > 0 && !anyInformativeWindow;
+  /** Tiers whose window is measured and INSIDE the margin. */
+  const narrowTiers = skillWindows.filter((w) => w.informative === false);
+  /** Tiers whose window is wide enough to resolve a superiority claim. */
+  const informativeTiers = skillWindows.filter((w) => w.informative === true);
   const windowSummary = skillWindows.map((w) => `${w.tier}: ${w.detail}`).join('; ');
+  const isResolvableTier = (tier: string): boolean =>
+    windowByTier.get(tier)?.informative === true;
 
   const noAdmissibleComparator = comparisons.length === 0 && excludedComparators.length > 0;
   const notProducedDetail = noAdmissibleComparator
@@ -777,13 +832,31 @@ export function evaluateRegisteredRelease(
         .join('; ')})`
     : 'NOT PRODUCED: no SRCLA-vs-baseline comparison was available';
 
+  // -------------------------------------------------------------------------
+  // The two-sided distinguishability statistic: REPORTED, NOT GATING.
+  //
+  // It was §11.5's criterion in v0.6 and it is not in v0.8 — the word
+  // "indistinguishab*" appears nowhere in the v0.8 paper, and the check is
+  // absent from §11.5's rejection list. Keeping it as a gate would have
+  // reinstated, through a second door, exactly the unattainable yield
+  // criterion this task removed through the first: demanding that SRCLA be
+  // statistically DISTINGUISHABLE from every sustainable baseline over an
+  // 18-43 bps universe is unattainable for precisely the reason
+  // non-inferiority replaced outperformance.
+  //
+  // The statistic is still worth publishing — it says how much resolution the
+  // data had — so it is emitted with `gating: false` and named as a
+  // diagnostic, rather than deleted.
+  // -------------------------------------------------------------------------
   const indistinguishable = comparisons.filter((c) => c.test.usable && c.test.pValue >= alpha);
   const unusable = comparisons.filter((c) => !c.test.usable);
+  const distinguishabilityName =
+    'Diagnostic: statistical distinguishability from every sustainable baseline';
   checks.push(
     comparisons.length === 0
-      ? check('Statistically distinguishable from every deployable baseline', null, notProducedDetail)
+      ? check(distinguishabilityName, null, notProducedDetail, false)
       : check(
-          'Statistically distinguishable from every deployable baseline',
+          distinguishabilityName,
           indistinguishable.length === 0 && unusable.length === 0,
           unusable.length > 0
             ? `test not usable for ${unusable.map((c) => `${c.baselineId}@${c.tier} (${c.test.reason})`).join(', ')}`
@@ -792,6 +865,7 @@ export function evaluateRegisteredRelease(
                   .map((c) => `${c.baselineId}@${c.tier} p=${c.test.pValue.toFixed(3)}`)
                   .join(', ')
               : `p < ${alpha} against all ${comparisons.length} admissible deployable comparisons`,
+          false,
         ),
   );
 
@@ -814,11 +888,18 @@ export function evaluateRegisteredRelease(
   // -------------------------------------------------------------------------
   const marginBps = (margin * 10_000).toFixed(1);
   const nonInferiorName = `Non-inferior to every sustainable baseline (margin ${marginBps} bps)`;
-  const weakEvidence = windowNarrow
-    ? ` POWER DISCLOSURE — skill window (${windowSummary}) is inside the ${marginBps} bps ` +
-      `margin: non-inferiority on such a universe is weak evidence of allocation quality, ` +
-      `because deploy-and-hold would also satisfy it.`
-    : '';
+  // PER TIER: the disclosure fires whenever ANY tier's window is inside the
+  // margin, and names those tiers. A wide window at one tier says nothing
+  // about the resolution available at another, so it must not suppress the
+  // disclosure the paper mandates at the narrow ones.
+  const weakEvidence =
+    narrowTiers.length > 0
+      ? ` POWER DISCLOSURE — the skill window is inside the ${marginBps} bps margin at ` +
+        `${narrowTiers.length} of ${skillWindows.length} tiers (${narrowTiers
+          .map((w) => `${w.tier}: ${w.detail}`)
+          .join('; ')}): at those tiers non-inferiority is weak evidence of allocation ` +
+        `quality, because deploy-and-hold would also satisfy it.`
+      : '';
   const inferior = comparisons.filter((c) => c.nonInferiority.nonInferior === false);
   const unresolved = comparisons.filter((c) => c.nonInferiority.nonInferior === null);
   checks.push(
@@ -854,56 +935,84 @@ export function evaluateRegisteredRelease(
   );
 
   // -------------------------------------------------------------------------
-  // 4b. SUPERIORITY — REPORTED, never gating (`gating: false`).
+  // 4b. SUPERIORITY — PRESENT ONLY WHEN CLAIMED, and it must not share a
+  //     branch with the check above.
   //
-  // The OTHER direction of P22, and it must not share a branch with the check
-  // above. Inside the skill window a superiority claim is NOT INFORMATIVE: no
-  // policy could have demonstrated yield superiority at that resolution, so a
-  // `false` here would be a statement about the universe masquerading as a
-  // defect of the policy. It is `null`, and it gates nothing — superiority
-  // stopped being a release criterion when non-inferiority replaced it.
+  // §11.5 rejects an UNSUPPORTED CLAIM; it does not require the claim to be
+  // made. So this check is emitted only when the release actually claims
+  // yield superiority, and when emitted it GATES — an unsupported claim is a
+  // rejection condition.
+  //
+  // The one exception, and the OTHER direction of P22: inside the skill
+  // window a superiority claim is NOT INFORMATIVE. No policy could have
+  // demonstrated yield superiority at that resolution, so the claim can be
+  // neither supported nor refuted; the paper says such a case "neither passes
+  // nor fails", so that branch — and only that branch — is `gating: false`.
+  // A `false` there would be a statement about the universe masquerading as a
+  // defect of the policy.
+  //
+  // Scored PER TIER: only comparisons at a tier whose own window is wide
+  // enough are eligible to support or refute the claim.
   // -------------------------------------------------------------------------
-  const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
-  const superiorityName = 'Superiority: yield above every sustainable baseline';
-  checks.push(
-    comparisons.length === 0
-      ? check(
-          superiorityName,
-          null,
-          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
-          false,
-        )
-      : producedWindows.length === 0
+  const claimsYieldSuperiority = (opts.claimedSuperiorityDimensions ?? []).includes('yield');
+  if (claimsYieldSuperiority) {
+    const superiorityName = 'Superiority: yield above every sustainable baseline (claimed)';
+    const resolvable = comparisons.filter((c) => isResolvableTier(c.tier));
+    // A TEST, not a ranking: `superiority` is the one-sided HAC test at a zero
+    // margin, cross-checked by the bootstrap on the same asymmetric rule.
+    const notBeaten = resolvable.filter((c) => c.superiority.nonInferior === false);
+    const unsettled = resolvable.filter((c) => c.superiority.nonInferior === null);
+    const unresolvableNote =
+      narrowTiers.length > 0
+        ? ` (not resolvable at ${narrowTiers.map((w) => w.tier).join(', ')}: window inside the ` +
+          `${marginBps} bps margin)`
+        : '';
+    checks.push(
+      comparisons.length === 0
         ? check(
             superiorityName,
             null,
-            `NOT PRODUCED: the skill window could not be measured (${windowSummary}), so a ` +
-              `superiority claim cannot be qualified`,
-            false,
+            noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
           )
-        : !anyInformativeWindow
+        : producedWindows.length === 0
           ? check(
               superiorityName,
               null,
-              `NOT INFORMATIVE: the skill window is inside the ${marginBps} bps margin at every ` +
-                `tier (${windowSummary}). No policy could have demonstrated yield superiority ` +
-                `at this resolution, so the point-estimate ordering measures estimation noise.`,
-              false,
+              `NOT PRODUCED: the skill window could not be measured (${windowSummary}), so a ` +
+                `claim of yield superiority can be neither supported nor refuted`,
             )
-          : check(
-              superiorityName,
-              notBeaten.length === 0,
-              (notBeaten.length === 0
-                ? `ahead of all ${comparisons.length} sustainable comparators`
-                : notBeaten
-                    .map(
-                      (c) =>
-                        `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ${(c.baselineNetApy * 100).toFixed(3)}%`,
-                    )
-                    .join(', ')) + ` — skill window: ${windowSummary}`,
-              false,
-            ),
-  );
+          : informativeTiers.length === 0
+            ? check(
+                superiorityName,
+                null,
+                `NOT INFORMATIVE: the skill window is inside the ${marginBps} bps margin at ` +
+                  `every tier (${windowSummary}). No policy could have demonstrated yield ` +
+                  `superiority at this resolution, so the point-estimate ordering measures ` +
+                  `estimation noise — this neither passes nor fails.`,
+                false,
+              )
+            : check(
+                superiorityName,
+                notBeaten.length > 0 ? false : unsettled.length > 0 ? null : true,
+                (notBeaten.length > 0
+                  ? `UNSUPPORTED CLAIM: ` +
+                    notBeaten
+                      .map(
+                        (c) =>
+                          `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ` +
+                          `${(c.baselineNetApy * 100).toFixed(3)}% (one-sided p=${c.superiority.pValue.toFixed(3)})`,
+                      )
+                      .join(', ')
+                  : unsettled.length > 0
+                    ? `UNRESOLVED for ${unsettled
+                        .map((c) => `${c.baselineId}@${c.tier} (${c.superiority.reason})`)
+                        .join(', ')}`
+                    : `significantly ahead (one-sided p < ${alpha}) of all ${resolvable.length} ` +
+                      `sustainable comparators at the ${informativeTiers.length} tiers where the ` +
+                      `window can resolve it`) + unresolvableNote,
+              ),
+    );
+  }
 
   // =========================================================================
   // 5. PRICE OF UNSUSTAINABILITY (§11.5 part 3). Publishing this is a

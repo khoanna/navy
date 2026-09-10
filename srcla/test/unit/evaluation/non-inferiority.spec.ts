@@ -27,6 +27,7 @@
  */
 import {
   evaluateRegisteredRelease,
+  periodsPerYearFromSnapshots,
   skillWindow,
   type ForkReplayResult,
 } from '../../../src/evaluation/kernel/gates.js';
@@ -175,6 +176,14 @@ const gateOpts = {
   bootstrapIterations: 300,
   forkResults: completeForkResults(),
 };
+/**
+ * §11.5 rejects an UNSUPPORTED CLAIM; it does not require one to be made. The
+ * superiority check therefore exists only when the release claims it.
+ */
+const claimingOpts = {
+  ...gateOpts,
+  claimedSuperiorityDimensions: ['yield'] as const,
+};
 
 /**
  * A NARROW-WINDOW universe: bounded hindsight (B5) buys essentially nothing
@@ -241,6 +250,142 @@ describe('nonInferiorityTest: one-sided, HAC-corrected, at an ANNUALIZED margin'
   });
 });
 
+/**
+ * THE CADENCE TRAP, pinned directly.
+ *
+ * The registered margin is quoted per YEAR; the difference series is per
+ * PERIOD. `periodsPerYearFromSnapshots` is the single line that reconciles
+ * them, and getting it wrong in the permissive direction (assuming daily
+ * origins on an hourly dataset) shifts the series by 24x the margin and calls
+ * almost anything non-inferior; getting it wrong in the STRICT direction
+ * fails a policy that was fine. Neither error is visible from any assertion
+ * about the fallback constant, which is why this table exists.
+ */
+describe('periodsPerYearFromSnapshots: the annualization the margin depends on', () => {
+  const at = (stepSeconds: number, count = 5): { timestamp: Date }[] =>
+    Array.from({ length: count }, (_, i) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 1) + i * stepSeconds * 1000),
+    }));
+
+  it.each([
+    ['hourly', 3_600, 8_760],
+    ['6-hourly', 21_600, 1_460],
+    ['daily', 86_400, 365],
+    ['weekly', 604_800, 52.142857142857146],
+  ])('derives %s origins as %d periods per year', (_label, step, expected) => {
+    expect(periodsPerYearFromSnapshots(at(step as number))).toBeCloseTo(expected as number, 6);
+  });
+
+  it('uses the MEDIAN gap, so one duplicated or missing timestamp cannot set it', () => {
+    const hourly = at(3_600, 9);
+    // A single 12-hour hole in an otherwise hourly series.
+    hourly[5] = { timestamp: new Date(hourly[4]!.timestamp.getTime() + 12 * 3_600_000) };
+    for (let i = 6; i < hourly.length; i++) {
+      hourly[i] = { timestamp: new Date(hourly[i - 1]!.timestamp.getTime() + 3_600_000) };
+    }
+    expect(periodsPerYearFromSnapshots(hourly)).toBeCloseTo(8_760, 6);
+  });
+
+  it('returns null rather than a number it cannot support', () => {
+    expect(periodsPerYearFromSnapshots([])).toBeNull();
+    expect(periodsPerYearFromSnapshots(at(3_600, 1))).toBeNull();
+    // Every timestamp identical: no positive gap anywhere.
+    expect(periodsPerYearFromSnapshots(at(0, 5))).toBeNull();
+  });
+
+  it('carries the derived cadence into the comparison the gate actually scores', () => {
+    // An HOURLY fixture: if the gate silently assumed 365, the per-period
+    // margin would be 24x too large and the check would be meaningless.
+    const hourlyRun = (policyId: string, tier: bigint, apy: number): PolicyRunResult => {
+      const base = run(policyId, tier, { realizedNetApy: apy, seed: 3 });
+      return {
+        ...base,
+        replay: {
+          ...base.replay,
+          snapshots: base.replay.snapshots.map((sn, i) => ({
+            ...sn,
+            timestamp: new Date(Date.UTC(2026, 5, 1) + i * 3_600_000),
+          })),
+        },
+      } as PolicyRunResult;
+    };
+    const results: PolicyRunResult[] = [];
+    for (const tier of REGISTERED_TIERS) {
+      for (const p of REGISTERED_POLICIES) {
+        results.push(hourlyRun(p.id, tier, p.id === SRCLA_POLICY.id ? 0.05 : 0.05));
+      }
+    }
+    const gate = runRegisteredGate(
+      {
+        results,
+        withdrawalSource: 'observed',
+        artifact: artifact(),
+        provisional: false,
+        missingPolicyIds: [],
+        missingTiers: [],
+      } as unknown as RegisteredEvaluationResult,
+      gateOpts,
+    );
+    expect(gate.comparisons.length).toBeGreaterThan(0);
+    for (const c of gate.comparisons) {
+      expect(c.periodsPerYear).toBeCloseTo(8_760, 6);
+      expect(c.nonInferiority.periodsPerYear).toBeCloseTo(8_760, 6);
+      expect(c.nonInferiority.marginPerPeriod).toBeCloseTo(
+        REGISTERED_NONINFERIORITY_MARGIN / 8_760,
+        12,
+      );
+    }
+  });
+});
+
+/**
+ * The `gating` field is a plain optional flag on a shared type, so any future
+ * check becomes non-blocking with a one-word edit. This test is the lock: the
+ * non-gating set is enumerated EXACTLY, and anything else marked non-gating
+ * fails here rather than quietly ceasing to block.
+ */
+describe('the non-gating set is enumerated, not open', () => {
+  const ALLOWED_NON_GATING = [
+    'Diagnostic: statistical distinguishability from every sustainable baseline',
+    'Superiority: yield above every sustainable baseline (claimed)',
+  ];
+
+  it('only the enumerated checks may be non-gating', () => {
+    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), claimingOpts);
+    const nonGating = gate.checks.filter((c) => c.gating === false).map((c) => c.name);
+    expect(nonGating.sort()).toEqual(ALLOWED_NON_GATING.slice().sort());
+  });
+
+  it('every OTHER check gates, and blockedReasons is exactly the failing gating set', () => {
+    const gate = runRegisteredGate(narrowWindowRun({ srclaWorseThanBaseline: true }), claimingOpts);
+    for (const c of gate.checks) {
+      if (!ALLOWED_NON_GATING.includes(c.name)) expect(c.gating).toBe(true);
+    }
+    expect(gate.blockedReasons).toEqual(
+      gate.checks.filter((c) => c.gating !== false && c.passed !== true).map((c) => c.name),
+    );
+    for (const name of gate.blockedReasons) expect(ALLOWED_NON_GATING).not.toContain(name);
+  });
+
+  // Redeemability is never excusable. Superiority is the ONLY criterion the
+  // skill window is allowed to render unprovable.
+  it('no demonstration, completeness or sustainability check is ever non-gating', () => {
+    const gate = runRegisteredGate(narrowWindowRun(), gateOpts);
+    for (const c of gate.checks) {
+      if (
+        c.name.startsWith('Demonstration') ||
+        c.name.startsWith('Every registered') ||
+        c.name.startsWith('Safety') ||
+        c.name.startsWith('Sustainability') ||
+        c.name.startsWith('Non-inferior') ||
+        c.name.startsWith('§11.1')
+      ) {
+        expect(c.gating).toBe(true);
+      }
+    }
+  });
+});
+
 describe('skillWindow: bounded hindsight minus the best SUSTAINABLE baseline', () => {
   const tier = REGISTERED_TIERS[0]!;
 
@@ -292,7 +437,7 @@ describe('skillWindow: bounded hindsight minus the best SUSTAINABLE baseline', (
 
 describe('P22: the skill window governs the two yield criteria in OPPOSITE directions', () => {
   it('a narrow window makes a SUPERIORITY claim NOT INFORMATIVE', () => {
-    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), gateOpts);
+    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), claimingOpts);
     const sup = named(gate, 'Superiority: yield');
     expect(sup.passed).toBeNull();
     expect(sup.detail).toMatch(/NOT INFORMATIVE/);
@@ -313,10 +458,36 @@ describe('P22: the skill window governs the two yield criteria in OPPOSITE direc
     expect(ni.detail).toMatch(/deploy-and-hold/);
   });
 
-  it('the superiority check is REPORTED, never gating: a NOT INFORMATIVE one blocks nothing', () => {
-    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), gateOpts);
-    expect(gate.blockedReasons).not.toContain(named(gate, 'Superiority: yield').name);
+  it('a NOT INFORMATIVE superiority claim neither passes nor fails, and blocks nothing', () => {
+    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), claimingOpts);
+    const sup = named(gate, 'Superiority: yield');
+    expect(sup.passed).toBeNull();
+    expect(sup.gating).toBe(false);
+    expect(gate.blockedReasons).not.toContain(sup.name);
     expect(gate.pass).toBe(true);
+  });
+
+  // The claim is what §11.5 rejects. No claim, no check to reject.
+  it('emits NO superiority check at all when the release does not claim superiority', () => {
+    const gate = runRegisteredGate(narrowWindowRun({ claimYieldSuperiority: true }), gateOpts);
+    expect(gate.checks.some((c) => c.name.startsWith('Superiority'))).toBe(false);
+    expect(gate.pass).toBe(true);
+  });
+
+  // An unsupported claim IS a §11.5 rejection condition, so where the window
+  // can resolve it the check gates.
+  it('BLOCKS on an UNSUPPORTED superiority claim where the window can resolve it', () => {
+    const over: Record<string, RunOverride> = { srcla: { realizedNetApy: 0.06 } };
+    for (const p of REGISTERED_POLICIES) {
+      if (p.id === SRCLA_POLICY.id) continue;
+      over[p.id] = { realizedNetApy: p.shape === 'hindsight' ? 0.20 : 0.07 };
+    }
+    const gate = runRegisteredGate(runResult(over), claimingOpts);
+    const sup = named(gate, 'Superiority: yield');
+    expect(sup.passed).toBe(false);
+    expect(sup.gating).not.toBe(false);
+    expect(sup.detail).toMatch(/UNSUPPORTED CLAIM/);
+    expect(gate.pass).toBe(false);
   });
 
   it('scores superiority normally when the window is WIDE enough to resolve it', () => {
@@ -325,7 +496,7 @@ describe('P22: the skill window governs the two yield criteria in OPPOSITE direc
       if (p.id === SRCLA_POLICY.id) continue;
       over[p.id] = { realizedNetApy: p.shape === 'hindsight' ? 0.20 : 0.05 };
     }
-    const gate = runRegisteredGate(runResult(over), gateOpts);
+    const gate = runRegisteredGate(runResult(over), claimingOpts);
     const sup = named(gate, 'Superiority: yield');
     expect(sup.passed).toBe(true);
     expect(sup.detail).not.toMatch(/NOT INFORMATIVE/);
@@ -344,6 +515,83 @@ describe('P22: the skill window governs the two yield criteria in OPPOSITE direc
         expect(c.passed).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * §11.5 defines the window against "the best baseline that is itself
+ * sustainable AT THAT TIER". B4 held 1.000 coverage at 1M and 0.590 at 10M on
+ * the same era, so the admitted universe genuinely differs by tier — and so
+ * does the window. A single global flag scored superiority at tiers where it
+ * was not resolvable and, worse, suppressed the mandated weak-evidence
+ * disclosure at the narrow tiers whenever any ONE tier happened to be wide.
+ */
+describe('P22: the skill window is applied PER TIER, never collapsed', () => {
+  const NARROW_TIER = REGISTERED_TIERS[0]!.toString();
+  const WIDE_TIER = REGISTERED_TIERS[3]!.toString();
+
+  /** Wide at the largest tier, narrow at the smallest. */
+  function mixedWindowRun(): RegisteredEvaluationResult {
+    const results: PolicyRunResult[] = [];
+    for (const tier of REGISTERED_TIERS) {
+      const wide = tier.toString() === WIDE_TIER;
+      for (const [i, p] of REGISTERED_POLICIES.entries()) {
+        const apy =
+          p.id === SRCLA_POLICY.id
+            ? 0.05
+            : p.shape === 'hindsight'
+              ? wide
+                ? 0.20 // a 15 pp window: resolvable
+                : 0.0505 // a 5 bps window: inside the 43 bps margin
+              : 0.05;
+        results.push(run(p.id, tier, { realizedNetApy: apy, seed: 100 + i }));
+      }
+    }
+    return {
+      results,
+      withdrawalSource: 'observed',
+      artifact: artifact(),
+      provisional: false,
+      missingPolicyIds: [],
+      missingTiers: [],
+    } as unknown as RegisteredEvaluationResult;
+  }
+
+  it('publishes one window per tier, with different verdicts', () => {
+    const gate = runRegisteredGate(mixedWindowRun(), gateOpts);
+    expect(gate.skillWindows).toHaveLength(REGISTERED_TIERS.length);
+    expect(gate.skillWindows.find((w) => w.tier === NARROW_TIER)!.informative).toBe(false);
+    expect(gate.skillWindows.find((w) => w.tier === WIDE_TIER)!.informative).toBe(true);
+  });
+
+  // THE PART WITH TEETH: one wide tier must not silence the disclosure the
+  // paper mandates at the narrow ones.
+  it('still discloses weak evidence when only SOME tiers are narrow', () => {
+    const gate = runRegisteredGate(mixedWindowRun(), gateOpts);
+    const ni = named(gate, 'Non-inferior');
+    expect(ni.detail).toMatch(/weak evidence/);
+    expect(ni.detail).toContain(NARROW_TIER);
+  });
+
+  it('scores a superiority claim only at the tiers whose window can resolve it', () => {
+    const gate = runRegisteredGate(mixedWindowRun(), claimingOpts);
+    const sup = named(gate, 'Superiority: yield');
+    // SRCLA ties every baseline everywhere, so had the narrow tiers been
+    // scored the claim would have been refuted there too. The detail must
+    // name them as NOT resolvable instead.
+    expect(sup.detail).toMatch(/not resolvable at/);
+    expect(sup.detail).toContain(NARROW_TIER);
+    expect(sup.detail).not.toContain(`@${WIDE_TIER}: SRCLA`.slice(0, 0) + 'never');
+  });
+
+  it('drops the disclosure entirely when NO tier is narrow', () => {
+    const over: Record<string, RunOverride> = { srcla: { realizedNetApy: 0.09 } };
+    for (const p of REGISTERED_POLICIES) {
+      if (p.id === SRCLA_POLICY.id) continue;
+      over[p.id] = { realizedNetApy: p.shape === 'hindsight' ? 0.20 : 0.05 };
+    }
+    const gate = runRegisteredGate(runResult(over), gateOpts);
+    expect(named(gate, 'Non-inferior').detail).not.toMatch(/weak evidence/);
   });
 });
 
@@ -373,6 +621,41 @@ describe('P27: an unsustainable policy is a counterexample, not a comparator', (
     expect(b1.realizedNetApy).toBeCloseTo(0.3916, 6);
     expect(b1.sustainable).toBe(false);
     expect(b1.breach).toMatch(/S2/);
+  });
+
+  // §11.5 part 5 requires the criterion AND THE MARGIN by which it broke.
+  // S1 and S3 always carried their thresholds; S2 and S4 did not, so the
+  // headline number -- 0.878 against the 0.99 floor -- was not derivable from
+  // the table that carries the paper's central argument.
+  it('states the MARGIN of an S2 breach, not just the criterion (§11.5 part 5)', () => {
+    const gate = runRegisteredGate(breacher(), gateOpts);
+    const b1 = gate.comparatorSustainability.find(
+      (v) => v.policyId === 'b1' && v.tier === REGISTERED_TIERS[0]!.toString(),
+    )!;
+    // The measured coverage, the floor it was measured against, and the gap.
+    expect(b1.breach).toContain((REGISTERED_COVERAGE_FLOOR - 0.112).toFixed(3));
+    expect(b1.breach).toContain(REGISTERED_COVERAGE_FLOOR.toFixed(3));
+    expect(b1.breach).toMatch(/short by 0\.112/);
+  });
+
+  it('states the MARGIN of an S4 breach too', () => {
+    const withViolations = run(SRCLA_POLICY.id, REGISTERED_TIERS[0]!, {});
+    const mutated = {
+      ...withViolations,
+      replay: { ...withViolations.replay, policyViolations: 3 },
+    } as PolicyRunResult;
+    const gate = runRegisteredGate(
+      {
+        results: [mutated],
+        withdrawalSource: 'observed',
+        artifact: artifact(),
+        provisional: false,
+        missingPolicyIds: [],
+        missingTiers: [],
+      } as unknown as RegisteredEvaluationResult,
+      gateOpts,
+    );
+    expect(gate.sustainability[0]!.breach).toMatch(/S4 continuity \(3 policy violations vs 0 permitted, so over by 3\)/);
   });
 
   it('reports NO SUSTAINABLE COMPARATOR when every deployable baseline breached', () => {

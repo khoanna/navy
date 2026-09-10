@@ -74,6 +74,24 @@ describe('RegimeTracker', () => {
       expect(tracker.getRegimeState('market-2')).toBe(RegimeState.VOLATILE);
     });
 
+    /* Ported from test/integration/regime.test.ts, deleted in the
+     * 2026-09-08 cleanup: jest's testMatch is '**\/*.spec.ts', so no
+     * `.test.ts` file in this repo has ever executed. Every other case in
+     * that file was already covered here EXCEPT this one --
+     * `getMarketsByState` is the reverse index of `getRegimeState`, and
+     * nothing else exercises it. */
+    it('should list every market currently in a given state', () => {
+      tracker.registerMarket('market-1', '0xdigest1', '0xblockhash1');
+      tracker.registerMarket('market-2', '0xdigest2', '0xblockhash2');
+
+      const volatile = tracker.getMarketsByState(RegimeState.VOLATILE);
+      expect(volatile).toContain('market-1');
+      expect(volatile).toContain('market-2');
+      expect(volatile).toHaveLength(2);
+
+      expect(tracker.getMarketsByState(RegimeState.STEADY)).toEqual([]);
+    });
+
     it('should detect material config changes', () => {
       tracker.registerMarket('market-1', '0xdigest-v1', '0xblockhash1');
 

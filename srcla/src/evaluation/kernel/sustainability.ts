@@ -146,14 +146,31 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
         `${REGISTERED_MAX_EXIT_ORIGINS})`,
     );
   }
-  if (!s2) failed.push(`S2 stressed coverage ${r.minStressedLiquidCoverage.toFixed(3)}`);
+  // §11.5 part 5 requires the criterion AND THE MARGIN by which it broke.
+  // S1 and S3 always carried their thresholds; S2 and S4 did not, so the
+  // headline counterexample -- B1 at 0.878 against the 0.99 floor -- printed
+  // `S2 stressed coverage 0.878` with the floor appearing nowhere in the
+  // report, leaving the 0.112 margin underivable from the table that carries
+  // the paper's central argument.
+  if (!s2) {
+    failed.push(
+      `S2 stressed coverage ${r.minStressedLiquidCoverage.toFixed(3)} vs floor ` +
+        `${REGISTERED_COVERAGE_FLOOR.toFixed(3)} (short by ` +
+        `${(REGISTERED_COVERAGE_FLOOR - r.minStressedLiquidCoverage).toFixed(3)})`,
+    );
+  }
   if (!s3) {
     failed.push(
       `S3 capacity discipline (worst venue share ${worstShare.toFixed(3)} vs ` +
         `${REGISTERED_MAX_VENUE_STRESS_SHARE})`,
     );
   }
-  if (!s4) failed.push(`S4 continuity (${r.policyViolations ?? 0} policy violations)`);
+  if (!s4) {
+    failed.push(
+      `S4 continuity (${r.policyViolations ?? 0} policy violations vs 0 permitted, so over by ` +
+        `${r.policyViolations ?? 0})`,
+    );
+  }
 
   const unmeasured = s1 === null;
   const sustainable = failed.length > 0 ? false : unmeasured ? null : true;

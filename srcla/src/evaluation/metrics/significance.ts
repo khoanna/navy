@@ -509,13 +509,26 @@ export function nonInferiorityTest(
   const pValue = 1 - normalCdf(hac.tStatistic);
   const hacSays = pValue < alpha;
   const bootstrapAgrees = bootstrap.usable ? bootstrap.lower > 0 : null;
-  const nonInferior =
-    bootstrapAgrees === null
-      ? null
-      : bootstrapAgrees === hacSays
-        ? hacSays
-        : // HAC and the distribution-free cross-check disagree: unresolved.
-          null;
+
+  // THE DISAGREEMENT RULE IS ASYMMETRIC, and deliberately so.
+  //
+  // The paper calls the moving-block bootstrap a CROSS-CHECK, not a co-equal
+  // test, so it may DOWNGRADE a pass but may never UPGRADE a failure:
+  //
+  //   - HAC says INFERIOR  -> `false`, whatever the bootstrap says. A clean,
+  //     measured failure converted into UNRESOLVED buys no strictness (both
+  //     block) while losing the finding, and the two methods disagree BY
+  //     CONSTRUCTION near p ~ alpha, so the symmetric rule turned every
+  //     borderline failure into a shrug.
+  //   - HAC says NON-INFERIOR -> `true` only when the distribution-free
+  //     cross-check agrees. A pass resting on the normal approximation alone,
+  //     contradicted by a method that assumes no distribution, is not
+  //     established: it is `null`, and `null` never rolls up into a pass.
+  const nonInferior: boolean | null = !hacSays
+    ? false
+    : bootstrapAgrees === true
+      ? true
+      : null;
 
   return {
     ...hac,
@@ -524,11 +537,12 @@ export function nonInferiorityTest(
     bootstrapAgrees,
     nonInferior,
     reason:
-      nonInferior === null && bootstrapAgrees !== null
-        ? `UNRESOLVED: HAC says ${hacSays ? 'non-inferior' : 'inferior'} but the ` +
-          `block bootstrap disagrees (lower bound ${bootstrap.lower.toExponential(3)})`
+      nonInferior !== null
+        ? 'OK'
         : bootstrapAgrees === null
-          ? `BOOTSTRAP_UNUSABLE: ${bootstrap.reason}`
-          : 'OK',
+          ? `UNRESOLVED: HAC says non-inferior but the block-bootstrap cross-check could not ` +
+            `run (${bootstrap.reason})`
+          : `UNRESOLVED: HAC says non-inferior but the block bootstrap disagrees ` +
+            `(one-sided lower bound ${bootstrap.lower.toExponential(3)} does not clear zero)`,
   };
 }

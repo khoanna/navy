@@ -317,7 +317,10 @@ async function main(): Promise<void> {
     console.error('');
     for (const c of gate.checks) {
       const mark = c.passed === true ? 'OK         ' : c.passed === false ? 'FAILED     ' : 'NOT PRODUCED';
-      console.error(`[gate] [${mark}] ${c.name}: ${c.detail}`);
+      // See run-phase4.ts: a reported check does not gate, and must not read
+      // as a block sitting next to a PASSED verdict.
+      const role = c.gating === false ? ' (reported)' : '';
+      console.error(`[gate] [${mark}]${role} ${c.name}: ${c.detail}`);
     }
     console.error(
       gate.pass

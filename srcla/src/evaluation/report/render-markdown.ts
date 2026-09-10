@@ -605,15 +605,30 @@ function comparisonTable(gate: RegisteredGateResult): string {
   if (gate.comparisons.length === 0) {
     return '_No SRCLA-vs-baseline comparison was produced._';
   }
+  // The one-sided NON-INFERIORITY verdict decides §11.5's yield criterion, so
+  // it must be in the table a Markdown reader actually reads. Showing only the
+  // two-sided p and the bootstrap CI -- which is what this table did -- meant
+  // the criterion was visible nowhere but inside a check's prose, and the
+  // two-sided statistic that IS shown no longer gates anything.
+  const verdict = (v: boolean | null): string =>
+    v === true ? 'NON-INFERIOR' : v === false ? '**INFERIOR**' : '**UNRESOLVED**';
   const rows = gate.comparisons.map(
     (c) =>
       `| ${usdc(BigInt(c.tier))} | \`${c.baselineId}\` | ${pct(c.srclaNetApy)} | ${pct(c.baselineNetApy)} | ` +
+      `${verdict(c.nonInferiority.nonInferior)} | ` +
+      `${c.nonInferiority.usable ? c.nonInferiority.pValue.toFixed(4) : `not usable (${c.nonInferiority.reason})`} | ` +
       `${c.test.usable ? c.test.pValue.toFixed(4) : `not usable (${c.test.reason})`} | ` +
       `${c.bootstrap.usable ? `[${c.bootstrap.lower.toExponential(2)}, ${c.bootstrap.upper.toExponential(2)}]` : 'not usable'} |`,
   );
+  const marginBps = (gate.nonInferiorityMarginApy * 10_000).toFixed(1);
   return [
-    '| Tier | Baseline | SRCLA | Baseline | paired HAC p | bootstrap 95% CI of difference |',
-    '|---|---|---|---|---|---|',
+    `**Non-inferiority** is §11.5's yield criterion: one-sided at a ${marginBps} bps annualized ` +
+      'margin, HAC-corrected, and cross-checked by a seeded moving-block bootstrap that may ' +
+      'downgrade a pass to UNRESOLVED but may never upgrade a failure. The two-sided p and the ' +
+      'bootstrap CI are **reported diagnostics** and gate nothing.',
+    '',
+    `| Tier | Baseline | SRCLA | Baseline | Non-inferior (${marginBps} bps) | one-sided p | two-sided HAC p | bootstrap 95% CI of difference |`,
+    '|---|---|---|---|---|---|---|---|',
     ...rows,
   ].join('\n');
 }

@@ -175,6 +175,9 @@ const named = (r: ReturnType<typeof evaluateRegisteredRelease>, name: string) =>
 const nonInferiorityCheck = (r: ReturnType<typeof evaluateRegisteredRelease>) =>
   r.checks.find((c) => c.name.startsWith('Non-inferior'))!;
 
+/** The two-sided statistic, REPORTED since v0.8 rather than gating. */
+const DISTINGUISHABILITY = 'Diagnostic: statistical distinguishability from every sustainable baseline';
+
 /**
  * P20/P21 fixture: a COMPLETE evaluation with a few named policies nudged
  * directly on the replay fields those tests care about
@@ -292,7 +295,10 @@ describe('evaluateRegisteredRelease: completeness', () => {
 
     expect(gate.pass).toBe(false);
     expect(gate.blockedReasons).toContain('Every registered tier ran');
-    expect(gate.blockedReasons).toContain('Statistically distinguishable from every deployable baseline');
+    // The two-sided statistic no longer gates (v0.8), so the yield block on
+    // an empty run is the non-inferiority check.
+    expect(gate.blockedReasons).toContain(nonInferiorityCheck(gate).name);
+    expect(gate.blockedReasons).not.toContain(DISTINGUISHABILITY);
   });
 });
 
@@ -473,9 +479,14 @@ describe('evaluateRegisteredRelease: attribution', () => {
 });
 
 describe('evaluateRegisteredRelease: statistical criterion', () => {
-  // §11.5 fails ON indistinguishability. A bare point comparison would pass
-  // this; the paired HAC test does not.
-  it('BLOCKS when SRCLA is statistically indistinguishable from a baseline', () => {
+  // v0.8 REMOVED indistinguishability as a gate. The word "indistinguishab*"
+  // appears nowhere in the v0.8 paper and the check is absent from §11.5's
+  // rejection list; demanding SRCLA be DISTINGUISHABLE from every sustainable
+  // baseline over an 18-43 bps universe is the same unattainable yield
+  // criterion non-inferiority replaced, re-entering through a second door.
+  // The statistic is still published, because it says how much resolution the
+  // data had -- it just does not block.
+  it('REPORTS, and does not block on, indistinguishability from a baseline', () => {
     const results = completeResults((id) => (id === 'srcla' ? { edge: 0.0000001 } : {}));
     const gate = evaluateRegisteredRelease(evaluation({ results }), {
       forkResults: completeForkResults(),
@@ -483,13 +494,17 @@ describe('evaluateRegisteredRelease: statistical criterion', () => {
       bootstrapIterations: 200,
     });
 
-    expect(gate.pass).toBe(false);
-    expect(named(gate, 'Statistically distinguishable from every deployable baseline').passed).toBe(
-      false,
-    );
+    const c = named(gate, DISTINGUISHABILITY);
+    expect(c.passed).toBe(false);
+    expect(c.gating).toBe(false);
+    expect(gate.blockedReasons).not.toContain(DISTINGUISHABILITY);
+    // A one-basis-point edge is well inside the registered margin, so the
+    // criterion that DOES gate is satisfied and the gate passes.
+    expect(nonInferiorityCheck(gate).passed).toBe(true);
+    expect(gate.pass).toBe(true);
   });
 
-  it('BLOCKS when the test could not be computed at all', () => {
+  it('BLOCKS on the NON-INFERIORITY check when the test could not be computed at all', () => {
     // Raising the minimum above the number of periods available makes every
     // comparison unusable. "Could not test" is not "passed the test".
     const gate = evaluateRegisteredRelease(evaluation(), {
@@ -498,9 +513,14 @@ describe('evaluateRegisteredRelease: statistical criterion', () => {
       bootstrapIterations: 200,
     });
 
-    const c = named(gate, 'Statistically distinguishable from every deployable baseline');
+    const c = named(gate, DISTINGUISHABILITY);
     expect(c.passed).toBe(false);
     expect(c.detail).toContain('not usable');
+
+    const ni = nonInferiorityCheck(gate);
+    expect(ni.passed).toBeNull();
+    expect(gate.blockedReasons).toContain(ni.name);
+    expect(gate.pass).toBe(false);
   });
 
   it('excludes the non-deployable B5 from the comparison set', () => {
@@ -643,9 +663,7 @@ describe('P20: safety is scoped to SRCLA; comparators are measured, not gating',
       h3d: { minStressedLiquidCoverage: 0.5 },
     });
     const gate = runRegisteredGate(out, gateOpts);
-    const distinguishable = gate.checks.find(
-      (c) => c.name === 'Statistically distinguishable from every deployable baseline',
-    )!;
+    const distinguishable = gate.checks.find((c) => c.name === DISTINGUISHABILITY)!;
     expect(distinguishable.passed).toBeNull();
     expect(distinguishable.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
 
@@ -688,14 +706,20 @@ describe('§11.5: sustainability first, yield second', () => {
   const gateOpts = { minPairedObservations: 20, bootstrapIterations: 200 };
 
   it('emits the checks in §11.5 order: demonstration, completeness, sustainability, yield, price', () => {
-    const gate = runRegisteredGate(evaluation(), { ...gateOpts, forkResults: completeForkResults() });
+    const gate = runRegisteredGate(evaluation(), {
+      ...gateOpts,
+      forkResults: completeForkResults(),
+      // Superiority is emitted ONLY when the release claims it, so the order
+      // test has to make the claim to see the check.
+      claimedSuperiorityDimensions: ['yield'],
+    });
     const names = gate.checks.map((c) => c.name);
     const at = (needle: string) => names.findIndex((n) => n.includes(needle));
 
     expect(at('Demonstration')).toBe(0);
     expect(at('Demonstration')).toBeLessThan(at('Every registered tier ran'));
     expect(at('Every registered policy ran')).toBeLessThan(at('Safety: withdrawal success'));
-    expect(at('Sustainability S4')).toBeLessThan(at('Statistically distinguishable'));
+    expect(at('Sustainability S4')).toBeLessThan(at('Diagnostic: statistical distinguishability'));
     expect(at('scale invariance')).toBeLessThan(at('Non-inferior to every sustainable baseline'));
     expect(at('Non-inferior to every sustainable baseline')).toBeLessThan(at('Superiority: yield'));
     expect(at('Price of unsustainability')).toBe(names.length - 1);

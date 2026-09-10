@@ -49,5 +49,45 @@ describe('CompoundV3Simulator', () => {
       const rate = calculateRateFromUtilization(0n, config);
       expect(rate).toBe(0n);
     });
+
+    /* The two cases below were ported from
+     * test/integration/srcla-gap.integration.test.ts, deleted in the
+     * 2026-09-08 cleanup: jest's testMatch is '**\/*.spec.ts', so no
+     * `.test.ts` file in this repo has ever executed. The three cases above
+     * pin the rate at three individual utilizations; neither of these
+     * shape properties followed from them. */
+
+    it('is monotonically increasing in utilization across the whole 0-100% range', () => {
+      const config = { ...DEFAULT_COMPOUND_CONFIG };
+      const utilizations = [0n, 10n, 30n, 50n, 70n, 80n, 85n, 90n, 95n, 100n].map(
+        (pct) => (pct * RAY) / 100n
+      );
+
+      let prevRate = -1n;
+      for (const util of utilizations) {
+        const rate = calculateRateFromUtilization(util, config);
+        expect(rate).toBeGreaterThan(prevRate);
+        prevRate = rate;
+      }
+    });
+
+    it('is steeper above the kink than below it, over equal utilization steps', () => {
+      // The defining property of the kinked model: the same 1% step in
+      // utilization must buy more rate above the kink than below it.
+      // Comparing two adjacent points (as the deleted test did) only
+      // re-proves monotonicity; comparing two equal-width SLOPES is what
+      // distinguishes slopeHigh from slopeLow.
+      const config = { ...DEFAULT_COMPOUND_CONFIG };
+      const step = RAY / 100n; // 1% of utilization
+
+      const below = calculateRateFromUtilization(config.kink - step, config);
+      const atKink = calculateRateFromUtilization(config.kink, config);
+      const above = calculateRateFromUtilization(config.kink + step, config);
+
+      const slopeBelow = atKink - below;
+      const slopeAbove = above - atKink;
+
+      expect(slopeAbove).toBeGreaterThan(slopeBelow);
+    });
   });
 });

@@ -431,7 +431,11 @@ async function runEra(
 
   for (const c of gate.checks) {
     const mark = c.passed === true ? 'OK          ' : c.passed === false ? 'FAILED      ' : 'NOT PRODUCED';
-    console.error(`    [${mark}] ${c.name}: ${c.detail.slice(0, 160)}`);
+    // A REPORTED check is not part of the verdict. Without this marker a
+    // reader sees `FAILED` beside `release gate PASSED` and cannot tell which
+    // of the two is wrong -- `blockedReasons` already excludes these.
+    const role = c.gating === false ? ' (reported)' : '';
+    console.error(`    [${mark}]${role} ${c.name}: ${c.detail.slice(0, 160)}`);
   }
   console.error(
     gate.pass
