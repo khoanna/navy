@@ -18,7 +18,7 @@
  * UNITS: money is USDC base units (6 dp); APYs are dimensionless fractions.
  */
 import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
-import type { RegisteredGateResult } from '../kernel/gates.js';
+import { ablationContributions, type RegisteredGateResult } from '../kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../kernel/harness.js';
 import { REGISTERED_ABLATIONS } from '../kernel/registry.js';
 
@@ -359,6 +359,9 @@ function ablationContributionsSection(evaluation: RegisteredEvaluationResult): s
     BigInt(a) < BigInt(b) ? -1 : 1,
   );
 
+  // The single source of truth for the verdict and the pp delta (P21) --
+  // this section only formats it.
+  const contributions = ablationContributions(evaluation);
   const negatives: Array<{ tier: string; id: string; description: string; contributionPp: number }> = [];
 
   for (const tier of tiers) {
@@ -373,23 +376,25 @@ function ablationContributionsSection(evaluation: RegisteredEvaluationResult): s
         (x) => x.policy.id === ablation.id && x.tier.toString() === tier,
       );
       if (r === undefined) continue;
+      const contrib = contributions.find((c) => c.policyId === ablation.id && c.tier === tier);
+      if (contrib === undefined) continue;
 
-      const contribution = srclaResult.replay.realizedNetApy - r.replay.realizedNetApy;
-      const contributionPp = contribution * 100;
+      const { contributionPp, verdict } = contrib;
       const sign = contributionPp >= 0 ? '+' : '';
       const valueStr = `${sign}${contributionPp.toFixed(3)} pp`;
-      const contributionCell = r.inertVsSrcla
-        ? '**INERT** (identical decisions — not a measured contribution)'
-        : contributionPp < 0
-          ? `**${valueStr}**`
-          : valueStr;
+      const contributionCell =
+        verdict === 'INERT'
+          ? '**INERT** (identical decisions — not a measured contribution)'
+          : verdict === 'NEGATIVE'
+            ? `**${valueStr}**`
+            : valueStr;
 
       rows.push(
         `| \`${ablation.id}\` | ${ablation.paperDefinition} | ${pct(srclaResult.replay.realizedNetApy)} | ` +
           `${pct(r.replay.realizedNetApy)} | ${contributionCell} | ${r.rebalances} | ${srclaResult.rebalances} |`,
       );
 
-      if (!r.inertVsSrcla && contribution < 0) {
+      if (verdict === 'NEGATIVE') {
         negatives.push({ tier, id: ablation.id, description: ablation.paperDefinition, contributionPp });
       }
     }

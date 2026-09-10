@@ -36,7 +36,7 @@ import {
   REGISTERED_STRESS_DEMAND_BPS,
 } from '../../policy/steps/coverage.js';
 import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from './harness.js';
-import { REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
+import { REGISTERED_ABLATIONS, REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
 
 export interface RegisteredGateCheck {
   name: string;
@@ -278,15 +278,20 @@ export function evaluateRegisteredRelease(
   // 5. §11.5's statistical criterion, per deployable, ADMISSIBLE baseline
   //    per tier, on AFTER-COST per-period returns.
   //
-  //    Two exclusions from the comparison set, neither of which touch SRCLA:
+  //    Three exclusions from the comparison set, none of which touch SRCLA:
   //      - B5 (and any other `deployable: false` row): §11.2 says it "cannot
   //        establish deployability".
+  //      - Every §11.3 ablation (P21): an ablation beating SRCLA is a
+  //        finding about the removed component, reported separately via
+  //        `ablationContributions` -- folding it in here is what turned that
+  //        diagnostic into an undifferentiated gate failure in the v0.6 run.
   //      - P20: a comparator that itself breached the stressed-liquid-
   //        coverage floor SRCLA was held to. B1/B2/B2u earning 39% while
   //        holding 0.878 coverage against the 0.99 floor is not a baseline
   //        SRCLA has to beat -- it is an inadmissible comparator, and its
   //        exclusion is recorded so "no comparison" and "no ADMISSIBLE
   //        comparison" are never reported as the same thing.
+  const ablationIds = new Set(REGISTERED_ABLATIONS.map((p) => p.id));
   const comparisons: BaselineComparison[] = [];
   const excludedForSafety: Array<{ baselineId: string; tier: string }> = [];
   const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((x, y) =>
@@ -303,7 +308,9 @@ export function evaluateRegisteredRelease(
     const srcla = atTier.find((r) => r.policy.id === SRCLA_POLICY.id);
     if (srcla === undefined) continue; // already failed the completeness check
     for (const b of atTier) {
-      if (b.policy.id === SRCLA_POLICY.id || !b.policy.deployable) continue;
+      if (b.policy.id === SRCLA_POLICY.id) continue;
+      if (ablationIds.has(b.policy.id)) continue; // §11.3 evidence, not a §11.2 comparator
+      if (!b.policy.deployable) continue;
       if (b.replay.minStressedLiquidCoverage < minStressed) {
         excludedForSafety.push({ baselineId: b.policy.id, tier });
         continue;
@@ -398,6 +405,51 @@ export function evaluateRegisteredRelease(
     comparisons,
     blockedReasons: checks.filter((c) => c.passed !== true).map((c) => c.name),
   };
+}
+
+/**
+ * §11.3, part 2 (P21): what each ablation's removed component was measured
+ * to be worth, at one (ablation, tier).
+ *
+ * `contribution = SRCLA net APY − ablation net APY`. POSITIVE means removing
+ * the component made the policy worse (it was earning its keep); NEGATIVE
+ * means removing it made the policy BETTER -- the component cost more than
+ * it earned on this data, and an ablation that beats SRCLA is exactly this,
+ * not a baseline SRCLA failed to beat. INERT is a distinct, stronger
+ * statement: the ablation's decisions are byte-identical to SRCLA's, so its
+ * zero delta is by construction, not a measured wash.
+ */
+export interface AblationContribution {
+  policyId: string;
+  tier: string;
+  contributionPp: number;
+  verdict: 'POSITIVE' | 'NEGATIVE' | 'INERT';
+}
+
+export function ablationContributions(out: RegisteredEvaluationResult): AblationContribution[] {
+  const ablationIds = new Set(REGISTERED_ABLATIONS.map((p) => p.id));
+  const tiers = [...new Set(out.results.map((r) => r.tier.toString()))];
+  const contributions: AblationContribution[] = [];
+
+  for (const tier of tiers) {
+    const srcla = out.results.find((r) => r.policy.id === SRCLA_POLICY.id && r.tier.toString() === tier);
+    if (srcla === undefined) continue;
+
+    for (const r of out.results) {
+      if (r.tier.toString() !== tier || !ablationIds.has(r.policy.id)) continue;
+
+      const contributionPp = (srcla.replay.realizedNetApy - r.replay.realizedNetApy) * 100;
+      const verdict: AblationContribution['verdict'] = r.inertVsSrcla
+        ? 'INERT'
+        : contributionPp < 0
+          ? 'NEGATIVE'
+          : 'POSITIVE';
+
+      contributions.push({ policyId: r.policy.id, tier, contributionPp, verdict });
+    }
+  }
+
+  return contributions;
 }
 
 const label = (r: PolicyRunResult): string => `${r.policy.id}@${r.tier}`;

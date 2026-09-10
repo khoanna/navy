@@ -8,6 +8,7 @@
  * that iterates only over what happens to be present.
  */
 import {
+  ablationContributions,
   compareToBaseline,
   evaluateRegisteredRelease,
   requiredRuns,
@@ -590,5 +591,30 @@ describe('P20: safety is scoped to SRCLA; comparators are measured, not gating',
     const outperforms = gate.checks.find((c) => c.name === 'Outperforms every deployable baseline')!;
     expect(outperforms.passed).toBeNull();
     expect(outperforms.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
+  });
+});
+
+describe('P21: ablations are §11.3 evidence, not §11.2 comparators', () => {
+  it('an ablation is not in the baseline comparison set', () => {
+    const out = runResult({ h3: { realizedNetApy: 0.39 } });
+    const gate = runRegisteredGate(out, { minPairedObservations: 20, bootstrapIterations: 200 });
+    expect(gate.comparisons.some((c) => c.baselineId.startsWith('h'))).toBe(false);
+  });
+
+  it('an ablation that beats SRCLA is reported as a NEGATIVE contribution', () => {
+    const out = runResult({ srcla: { realizedNetApy: 0.008 }, h3: { realizedNetApy: 0.034 } });
+    const contribs = ablationContributions(out);
+    const h3 = contribs.find((c) => c.policyId === 'h3' && c.tier === '10000000000')!;
+    expect(h3.verdict).toBe('NEGATIVE');
+    expect(h3.contributionPp).toBeLessThan(0);
+  });
+
+  it('a byte-identical ablation is INERT, not a contribution of either sign', () => {
+    const out = runResult({
+      srcla: { realizedNetApy: 0.05 },
+      h5: { realizedNetApy: 0.05, inertVsSrcla: true },
+    });
+    const h5 = ablationContributions(out).find((c) => c.policyId === 'h5' && c.tier === '10000000000')!;
+    expect(h5.verdict).toBe('INERT');
   });
 });
