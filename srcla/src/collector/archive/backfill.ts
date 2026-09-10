@@ -18,6 +18,15 @@
  *     offset from the first run's produces two interleaved half-datasets that
  *     look like one dense dataset, and the label deriver would average rates
  *     across an irregular grid without complaining.
+ *  5. The rate model a row's parameters came from is verified AT THAT ROW'S
+ *     OWN BLOCK. This file used to re-read the venue addresses once per 500
+ *     origins and trust them in between; a governance model swap was then
+ *     attributed to the old model's coefficients for up to three weeks, and
+ *     `configDigest` -- derived from the same reading -- missed the regime
+ *     boundary entirely. 3,262 of Moonwell's 10,632 calibration rows carried
+ *     a misattributed model. The identity now rides in the origin's own
+ *     multicall (`buildOriginCalls`'s `identity.*` legs) and a mismatch
+ *     re-fetches the origin rather than being written.
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized; times
  * are Unix seconds.
@@ -36,6 +45,16 @@ import {
   type ArchiveAddresses,
   type OriginReading,
 } from './calls.js';
+
+/**
+ * How many times one origin may be re-fetched after an address drift.
+ *
+ * ONE is enough and two would hide a bug. The retry re-issues the SAME block
+ * with the addresses that block itself reported, so the second attempt reads
+ * the contracts the chain named; if it still disagrees, the disagreement is
+ * not staleness and must surface as a gap rather than be papered over.
+ */
+const MAX_ADDRESS_CORRECTIONS = 1;
 
 /** One hour, the paper's registered origin cadence. */
 export const DEFAULT_CADENCE_SECONDS = 3600;
@@ -60,6 +79,14 @@ export interface BackfillSummary {
    */
   deferredByLimit: number;
   gaps: BackfillGap[];
+  /**
+   * Origins whose batch was built against a superseded address and had to be
+   * re-fetched (rule 5). Reported rather than swallowed: this is the measured
+   * frequency of governance model swaps in the window, and a run that reports
+   * zero over a window known to contain them is a run whose identity check is
+   * not working.
+   */
+  addressCorrections: number;
   /** Persisted origins per era, so coverage is visible without a query. */
   byEra: Record<string, number>;
   endpointStats: ReturnType<RpcPool['stats']>;
@@ -76,8 +103,6 @@ export interface BackfillOptions {
   limit?: number;
   /** Decode and report without writing. */
   dryRun?: boolean;
-  /** Re-resolve venue addresses every N origins. See `resolveAddresses`. */
-  addressRefreshEvery?: number;
   anchor?: BlockAnchor;
   onProgress?: (done: number, total: number, summary: Readonly<BackfillSummary>) => void;
 }
@@ -132,24 +157,59 @@ export async function persistedOrigins(
   return new Set(rows.map((r) => Math.floor(r.timestamp.getTime() / 1000)));
 }
 
-/** Fetch and decode one origin. Throws on a failure the caller records. */
+export interface FetchedOrigin {
+  reading: OriginReading;
+  /** The addresses the returned reading was actually decoded against. */
+  addresses: ArchiveAddresses;
+  /** True when `addresses` differ from the ones the caller proposed. */
+  corrected: boolean;
+}
+
+/**
+ * Fetch and decode one origin, VERIFYING the rate-model identity at its own
+ * block. Throws on a failure the caller records as a gap.
+ *
+ * `addresses` is a HINT, not an authority. The batch carries identity legs
+ * read from the fixed market contracts at the same block, so a hint that
+ * governance has superseded is detected here and the origin re-fetched
+ * against what the chain reported. That is the whole of the fix for the
+ * 500-origin refresh cadence: correctness no longer depends on how often the
+ * caller re-resolves, because every origin checks its own.
+ */
 export async function fetchOrigin(
   pool: RpcPool,
   addresses: ArchiveAddresses,
   targetSeconds: number,
   anchor?: BlockAnchor,
-): Promise<OriginReading> {
+): Promise<FetchedOrigin> {
   const block = await resolveBlockAtOrBefore(pool, targetSeconds, anchor);
-  const calls = buildOriginCalls(addresses, block.blockNumber);
-  const raw = await pool.call(async (p) =>
-    p.call({ to: BASE.multicall3, data: encodeAggregate3(calls), blockTag: block.blockNumber }),
-  );
-  return decodeOrigin(addresses, calls, decodeAggregate3(raw), {
-    blockNumber: block.blockNumber,
-    blockHash: block.hash,
-    timestampSeconds: block.timestampSeconds,
-    baseFeePerGasWei: block.baseFeePerGasWei,
-  });
+
+  let current = addresses;
+  let corrected = false;
+  for (let attempt = 0; ; attempt += 1) {
+    const calls = buildOriginCalls(current, block.blockNumber);
+    const raw = await pool.call(async (p) =>
+      p.call({ to: BASE.multicall3, data: encodeAggregate3(calls), blockTag: block.blockNumber }),
+    );
+    const reading = decodeOrigin(current, calls, decodeAggregate3(raw), {
+      blockNumber: block.blockNumber,
+      blockHash: block.hash,
+      timestampSeconds: block.timestampSeconds,
+      baseFeePerGasWei: block.baseFeePerGasWei,
+    });
+
+    if (reading.addressDrift.length === 0) return { reading, addresses: current, corrected };
+
+    if (attempt >= MAX_ADDRESS_CORRECTIONS || reading.observedAddresses === null) {
+      throw new Error(
+        `address identity did not settle at block ${block.blockNumber}: ` +
+          `${reading.addressDrift.join(',')} still disagree after ${attempt + 1} attempt(s). ` +
+          `Refusing to persist parameters read from a contract the chain did not name.`,
+      );
+    }
+    current = reading.observedAddresses;
+    corrected = true;
+  }
 }
 
 /**
@@ -285,6 +345,7 @@ export async function runBackfill(
     skipped: all.length - outstanding.length,
     deferredByLimit: outstanding.length - todo.length,
     gaps: [],
+    addressCorrections: 0,
     byEra: {},
     endpointStats: pool.stats(),
     elapsedMs: 0,
@@ -296,19 +357,26 @@ export async function runBackfill(
     return summary;
   }
 
-  // Addresses are resolved per chunk, not once: Moonwell's rate model address
-  // and Aave's strategy address both change inside the window, and pinning
-  // one would attribute one model's parameters to the other's blocks.
-  const refreshEvery = opts.addressRefreshEvery ?? 500;
-  const addressCache = new Map<number, ArchiveAddresses>();
-  const addressesFor = async (index: number, originSeconds: number): Promise<ArchiveAddresses> => {
-    const bucket = Math.floor(index / refreshEvery);
-    const cached = addressCache.get(bucket);
-    if (cached !== undefined) return cached;
-    const block = await resolveBlockAtOrBefore(pool, originSeconds, opts.anchor);
-    const resolved = await resolveAddresses(pool, block.blockNumber);
-    addressCache.set(bucket, resolved);
-    return resolved;
+  // A SEED, resolved once, plus a hint that moves forward as the workers
+  // observe governance changes. Correctness does not depend on either: every
+  // origin verifies its own identity inside its own multicall (rule 5), and a
+  // wrong hint costs one extra round trip at the boundary, not a wrong row.
+  //
+  // The hint exists purely so that ONE origin pays for a model swap rather
+  // than every subsequent origin paying until some refresh interval elapses.
+  let hint: ArchiveAddresses | null = null;
+  let seeding: Promise<ArchiveAddresses> | null = null;
+  const addressHint = async (originSeconds: number): Promise<ArchiveAddresses> => {
+    if (hint !== null) return hint;
+    if (seeding === null) {
+      seeding = (async () => {
+        const block = await resolveBlockAtOrBefore(pool, originSeconds, opts.anchor);
+        const resolved = await resolveAddresses(pool, block.blockNumber);
+        hint = resolved;
+        return resolved;
+      })();
+    }
+    return seeding;
   };
 
   const workers = Math.max(1, opts.concurrency ?? pool.capacity);
@@ -321,8 +389,17 @@ export async function runBackfill(
       if (index >= todo.length) return;
       const originSeconds = todo[index]!;
       try {
-        const addresses = await addressesFor(index, originSeconds);
-        const reading = await fetchOrigin(pool, addresses, originSeconds, opts.anchor);
+        const proposed = await addressHint(originSeconds);
+        const fetched = await fetchOrigin(pool, proposed, originSeconds, opts.anchor);
+        const reading = fetched.reading;
+        if (fetched.corrected) {
+          summary.addressCorrections += 1;
+          // Move the shared hint forward so the NEXT origin does not pay for
+          // the same swap. Never backwards-checked: a worker on an earlier
+          // origin that inherits a later hint simply corrects again, which is
+          // one round trip, not a wrong row.
+          hint = fetched.addresses;
+        }
 
         if (reading.markets.length === 0) {
           summary.gaps.push({

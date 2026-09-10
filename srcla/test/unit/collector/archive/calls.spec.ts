@@ -11,10 +11,13 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  ADDRESS_OWNER,
+  addressDriftBetween,
   buildOriginCalls,
   compoundSupplyRateWad,
   decodeAaveConfiguration,
   decodeOrigin,
+  observedAddressesFrom,
   utilizationWad,
   MARKET_IDS,
   type ArchiveAddresses,
@@ -306,5 +309,160 @@ describe('decodeAaveConfiguration', () => {
     expect(decodeAaveConfiguration(active | (1n << 57n)).frozen).toBe(true);
     expect(decodeAaveConfiguration(active | (1n << 60n)).paused).toBe(true);
     expect(decodeAaveConfiguration(active | (1000n << 64n)).reserveFactorBps).toBe(1000);
+  });
+});
+
+
+/**
+ * The 500-origin address-refresh defect, and the check that closes it.
+ *
+ * `backfill.ts` used to re-resolve the venue addresses once per 500 hourly
+ * origins (~21 days) and trust them in between. When governance replaced
+ * mUSDC's JumpRateModel, the archive kept reading the OLD contract's
+ * coefficients and stamped them on the NEW period's rows -- and, because
+ * `configDigest`'s parameter half is derived from the same reading, the regime
+ * boundary was invisible too. Measured: 3,262 of Moonwell's 10,632 calibration
+ * rows carried a misattributed model, 31% of the era. mUSDC's kink really moved
+ * 80% -> 90% between 2024-04-06 and 2024-04-08; the archive did not notice
+ * until 2024-04-25.
+ *
+ * The fix is not a shorter interval. Identity legs ride in the origin's own
+ * multicall, read from the FIXED market contracts, so a stale address is caught
+ * at every origin at the cost of two legs on a 41-leg batch.
+ */
+describe('decodeOrigin -- rate-model identity is verified at the origin\'s own block', () => {
+  const decodeWith = (f: Fixture, addr: ArchiveAddresses) =>
+    decodeOrigin(addr, buildOriginCalls(addr, f.blockNumber), f.results, {
+      blockNumber: f.blockNumber,
+      blockHash: f.blockHash,
+      timestampSeconds: f.timestampSeconds,
+      baseFeePerGasWei: BigInt(f.baseFeePerGasWei),
+    });
+
+  it('reads the identity from chain and agrees with the fixture at both blocks', () => {
+    for (const f of [OLD, NEW]) {
+      const out = decode(f);
+      expect(out.addressDrift).toEqual([]);
+      expect(out.observedAddresses).not.toBeNull();
+      expect(out.observedAddresses!.mInterestRateModel.toLowerCase()).toBe(
+        f.addresses.mInterestRateModel.toLowerCase(),
+      );
+      expect(out.observedAddresses!.aaveStrategy.toLowerCase()).toBe(
+        f.addresses.aaveStrategy.toLowerCase(),
+      );
+    }
+  });
+
+  it('the two blocks really do disagree -- the defect has something to detect', () => {
+    // 0x54dC..2445 at 2024-09-03, 0x0F70..6cab at 2025-09-10.
+    expect(OLD.addresses.mInterestRateModel.toLowerCase()).not.toBe(
+      NEW.addresses.mInterestRateModel.toLowerCase(),
+    );
+  });
+
+  it('DROPS Moonwell when the batch was built on a superseded rate model', () => {
+    // Exactly the stale-seed case: the run resolved addresses weeks ago and is
+    // still carrying them.
+    const stale: ArchiveAddresses = {
+      ...OLD.addresses,
+      mInterestRateModel: NEW.addresses.mInterestRateModel,
+    };
+    const out = decodeWith(OLD, stale);
+
+    expect(out.addressDrift).toEqual(['mInterestRateModel']);
+    expect(out.failures).toContain('identity.drift.mInterestRateModel');
+    // Never emitted on the wrong model...
+    expect(out.markets.map((m) => m.marketId)).not.toContain(MARKET_IDS.moonwell);
+    // ...and the other two venues are untouched: one venue's governance action
+    // is not a whole-origin gap.
+    expect(out.markets.map((m) => m.marketId).sort()).toEqual(
+      [MARKET_IDS.aave, MARKET_IDS.compound].sort(),
+    );
+    // The caller is handed what the chain actually named, so it can re-fetch.
+    expect(out.observedAddresses!.mInterestRateModel.toLowerCase()).toBe(
+      OLD.addresses.mInterestRateModel.toLowerCase(),
+    );
+  });
+
+  it('DROPS Aave when the batch was built on a superseded rate strategy', () => {
+    const stale: ArchiveAddresses = {
+      ...NEW.addresses,
+      aaveStrategy: '0x000000000000000000000000000000000000dEaD',
+    };
+    const out = decodeWith(NEW, stale);
+    expect(out.addressDrift).toEqual(['aaveStrategy']);
+    expect(out.markets.map((m) => m.marketId)).not.toContain(MARKET_IDS.aave);
+    expect(out.markets.map((m) => m.marketId)).toContain(MARKET_IDS.moonwell);
+  });
+
+  it('leaves Compound alone whatever drifts -- Comet is a Base constant', () => {
+    const stale: ArchiveAddresses = {
+      ...NEW.addresses,
+      mInterestRateModel: OLD.addresses.mInterestRateModel,
+      aaveStrategy: '0x000000000000000000000000000000000000dEaD',
+    };
+    const out = decodeWith(NEW, stale);
+    expect(out.markets.map((m) => m.marketId)).toEqual([MARKET_IDS.compound]);
+  });
+
+  it('DROPS a venue whose identity could not be READ, rather than trusting the hint', () => {
+    // A check that silently agrees with whatever it was given is not a check.
+    const calls = buildOriginCalls(NEW.addresses, NEW.blockNumber);
+    const broken = NEW.results.map((r, i) =>
+      calls[i]!.key === 'identity.mwIrm' ? { success: false, returnData: '0x' } : r,
+    );
+    const out = decodeOrigin(NEW.addresses, calls, broken, {
+      blockNumber: NEW.blockNumber,
+      blockHash: NEW.blockHash,
+      timestampSeconds: NEW.timestampSeconds,
+      baseFeePerGasWei: BigInt(NEW.baseFeePerGasWei),
+    });
+    expect(out.failures).toContain('identity.mwIrm');
+    expect(out.observedAddresses).toBeNull();
+    expect(out.markets.map((m) => m.marketId)).not.toContain(MARKET_IDS.moonwell);
+  });
+
+  it('the identity legs cost two legs and no extra round trip', () => {
+    const calls = buildOriginCalls(NEW.addresses, NEW.blockNumber);
+    const identity = calls.filter((c) => c.key.startsWith('identity.'));
+    expect(identity).toHaveLength(2);
+    // Read from the FIXED market contract, so they cannot themselves go stale.
+    expect(identity.every((c) => c.target === NEW.addresses.mToken)).toBe(true);
+    // Aave needs no leg of its own: getReserveData already returns all three.
+    expect(calls.some((c) => c.key === 'aave.reserveData')).toBe(true);
+  });
+});
+
+describe('addressDriftBetween', () => {
+  it('compares case-insensitively -- a checksum difference is not a governance action', () => {
+    const upper: ArchiveAddresses = {
+      ...NEW.addresses,
+      mInterestRateModel: NEW.addresses.mInterestRateModel.toUpperCase().replace('0X', '0x'),
+    };
+    expect(addressDriftBetween(NEW.addresses, upper)).toEqual([]);
+  });
+
+  it('ignores the Base constants -- a difference there is a different chain, not drift', () => {
+    const other: ArchiveAddresses = { ...NEW.addresses, comet: '0x00000000000000000000000000000000000000c0' };
+    expect(addressDriftBetween(NEW.addresses, other)).toEqual([]);
+  });
+
+  it('maps every mutable field to the one venue it can poison', () => {
+    expect(Object.keys(ADDRESS_OWNER).sort()).toEqual(
+      ['aaveAToken', 'aaveStrategy', 'aaveVariableDebt', 'mComptroller', 'mInterestRateModel'].sort(),
+    );
+    expect(new Set(Object.values(ADDRESS_OWNER))).toEqual(new Set(['aave', 'moonwell']));
+  });
+});
+
+describe('observedAddressesFrom', () => {
+  it('refuses to answer at all when a leg is missing, naming it', () => {
+    const calls = buildOriginCalls(NEW.addresses, NEW.blockNumber);
+    const byKey = new Map<string, Multicall3Result>();
+    calls.forEach((c, i) => byKey.set(c.key, NEW.results[i]!));
+    byKey.set('aave.reserveData', { success: false, returnData: '0x' });
+    const out = observedAddressesFrom(NEW.addresses, byKey);
+    expect(out.addresses).toBeNull();
+    expect(out.missing).toContain('aave.reserveData');
   });
 });

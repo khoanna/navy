@@ -236,7 +236,41 @@ export interface OriginReading {
   /** Call keys that failed. A venue with any failure is OMITTED from
    *  `markets` rather than emitted with zeros. */
   failures: string[];
+  /**
+   * The venue-owned addresses AS READ AT THIS ORIGIN'S OWN BLOCK, from the
+   * identity legs of this same batch.
+   *
+   * `null` only when those legs could not be read at all, which is itself a
+   * failure and suppresses every venue whose identity it would have carried.
+   */
+  observedAddresses: ArchiveAddresses | null;
+  /**
+   * Fields of the `addr` argument that DISAGREE with `observedAddresses`.
+   *
+   * A non-empty array means this batch was built against a rate model or
+   * token that governance had already replaced by this block: the venue's
+   * parameter legs were read from the wrong contract. The affected venues are
+   * omitted from `markets` (never emitted on the wrong model), and the caller
+   * is expected to re-issue the batch against `observedAddresses`. See
+   * `ADDRESS_OWNER` for the field-to-venue mapping.
+   */
+  addressDrift: string[];
 }
+
+/**
+ * Which venue each mutable address belongs to.
+ *
+ * A drifted field poisons ONLY its own venue: Moonwell's model address moving
+ * says nothing about Comet's parameters, and omitting all three would turn one
+ * governance action into a whole-origin gap.
+ */
+export const ADDRESS_OWNER: Readonly<Record<string, 'aave' | 'moonwell'>> = Object.freeze({
+  aaveAToken: 'aave',
+  aaveVariableDebt: 'aave',
+  aaveStrategy: 'aave',
+  mInterestRateModel: 'moonwell',
+  mComptroller: 'moonwell',
+});
 
 // ---------------------------------------------------------------------------
 // Address resolution
@@ -246,9 +280,22 @@ export interface OriginReading {
  * Resolve the addresses that are constant within a chunk but NOT across the
  * whole window.
  *
- * Called per resume-chunk rather than once per run: Moonwell's rate model
- * address changed inside the backfill window, and pinning it once would
- * attribute one model's parameters to the other model's blocks.
+ * THIS IS A SEED, NOT THE GUARANTEE. Until 2026-09-10 the backfill called it
+ * once per 500 hourly origins (~21 days) and trusted the answer in between,
+ * so a governance rate-model swap was attributed to the PREVIOUS model's
+ * coefficients for up to three weeks. Measured over the calibration era that
+ * mis-attributed 3,262 of Moonwell's 10,632 rows -- 31% -- and, because
+ * `configDigest`'s parameter half is derived from the same reading, hid every
+ * one of those regime boundaries from §6.2's admission and from the
+ * state-space forecast's "never blend across a reparameterisation" rule.
+ *
+ * The guarantee now lives in the batch itself: `buildOriginCalls` carries
+ * IDENTITY legs read at the origin's own block, and `decodeOrigin` compares
+ * them against whatever addresses the batch was built with. A stale seed is
+ * therefore detected at EVERY origin rather than at every 500th, and costs no
+ * extra round trip -- see `ADDRESS_OWNER` and `OriginReading.addressDrift`.
+ * This function survives only to give the first origin of a run something to
+ * start from.
  */
 export async function resolveAddresses(
   pool: RpcPool,
@@ -342,6 +389,19 @@ export function buildOriginCalls(addr: ArchiveAddresses, blockNumber: number): M
     call('aave.irmV30.slope1', addr.aaveStrategy, AAVE_STRATEGY_V30_IFACE, 'getVariableRateSlope1'),
     call('aave.irmV30.slope2', addr.aaveStrategy, AAVE_STRATEGY_V30_IFACE, 'getVariableRateSlope2'),
     call('aave.irmV30.maxExcess', addr.aaveStrategy, AAVE_STRATEGY_V30_IFACE, 'MAX_EXCESS_USAGE_RATIO'),
+
+    // IDENTITY. Read from the FIXED market contracts (the Pool above, the
+    // mToken here), never from an address this batch was built with, so they
+    // cannot themselves go stale. `decodeOrigin` compares them against `addr`
+    // and refuses to emit a venue whose parameter legs were read from a
+    // contract governance had already replaced. Two extra legs on a 39-leg
+    // aggregate3, in the SAME round trip -- which is why the identity can be
+    // checked at every origin rather than every 500th.
+    call('identity.mwIrm', addr.mToken, MTOKEN_IFACE, 'interestRateModel'),
+    call('identity.mwComptroller', addr.mToken, MTOKEN_IFACE, 'comptroller'),
+    // (Aave's aToken, variable-debt token and rate strategy need no leg of
+    //  their own: `aave.reserveData` above already returns all three, read
+    //  from the Pool at this same block.)
 
     // Moonwell
     call('moonwell.cash', addr.mToken, MTOKEN_IFACE, 'getCash'),
@@ -444,6 +504,27 @@ export function decodeOrigin(
     return d === null ? null : (d[0] as boolean);
   };
 
+  // -- Identity, before any venue is decoded ---------------------------------
+  //
+  // Everything below that reads a rate model reads it from an address chosen
+  // by the CALLER. These legs are what makes that choice checkable: they come
+  // from the fixed market contracts at this block, so a caller working from a
+  // seed that governance has since superseded is caught here rather than
+  // three weeks later.
+  const identity = observedAddressesFrom(addr, byKey);
+  if (identity.addresses === null) failures.push(...identity.missing);
+  const drift = identity.addresses === null ? [] : addressDriftBetween(addr, identity.addresses);
+  const driftedVenues = new Set(drift.map((f) => ADDRESS_OWNER[f]));
+  // Named in `failures` as well as in `addressDrift`, so a caller that only
+  // reads `failures` still sees the venue was dropped and why.
+  for (const field of drift) failures.push(`identity.drift.${field}`);
+  /** A venue whose identity is unreadable is as unusable as one that drifted. */
+  const unverifiable = new Set(
+    identity.missing.map((k) => (k === 'identity.mwIrm' || k === 'identity.mwComptroller' ? 'moonwell' : 'aave')),
+  );
+  const identityBad = (venue: 'aave' | 'moonwell'): boolean =>
+    driftedVenues.has(venue) || unverifiable.has(venue);
+
   const markets: VenueReading[] = [];
 
   // -- Compound III ---------------------------------------------------------
@@ -528,7 +609,7 @@ export function decodeOrigin(
     const debt = uint('aave.debt', ERC20_IFACE, 'totalSupply');
     const virtualBal = uint('aave.virtualBalance', AAVE_POOL_IFACE, 'getVirtualUnderlyingBalance');
 
-    if (reserveData !== null && cash !== null && debt !== null) {
+    if (reserveData !== null && cash !== null && debt !== null && !identityBad('aave')) {
       const reserve = reserveData[0] as Result;
       // currentLiquidityRate is RAY per year; the pipeline is WAD.
       const liquidityRateRay = reserve.getValue('currentLiquidityRate') as bigint;
@@ -585,6 +666,7 @@ export function decodeOrigin(
 
     if (
       failures.length === before &&
+      !identityBad('moonwell') &&
       cash !== null && borrows !== null && reserves !== null &&
       supplyRatePerTs !== null && paused !== null
     ) {
@@ -636,7 +718,95 @@ export function decodeOrigin(
     markets,
     cost,
     failures,
+    observedAddresses: identity.addresses,
+    addressDrift: drift,
   };
+}
+
+/**
+ * The venue-owned addresses as the chain reports them AT THIS BLOCK, taken
+ * from the identity legs of the batch itself.
+ *
+ * PURE. Returns `addresses: null` with the missing keys named rather than
+ * falling back to the caller's own `addr`: a check that silently agrees with
+ * whatever it was given is not a check.
+ */
+export function observedAddressesFrom(
+  addr: ArchiveAddresses,
+  byKey: ReadonlyMap<string, Multicall3Result>,
+): { addresses: ArchiveAddresses | null; missing: string[] } {
+  const missing: string[] = [];
+  const one = (key: string, iface: Interface, fn: string): string | null => {
+    const r = byKey.get(key);
+    if (r === undefined || !r.success || r.returnData === '0x') {
+      missing.push(key);
+      return null;
+    }
+    try {
+      return iface.decodeFunctionResult(fn, r.returnData)[0] as string;
+    } catch {
+      missing.push(key);
+      return null;
+    }
+  };
+
+  const reserveRaw = byKey.get('aave.reserveData');
+  let aToken: string | null = null;
+  let variableDebt: string | null = null;
+  let strategy: string | null = null;
+  if (reserveRaw === undefined || !reserveRaw.success || reserveRaw.returnData === '0x') {
+    missing.push('aave.reserveData');
+  } else {
+    try {
+      const reserve = AAVE_POOL_IFACE.decodeFunctionResult('getReserveData', reserveRaw.returnData)[0] as Result;
+      aToken = reserve.getValue('aTokenAddress') as string;
+      variableDebt = reserve.getValue('variableDebtTokenAddress') as string;
+      strategy = reserve.getValue('interestRateStrategyAddress') as string;
+    } catch {
+      missing.push('aave.reserveData');
+    }
+  }
+
+  const mIrm = one('identity.mwIrm', MTOKEN_IFACE, 'interestRateModel');
+  const mComptroller = one('identity.mwComptroller', MTOKEN_IFACE, 'comptroller');
+
+  if (aToken === null || variableDebt === null || strategy === null || mIrm === null || mComptroller === null) {
+    return { addresses: null, missing };
+  }
+  return {
+    addresses: {
+      ...addr,
+      aaveAToken: aToken,
+      aaveVariableDebt: variableDebt,
+      aaveStrategy: strategy,
+      mInterestRateModel: mIrm,
+      mComptroller,
+    },
+    missing,
+  };
+}
+
+/**
+ * The mutable fields on which two address sets disagree, case-insensitively.
+ *
+ * Only the fields in `ADDRESS_OWNER` are compared: the rest are Base
+ * constants, and a difference there would mean the caller passed a different
+ * chain, not that governance moved something.
+ *
+ * PURE.
+ */
+export function addressDriftBetween(
+  used: ArchiveAddresses,
+  observed: ArchiveAddresses,
+): string[] {
+  const out: string[] = [];
+  for (const field of Object.keys(ADDRESS_OWNER)) {
+    const a = (used as unknown as Record<string, string>)[field];
+    const b = (observed as unknown as Record<string, string>)[field];
+    if (a === undefined || b === undefined) continue;
+    if (a.toLowerCase() !== b.toLowerCase()) out.push(field);
+  }
+  return out;
 }
 
 /**

@@ -593,11 +593,12 @@ export class SnapshotCollector {
    * Moonwell's `JumpRateModel` (paper §6.5).
    *
    * `interestRateModel()` is resolved PER READ, never pinned: Base mUSDC's
-   * model has been redeployed by governance repeatedly, and pinning it is
-   * precisely the defect that makes the archive backfill misattribute a
-   * governance swap to the previous model
-   * (`collector/archive/backfill.ts`'s `addressRefreshEvery`). The live path
-   * has no such excuse — it reads one block.
+   * model has been redeployed by governance repeatedly, and pinning it was
+   * precisely the defect that made the archive backfill misattribute a
+   * governance swap to the previous model for up to three weeks (the archive
+   * now verifies the identity in each origin's own multicall; see
+   * `collector/archive/backfill.ts` rule 5). The live path has no such
+   * excuse — it reads one block.
    *
    * The coefficients are a BORROW curve per timestamp; `reserveFactorMantissa`
    * is the cut that turns it into the supply rate.

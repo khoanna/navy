@@ -15,7 +15,7 @@
  *   DATABASE_URL=postgresql://user:password@localhost:5433/srcla \
  *     pnpm backfill:history [options]
  *
- *   --from <ISO>        default: the calibration era's start (2024-09-01)
+ *   --from <ISO>        default: the calibration era's start (2024-03-15)
  *   --to <ISO>          default: now
  *   --era <tag>         backfill exactly one registered era instead of --from/--to
  *   --cadence <s>       default 3600 (the paper's registered origin cadence)
@@ -130,6 +130,10 @@ async function main(): Promise<void> {
     }
     console.log(`[backfill] persisted ${summary.persisted}`);
     console.log(`[backfill] gaps      ${summary.gaps.length}`);
+    // The measured frequency of governance rate-model swaps in this window.
+    // Zero over a window known to contain them means the identity check in
+    // `buildOriginCalls` is not doing its job -- see backfill.ts rule 5.
+    console.log(`[backfill] address corrections ${summary.addressCorrections}`);
     console.log(`[backfill] elapsed   ${(summary.elapsedMs / 1000 / 60).toFixed(1)} min`);
     console.log('[backfill] per era:');
     for (const [era, n] of Object.entries(summary.byEra).sort()) {
