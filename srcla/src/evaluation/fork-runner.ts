@@ -103,8 +103,27 @@ export interface ForkReplayOptions {
   rpcUrl: string;
   /** The block the prestate is pinned at. Must be the fork's current head. */
   prestateBlock: number;
-  /** Deployed `NavyVaultSRCLA` on that fork. */
+  /** Deployed `NavyVaultSRCLA` on that fork. Used for every tier that
+   *  `vaultByTier` does not name. */
   vaultAddress: string;
+  /**
+   * tier (USDC base units, as a decimal string) -> the vault deployed AT THAT
+   * SCALE, and the adapters registered on it.
+   *
+   * WHY THIS EXISTS. `submitPlan` verifies `capBps`, `minIdleBps`, the
+   * reserve and the loss bound against the VAULT'S OWN NAV. Replaying every
+   * registered tier against one vault therefore checks the wrong guardrails:
+   * a plan sized for the 10M tier submitted to a 390k vault is refused by the
+   * contract behaving exactly as specified, and the run records it as an
+   * allocation the chain rejected. It is not -- it is a bench that does not
+   * match the experiment. Measured: 30 of 64 replays refused this way, all at
+   * the 1M tier and above.
+   *
+   * Absent for a tier means "use `vaultAddress`", which is the single-vault
+   * behaviour and carries the disclosed caveat that the guardrails were
+   * evaluated at one NAV rather than at each tier's scale.
+   */
+  vaultByTier?: Readonly<Record<string, { vault: string; adapterByMarketId: Readonly<Record<string, string>> }>>;
   /** Key holding ALLOCATOR_ROLE on that vault. */
   allocatorPrivateKey: string;
   /** marketId -> the `IYieldAdapter` registered on the vault for that venue. */
@@ -354,12 +373,49 @@ export async function runForkReplays(
     // nonce and fails with "nonce has already been used" — which would be
     // recorded as the POLICY's plan being refused by the chain.
     const signer = new ethers.NonceManager(wallet);
-    const vault = new Contract(opts.vaultAddress, VAULT_ABI, signer);
-    const assetAddress = (await vault.asset!()) as string;
-    const asset = new Contract(assetAddress, ERC20_ABI, provider);
     const network = await provider.getNetwork();
     const chainId = Number(network.chainId);
-    const adapters = [...new Set(Object.values(opts.adapterByMarketId))];
+
+    // One context per TIER. The vault verifies its guardrails against its own
+    // NAV, so each registered tier is replayed against the vault deployed at
+    // that scale when one is supplied; see `ForkReplayOptions.vaultByTier`.
+    interface TierContext {
+      vaultAddress: string;
+      vault: Contract;
+      asset: Contract;
+      assetAddress: string;
+      adapterByMarketId: Readonly<Record<string, string>>;
+      adapters: string[];
+      pinnedDigest: string;
+    }
+    const contexts = new Map<string, TierContext>();
+    const contextFor = async (tier: bigint): Promise<TierContext> => {
+      const key = tier.toString();
+      const hit = contexts.get(key);
+      if (hit !== undefined) return hit;
+      const perTier = opts.vaultByTier?.[key];
+      const vaultAddress = perTier?.vault ?? opts.vaultAddress;
+      const adapterByMarketId = perTier?.adapterByMarketId ?? opts.adapterByMarketId;
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const assetAddress = (await vault.asset!()) as string;
+      const asset = new Contract(assetAddress, ERC20_ABI, provider);
+      const adapters = [...new Set(Object.values(adapterByMarketId))];
+      if (!((await vault.hasRole!(await vault.ALLOCATOR_ROLE!(), wallet.address)) as boolean)) {
+        throw new Error(`${wallet.address} does not hold ALLOCATOR_ROLE on ${vaultAddress}`);
+      }
+      const pinned = await readPrestate(provider, vault, asset, adapters);
+      const ctx: TierContext = {
+        vaultAddress,
+        vault,
+        asset,
+        assetAddress,
+        adapterByMarketId,
+        adapters,
+        pinnedDigest: fingerprintDigest(pinned),
+      };
+      contexts.set(key, ctx);
+      return ctx;
+    };
 
     const head = await provider.getBlockNumber();
     if (head !== opts.prestateBlock) {
@@ -368,12 +424,9 @@ export async function runForkReplays(
           `${head}. The pin must name the state the replays are restored to.`,
       );
     }
-    if (!((await vault.hasRole!(await vault.ALLOCATOR_ROLE!(), wallet.address)) as boolean)) {
-      throw new Error(`${wallet.address} does not hold ALLOCATOR_ROLE on ${opts.vaultAddress}`);
-    }
-
-    const pinned = await readPrestate(provider, vault, asset, adapters);
-    const pinnedDigest = fingerprintDigest(pinned);
+    // Every tier's prestate is read BEFORE the first snapshot, so the
+    // fingerprint each replay is checked against is the untouched fork.
+    for (const tier of new Set(plans.map((p) => p.tier))) await contextFor(tier);
 
     let snapshotId = (await provider.send('evm_snapshot', [])) as string;
     const results: ForkReplayResult[] = [];
@@ -381,6 +434,10 @@ export async function runForkReplays(
     for (const plan of plans) {
       const label = `${plan.policyId}@${plan.tier}`;
       // §11.1: THE SAME pinned prestate, before EVERY candidate policy.
+      const tierCtx = await contextFor(plan.tier);
+      const { vault, asset, assetAddress, adapters, pinnedDigest } = tierCtx;
+      // `evm_revert` restores the WHOLE chain, so one snapshot serves every
+      // tier; only the fingerprint being compared is per-tier.
       const reverted = (await provider.send('evm_revert', [snapshotId])) as boolean;
       snapshotId = (await provider.send('evm_snapshot', [])) as string;
       // evm_revert rolls the account nonce back too; the local counter must
@@ -412,9 +469,9 @@ export async function runForkReplays(
           const block = await provider.getBlock('latest');
           built = buildForkPlan(plan, {
             chainId,
-            vaultAddress: opts.vaultAddress,
+            vaultAddress: tierCtx.vaultAddress,
             assetAddress,
-            adapterByMarketId: opts.adapterByMarketId,
+            adapterByMarketId: tierCtx.adapterByMarketId,
             configurationDigest: digest,
             totalAssetsBase: restored.totalAssetsBase,
             prestateBlock: opts.prestateBlock,
@@ -588,5 +645,50 @@ export async function forkReplayOptionsFromEnv(
     }
   }
 
-  return { rpcUrl, vaultAddress, allocatorPrivateKey, adapterByMarketId, prestateBlock };
+  // Optional per-tier benches:
+  //   SRCLA_FORK_REPLAY_TIER_VAULTS
+  //     10000000000=0xVault|compound-v3-usdc=0x..,aave-v3-usdc=0x..;100000000000=...
+  // Tier keys are USDC BASE UNITS, matching `ForkReplayPlan.tier`. A tier the
+  // variable does not name falls back to the single vault above, which is the
+  // behaviour that carries the disclosed one-NAV caveat.
+  const tierSpec = env['SRCLA_FORK_REPLAY_TIER_VAULTS'];
+  let vaultByTier: Record<string, { vault: string; adapterByMarketId: Record<string, string> }> | undefined;
+  if (tierSpec !== undefined && tierSpec.trim() !== '') {
+    vaultByTier = {};
+    for (const entry of tierSpec.split(';')) {
+      if (entry.trim() === '') continue;
+      // Split on '|' FIRST. A combined /[=|]/ split also cuts the adapter
+      // list's own '=' separators, so the third field arrived truncated to a
+      // bare marketId.
+      const bar = entry.indexOf('|');
+      const eq = entry.indexOf('=');
+      const tier = bar > 0 && eq > 0 && eq < bar ? entry.slice(0, eq) : undefined;
+      const vault = tier === undefined ? undefined : entry.slice(eq + 1, bar);
+      const adapterPart = tier === undefined ? undefined : entry.slice(bar + 1);
+      if (tier === undefined || vault === undefined || adapterPart === undefined) {
+        throw new Error(
+          `SRCLA_FORK_REPLAY_TIER_VAULTS entry '${entry}' is not ` +
+            `'<tierBaseUnits>=<0xvault>|<marketId>=0x..,<marketId>=0x..'`,
+        );
+      }
+      const perTierAdapters: Record<string, string> = {};
+      for (const a of adapterPart.split(',')) {
+        const [marketId, address] = a.split('=');
+        if (marketId === undefined || address === undefined || address.length === 0) {
+          throw new Error(`SRCLA_FORK_REPLAY_TIER_VAULTS adapter '${a}' is not 'marketId=0xaddress'`);
+        }
+        perTierAdapters[marketId.trim()] = address.trim();
+      }
+      vaultByTier[tier.trim()] = { vault: vault.trim(), adapterByMarketId: perTierAdapters };
+    }
+  }
+
+  return {
+    rpcUrl,
+    vaultAddress,
+    allocatorPrivateKey,
+    adapterByMarketId,
+    prestateBlock,
+    ...(vaultByTier === undefined ? {} : { vaultByTier }),
+  };
 }

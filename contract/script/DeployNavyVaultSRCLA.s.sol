@@ -7,7 +7,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 
 import {NavyVaultSRCLA} from "../src/NavyVaultSRCLA.sol";
 
-/// @notice Deploys NavyVaultSRCLA on Sepolia.
+/// @notice Deploys NavyVaultSRCLA on Base (or an Anvil fork of it).
 /// @dev Verifies USDC decimals before deployment. Admin is the deployer (msg.sender).
 contract DeployNavyVaultSRCLA is Script {
     uint8 public constant USDC_DECIMALS = 6;
@@ -16,7 +16,7 @@ contract DeployNavyVaultSRCLA is Script {
 
     function run() external returns (NavyVaultSRCLA vault) {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
-        address usdc = vm.envAddress("SEPOLIA_USDC_ADDRESS");
+        address usdc = vm.envAddress("NAVY_USDC_ADDRESS");
         address deployer = vm.addr(deployerPk);
 
         // Verify USDC decimals

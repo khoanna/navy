@@ -35,48 +35,62 @@ contract DeployAndFund is Script {
         // Fund it out of band instead (anvil_impersonateAccount + transfer).
         uint256 deployerBal = IERC20(USDC).balanceOf(deployer);
         console2.log("Deployer USDC balance: %s", deployerBal);
-        require(deployerBal >= 120_000e6, "deployer USDC not funded; see script header");
+        require(deployerBal >= 11_110_000e6, "deployer USDC not funded for all four tiers; see script header");
 
         vm.startBroadcast(deployerPk);
 
-        // Deploy vaults and fund them
-        // Comet has ~443K USDC, so we use 3 tiers: 10K, 100K, 300K
-        console2.log("\n=== Deploying and funding vaults ===");
+        // ONE VAULT PER REGISTERED TIER (§11.1: 10k, 100k, 1M, 10M).
+        // §11.1's fork replay submits each (policy, tier)'s plan to a vault,
+        // and the vault verifies capBps, minIdleBps, the reserve and the loss
+        // bound AGAINST ITS OWN NAV. Replaying every tier against one vault
+        // therefore checks the wrong guardrails: a plan sized for the 10M
+        // tier submitted to a 390k vault is refused by the contract behaving
+        // correctly, which reads as an allocation the chain rejected. It is
+        // not -- it is a bench that does not match the experiment.
+        console2.log("\n=== Deploying and funding one vault per registered tier ===");
 
-        // 10K vault
-        VaultInfo memory vault10k = deployVault(deployer);
-        IERC20(USDC).transfer(vault10k.vault, 10_000e6);
-        console2.log("10K vault funded: %s", IERC20(USDC).balanceOf(vault10k.vault));
+        VaultInfo memory v10k = deployVault(deployer);
+        IERC20(USDC).transfer(v10k.vault, 10_000e6);
+        console2.log("10K vault funded:  %s", IERC20(USDC).balanceOf(v10k.vault));
 
-        // 100K vault
-        VaultInfo memory vault100k = deployVault(deployer);
-        IERC20(USDC).transfer(vault100k.vault, 100_000e6);
-        console2.log("100K vault funded: %s", IERC20(USDC).balanceOf(vault100k.vault));
+        VaultInfo memory v100k = deployVault(deployer);
+        IERC20(USDC).transfer(v100k.vault, 100_000e6);
+        console2.log("100K vault funded: %s", IERC20(USDC).balanceOf(v100k.vault));
 
-        // 300K vault (adjusted from 1M due to limited USDC)
-        VaultInfo memory vault300k = deployVault(deployer);
-        uint256 remainingBal = IERC20(USDC).balanceOf(deployer);
-        IERC20(USDC).transfer(vault300k.vault, remainingBal);
-        console2.log("300K vault funded: %s", IERC20(USDC).balanceOf(vault300k.vault));
+        VaultInfo memory v1m = deployVault(deployer);
+        IERC20(USDC).transfer(v1m.vault, 1_000_000e6);
+        console2.log("1M vault funded:   %s", IERC20(USDC).balanceOf(v1m.vault));
+
+        VaultInfo memory v10m = deployVault(deployer);
+        IERC20(USDC).transfer(v10m.vault, 10_000_000e6);
+        console2.log("10M vault funded:  %s", IERC20(USDC).balanceOf(v10m.vault));
 
         vm.stopBroadcast();
 
         // Print all addresses
         console2.log("\n=== DEPLOYMENT SUMMARY ===");
-        console2.log("VAULT_10K=%s", vault10k.vault);
-        console2.log("AAVE_10K=%s", vault10k.aave);
-        console2.log("COMPOUND_10K=%s", vault10k.compound);
-        console2.log("MOONWELL_10K=%s", vault10k.moonwell);
+        console2.log("SRCLA_FORK_REPLAY_VAULTS=10000=%s,100000=%s", v10k.vault, v100k.vault);
+        console2.log("  ...,1000000=%s,10000000=%s", v1m.vault, v10m.vault);
         console2.log("");
-        console2.log("VAULT_100K=%s", vault100k.vault);
-        console2.log("AAVE_100K=%s", vault100k.aave);
-        console2.log("COMPOUND_100K=%s", vault100k.compound);
-        console2.log("MOONWELL_100K=%s", vault100k.moonwell);
+        console2.log("VAULT_10K=%s", v10k.vault);
+        console2.log("AAVE_10K=%s", v10k.aave);
+        console2.log("COMPOUND_10K=%s", v10k.compound);
+        console2.log("MOONWELL_10K=%s", v10k.moonwell);
         console2.log("");
-        console2.log("VAULT_300K=%s", vault300k.vault);
-        console2.log("AAVE_300K=%s", vault300k.aave);
-        console2.log("COMPOUND_300K=%s", vault300k.compound);
-        console2.log("MOONWELL_300K=%s", vault300k.moonwell);
+        console2.log("VAULT_100K=%s", v100k.vault);
+        console2.log("AAVE_100K=%s", v100k.aave);
+        console2.log("COMPOUND_100K=%s", v100k.compound);
+        console2.log("MOONWELL_100K=%s", v100k.moonwell);
+        console2.log("");
+        console2.log("VAULT_1M=%s", v1m.vault);
+        console2.log("AAVE_1M=%s", v1m.aave);
+        console2.log("COMPOUND_1M=%s", v1m.compound);
+        console2.log("MOONWELL_1M=%s", v1m.moonwell);
+        console2.log("");
+        console2.log("VAULT_10M=%s", v10m.vault);
+        console2.log("AAVE_10M=%s", v10m.aave);
+        console2.log("COMPOUND_10M=%s", v10m.compound);
+        console2.log("MOONWELL_10M=%s", v10m.moonwell);
     }
 
     struct VaultInfo {
