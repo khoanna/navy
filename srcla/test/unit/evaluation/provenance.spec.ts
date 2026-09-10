@@ -160,6 +160,11 @@ function row(policyId: string, tier: bigint, apy: number): PolicyRunResult {
       deploymentLatencyOrigins: 0,
       idleDragApy: null,
       hurdleBlocks: {},
+      // §11.5 sustainability metrics — not under test here, so neutral values.
+      timeToFullExitOrigins: 0,
+      venueStressContribution: {},
+      displayedVsRealizedGapApy: 0,
+      policyViolations: 0,
     },
   } as PolicyRunResult;
 }

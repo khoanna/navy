@@ -557,3 +557,79 @@ describe('renderReport — ablation contributions edge cases', () => {
     expect(negativeMd).toMatch(/Negative contribution/);
   });
 });
+
+describe('renderReport — §11.5 sustainability sections', () => {
+  const verdict = (over: Record<string, unknown>) => ({
+    policyId: 'srcla',
+    tier: '1000000000000',
+    demonstrated: true,
+    s1: true,
+    s2: true,
+    s3: true,
+    s4: true,
+    sustainable: true,
+    breach: null,
+    realizedNetApy: 0.0755,
+    displayedVsRealizedGapApy: 0.011,
+    ...over,
+  });
+
+  const withVerdicts = (over: Record<string, unknown>) => {
+    const base = fakeRun('heldout-c', false);
+    return {
+      ...params,
+      runs: [{ ...base, gate: { ...base.gate, ...over } }],
+    } as unknown as Parameters<typeof renderReport>[0];
+  };
+
+  it('reports sustainability BEFORE the yield comparison', () => {
+    const md = renderReport(withVerdicts({ sustainability: [verdict({})], scaleInvariant: true }));
+    expect(md.indexOf('Sustainability — the primary release criterion')).toBeLessThan(
+      md.indexOf('SRCLA against each deployable baseline'),
+    );
+  });
+
+  it('prints NOT DEMONSTRATED as itself, never as a pass', () => {
+    const md = renderReport(
+      withVerdicts({
+        sustainability: [
+          verdict({
+            demonstrated: false,
+            s1: null,
+            s2: null,
+            s3: null,
+            s4: null,
+            sustainable: null,
+            breach: 'NOT DEMONSTRATED: capital at work 0.000 < 0.8',
+            realizedNetApy: 0,
+          }),
+        ],
+        scaleInvariant: null,
+      }),
+    );
+    expect(md).toContain('**NOT DEMONSTRATED**');
+    expect(md).toMatch(/Scale invariance \(P26\):\*\* \*\*NOT DEMONSTRATED\*\*/);
+  });
+
+  it('publishes an excluded comparator as a counterexample with its return', () => {
+    const md = renderReport(
+      withVerdicts({
+        sustainability: [verdict({})],
+        scaleInvariant: true,
+        comparatorSustainability: [
+          verdict({
+            policyId: 'b1',
+            sustainable: false,
+            s2: false,
+            breach: 'S2 stressed coverage 0.878',
+            realizedNetApy: 0.39,
+          }),
+        ],
+      }),
+    );
+    expect(md).toContain('The price of unsustainability');
+    expect(md).toContain('`b1`');
+    expect(md).toContain('39.000%');
+    expect(md).toMatch(/not comparators/);
+  });
+});

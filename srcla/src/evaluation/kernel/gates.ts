@@ -37,6 +37,16 @@ import {
 } from '../../policy/steps/coverage.js';
 import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from './harness.js';
 import { REGISTERED_ABLATIONS, REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
+import {
+  qualifiesAsComparator,
+  scaleInvariant,
+  sustainabilityAtTier,
+  REGISTERED_DEMONSTRATION_FLOOR,
+  REGISTERED_MAX_EXIT_ORIGINS,
+  REGISTERED_MAX_VENUE_STRESS_SHARE,
+  REGISTERED_MIN_WITHDRAWAL_SUCCESS,
+  type SustainabilityVerdict,
+} from './sustainability.js';
 
 export interface RegisteredGateCheck {
   name: string;
@@ -68,6 +78,28 @@ export interface RegisteredGateResult {
   comparisons: BaselineComparison[];
   /** Names of every check that did not verify, in order. */
   blockedReasons: string[];
+  /**
+   * §11.5's PRIMARY criterion, per SRCLA run. One verdict per tier — a
+   * per-tier pass does not aggregate (P26), so the per-tier rows are the
+   * result and `scaleInvariant` below is derived from them, never averaged.
+   */
+  sustainability: SustainabilityVerdict[];
+  /**
+   * The SAME verdict computed for every non-SRCLA run, on identical terms.
+   * Two uses, and only two: it is the admissibility filter for the yield
+   * comparison, and it is the counterexample table — a policy that breaches
+   * is not a comparator, and its return is published as the measured price
+   * of unsustainability (§11.5 part 3).
+   */
+  comparatorSustainability: SustainabilityVerdict[];
+  /** P26 over `sustainability`. `null` is NOT DEMONSTRATED, never a pass. */
+  scaleInvariant: boolean | null;
+  /**
+   * Comparators dropped from the yield comparison, with WHY — so "no
+   * comparison" and "no ADMISSIBLE comparison" are never reported as the
+   * same thing.
+   */
+  excludedComparators: Array<{ baselineId: string; tier: string; reason: string }>;
 }
 
 /**
@@ -175,12 +207,28 @@ export function compareToBaseline(
 
 /**
  * Run the §11.5 gate over a completed registered evaluation.
+ *
+ * ORDER IS THE ARGUMENT (paper v0.8, §11.5). Checks are emitted as:
+ *
+ *   1. DEMONSTRATION — was the vault deployed enough for any sustainability
+ *      claim to mean anything? Below the floor nothing else may be claimed,
+ *      so this comes first and the criteria below it report NOT DEMONSTRATED.
+ *   2. COMPLETENESS — is the evidence base whole?
+ *   3. SUSTAINABILITY — the PRIMARY, ABSOLUTE criterion: redeemability under
+ *      stress, capacity discipline, operational continuity, and invariance
+ *      across vault size.
+ *   4. YIELD — scored second, and ONLY among policies that are themselves
+ *      sustainable.
+ *   5. PRICE OF UNSUSTAINABILITY — what the breaching policies earned, and
+ *      what they were displaying while they earned it. A breaching policy is
+ *      not a comparator; it is a counterexample, and its return is the
+ *      measured price of the thing the study says is not free.
  */
 export function evaluateRegisteredRelease(
   out: RegisteredEvaluationResult,
   opts: RegisteredGateOptions = {},
 ): RegisteredGateResult {
-  const minWithdrawalSuccess = opts.minWithdrawalSuccess ?? 0.99;
+  const minWithdrawalSuccess = opts.minWithdrawalSuccess ?? REGISTERED_MIN_WITHDRAWAL_SUCCESS;
   // The floor the OPTIMISER enforces, imported rather than re-declared:
   // `src/policy/steps/coverage.ts` exists precisely to stop the optimiser and
   // the grader from carrying two copies of this number that can drift apart.
@@ -189,9 +237,58 @@ export function evaluateRegisteredRelease(
 
   const checks: RegisteredGateCheck[] = [];
 
-  // 1. Completeness. A tier or a (policy, tier) that was not run cannot be
+  // P20: the sustainability criteria GATE on SRCLA's own runs. A comparator
+  // is not held to a constraint it never agreed to obey merely by appearing
+  // in the same batch as the candidate — but its verdict is computed on
+  // IDENTICAL terms, because that verdict is both the admissibility filter
+  // for the yield comparison and the counterexample table.
+  const srclaResults = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
+  const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id);
+  const sustainability = srclaResults.map(sustainabilityAtTier);
+  const comparatorSustainability = otherResults.map(sustainabilityAtTier);
+  const comparatorVerdict = new Map<string, SustainabilityVerdict>(
+    comparatorSustainability.map((v) => [`${v.policyId}@${v.tier}`, v]),
+  );
+
+  // =========================================================================
+  // 1. DEMONSTRATION (P25). FIRST, and it gates everything below it.
+  //
+  // Sustainability must be demonstrated WHILE DEPLOYED. A vault holding idle
+  // cash satisfies every redeemability test and has proven nothing: without
+  // this floor, B0 (all idle) is the most sustainable policy in the study,
+  // and the v0.6 SRCLA — 1.000 stressed coverage at all four tiers on both
+  // eras, 0.000% realized on one of them — passes at the tier where it
+  // earned nothing.
+  // =========================================================================
+  const notDemonstrated = sustainability.filter((v) => !v.demonstrated);
+  checks.push(
+    sustainability.length === 0
+      ? check(
+          'Demonstration: sustainability was demonstrated while deployed',
+          null,
+          'NOT PRODUCED: no SRCLA run was available to demonstrate anything',
+        )
+      : check(
+          'Demonstration: sustainability was demonstrated while deployed',
+          notDemonstrated.length === 0,
+          notDemonstrated.length === 0
+            ? `capital at work >= ${REGISTERED_DEMONSTRATION_FLOOR} across all ` +
+              `${sustainability.length} SRCLA runs`
+            : `NOT DEMONSTRATED at ${notDemonstrated
+                .map(
+                  (v) =>
+                    `${v.policyId}@${v.tier} (realized ${(v.realizedNetApy * 100).toFixed(3)}%)`,
+                )
+                .join(', ')}: below the ${REGISTERED_DEMONSTRATION_FLOOR} capital-at-work floor, ` +
+              `redeemability proves nothing and no sustainability claim may be drawn`,
+        ),
+  );
+
+  // =========================================================================
+  // 2. COMPLETENESS. A tier or a (policy, tier) that was not run cannot be
   //    checked, so it FAILS. `TIERS.every(...)` over the tiers that happened
   //    to be present is what made the missing 10,000 tier invisible.
+  // =========================================================================
   checks.push(
     check(
       'Every registered tier ran',
@@ -212,8 +309,8 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  // 2. The artifact must be calibrated. A provisional one makes every number
-  //    below non-citable, so it blocks rather than annotating.
+  // The artifact must be calibrated. A provisional one makes every number
+  // below non-citable, so it blocks rather than annotating.
   checks.push(
     check(
       'Calibrated artifact',
@@ -224,152 +321,10 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  // 3. §11.4 safety, per (policy, tier). An UNMEASURED withdrawal rate
-  //    (null: no redemption attempted) fails; the previous replay returned a
-  //    hardcoded 1.0 here, which let a zero-cash policy clear a liquidity
-  //    gate it was never subjected to.
-  const unmeasured = out.results.filter((r) => r.replay.withdrawalSuccessRate === null);
-  const failedWithdrawals = out.results.filter(
-    (r) => r.replay.withdrawalSuccessRate !== null && r.replay.withdrawalSuccessRate < minWithdrawalSuccess,
-  );
-  checks.push(
-    check(
-      'Safety: withdrawal success measured and met',
-      unmeasured.length === 0 && failedWithdrawals.length === 0,
-      unmeasured.length > 0
-        ? `not measured for ${unmeasured.map(label).join(', ')}: no redemption was attempted`
-        : failedWithdrawals.length > 0
-          ? failedWithdrawals
-              .map((r) => `${label(r)} ${(r.replay.withdrawalSuccessRate! * 100).toFixed(1)}%`)
-              .join(', ')
-          : `>= ${(minWithdrawalSuccess * 100).toFixed(0)}% across ${out.results.length} runs`,
-    ),
-  );
-
-  // P20: this check is scoped to SRCLA's OWN runs. On the v0.6 secondary era
-  // every stressed-coverage violation belonged to a baseline or an ablation
-  // and none to SRCLA, yet the gate (ranging over every run) recorded it as
-  // SRCLA's failure. A comparator is not held to a constraint it never
-  // agreed to obey merely by appearing in the same batch as the candidate;
-  // its breach is still surfaced below, just not as a reason to block.
-  const srclaResults = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
-  const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id);
-  const squeezed = srclaResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
-  const reportedOnly = otherResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
-  checks.push(
-    stressedLiquidCoverageCheck(squeezed, srclaResults.length, minStressed, opts.universeLiquidity, reportedOnly),
-  );
-
-  // 4. An INERT ablation removed nothing on this dataset: its decision
-  //    sequence is byte-identical to SRCLA's, so any delta reported for it is
-  //    noise and attributing it to the removed component is a
-  //    misattribution.
-  const inert = [...new Set(out.results.filter((r) => r.inertVsSrcla).map((r) => r.policy.id))];
-  checks.push(
-    check(
-      'No inert ablation',
-      inert.length === 0,
-      inert.length === 0
-        ? 'every ablation changed at least one decision'
-        : `these made byte-identical decisions to SRCLA: ${inert.join(', ')}`,
-    ),
-  );
-
-  // 5. §11.5's statistical criterion, per deployable, ADMISSIBLE baseline
-  //    per tier, on AFTER-COST per-period returns.
-  //
-  //    Three exclusions from the comparison set, none of which touch SRCLA:
-  //      - B5 (and any other `deployable: false` row): §11.2 says it "cannot
-  //        establish deployability".
-  //      - Every §11.3 ablation (P21): an ablation beating SRCLA is a
-  //        finding about the removed component, reported separately via
-  //        `ablationContributions` -- folding it in here is what turned that
-  //        diagnostic into an undifferentiated gate failure in the v0.6 run.
-  //      - P20: a comparator that itself breached the stressed-liquid-
-  //        coverage floor SRCLA was held to. B1/B2/B2u earning 39% while
-  //        holding 0.878 coverage against the 0.99 floor is not a baseline
-  //        SRCLA has to beat -- it is an inadmissible comparator, and its
-  //        exclusion is recorded so "no comparison" and "no ADMISSIBLE
-  //        comparison" are never reported as the same thing.
-  const ablationIds = new Set(REGISTERED_ABLATIONS.map((p) => p.id));
-  const comparisons: BaselineComparison[] = [];
-  const excludedForSafety: Array<{ baselineId: string; tier: string }> = [];
-  const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((x, y) =>
-    BigInt(x) < BigInt(y) ? -1 : BigInt(x) > BigInt(y) ? 1 : 0,
-  );
-
-  const compareOpts: Parameters<typeof compareToBaseline>[2] = {};
-  if (opts.minPairedObservations !== undefined) compareOpts.minPairedObservations = opts.minPairedObservations;
-  if (opts.bootstrapSeed !== undefined) compareOpts.bootstrapSeed = opts.bootstrapSeed;
-  if (opts.bootstrapIterations !== undefined) compareOpts.bootstrapIterations = opts.bootstrapIterations;
-
-  for (const tier of tiers) {
-    const atTier = out.results.filter((r) => r.tier.toString() === tier);
-    const srcla = atTier.find((r) => r.policy.id === SRCLA_POLICY.id);
-    if (srcla === undefined) continue; // already failed the completeness check
-    for (const b of atTier) {
-      if (b.policy.id === SRCLA_POLICY.id) continue;
-      if (ablationIds.has(b.policy.id)) continue; // §11.3 evidence, not a §11.2 comparator
-      if (!b.policy.deployable) continue;
-      if (b.replay.minStressedLiquidCoverage < minStressed) {
-        excludedForSafety.push({ baselineId: b.policy.id, tier });
-        continue;
-      }
-      comparisons.push(compareToBaseline(srcla, b, compareOpts));
-    }
-  }
-
-  const noAdmissibleComparator = comparisons.length === 0 && excludedForSafety.length > 0;
-  const notProducedDetail = noAdmissibleComparator
-    ? `NO ADMISSIBLE COMPARATOR: every deployable baseline breached the stressed-liquid-coverage ` +
-      `floor SRCLA held (${excludedForSafety.map((e) => `${e.baselineId}@${e.tier}`).join(', ')})`
-    : 'NOT PRODUCED: no SRCLA-vs-baseline comparison was available';
-
-  const indistinguishable = comparisons.filter((c) => c.test.usable && c.test.pValue >= alpha);
-  const unusable = comparisons.filter((c) => !c.test.usable);
-  checks.push(
-    comparisons.length === 0
-      ? check('Statistically distinguishable from every deployable baseline', null, notProducedDetail)
-      : check(
-          'Statistically distinguishable from every deployable baseline',
-          indistinguishable.length === 0 && unusable.length === 0,
-          unusable.length > 0
-            ? `test not usable for ${unusable.map((c) => `${c.baselineId}@${c.tier} (${c.test.reason})`).join(', ')}`
-            : indistinguishable.length > 0
-              ? indistinguishable
-                  .map((c) => `${c.baselineId}@${c.tier} p=${c.test.pValue.toFixed(3)}`)
-                  .join(', ')
-              : `p < ${alpha} against all ${comparisons.length} admissible deployable comparisons`,
-        ),
-  );
-
-  // 6. Outperformance, on the same admissible deployable set.
-  const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
-  checks.push(
-    comparisons.length === 0
-      ? check(
-          'Outperforms every deployable baseline',
-          null,
-          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
-        )
-      : check(
-          'Outperforms every deployable baseline',
-          notBeaten.length === 0,
-          notBeaten.length === 0
-            ? `ahead of all ${comparisons.length} admissible deployable comparisons`
-            : notBeaten
-                .map(
-                  (c) =>
-                    `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ${(c.baselineNetApy * 100).toFixed(3)}%`,
-                )
-                .join(', '),
-        ),
-  );
-
-  // 7. §11.1's per-policy pinned-prestate fork replay. Unimplemented today:
-  //    `src/evaluation/fork-runner.ts` is the scaffold and nothing calls it,
-  //    so this reports NOT PRODUCED and blocks. Skipping it silently is how
-  //    a paper requirement gets quietly dropped.
+  // §11.1's per-policy pinned-prestate fork replay. Unimplemented today:
+  // `src/evaluation/fork-runner.ts` is the scaffold and nothing calls it, so
+  // this reports NOT PRODUCED and blocks. Skipping it silently is how a
+  // paper requirement gets quietly dropped.
   const fork = opts.forkResults;
   if (fork === undefined) {
     checks.push(
@@ -397,6 +352,243 @@ export function evaluateRegisteredRelease(
     );
   }
 
+  // =========================================================================
+  // 3. SUSTAINABILITY — the PRIMARY, ABSOLUTE criterion. One check per
+  //    criterion, so the report names WHICH one failed rather than reporting
+  //    an undifferentiated "unsustainable".
+  // =========================================================================
+
+  // S1a — an UNMEASURED withdrawal rate (null: no redemption attempted)
+  // fails; the previous replay returned a hardcoded 1.0 here, which let a
+  // zero-cash policy clear a liquidity gate it was never subjected to.
+  const unmeasured = out.results.filter((r) => r.replay.withdrawalSuccessRate === null);
+  const failedWithdrawals = out.results.filter(
+    (r) => r.replay.withdrawalSuccessRate !== null && r.replay.withdrawalSuccessRate < minWithdrawalSuccess,
+  );
+  checks.push(
+    check(
+      'Safety: withdrawal success measured and met',
+      unmeasured.length === 0 && failedWithdrawals.length === 0,
+      unmeasured.length > 0
+        ? `not measured for ${unmeasured.map(label).join(', ')}: no redemption was attempted`
+        : failedWithdrawals.length > 0
+          ? failedWithdrawals
+              .map((r) => `${label(r)} ${(r.replay.withdrawalSuccessRate! * 100).toFixed(1)}%`)
+              .join(', ')
+          : `>= ${(minWithdrawalSuccess * 100).toFixed(0)}% across ${out.results.length} runs`,
+    ),
+  );
+
+  // S2 — stressed liquid coverage, with §11.4's capacity-infeasibility
+  // partition. Scoped to SRCLA; a comparator's breach is reported, not
+  // gating, and is carried into the counterexample table below.
+  const squeezed = srclaResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  const reportedOnly = otherResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  checks.push(
+    stressedLiquidCoverageCheck(squeezed, srclaResults.length, minStressed, opts.universeLiquidity, reportedOnly),
+  );
+
+  // S1b — a bounded COMPLETE exit. Coverage answers "could the vault meet
+  // one stress demand"; this answers "could everyone actually get out, and
+  // how long would it take". A run that never fully exits scores `null` for
+  // `timeToFullExitOrigins`, which is a MEASURED failure, not an absence.
+  checks.push(
+    sustainabilityCheck(
+      'Sustainability S1: complete exit within the registered bound',
+      sustainability,
+      (v) => v.s1,
+      `withdrawals filled and full exit within ${REGISTERED_MAX_EXIT_ORIGINS} origins`,
+    ),
+  );
+
+  // S3 — capacity discipline. A vault that IS a venue's depth cannot exit it
+  // without moving it, so the yield it displays there is not a yield it can
+  // realize at size. This is the criterion that makes the 10M tier a real
+  // question rather than a rescaling of the 1M one.
+  checks.push(
+    sustainabilityCheck(
+      'Sustainability S3: capacity discipline',
+      sustainability,
+      (v) => v.s3,
+      `no venue share above ${REGISTERED_MAX_VENUE_STRESS_SHARE}, time-weighted`,
+    ),
+  );
+
+  // S4 — operational continuity.
+  checks.push(
+    sustainabilityCheck(
+      'Sustainability S4: operational continuity',
+      sustainability,
+      (v) => v.s4,
+      'no policy violation over any run',
+    ),
+  );
+
+  // P26 — scale invariance. A per-tier pass does NOT aggregate: B4 held
+  // 1.000 coverage at 1M and 0.590 at 10M on the same era with an identical
+  // return, and no metric averaged over tiers can see that. A demonstrated
+  // breach at any tier outranks a NOT DEMONSTRATED at another.
+  const invariant = scaleInvariant(sustainability);
+  const breaching = sustainability.filter((v) => v.sustainable === false);
+  const undemonstrated = sustainability.filter((v) => v.sustainable === null);
+  checks.push(
+    check(
+      'Sustainability: scale invariance across every registered tier (P26)',
+      invariant,
+      invariant === true
+        ? `sustainable at all ${sustainability.length} tiers measured`
+        : invariant === false
+          ? `breaches at ${breaching.map((v) => `${v.policyId}@${v.tier} (${v.breach})`).join('; ')}`
+          : sustainability.length === 0
+            ? 'NOT DEMONSTRATED: no SRCLA run was available'
+            : `NOT DEMONSTRATED at ${undemonstrated
+                .map((v) => `${v.policyId}@${v.tier}`)
+                .join(', ')} — a tier that proved nothing cannot be counted as invariant`,
+    ),
+  );
+
+  // =========================================================================
+  // 4. YIELD — scored second, and only among comparators that are themselves
+  //    sustainable.
+  // =========================================================================
+
+  // An INERT ablation removed nothing on this dataset: its decision sequence
+  // is byte-identical to SRCLA's, so any delta reported for it is noise and
+  // attributing it to the removed component is a misattribution.
+  const inert = [...new Set(out.results.filter((r) => r.inertVsSrcla).map((r) => r.policy.id))];
+  checks.push(
+    check(
+      'No inert ablation',
+      inert.length === 0,
+      inert.length === 0
+        ? 'every ablation changed at least one decision'
+        : `these made byte-identical decisions to SRCLA: ${inert.join(', ')}`,
+    ),
+  );
+
+  // §11.5's statistical criterion, per deployable, ADMISSIBLE baseline per
+  // tier, on AFTER-COST per-period returns.
+  //
+  //   - B5 (and any other `deployable: false` row): §11.2 says it "cannot
+  //     establish deployability".
+  //   - Every §11.3 ablation (P21): an ablation beating SRCLA is a finding
+  //     about the removed component, reported via `ablationContributions` --
+  //     folding it in here is what turned that diagnostic into an
+  //     undifferentiated gate failure in the v0.6 run.
+  //   - P20/P24: a comparator that is not itself SUSTAINABLE. This is the
+  //     one and only admissibility predicate in the tree
+  //     (`qualifiesAsComparator`), and it replaces the provisional inline
+  //     coverage test this loop carried through Tasks 9/10. B1/B2/B2u
+  //     earning 39% while holding 0.878 coverage against the 0.99 floor is
+  //     not a baseline SRCLA has to beat -- it is a counterexample, and its
+  //     return is published below as the price of unsustainability.
+  const ablationIds = new Set(REGISTERED_ABLATIONS.map((p) => p.id));
+  const comparisons: BaselineComparison[] = [];
+  const excludedComparators: Array<{ baselineId: string; tier: string; reason: string }> = [];
+  const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((x, y) =>
+    BigInt(x) < BigInt(y) ? -1 : BigInt(x) > BigInt(y) ? 1 : 0,
+  );
+
+  const compareOpts: Parameters<typeof compareToBaseline>[2] = {};
+  if (opts.minPairedObservations !== undefined) compareOpts.minPairedObservations = opts.minPairedObservations;
+  if (opts.bootstrapSeed !== undefined) compareOpts.bootstrapSeed = opts.bootstrapSeed;
+  if (opts.bootstrapIterations !== undefined) compareOpts.bootstrapIterations = opts.bootstrapIterations;
+
+  for (const tier of tiers) {
+    const atTier = out.results.filter((r) => r.tier.toString() === tier);
+    const srcla = atTier.find((r) => r.policy.id === SRCLA_POLICY.id);
+    if (srcla === undefined) continue; // already failed the completeness check
+    for (const b of atTier) {
+      if (b.policy.id === SRCLA_POLICY.id) continue;
+      if (ablationIds.has(b.policy.id)) continue; // §11.3 evidence, not a §11.2 comparator
+      if (!b.policy.deployable) continue;
+      const verdict = comparatorVerdict.get(`${b.policy.id}@${tier}`);
+      if (verdict === undefined || !qualifiesAsComparator(verdict)) {
+        excludedComparators.push({
+          baselineId: b.policy.id,
+          tier,
+          reason: verdict?.breach ?? 'NOT PRODUCED: no sustainability verdict',
+        });
+        continue;
+      }
+      comparisons.push(compareToBaseline(srcla, b, compareOpts));
+    }
+  }
+
+  const noAdmissibleComparator = comparisons.length === 0 && excludedComparators.length > 0;
+  const notProducedDetail = noAdmissibleComparator
+    ? `NO ADMISSIBLE COMPARATOR: every deployable baseline was itself unsustainable at the ` +
+      `criteria SRCLA is held to (${excludedComparators
+        .map((e) => `${e.baselineId}@${e.tier}: ${e.reason}`)
+        .join('; ')})`
+    : 'NOT PRODUCED: no SRCLA-vs-baseline comparison was available';
+
+  const indistinguishable = comparisons.filter((c) => c.test.usable && c.test.pValue >= alpha);
+  const unusable = comparisons.filter((c) => !c.test.usable);
+  checks.push(
+    comparisons.length === 0
+      ? check('Statistically distinguishable from every deployable baseline', null, notProducedDetail)
+      : check(
+          'Statistically distinguishable from every deployable baseline',
+          indistinguishable.length === 0 && unusable.length === 0,
+          unusable.length > 0
+            ? `test not usable for ${unusable.map((c) => `${c.baselineId}@${c.tier} (${c.test.reason})`).join(', ')}`
+            : indistinguishable.length > 0
+              ? indistinguishable
+                  .map((c) => `${c.baselineId}@${c.tier} p=${c.test.pValue.toFixed(3)}`)
+                  .join(', ')
+              : `p < ${alpha} against all ${comparisons.length} admissible deployable comparisons`,
+        ),
+  );
+
+  // Outperformance, on the same admissible deployable set.
+  const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
+  checks.push(
+    comparisons.length === 0
+      ? check(
+          'Outperforms every deployable baseline',
+          null,
+          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
+        )
+      : check(
+          'Outperforms every deployable baseline',
+          notBeaten.length === 0,
+          notBeaten.length === 0
+            ? `ahead of all ${comparisons.length} admissible deployable comparisons`
+            : notBeaten
+                .map(
+                  (c) =>
+                    `${c.baselineId}@${c.tier}: SRCLA ${(c.srclaNetApy * 100).toFixed(3)}% vs ${(c.baselineNetApy * 100).toFixed(3)}%`,
+                )
+                .join(', '),
+        ),
+  );
+
+  // =========================================================================
+  // 5. PRICE OF UNSUSTAINABILITY (§11.5 part 3). Publishing this is a
+  //    REQUIREMENT, not a gate: an excluded comparator's return is the whole
+  //    point of the study, so it must appear as a measured figure rather
+  //    than vanish with the exclusion. The check verifies that the table was
+  //    produced, which is why it reads `true` when there is nothing to
+  //    publish -- "no policy breached" is a published finding too.
+  // =========================================================================
+  const counterexamples = comparatorSustainability.filter((v) => v.sustainable !== true);
+  checks.push(
+    check(
+      'Price of unsustainability published',
+      true,
+      counterexamples.length === 0
+        ? 'no comparator breached: nothing to price'
+        : counterexamples
+            .map(
+              (v) =>
+                `${v.policyId}@${v.tier} ${(v.realizedNetApy * 100).toFixed(3)}% ` +
+                `(displayed−realized ${(v.displayedVsRealizedGapApy * 100).toFixed(3)}pp) — ${v.breach}`,
+            )
+            .join('; '),
+    ),
+  );
+
   // `=== true`, not truthiness: NOT PRODUCED must not verify.
   const pass = checks.every((c) => c.passed === true);
   return {
@@ -404,7 +596,41 @@ export function evaluateRegisteredRelease(
     checks,
     comparisons,
     blockedReasons: checks.filter((c) => c.passed !== true).map((c) => c.name),
+    sustainability,
+    comparatorSustainability,
+    scaleInvariant: invariant,
+    excludedComparators,
   };
+}
+
+/**
+ * Roll one sustainability criterion up over SRCLA's per-tier verdicts.
+ *
+ * Same three-valued ordering as everywhere else: a demonstrated breach at
+ * any tier is `false`; otherwise any NOT DEMONSTRATED tier makes the whole
+ * criterion `null`; only an all-`true` set verifies. An empty set is `null`
+ * — nothing was measured, so nothing passed.
+ */
+function sustainabilityCheck(
+  name: string,
+  verdicts: readonly SustainabilityVerdict[],
+  read: (v: SustainabilityVerdict) => boolean | null,
+  passDetail: string,
+): RegisteredGateCheck {
+  if (verdicts.length === 0) return check(name, null, 'NOT PRODUCED: no SRCLA run was available');
+  const failed = verdicts.filter((v) => read(v) === false);
+  if (failed.length > 0) {
+    return check(name, false, failed.map((v) => `${v.policyId}@${v.tier}: ${v.breach}`).join('; '));
+  }
+  const absent = verdicts.filter((v) => read(v) !== true);
+  if (absent.length > 0) {
+    return check(
+      name,
+      null,
+      `NOT DEMONSTRATED at ${absent.map((v) => `${v.policyId}@${v.tier}`).join(', ')}`,
+    );
+  }
+  return check(name, true, `${passDetail} across all ${verdicts.length} SRCLA runs`);
 }
 
 /**

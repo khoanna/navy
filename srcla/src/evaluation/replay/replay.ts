@@ -7,6 +7,13 @@
 import { VaultReplay, type RedeemFailure } from './erc4626.js';
 import { modelExecution } from './execution.js';
 import { stressedCoverage } from '../../policy/steps/coverage.js';
+import {
+  displayedVsRealizedGap,
+  timeToFullExit,
+  venueStressContribution,
+  type DisplayedOrigin,
+  type ExitOrigin,
+} from './sustainability-metrics.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
 import type { VaultState } from './state.js';
 
@@ -118,6 +125,28 @@ export interface ReplayResult {
    * (== `coverageDistribution.min`) exclusively.
    */
   coverageDistribution: CoverageDistribution;
+  /**
+   * §11.5's sustainability measurements (P24–P26, P28). See
+   * `sustainability-metrics.ts` for each definition and its declared bias.
+   */
+  /**
+   * Origins needed to redeem 100% of NAV starting from the run's WORST
+   * coverage origin, executing only same-transaction exits. `null` means the
+   * vault never fully exits inside the window — a measured failure, not a
+   * missing measurement.
+   */
+  timeToFullExitOrigins: number | null;
+  /** Per venue, the time-weighted share of that venue the vault itself was. */
+  venueStressContribution: Record<string, number>;
+  /** Deployed-weighted advertised APY minus `realizedNetApy`. */
+  displayedVsRealizedGapApy: number;
+  /**
+   * Actions the replay could not honour as proposed: a deploy into a venue
+   * that was paused or absent from the snapshot, or a divest from a venue
+   * the vault held nothing in. §11.5's operational-continuity criterion
+   * grades this; a correct policy scores 0.
+   */
+  policyViolations: number;
 }
 
 /** min/p05/median over a `stressedLiquidCoverage` series. */
@@ -222,7 +251,13 @@ export function runReplay(config: ReplayConfig): ReplayResult {
   let totalTurnover = 0n;
   let totalCosts = 0n;
   let minStressedLiquidCoverage = 1;
+  let worstCoverageIndex = 0;
   const coverageSeries: number[] = [];
+  // §11.5 sustainability inputs, accumulated per origin.
+  const exitSeries: ExitOrigin[] = [];
+  const venueShareSeries: Array<Record<string, number>> = [];
+  const displayedSeries: DisplayedOrigin[] = [];
+  let policyViolations = 0;
   const initialSharePrice = vault.currentSharePrice();
 
   const requestsByIndex = new Map<number, WithdrawalRequest[]>();
@@ -256,6 +291,20 @@ export function runReplay(config: ReplayConfig): ReplayResult {
 
     // Get policy actions
     const actions = policy(vault.getState(), snapshot);
+
+    // §11.5 S4: an action the venue set could not honour as proposed is an
+    // operational-continuity violation, counted BEFORE the replay silently
+    // clips it. A correct policy proposes none.
+    const observed = new Map(snapshot.snapshots.map((m) => [m.marketId, m]));
+    for (const action of actions) {
+      if (action.amount <= 0n) continue;
+      if (action.kind === 'deploy') {
+        const market = observed.get(action.adapter);
+        if (market === undefined || market.paused) policyViolations += 1;
+      } else if ((vault.getState().strategyBalances.get(action.adapter) ?? 0n) <= 0n) {
+        policyViolations += 1;
+      }
+    }
 
     // Execute actions
     for (const action of actions) {
@@ -308,8 +357,35 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       venueCashByMarket: new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase])),
       totalAssetsBase: vault.getState().totalAssets,
     }).worst;
-    if (coverage < minStressedLiquidCoverage) minStressedLiquidCoverage = coverage;
+    if (coverage < minStressedLiquidCoverage) {
+      minStressedLiquidCoverage = coverage;
+      worstCoverageIndex = i;
+    }
     coverageSeries.push(coverage);
+
+    // §11.5 sustainability inputs for this origin, read from the SAME state
+    // the coverage figure above was read from.
+    const post = vault.getState();
+    let exitCapacityBase = 0n;
+    let deployedBase = 0n;
+    let weightedRate = 0;
+    const shares: Record<string, number> = {};
+    for (const [marketId, balance] of post.strategyBalances) {
+      if (balance <= 0n) continue;
+      deployedBase += balance;
+      const market = observed.get(marketId);
+      const venueCash = market?.cashBase ?? 0n;
+      exitCapacityBase += balance < venueCash ? balance : venueCash;
+      const venueTotal = market?.totalAssetsBase ?? 0n;
+      if (venueTotal > 0n) shares[marketId] = Number(balance) / Number(venueTotal);
+      weightedRate += Number(balance) * (Number(market?.supplyRateE18 ?? 0n) / 1e18);
+    }
+    exitSeries.push({ navBase: post.totalAssets, idleBase: post.idleBase, exitCapacityBase });
+    venueShareSeries.push(shares);
+    displayedSeries.push({
+      displayedApy: deployedBase === 0n ? 0 : weightedRate / Number(deployedBase),
+      deployedBase,
+    });
 
     snapshots.push({
       timestamp: snapshot.timestamp,
@@ -323,13 +399,14 @@ export function runReplay(config: ReplayConfig): ReplayResult {
   }
 
   const successful = withdrawalOutcomes.filter((w) => w.success).length;
+  const realizedNetApy = annualizedSharePriceGrowth(snapshots);
 
   return {
     policyId: evaluationId,
     tier,
     cohortId,
     snapshots,
-    realizedNetApy: annualizedSharePriceGrowth(snapshots),
+    realizedNetApy,
     totalTurnover,
     withdrawalSuccessRate:
       withdrawalOutcomes.length > 0 ? successful / withdrawalOutcomes.length : null,
@@ -337,6 +414,12 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     totalCosts,
     minStressedLiquidCoverage,
     coverageDistribution: coverageDistribution(coverageSeries),
+    // Graded from the run's WORST coverage origin: the moment the vault was
+    // least able to pay is the only moment a redeemability claim is about.
+    timeToFullExitOrigins: timeToFullExit(exitSeries, { startIndex: worstCoverageIndex }),
+    venueStressContribution: venueStressContribution(venueShareSeries),
+    displayedVsRealizedGapApy: displayedVsRealizedGap(displayedSeries, realizedNetApy),
+    policyViolations,
   };
 }
 

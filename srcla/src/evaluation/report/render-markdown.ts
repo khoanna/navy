@@ -19,6 +19,10 @@
  */
 import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
 import { ablationContributions, type RegisteredGateResult } from '../kernel/gates.js';
+import {
+  REGISTERED_DEMONSTRATION_FLOOR,
+  type SustainabilityVerdict,
+} from '../kernel/sustainability.js';
 import type { RegisteredEvaluationResult } from '../kernel/harness.js';
 import { REGISTERED_ABLATIONS } from '../kernel/registry.js';
 
@@ -430,6 +434,84 @@ function ablationContributionsSection(evaluation: RegisteredEvaluationResult): s
   return out.join('\n');
 }
 
+/**
+ * §11.5's PRIMARY criterion, rendered BEFORE the yield tables because that
+ * is the claim's order: a policy that is not sustainable is not a comparator
+ * whose return is worth reading, it is a counterexample whose return is the
+ * price of the thing being ruled out.
+ *
+ * Three-valued throughout. `NOT DEMONSTRATED` is printed as itself and never
+ * collapsed into either a tick or a cross, because the distinction between
+ * "held up under stress while deployed" and "held cash and was never tested"
+ * is the entire point of the demonstration floor.
+ */
+function sustainabilityTable(gate: RegisteredGateResult): string {
+  const verdicts: SustainabilityVerdict[] = gate.sustainability ?? [];
+  if (verdicts.length === 0) return '_No sustainability verdict was produced._';
+
+  const mark = (v: boolean | null): string =>
+    v === true ? 'PASS' : v === false ? '**FAIL**' : '**ND**';
+  const rows = verdicts
+    .slice()
+    .sort((a, b) => (BigInt(a.tier) < BigInt(b.tier) ? -1 : 1))
+    .map(
+      (v) =>
+        `| ${usdc(BigInt(v.tier))} | ${v.demonstrated ? 'yes' : '**NOT DEMONSTRATED**'} | ` +
+        `${mark(v.s1)} | ${mark(v.s2)} | ${mark(v.s3)} | ${mark(v.s4)} | ` +
+        `${v.sustainable === true ? '**SUSTAINABLE**' : v.sustainable === false ? '**BREACH**' : '**NOT DEMONSTRATED**'} | ` +
+        `${pct(v.realizedNetApy)} | ${v.breach ?? '—'} |`,
+    );
+  const invariant = gate.scaleInvariant;
+  return [
+    `Demonstration floor: capital at work >= **${REGISTERED_DEMONSTRATION_FLOOR}**. Below it a run ` +
+      'is trivially redeemable and demonstrates nothing, so every criterion reports **ND** (NOT ' +
+      'DEMONSTRATED) and no sustainability claim may be drawn from it.',
+    '',
+    '| Tier | Demonstrated | S1 redeem | S2 coverage | S3 capacity | S4 continuity | Verdict | Net APY | Breach |',
+    '|---|---|---|---|---|---|---|---|---|',
+    ...rows,
+    '',
+    `**Scale invariance (P26):** ${
+      invariant === true
+        ? 'sustainable at EVERY registered tier.'
+        : invariant === false
+          ? '**NOT scale invariant** — a breach at any tier is a breach, and no average over tiers may stand in for it.'
+          : '**NOT DEMONSTRATED** — at least one tier proved nothing, and a tier that proved nothing cannot be counted as invariant.'
+    }`,
+  ].join('\n');
+}
+
+/**
+ * §11.5 part 3 — the price of unsustainability. Every comparator excluded
+ * from the yield comparison appears here with what it EARNED and what it was
+ * DISPLAYING while it earned it. Dropping a breaching policy from the
+ * comparison and then not printing its return would hide the study's own
+ * headline number.
+ */
+function counterexampleTable(gate: RegisteredGateResult): string {
+  const verdicts: SustainabilityVerdict[] = gate.comparatorSustainability ?? [];
+  const breaching = verdicts.filter((v) => v.sustainable !== true);
+  if (breaching.length === 0) return '_No comparator breached: there is nothing to price._';
+
+  const rows = breaching
+    .slice()
+    .sort((a, b) => (a.policyId === b.policyId ? (BigInt(a.tier) < BigInt(b.tier) ? -1 : 1) : a.policyId < b.policyId ? -1 : 1))
+    .map(
+      (v) =>
+        `| \`${v.policyId}\` | ${usdc(BigInt(v.tier))} | ${pct(v.realizedNetApy)} | ` +
+        `${pct(v.displayedVsRealizedGapApy)} | ${v.sustainable === false ? '**BREACH**' : '**NOT DEMONSTRATED**'} | ${v.breach ?? '—'} |`,
+    );
+  return [
+    'These policies are **not comparators**. Each is a counterexample: the return below is what ' +
+      'the policy earned while failing a criterion SRCLA is held to, i.e. the measured price of ' +
+      'unsustainability rather than a benchmark SRCLA had to beat.',
+    '',
+    '| Policy | Tier | Net APY | Displayed − realized | Verdict | Why |',
+    '|---|---|---|---|---|---|',
+    ...rows,
+  ].join('\n');
+}
+
 function comparisonTable(gate: RegisteredGateResult): string {
   if (gate.comparisons.length === 0) {
     return '_No SRCLA-vs-baseline comparison was produced._';
@@ -606,6 +688,17 @@ export function renderReport(params: ReportParams): string {
     );
     out.push('');
     out.push(resultsTable(run.evaluation));
+    out.push('');
+    // §11.5's order: sustainability is the PRIMARY criterion and is reported
+    // BEFORE any yield comparison, because yield is only scored among
+    // policies that are themselves sustainable.
+    out.push('### Sustainability — the primary release criterion (§11.5)');
+    out.push('');
+    out.push(sustainabilityTable(run.gate));
+    out.push('');
+    out.push('### The price of unsustainability (§11.5 part 3)');
+    out.push('');
+    out.push(counterexampleTable(run.gate));
     out.push('');
     out.push('### SRCLA against each deployable baseline');
     out.push('');

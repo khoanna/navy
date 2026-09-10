@@ -68,6 +68,10 @@ function run(
     withdrawalSuccessRate?: number | null;
     minStressed?: number;
     inert?: boolean;
+    capitalAtWork?: number;
+    exitOrigins?: number | null;
+    venueShare?: number;
+    policyViolations?: number;
   } = {},
 ): PolicyRunResult {
   const policy = REGISTERED_POLICIES.find((p) => p.id === policyId) ?? SRCLA_POLICY;
@@ -100,10 +104,15 @@ function run(
       minStressedLiquidCoverage: opts.minStressed ?? 1,
       coverageDistribution: { min: opts.minStressed ?? 1, p05: opts.minStressed ?? 1, median: 1 },
       // §11.4 deployment metrics — not under test here, so fixed/neutral values.
-      capitalAtWorkFraction: 1,
+      capitalAtWorkFraction: opts.capitalAtWork ?? 1,
       deploymentLatencyOrigins: 0,
       idleDragApy: null,
       hurdleBlocks: {},
+      // §11.5 sustainability metrics — neutral unless a test asks otherwise.
+      timeToFullExitOrigins: opts.exitOrigins === undefined ? 0 : opts.exitOrigins,
+      venueStressContribution: { 'compound-usdc': opts.venueShare ?? 0.05 },
+      displayedVsRealizedGapApy: 0,
+      policyViolations: opts.policyViolations ?? 0,
     },
   } as PolicyRunResult;
 }
@@ -175,6 +184,9 @@ function runResult(
       withdrawalSuccessRate: number | null;
       realizedNetApy: number;
       inertVsSrcla: boolean;
+      capitalAtWork: number;
+      exitOrigins: number | null;
+      venueShare: number;
     }>
   >,
 ): RegisteredEvaluationResult {
@@ -185,6 +197,9 @@ function runResult(
       ...(o.minStressedLiquidCoverage !== undefined ? { minStressed: o.minStressedLiquidCoverage } : {}),
       ...(o.withdrawalSuccessRate !== undefined ? { withdrawalSuccessRate: o.withdrawalSuccessRate } : {}),
       ...(o.inertVsSrcla !== undefined ? { inert: o.inertVsSrcla } : {}),
+      ...(o.capitalAtWork !== undefined ? { capitalAtWork: o.capitalAtWork } : {}),
+      ...(o.exitOrigins !== undefined ? { exitOrigins: o.exitOrigins } : {}),
+      ...(o.venueShare !== undefined ? { venueShare: o.venueShare } : {}),
     };
   }).map((r) => {
     const o = overrides[r.policy.id];
@@ -616,5 +631,124 @@ describe('P21: ablations are §11.3 evidence, not §11.2 comparators', () => {
     });
     const h5 = ablationContributions(out).find((c) => c.policyId === 'h5' && c.tier === '10000000000')!;
     expect(h5.verdict).toBe('INERT');
+  });
+});
+
+/**
+ * P24–P26: sustainability is the PRIMARY, ABSOLUTE release criterion, it is
+ * scored behind a demonstration floor, and it does not aggregate over tiers.
+ */
+describe('§11.5: sustainability first, yield second', () => {
+  const gateOpts = { minPairedObservations: 20, bootstrapIterations: 200 };
+
+  it('emits the checks in §11.5 order: demonstration, completeness, sustainability, yield, price', () => {
+    const gate = runRegisteredGate(evaluation(), { ...gateOpts, forkResults: completeForkResults() });
+    const names = gate.checks.map((c) => c.name);
+    const at = (needle: string) => names.findIndex((n) => n.includes(needle));
+
+    expect(at('Demonstration')).toBe(0);
+    expect(at('Demonstration')).toBeLessThan(at('Every registered tier ran'));
+    expect(at('Every registered policy ran')).toBeLessThan(at('Safety: withdrawal success'));
+    expect(at('Sustainability S4')).toBeLessThan(at('Statistically distinguishable'));
+    expect(at('scale invariance')).toBeLessThan(at('Outperforms every deployable baseline'));
+    expect(at('Price of unsustainability')).toBe(names.length - 1);
+  });
+
+  // The v0.6 run: perfect coverage everywhere, 0.000% realized. It must NOT
+  // pass, and it must not report a sustainability verdict at all.
+  it('an all-idle SRCLA run reports NOT DEMONSTRATED and every criterion null', () => {
+    const out = runResult({ srcla: { capitalAtWork: 0, realizedNetApy: 0, minStressedLiquidCoverage: 1 } });
+    const gate = runRegisteredGate(out, { ...gateOpts, forkResults: completeForkResults() });
+
+    expect(named(gate, 'Demonstration: sustainability was demonstrated while deployed').passed).toBe(false);
+    expect(named(gate, 'Sustainability S1: complete exit within the registered bound').passed).toBeNull();
+    expect(named(gate, 'Sustainability S3: capacity discipline').passed).toBeNull();
+    expect(named(gate, 'Sustainability S4: operational continuity').passed).toBeNull();
+    expect(gate.scaleInvariant).toBeNull();
+    expect(gate.pass).toBe(false);
+    expect(gate.sustainability.every((v) => v.sustainable === null)).toBe(true);
+  });
+
+  it('a run that never fully exits FAILS S1 even at perfect coverage', () => {
+    const out = runResult({ srcla: { exitOrigins: null } });
+    const gate = runRegisteredGate(out, { ...gateOpts, forkResults: completeForkResults() });
+    const c = named(gate, 'Sustainability S1: complete exit within the registered bound');
+    expect(c.passed).toBe(false);
+    expect(c.detail).toMatch(/NEVER/);
+  });
+
+  it('a vault that IS the venue fails S3 capacity discipline', () => {
+    const out = runResult({ srcla: { venueShare: 0.8 } });
+    const gate = runRegisteredGate(out, { ...gateOpts, forkResults: completeForkResults() });
+    expect(named(gate, 'Sustainability S3: capacity discipline').passed).toBe(false);
+  });
+
+  // P26 on the real B4 shape, applied to SRCLA's own runs: sustainable at
+  // three tiers, breaching at the fourth. No average over tiers can see it.
+  it('a breach at ONE tier makes the run NOT scale invariant', () => {
+    const results = completeResults((id, tier) =>
+      id === 'srcla' && tier === 10_000_000_000_000n ? { minStressed: 0.59 } : {},
+    );
+    const gate = runRegisteredGate(evaluation({ results }), { ...gateOpts, forkResults: completeForkResults() });
+
+    expect(gate.scaleInvariant).toBe(false);
+    const c = named(gate, 'Sustainability: scale invariance across every registered tier (P26)');
+    expect(c.passed).toBe(false);
+    expect(c.detail).toContain('10000000000000');
+    expect(gate.pass).toBe(false);
+  });
+
+  it('three sustainable tiers and one NOT DEMONSTRATED is null, never a pass', () => {
+    const results = completeResults((id, tier) =>
+      id === 'srcla' && tier === 10_000_000_000n ? { capitalAtWork: 0.1 } : {},
+    );
+    const gate = runRegisteredGate(evaluation({ results }), { ...gateOpts, forkResults: completeForkResults() });
+
+    expect(gate.scaleInvariant).toBeNull();
+    expect(named(gate, 'Sustainability: scale invariance across every registered tier (P26)').passed).toBeNull();
+    expect(gate.pass).toBe(false);
+  });
+});
+
+/**
+ * P24: exactly ONE notion of "does this comparator qualify" exists, and it is
+ * `sustainabilityAtTier`. The provisional inline coverage test Tasks 9/10
+ * left in the comparison loop is gone.
+ */
+describe('§11.5 part 3: a breaching comparator is a counterexample, not a baseline', () => {
+  const gateOpts = { minPairedObservations: 20, bootstrapIterations: 200 };
+
+  it('excludes an UNDEPLOYED baseline and records WHY', () => {
+    const out = runResult({ b0: { capitalAtWork: 0.0, realizedNetApy: 0 } });
+    const gate = runRegisteredGate(out, gateOpts);
+
+    expect(gate.comparisons.some((c) => c.baselineId === 'b0')).toBe(false);
+    const ex = gate.excludedComparators.filter((e) => e.baselineId === 'b0');
+    expect(ex.length).toBeGreaterThan(0);
+    expect(ex[0]!.reason).toMatch(/NOT DEMONSTRATED/);
+  });
+
+  it('excludes a comparator that cannot exit, not merely one that breaches coverage', () => {
+    const out = runResult({ b1: { exitOrigins: null } });
+    const gate = runRegisteredGate(out, gateOpts);
+    expect(gate.comparisons.some((c) => c.baselineId === 'b1')).toBe(false);
+    expect(gate.excludedComparators.some((e) => e.baselineId === 'b1')).toBe(true);
+  });
+
+  it('publishes the excluded comparator\'s return as the price of unsustainability', () => {
+    const out = runResult({ b1: { minStressedLiquidCoverage: 0.878, realizedNetApy: 0.39 } });
+    const gate = runRegisteredGate(out, gateOpts);
+    const c = named(gate, 'Price of unsustainability published');
+
+    expect(c.passed).toBe(true);
+    expect(c.detail).toContain('b1@');
+    expect(c.detail).toContain('39.000%');
+    expect(gate.comparatorSustainability.some((v) => v.policyId === 'b1' && v.sustainable === false)).toBe(true);
+  });
+
+  it('keeps a sustainable deployable baseline in the comparison set', () => {
+    const gate = runRegisteredGate(evaluation(), gateOpts);
+    expect(gate.comparisons.map((c) => c.baselineId)).toContain('b0');
+    expect(gate.excludedComparators).toEqual([]);
   });
 });

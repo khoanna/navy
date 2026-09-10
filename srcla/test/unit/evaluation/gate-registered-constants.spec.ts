@@ -66,6 +66,15 @@ function run(policyId: string, tier: bigint, minStressed: number): PolicyRunResu
       totalCosts: 0n,
       minStressedLiquidCoverage: minStressed,
       coverageDistribution: { min: minStressed, p05: minStressed, median: minStressed },
+      // §11.5 sustainability metrics — not under test here, so neutral values.
+      timeToFullExitOrigins: 0,
+      venueStressContribution: {},
+      displayedVsRealizedGapApy: 0,
+      policyViolations: 0,
+      capitalAtWorkFraction: 1,
+      deploymentLatencyOrigins: 0,
+      idleDragApy: null,
+      hurdleBlocks: {},
     },
   } as unknown as PolicyRunResult;
 }
