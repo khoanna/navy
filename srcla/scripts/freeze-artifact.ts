@@ -477,6 +477,20 @@ async function main(): Promise<void> {
         residualQuantileWadByMarket: Object.fromEntries(
           Object.entries(row.quantileWadByMarket).map(([m, v]) => [m, v.toString()]),
         ),
+        // P1's RELATIVE form, solved from the same residuals as the absolute
+        // map above. Emitted only when non-empty: an empty object would be
+        // indistinguishable from "every venue calibrated to zero haircut",
+        // and `lowerBoundAt` must fall back to the absolute map instead.
+        ...(Object.keys(row.relativeQuantileWadByMarket ?? {}).length > 0
+          ? {
+              relativeResidualQuantileWadByMarket: Object.fromEntries(
+                Object.entries(row.relativeQuantileWadByMarket).map(([m, v]) => [
+                  m,
+                  v.toString(),
+                ]),
+              ),
+            }
+          : {}),
         portfolioResidualQuantileWad: portfolioFallback.toString(),
         cashResidualQuantileWadByMarket: Object.fromEntries(
           Object.entries(cashQuantilesOf(h, row.point.coverageTarget)).map(([m, v]) => [

@@ -322,10 +322,33 @@ function minMax(xs: readonly bigint[]): { min: bigint; max: bigint } {
   return { min, max };
 }
 
+/**
+ * One forecast residual, tagged with the state it was made in.
+ *
+ * `residualsFor` returns bare residuals because that is all the SELECTION
+ * loss needs. Calibrating a STATE-DEPENDENT uncertainty term needs to know
+ * where on the utilization curve each residual was earned, and whether the
+ * error scales with the level being forecast -- neither of which a bare
+ * `bigint[]` can answer. Collected through an optional out-parameter so the
+ * existing return shape, and every caller of it, is untouched.
+ */
+export interface ResidualObservation {
+  /** realized - forecast, WAD over the horizon. */
+  residualWad: bigint;
+  /** The forecast itself, WAD over the horizon. Never negative in practice. */
+  forecastWad: bigint;
+  /** Venue utilization AT THE ORIGIN, WAD. `undefined` when unreadable. */
+  utilizationWad: bigint | undefined;
+}
+
+/** marketId -> the observations behind that venue's residual series. */
+export type ResidualObservations = Record<string, ResidualObservation[]>;
+
 function stateSpaceResidualsFor(
   point: GridPoint,
   labels: readonly CompletedLabel[],
   minObservations: number,
+  collect?: ResidualObservations,
 ): Record<string, bigint[]> {
   const byMarket = new Map<string, CompletedLabel[]>();
   for (const l of labels) {
@@ -450,7 +473,17 @@ function stateSpaceResidualsFor(
       }
 
       const muWad = (annualizedRateWad * BigInt(point.horizonSeconds)) / SECONDS_PER_YEAR;
-      residuals.push(target.realizedReturnWad - muWad);
+      const residualWad = target.realizedReturnWad - muWad;
+      residuals.push(residualWad);
+      if (collect !== undefined) {
+        const list = collect[marketId] ?? [];
+        list.push({
+          residualWad,
+          forecastWad: muWad,
+          utilizationWad: originUtilizationOf(target),
+        });
+        collect[marketId] = list;
+      }
     }
     if (residuals.length > 0) out[marketId] = residuals;
   }
@@ -555,8 +588,19 @@ export const LOSS_WEIGHTS = Object.freeze({
 });
 
 export interface FitPoint {
-  /** Per-venue solved quantiles. */
+  /** Per-venue solved quantiles. ABSOLUTE, WAD over the horizon. */
   quantileWadByMarket: Record<string, bigint>;
+  /**
+   * Per-venue solved quantiles in RELATIVE form — the same residuals divided
+   * by the forecast each was measured against, solved to the same coverage
+   * target by the same solver. See
+   * `PolicyArtifact.relativeResidualQuantileWadByMarket`.
+   *
+   * A venue appears here only when it had usable observations with a strictly
+   * positive forecast; a zero or negative forecast has no meaningful relative
+   * error, and including those would divide by something that is not a level.
+   */
+  relativeQuantileWadByMarket: Record<string, bigint>;
   loss: SelectionLoss;
   /** Per-venue achieved coverage, the P1 diagnostic. */
   coverageByMarket: Record<string, number>;
@@ -850,33 +894,67 @@ export function residualsFor(
   point: GridPoint,
   labels: readonly CompletedLabel[],
   minObservations: number,
+  collect?: ResidualObservations,
 ): Record<string, bigint[]> {
   // 'state-space' needs the origin's utilization+IRM, not the bare return
   // history every other method is fit against — see `stateSpaceResidualsFor`
   // and `meanForecast`'s refusal for why this is a separate path rather than
   // a branch inside the loop below.
   if (point.method === 'state-space') {
-    return stateSpaceResidualsFor(point, labels, minObservations);
+    return stateSpaceResidualsFor(point, labels, minObservations, collect);
   }
 
-  const byMarket = new Map<string, bigint[]>();
+  const byMarket = new Map<string, CompletedLabel[]>();
   for (const l of labels) {
     if (l.horizonSeconds !== point.horizonSeconds) continue;
     const list = byMarket.get(l.marketId) ?? [];
-    list.push(l.realizedReturnWad);
+    list.push(l);
     byMarket.set(l.marketId, list);
   }
 
   const out: Record<string, bigint[]> = {};
-  for (const [marketId, series] of byMarket) {
+  for (const [marketId, labelSeries] of byMarket) {
+    const series = labelSeries.map((l) => l.realizedReturnWad);
     const residuals: bigint[] = [];
     for (let i = minObservations; i < series.length; i++) {
       const mu = meanForecast(point.method, point.methodParams, series.slice(0, i));
-      residuals.push(series[i]! - mu);
+      const residualWad = series[i]! - mu;
+      residuals.push(residualWad);
+      if (collect !== undefined) {
+        const list = collect[marketId] ?? [];
+        list.push({
+          residualWad,
+          forecastWad: mu,
+          utilizationWad: originUtilizationOf(labelSeries[i]!),
+        });
+        collect[marketId] = list;
+      }
     }
     if (residuals.length > 0) out[marketId] = residuals;
   }
   return out;
+}
+
+/**
+ * A label's ORIGIN utilization -- the state the forecast was made in, never
+ * the post-deposit state a candidate allocation would create.
+ *
+ * Compound carries it directly. Aave and Moonwell carry the (cash, borrows,
+ * reserves) triple it is derived from, which is the primitive state for those
+ * venues; `undefined` when any component is missing, so a caller buckets it
+ * as unknown rather than as zero -- zero utilization is the calmest possible
+ * state and would be the most optimistic assumption available.
+ */
+function originUtilizationOf(l: CompletedLabel): bigint | undefined {
+  if (l.originUtilizationWad !== undefined) return l.originUtilizationWad;
+  const cash = l.originCashBase;
+  const borrows = l.originBorrowsBase;
+  const reserves = l.originReservesBase;
+  if (cash === null || cash === undefined || borrows === undefined || reserves === undefined) {
+    return undefined;
+  }
+  const supplied = cash + borrows - reserves;
+  return supplied <= 0n ? undefined : (borrows * WAD) / supplied;
 }
 
 /** Fit and score one grid point on the calibration labels. */
@@ -885,7 +963,11 @@ export function fitPoint(
   labels: readonly CompletedLabel[],
   minObservations: number,
 ): FitPoint | null {
-  const residualsByMarket = residualsFor(point, labels, minObservations);
+  // Collected alongside, so the relative quantile is solved from EXACTLY the
+  // residuals the absolute one is solved from -- not from a second pass that
+  // could silently disagree about which observations were usable.
+  const observations: ResidualObservations = {};
+  const residualsByMarket = residualsFor(point, labels, minObservations, observations);
   const markets = Object.keys(residualsByMarket).sort();
   if (markets.length === 0) return null;
 
@@ -910,6 +992,7 @@ export function fitPoint(
   }
 
   const quantileWadByMarket: Record<string, bigint> = {};
+  const relativeQuantileWadByMarket: Record<string, bigint> = {};
   const coverageByMarket: Record<string, number> = {};
 
   let pointErrorSum = 0;
@@ -927,6 +1010,20 @@ export function fitPoint(
     const q = solveQuantileForCoverage(residuals, point.coverageTarget);
     quantileWadByMarket[marketId] = q;
     coverageByMarket[marketId] = achievedCoverage(residuals, q);
+
+    // The same residuals, expressed as a fraction of the forecast each was
+    // measured against. Observations with a non-positive forecast are dropped
+    // rather than clamped: there is no such thing as a relative error against
+    // a level of zero, and substituting one would invent a haircut.
+    const relative = (observations[marketId] ?? [])
+      .filter((o) => o.forecastWad > 0n)
+      .map((o) => (o.residualWad * WAD) / o.forecastWad);
+    if (relative.length > 0) {
+      relativeQuantileWadByMarket[marketId] = solveQuantileForCoverage(
+        relative,
+        point.coverageTarget,
+      );
+    }
 
     for (const r of residuals) {
       const rf = Number(r) / Number(WAD);
@@ -967,7 +1064,7 @@ export function fitPoint(
     LOSS_WEIGHTS.sharpness * loss.sharpness +
     LOSS_WEIGHTS.downsideRate * loss.downsideRate;
 
-  return { quantileWadByMarket, loss, coverageByMarket };
+  return { quantileWadByMarket, relativeQuantileWadByMarket, loss, coverageByMarket };
 }
 
 export interface SweepRow extends FitPoint {

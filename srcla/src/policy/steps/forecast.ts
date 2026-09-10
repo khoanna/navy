@@ -28,6 +28,28 @@ function quantileFor(artifact: PolicyArtifact, marketId: string): bigint {
 }
 
 /**
+ * P1's RELATIVE quantile, with the same fallback ladder as `quantileFor` and
+ * for the same reason: an unregistered venue must never receive a MORE
+ * optimistic bound than a calibrated one, so a missing entry takes the most
+ * conservative registered peer.
+ *
+ * Returns `undefined` — not a fabricated value — when the artifact carries no
+ * relative map at all. An artifact frozen before the field existed must keep
+ * using the absolute form it was calibrated in; the two are not
+ * interconvertible without the forecast level each was measured against, and
+ * inventing one from the other would be a haircut nobody calibrated.
+ */
+function relativeQuantileFor(artifact: PolicyArtifact, marketId: string): bigint | undefined {
+  const map = artifact.relativeResidualQuantileWadByMarket;
+  if (map === undefined) return undefined;
+  const own = map[marketId];
+  if (own !== undefined) return own;
+  const all = Object.values(map);
+  if (all.length === 0) return undefined;
+  return all.reduce((min, q) => (q < min ? q : min));
+}
+
+/**
  * §7.1 — l(x) = mu_hat(x) + q_alpha, where mu_hat is the annualised curve rate
  * converted to the horizon and q_alpha <= 0 is the calibrated lower quantile
  * of completed horizon residuals.
@@ -43,10 +65,30 @@ export function lowerBoundAt(
   xBase: bigint,
   horizonSeconds: number
 ): bigint {
-  const q = quantileFor(artifact, marketId);
-  if (q > 0n) throw new Error(`residual quantile for ${marketId} must be <= 0, got ${q}`);
   const annualised = rateAt(curve, xBase);
   const horizonMu = (annualised * BigInt(horizonSeconds)) / SECONDS_PER_YEAR;
+
+  // RELATIVE form when the artifact carries it (see
+  // `PolicyArtifact.relativeResidualQuantileWadByMarket` for the measurement
+  // that motivates it). `mu` here is evaluated at the CANDIDATE allocation
+  // `xBase`, so at a large vault size it is a rate the vault's own deposit
+  // has already compressed; a fixed absolute haircut then eats a growing
+  // share of a shrinking edge until nothing can clear the deployment hurdle.
+  // A proportional haircut scales with the quantity it is uncertain about.
+  const qRel = relativeQuantileFor(artifact, marketId);
+  if (qRel !== undefined) {
+    if (qRel > 0n) {
+      throw new Error(`relative residual quantile for ${marketId} must be <= 0, got ${qRel}`);
+    }
+    // A quantile at or below -WAD would flip the bound negative (or zero it)
+    // for every forecast, which is a degenerate calibration rather than a
+    // conservative one. Clamp at -WAD: the bound floors at 0, never inverts.
+    const scale = qRel < -WAD ? 0n : WAD + qRel;
+    return (horizonMu * scale) / WAD;
+  }
+
+  const q = quantileFor(artifact, marketId);
+  if (q > 0n) throw new Error(`residual quantile for ${marketId} must be <= 0, got ${q}`);
   return horizonMu + q;
 }
 

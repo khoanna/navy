@@ -242,6 +242,7 @@ describe('P18: decision-focused loss terms', () => {
       attachDecisionTerms(
         {
           quantileWadByMarket: {},
+          relativeQuantileWadByMarket: {},
           coverageByMarket: {},
           loss: {
             pointError: 0, coverageDeviation: 0, exceedanceShortfall: 0, sharpness: 0,

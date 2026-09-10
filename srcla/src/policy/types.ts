@@ -356,8 +356,45 @@ export interface PolicyArtifact {
   coverageTarget: CoverageTarget;
   method: ForecastMethod;
   methodParams: Record<string, number>;
-  /** P1: residual quantile per market id, all <= 0 in WAD. */
+  /** P1: residual quantile per market id, all <= 0 in WAD. ABSOLUTE — a
+   *  horizon-return haircut subtracted from the point forecast. Retained as
+   *  the fallback for `relativeResidualQuantileWadByMarket` below, and as
+   *  what an artifact frozen before that field existed carries. */
   residualQuantileWadByMarket: Record<string, bigint>;
+  /**
+   * P1, RELATIVE form — the residual quantile as a FRACTION of the forecast
+   * it haircuts, all <= 0 in WAD, applied as
+   * `lowerBound = mu * (WAD + q) / WAD`.
+   *
+   * WHY RELATIVE. The absolute form above is one constant per venue,
+   * subtracted from a point forecast whose level varies by a factor of
+   * several across the era — and, critically, which the vault's OWN deposit
+   * compresses at scale, because §6's capacity curves evaluate the rate after
+   * the deposit. A constant absolute haircut therefore consumes a growing
+   * share of a shrinking edge, and past a certain vault size it exceeds the
+   * edge entirely and no venue can ever clear the deployment hurdle. That is
+   * observable: at the 10M tier the controller left 61% of NAV idle, while
+   * the same controller with the haircut removed deployed 86% and remained
+   * fully redeemable.
+   *
+   * The multiplicative form is not a relaxation, it is the specification the
+   * calibration data supports. Measured on the calibration era, the 5% lower
+   * quantile of the ABSOLUTE forecast error varies 2.9x-5.9x across
+   * utilization bands while the RELATIVE error varies only 1.8x-2.9x and
+   * tracks the forecast level: the error is proportional to what is being
+   * forecast. The resulting bound is STRICTER than the absolute one wherever
+   * the forecast rate is above the venue's mean and looser only below it.
+   *
+   * This also makes §7.2's two registered targets consistent:
+   * `cashResidualQuantileWadByMarket` below has always been relative, and is
+   * applied by exactly this arithmetic.
+   *
+   * OPTIONAL: an artifact frozen before this field carries only the absolute
+   * map, and `lowerBoundAt` falls back to it rather than fabricating a
+   * relative quantile from it — the two are not interconvertible without the
+   * forecast level each was calibrated against.
+   */
+  relativeResidualQuantileWadByMarket?: Record<string, bigint>;
   /**
    * §7.2's SECOND registered target, calibrated with the same machinery as
    * the first: a lower prediction bound on the venue's WITHDRAWABLE CASH

@@ -152,3 +152,110 @@ describe('computeArtifactHash', () => {
     expect(computeArtifactHash(rest)).not.toBe(computeArtifactHash(changed));
   });
 });
+
+/**
+ * P1's RELATIVE form. See `PolicyArtifact.relativeResidualQuantileWadByMarket`
+ * for the calibration measurement that motivates it: the ABSOLUTE forecast
+ * error varies 2.9x-5.9x across utilization bands while the RELATIVE error
+ * varies 1.8x-2.9x and tracks the level being forecast.
+ *
+ * The behaviour that matters is the interaction with §6's capacity curves.
+ * `lowerBoundAt` evaluates `mu` at the CANDIDATE allocation, so at a large
+ * vault size it is a rate the vault's own deposit has already compressed. A
+ * fixed absolute haircut then consumes a growing share of a shrinking edge
+ * and eventually exceeds it, which is what left the controller 61% idle at
+ * the 10M tier.
+ */
+describe('lowerBoundAt — the relative residual quantile', () => {
+  const relArtifact = (qRelWad: bigint): PolicyArtifact =>
+    artifact({ relativeResidualQuantileWadByMarket: { aave: qRelWad } });
+
+  it('scales the haircut with the forecast instead of subtracting a constant', () => {
+    // -20% of the forecast.
+    const a = relArtifact(-(WAD / 5n));
+    const lower = lowerBoundAt(curve, a, 'aave', 0n, 604_800);
+    const horizonMu = (((WAD * 5n) / 100n) * 604_800n) / 31_536_000n;
+    expect(lower).toBe((horizonMu * (WAD - WAD / 5n)) / WAD);
+  });
+
+  it('is STRICTER than the absolute form where the forecast is high', () => {
+    // The REGISTERED calibration values, not the fixture's placeholder ones:
+    // aave measured -1.159% APY absolute and -0.188 relative. Over a 7-day
+    // horizon the absolute haircut is 1.159% * 7/365 of a unit.
+    const H = 604_800n;
+    const absQ = -((WAD * 1159n) / 100_000n * H) / 31_536_000n;
+    const relQ = -((WAD * 188n) / 1000n);
+    const hot: RateCurve = { ...curve, points: [(WAD * 7n) / 100n] }; // 7% APY
+    const a = artifact({ residualQuantileWadByMarket: { aave: absQ } });
+    const r = artifact({
+      residualQuantileWadByMarket: { aave: absQ },
+      relativeResidualQuantileWadByMarket: { aave: relQ },
+    });
+    const absolute = lowerBoundAt(hot, a, 'aave', 0n, 604_800);
+    const relative = lowerBoundAt(hot, r, 'aave', 0n, 604_800);
+    // Both are positive and sane at this level; the relative one is lower,
+    // i.e. the re-specification is not a blanket relaxation.
+    expect(absolute).toBeGreaterThan(0n);
+    expect(relative).toBeGreaterThan(0n);
+    expect(relative).toBeLessThan(absolute);
+  });
+
+  it('is LOOSER only where the vault\'s own deposit has compressed the rate', () => {
+    const H = 604_800n;
+    const absQ = -((WAD * 1159n) / 100_000n * H) / 31_536_000n;
+    const relQ = -((WAD * 188n) / 1000n);
+    // Below aave's measured 1.159% APY haircut, which is exactly where the
+    // absolute form inverts: any venue the vault's own deposit compresses
+    // under that rate can never clear a deployment hurdle again.
+    const compressed: RateCurve = { ...curve, points: [WAD / 100n] }; // 1.0% APY
+    const a = artifact({ residualQuantileWadByMarket: { aave: absQ } });
+    const r = artifact({
+      residualQuantileWadByMarket: { aave: absQ },
+      relativeResidualQuantileWadByMarket: { aave: relQ },
+    });
+    expect(lowerBoundAt(compressed, a, 'aave', 0n, 604_800)).toBeLessThan(0n);
+    expect(lowerBoundAt(compressed, r, 'aave', 0n, 604_800)).toBeGreaterThan(0n);
+  });
+
+  it('never drives the bound negative on a positive forecast — the absolute form does', () => {
+    // A venue whose post-deposit rate the vault's own size has compressed to
+    // near nothing. The absolute haircut exceeds it and the bound inverts;
+    // the relative haircut cannot, because it is a fraction OF the forecast.
+    const compressed: RateCurve = { ...curve, points: [WAD / 1000n] }; // 0.1% APY
+    const absolute = lowerBoundAt(compressed, artifact(), 'aave', 0n, 604_800);
+    const relative = lowerBoundAt(compressed, relArtifact(-(WAD / 5n)), 'aave', 0n, 604_800);
+    expect(absolute).toBeLessThan(0n);
+    expect(relative).toBeGreaterThan(0n);
+  });
+
+  it('clamps at -WAD rather than inverting the bound', () => {
+    const a = relArtifact(-2n * WAD);
+    expect(lowerBoundAt(curve, a, 'aave', 0n, 604_800)).toBe(0n);
+  });
+
+  it('rejects a positive relative quantile loudly', () => {
+    expect(() => lowerBoundAt(curve, relArtifact(WAD / 10n), 'aave', 0n, 604_800)).toThrow(
+      /must be <= 0/,
+    );
+  });
+
+  it('falls back to a conservative PEER, never to zero, for an unregistered venue', () => {
+    const a = artifact({
+      relativeResidualQuantileWadByMarket: { compound: -(WAD / 4n), moonwell: -(WAD / 10n) },
+    });
+    const lower = lowerBoundAt(curve, a, 'aave', 0n, 604_800);
+    const horizonMu = (((WAD * 5n) / 100n) * 604_800n) / 31_536_000n;
+    // The most conservative peer is compound's -25%, not moonwell's -10%.
+    expect(lower).toBe((horizonMu * (WAD - WAD / 4n)) / WAD);
+  });
+
+  it('keeps using the ABSOLUTE form when the artifact carries no relative map', () => {
+    // An artifact frozen before the field existed must not be handed a
+    // relative quantile derived from its absolute one -- they are not
+    // interconvertible without the forecast level each was measured against.
+    const a = artifact();
+    expect(a.relativeResidualQuantileWadByMarket).toBeUndefined();
+    const horizonMu = (((WAD * 5n) / 100n) * 604_800n) / 31_536_000n;
+    expect(lowerBoundAt(curve, a, 'aave', 0n, 604_800)).toBe(horizonMu - WAD / 1000n);
+  });
+});

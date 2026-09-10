@@ -177,6 +177,12 @@ export function parseArtifact(
     method: need(raw['method'], 'method') as PolicyArtifact['method'],
     methodParams: need(raw['methodParams'], 'methodParams') as Record<string, number>,
     residualQuantileWadByMarket: quantileMap('residualQuantileWadByMarket'),
+    // OPTIONAL by design: an artifact frozen before P1 gained its relative
+    // form carries only the absolute map, and `lowerBoundAt` must keep using
+    // that rather than be handed a fabricated relative quantile.
+    ...(raw['relativeResidualQuantileWadByMarket'] === undefined
+      ? {}
+      : { relativeResidualQuantileWadByMarket: quantileMap('relativeResidualQuantileWadByMarket') }),
     portfolioResidualQuantileWad: needBigInt(raw['portfolioResidualQuantileWad'], 'portfolioResidualQuantileWad'),
     // §7.2's second registered target. Required, not defaulted: a missing map
     // would silently mean "no cash forecast" and send `e_i^cons` and phi back
