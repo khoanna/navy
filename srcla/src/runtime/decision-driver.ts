@@ -11,6 +11,7 @@ import type {
   PolicyArtifact,
 } from '../policy/types.js';
 import type { SnapshotCollector } from '../collector/snapshot-collector.js';
+import type { VenueIrmReading } from '../collector/types.js';
 import type { PrismaClient, Prisma } from '@prisma/client';
 
 /** A well-formed, ABI-encodable all-zero bytes32 -- see its use below. */
@@ -180,6 +181,49 @@ function asHorizonSeconds(n: number, labelId: string): HorizonSeconds {
 }
 
 /**
+ * Un-alias a collector `VenueIrmReading` into whichever of
+ * `MarketObservation`'s two rate-model seams the venue's protocol takes.
+ *
+ * Mirrors `evaluation/kernel/decision-input.ts` field for field, so the live
+ * and offline paths cannot disagree about what a rate-model observation is.
+ * PURE and exported so the dispatch is unit-tested directly rather than only
+ * through a chain-backed collector.
+ *
+ * Returns an EMPTY object — not a default — when there is no reading, or when
+ * an Aave reading is missing either of its two Aave-only bounds. The empty
+ * object is what makes `policy/steps/simulate.ts#resolveConfig` warn instead
+ * of substituting silently.
+ */
+export function irmSeamFor(
+  marketId: string,
+  irm: VenueIrmReading | undefined
+): Pick<MarketObservation, 'irmParams' | 'aaveIrmParams'> {
+  if (irm === undefined) return {};
+  if (protocolOf(marketId) === 'aave') {
+    if (irm.optimalUtilizationRay === undefined || irm.maxUtilizationRay === undefined) return {};
+    return {
+      aaveIrmParams: {
+        baseRateWad: irm.baseRateWad,
+        variableRateSlope1Wad: irm.slopeLowWad,
+        variableRateSlope2Wad: irm.slopeHighWad,
+        optimalUtilizationRay: irm.optimalUtilizationRay,
+        maxUtilizationRay: irm.maxUtilizationRay,
+        reserveFactorBps: irm.reserveFactorBps,
+      },
+    };
+  }
+  return {
+    irmParams: {
+      baseRateWad: irm.baseRateWad,
+      kinkRay: irm.kinkRay,
+      slopeLowWad: irm.slopeLowWad,
+      slopeHighWad: irm.slopeHighWad,
+      reserveFactorBps: irm.reserveFactorBps,
+    },
+  };
+}
+
+/**
  * Adapter from a collected finalised snapshot to the unfiltered RawOrigin.
  * It does no filtering of its own — buildDecisionInput owns the barrier.
  *
@@ -244,12 +288,40 @@ export async function buildRawOriginFromCollector(
     // KNOWN GAP, not introduced by this task: per-market capBps/maxLossBps/
     // dependencyGroupIds are not yet collected on-chain — StrategySnapshot
     // has no fields for them. These are fixed placeholders pending a
-    // collector enhancement (mirrors the existing irmParams gap documented
-    // on MarketObservation in policy/types.ts).
+    // collector enhancement. (This comment used to cite the irmParams gap as
+    // a peer; that one is CLOSED as of 2026-09-10 — see the seams below.)
     capBps: 5000,
     absoluteCapBase: snap.vault.totalAssets,
     maxLossBps: 50,
     dependencyGroupIds: [],
+    // §6.3-6.5's LIVE registered rate model, read at THIS cycle's own block
+    // by `SnapshotCollector` — not `DefaultConfigs`.
+    //
+    // FIX 2026-09-10 (E1b), GAP 2. This function populated NEITHER seam, so
+    // every venue on the LIVE keeper path ran through placeholder curves on
+    // every cycle: Aave through DEFAULT_AAVE_CONFIG (the defect E1 closed on
+    // the offline path only) and Compound/Moonwell through
+    // DEFAULT_COMPOUND_CONFIG/DEFAULT_MOONWELL_CONFIG. `RateCurve.points`
+    // feeds `rateAt` -> `annualLowerBound` -> both movement hurdles, so a
+    // placeholder curve is a wrong deployment and rotation decision with real
+    // funds behind it. Measured against the stored rate over the calibration
+    // era, the placeholders were off 7.5689 pp MAE (Compound), 7.2538 pp MAE
+    // (Moonwell) and 3.9769 pp MAE (Aave) at each origin's own utilization.
+    //
+    // The SHAPE dispatch is the same one `decision-input.ts` makes offline
+    // and `resolveConfig` enforces: Aave's reading is a structurally
+    // different curve and rides in `aaveIrmParams`; Compound's and
+    // Moonwell's kinked-linear readings ride in `irmParams`. Supplying
+    // `irmParams` on an Aave market is a caller error `resolveConfig` THROWS
+    // on, so the protocol gate here is load-bearing, not cosmetic.
+    //
+    // ALL-OR-NOTHING: `s.irm` is either a complete reading or absent, and
+    // absent leaves both seams undefined so `resolveConfig` falls back to the
+    // placeholder AND WARNS, naming the market. Never half-populated, never a
+    // silent substitution. Aave additionally requires its two own bounds to
+    // be present, so a kinked-only reading can never be misread as an Aave
+    // one.
+    ...irmSeamFor(s.name, s.irm),
   }));
 
   const rows = await prisma.forecastLabel.findMany({

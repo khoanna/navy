@@ -3,8 +3,11 @@ import { ChainClient } from '../chain/client.js';
 import {
   ADAPTER_IFACE,
   AAVE_POOL_IFACE,
+  AAVE_STRATEGY_V30_IFACE,
+  AAVE_STRATEGY_V32_IFACE,
   COMET_IFACE,
   ERC20_IFACE,
+  MOONWELL_IRM_IFACE,
   MTOKEN_IFACE,
   REWARD_ACCOUNTANT_IFACE,
   REWARD_EXECUTOR_IFACE,
@@ -19,6 +22,7 @@ import {
   CollectedSnapshot,
   StrategySnapshot,
   VaultSnapshot,
+  VenueIrmReading,
   VenueKind,
   VenueState,
 } from './types.js';
@@ -33,6 +37,20 @@ const VENUES: ReadonlyArray<{ name: string; venue: VenueKind; key: keyof Collect
   { name: 'Compound', venue: 'compound', key: 'compound' },
   { name: 'Moonwell', venue: 'moonwell', key: 'moonwell' },
 ];
+
+/**
+ * Seconds per year, 365.25 days — the SAME constant `protocols/math.ts`,
+ * `evaluation/replay.ts` and `collector/archive/calls.ts` use. Compound's
+ * and Moonwell's rate-model getters are per-second; everything downstream of
+ * `VenueIrmReading` is WAD-annualized, and this is where that conversion
+ * happens on the live path.
+ */
+const SECONDS_PER_YEAR = 31_557_600n;
+
+/** Ray has 9 more decimal digits than Wad. */
+const RAY_PER_WAD = 10n ** 9n;
+const RAY = 10n ** 27n;
+const IRM_WAD = 10n ** 18n;
 
 export class SnapshotCollector {
   private client: ChainClient;
@@ -418,6 +436,9 @@ export class SnapshotCollector {
       reserves: venueState.reserves,
       paused: venueState.paused,
       configDigest,
+      // Absent when the rate-model read did not succeed — a refusal that
+      // `simulateCurves` announces, never a silent default. See readVenueIrm.
+      ...(venueState.irm !== undefined ? { irm: venueState.irm } : {}),
     };
   }
 
@@ -450,6 +471,7 @@ export class SnapshotCollector {
         this.readUint(ERC20_IFACE, usdc, 'balanceOf', [comet], blockNumber),
         this.readBool(COMET_IFACE, comet, 'isSupplyPaused', [], blockNumber),
       ]);
+      const irm = await this.readCompoundIrm(comet, blockNumber);
       return {
         // Reported as Comet reports it, not recomputed: this is the exact
         // input its own interest-rate model uses.
@@ -462,6 +484,7 @@ export class SnapshotCollector {
         // denominator, where 0 is the conservative choice.
         reserves: 0n,
         paused,
+        ...(irm !== undefined ? { irm } : {}),
       };
     }
 
@@ -489,6 +512,12 @@ export class SnapshotCollector {
         [],
         blockNumber
       );
+      const irm = await this.readAaveIrm(
+        reserve.getValue('interestRateStrategyAddress') as string,
+        usdc,
+        flags.reserveFactorBps,
+        blockNumber
+      );
       return {
         // reserves = 0: Aave's `accruedToTreasury` is denominated in SCALED
         // aToken units, not underlying, so it is not interchangeable with the
@@ -502,6 +531,7 @@ export class SnapshotCollector {
         // does; AaveV3Adapter.maxDeployable (AaveV3Adapter.sol:129-133) treats
         // all three identically.
         paused: aaveReserveIsBlocked(flags),
+        ...(irm !== undefined ? { irm } : {}),
       };
     }
 
@@ -514,6 +544,7 @@ export class SnapshotCollector {
       // comptroller.mintGuardianPaused(mToken).
       this.readBool(ADAPTER_IFACE, adapter, 'isMintPaused', [], blockNumber),
     ]);
+    const irm = await this.readMoonwellIrm(mToken, blockNumber);
     return {
       // Exactly the (cash, borrows, reserves) triple MoonwellAdapter hands to
       // IMInterestRateModel.getSupplyRate (MoonwellAdapter.sol:139-141).
@@ -522,7 +553,147 @@ export class SnapshotCollector {
       borrows,
       reserves,
       paused,
+      ...(irm !== undefined ? { irm } : {}),
     };
+  }
+
+  /**
+   * Comet's SUPPLY-side rate model (paper §6.4).
+   *
+   * The four getters are per-second at WAD scale and `supplyKink()` is WAD;
+   * both are converted here to the annualized-WAD / RAY forms
+   * `VenueIrmReading` documents, matching what the archive backfill stores.
+   * `reserveFactorBps` is 0 BY DESIGN: Comet's supply curve is already net of
+   * reserves, so charging one here would be a second cut. See
+   * `CompoundSimulatorConfig`.
+   */
+  private async readCompoundIrm(comet: string, blockNumber: number): Promise<VenueIrmReading | undefined> {
+    try {
+      const [kinkWad, base, slopeLow, slopeHigh] = await Promise.all([
+        this.readUint(COMET_IFACE, comet, 'supplyKink', [], blockNumber),
+        this.readUint(COMET_IFACE, comet, 'supplyPerSecondInterestRateBase', [], blockNumber),
+        this.readUint(COMET_IFACE, comet, 'supplyPerSecondInterestRateSlopeLow', [], blockNumber),
+        this.readUint(COMET_IFACE, comet, 'supplyPerSecondInterestRateSlopeHigh', [], blockNumber),
+      ]);
+      return {
+        address: comet,
+        baseRateWad: base * SECONDS_PER_YEAR,
+        kinkRay: kinkWad * RAY_PER_WAD,
+        slopeLowWad: slopeLow * SECONDS_PER_YEAR,
+        slopeHighWad: slopeHigh * SECONDS_PER_YEAR,
+        reserveFactorBps: 0,
+      };
+    } catch (error) {
+      warnIrmUnavailable('Compound', comet, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Moonwell's `JumpRateModel` (paper §6.5).
+   *
+   * `interestRateModel()` is resolved PER READ, never pinned: Base mUSDC's
+   * model has been redeployed by governance repeatedly, and pinning it is
+   * precisely the defect that makes the archive backfill misattribute a
+   * governance swap to the previous model
+   * (`collector/archive/backfill.ts`'s `addressRefreshEvery`). The live path
+   * has no such excuse — it reads one block.
+   *
+   * The coefficients are a BORROW curve per timestamp; `reserveFactorMantissa`
+   * is the cut that turns it into the supply rate.
+   */
+  private async readMoonwellIrm(mToken: string, blockNumber: number): Promise<VenueIrmReading | undefined> {
+    try {
+      const [model, reserveFactorMantissa] = await Promise.all([
+        this.readAddress(MTOKEN_IFACE, mToken, 'interestRateModel', [], blockNumber),
+        this.readUint(MTOKEN_IFACE, mToken, 'reserveFactorMantissa', [], blockNumber),
+      ]);
+      const [kinkWad, base, multiplier, jump] = await Promise.all([
+        this.readUint(MOONWELL_IRM_IFACE, model, 'kink', [], blockNumber),
+        this.readUint(MOONWELL_IRM_IFACE, model, 'baseRatePerTimestamp', [], blockNumber),
+        this.readUint(MOONWELL_IRM_IFACE, model, 'multiplierPerTimestamp', [], blockNumber),
+        this.readUint(MOONWELL_IRM_IFACE, model, 'jumpMultiplierPerTimestamp', [], blockNumber),
+      ]);
+      return {
+        address: model,
+        baseRateWad: base * SECONDS_PER_YEAR,
+        kinkRay: kinkWad * RAY_PER_WAD,
+        slopeLowWad: multiplier * SECONDS_PER_YEAR,
+        slopeHighWad: jump * SECONDS_PER_YEAR,
+        reserveFactorBps: Number((reserveFactorMantissa * 10_000n) / IRM_WAD),
+      };
+    } catch (error) {
+      warnIrmUnavailable('Moonwell', mToken, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Aave V3's `DefaultReserveInterestRateStrategy` (paper §6.3).
+   *
+   * The strategy is VERSIONED and the two versions expose different getters,
+   * so V3.2's packed bps getter is tried first and V3.0's individual RAY
+   * getters are the fallback — the same order the archive backfill uses.
+   * Where both fail the reading is `undefined`, a disclosed refusal;
+   * `DEFAULT_AAVE_CONFIG` is never substituted here.
+   *
+   * `reserveFactorBps` comes from the caller because it lives in the
+   * reserve's packed configuration word, which the caller has already read.
+   */
+  private async readAaveIrm(
+    strategy: string,
+    asset: string,
+    reserveFactorBps: number,
+    blockNumber: number
+  ): Promise<VenueIrmReading | undefined> {
+    const bpsToWad = (bps: bigint): bigint => (bps * IRM_WAD) / 10_000n;
+    try {
+      const [data] = await this.read(
+        AAVE_STRATEGY_V32_IFACE,
+        strategy,
+        'getInterestRateDataBps',
+        [asset],
+        blockNumber
+      );
+      const d = data as ethers.Result;
+      const optimalBps = d.getValue('optimalUsageRatio') as bigint;
+      const optimalRay = (optimalBps * RAY) / 10_000n;
+      return {
+        address: strategy,
+        baseRateWad: bpsToWad(d.getValue('baseVariableBorrowRate') as bigint),
+        kinkRay: optimalRay,
+        slopeLowWad: bpsToWad(d.getValue('variableRateSlope1') as bigint),
+        slopeHighWad: bpsToWad(d.getValue('variableRateSlope2') as bigint),
+        reserveFactorBps,
+        optimalUtilizationRay: optimalRay,
+        // Aave's excess band runs from the optimal ratio to 100%.
+        maxUtilizationRay: RAY,
+      };
+    } catch {
+      /* fall through to the V3.0 getters */
+    }
+    try {
+      const [optimal, base, slope1, slope2] = await Promise.all([
+        this.readUint(AAVE_STRATEGY_V30_IFACE, strategy, 'OPTIMAL_USAGE_RATIO', [], blockNumber),
+        this.readUint(AAVE_STRATEGY_V30_IFACE, strategy, 'getBaseVariableBorrowRate', [], blockNumber),
+        this.readUint(AAVE_STRATEGY_V30_IFACE, strategy, 'getVariableRateSlope1', [], blockNumber),
+        this.readUint(AAVE_STRATEGY_V30_IFACE, strategy, 'getVariableRateSlope2', [], blockNumber),
+      ]);
+      const rayToWad = (r: bigint): bigint => r / RAY_PER_WAD;
+      return {
+        address: strategy,
+        baseRateWad: rayToWad(base),
+        kinkRay: optimal,
+        slopeLowWad: rayToWad(slope1),
+        slopeHighWad: rayToWad(slope2),
+        reserveFactorBps,
+        optimalUtilizationRay: optimal,
+        maxUtilizationRay: RAY,
+      };
+    } catch (error) {
+      warnIrmUnavailable('Aave', strategy, error);
+      return undefined;
+    }
   }
 
   /**
@@ -671,4 +842,32 @@ export class SnapshotCollector {
 
     return { value, lastUpdated, isStale };
   }
+}
+
+/**
+ * Markets whose rate-model read has already been reported as unavailable.
+ *
+ * Log-only and deduplicated per venue: the collector runs on a schedule, so
+ * an un-deduplicated warning would be one identical line per cycle forever.
+ * Mirrors the dedupe in `policy/steps/simulate.ts`, which warns again at the
+ * point the placeholder is actually USED — so a failure here is announced
+ * once at the read and once per market at the simulation, never silently.
+ */
+const warnedIrmUnavailable = new Set<string>();
+
+function warnIrmUnavailable(venue: string, address: string, error: unknown): void {
+  if (warnedIrmUnavailable.has(venue)) return;
+  warnedIrmUnavailable.add(venue);
+  console.warn(
+    `[SnapshotCollector] ${venue}: could not read the live interest-rate model at ${address} ` +
+      `(${error instanceof Error ? error.message : String(error)}). This venue's snapshot carries ` +
+      `NO irm reading, so policy/steps/simulate.ts will fall back to DefaultConfigs — a ` +
+      `PLACEHOLDER curve, not this venue's real one — and will say so. Warned once per venue per ` +
+      `process.`
+  );
+}
+
+/** Test seam: reset the one-shot IRM-unavailable dedupe. Not used by production code. */
+export function __resetIrmUnavailableWarnings(): void {
+  warnedIrmUnavailable.clear();
 }

@@ -44,7 +44,7 @@ export interface MarketObservation {
   dependencyGroupIds: string[];
   /**
    * Live on-chain IRM parameters, KINKED-LINEAR SHAPE (Compound III /
-   * Moonwell). Falls back to DefaultConfigs when absent.
+   * Moonwell). Falls back to DefaultConfigs — loudly — when absent.
    *
    * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
    * interest-rate strategy, not a hardcoded default — this is that seam.
@@ -54,14 +54,45 @@ export interface MarketObservation {
    * `policy/steps/simulate.ts#resolveConfig` throws on it rather than
    * silently dropping an override that does not apply.
    *
-   * NOT populated on the LIVE runtime driver path
-   * (`runtime/decision-driver.ts`) — the collector that reads live IRM params
-   * off each venue's rate strategy contract via the Navy adapters is still a
-   * later task. It IS populated on the offline evaluation path
-   * (`evaluation/kernel/decision-input.ts`), whose archive rows carry a
-   * per-origin chain reading.
+   * WHAT THE FOUR COEFFICIENTS MEAN IS PROTOCOL-DEPENDENT, and the shape
+   * alone does not say which. On Comet they ARE the supply curve
+   * (`supplyPerSecondInterestRate*` / `supplyKink()`, already net of
+   * reserves). On an mToken they are the BORROW curve
+   * (`baseRatePerTimestamp` / `multiplierPerTimestamp` /
+   * `jumpMultiplierPerTimestamp` / `kink`) and the supply rate is
+   * `borrow * u * (1 - reserveFactor)`. `resolveConfig` dispatches on
+   * `protocol` for exactly that reason.
+   *
+   * Populated on BOTH drivers as of 2026-09-10: the offline evaluation path
+   * (`evaluation/kernel/decision-input.ts`, from the archive row's per-origin
+   * chain reading) and the LIVE runtime path
+   * (`runtime/decision-driver.ts`, from `StrategySnapshot.irm`, which
+   * `SnapshotCollector` now reads off each venue's rate model through the
+   * Navy adapters). Before that date NEITHER driver populated it, so every
+   * Compound and Moonwell curve in the shipped controller came from
+   * `DefaultConfigs` — measured at 7.5689 pp MAE (Compound) and 7.2538 pp MAE
+   * (Moonwell) against the stored rate over the calibration era.
+   *
+   * ALL-OR-NOTHING: a producer supplies every field or omits the object.
+   * Never half-populated, never defaulted field by field.
    */
-  irmParams?: { baseRateWad: bigint; kinkRay: bigint; slopeLowWad: bigint; slopeHighWad: bigint };
+  irmParams?: {
+    baseRateWad: bigint;
+    kinkRay: bigint;
+    slopeLowWad: bigint;
+    slopeHighWad: bigint;
+    /**
+     * The venue's reserve factor, bps. REQUIRED for the same reason
+     * `aaveIrmParams.reserveFactorBps` is: on Moonwell it is a
+     * multiplicative term in the borrow -> supply conversion and an absent
+     * value silently reading as 0 overstates the supply rate by exactly that
+     * factor. On Compound it is 0 by construction — Comet's curve is already
+     * net of reserves, which is why the archive stores NULL there and
+     * `evaluation/dataset.ts#resolveReserveFactorBps` resolves that NULL to 0
+     * for that venue only.
+     */
+    reserveFactorBps: number;
+  };
   /**
    * Live on-chain IRM parameters, AAVE V3 SHAPE — the per-origin reading of
    * `DefaultReserveInterestRateStrategy` plus the reserve's own reserve

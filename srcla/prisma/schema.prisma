@@ -135,8 +135,16 @@ model MarketSnapshot {
   // actually in force rather than today's DefaultConfigs. Kinked-linear
   // shape (Compound/Moonwell) mirrors MarketObservation.irmParams in
   // src/policy/types.ts; optimal/max utilization are Aave V3's quadratic
-  // model (src/protocols/simulation/types.ts AaveSimulatorConfig). NOT YET
-  // POPULATED — no producer wired in this task; forward provisioning only.
+  // model (src/protocols/simulation/types.ts AaveSimulatorConfig).
+  //
+  // POPULATED as of 2026-09-08 by the archive backfill
+  // (src/collector/archive/backfill.ts), on every row of the registered
+  // window. The LIVE collector reads the same parameters off chain too
+  // (SnapshotCollector.readCompoundIrm/readMoonwellIrm/readAaveIrm, 2026-09-10)
+  // but does not yet WRITE them to this table — the live snapshot upsert in
+  // src/runtime/scheduler.ts still persists only the state columns, so a row
+  // collected live carries NULL here. The live DECISION path does not read
+  // this table for them; it takes them straight off the collector.
   irmBaseRateWad         String? // BigInt as string
   irmKinkRay             String? // BigInt as string
   irmSlopeLowWad         String? // BigInt as string

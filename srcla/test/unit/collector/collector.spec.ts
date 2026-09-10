@@ -4,8 +4,10 @@ import { CollectorConfig, type VaultSnapshot, type CollectedSnapshot } from '../
 import {
   ADAPTER_IFACE,
   AAVE_POOL_IFACE,
+  AAVE_STRATEGY_V32_IFACE,
   COMET_IFACE,
   ERC20_IFACE,
+  MOONWELL_IRM_IFACE,
   MTOKEN_IFACE,
   REWARD_EXECUTOR_IFACE,
   VAULT_IFACE,
@@ -102,11 +104,14 @@ function aaveConfigWord(flags: {
   active?: boolean;
   frozen?: boolean;
   paused?: boolean;
+  /** Bits 64-79. E1b: a rate-model input, not a flag -- see decodeAaveReserveFlags. */
+  reserveFactorBps?: number;
 }): bigint {
   let word = 0n;
   if (flags.active) word |= 1n << 56n;
   if (flags.frozen) word |= 1n << 57n;
   if (flags.paused) word |= 1n << 60n;
+  word |= BigInt(flags.reserveFactorBps ?? 0) << 64n;
   return word;
 }
 
@@ -114,7 +119,14 @@ function aaveConfigWord(flags: {
  * The 15-field `IAaveV3Pool.ReserveData` tuple, with only the fields the
  * collector reads made meaningful.
  */
-function aaveReserveData(configWord: bigint, variableDebtToken: string): unknown[] {
+function aaveReserveData(
+  configWord: bigint,
+  variableDebtToken: string,
+  // E1b: the collector now reaches through to the rate strategy for the
+  // venue's live IRM parameters, so this field can no longer be a zero
+  // address in a fixture that expects a reading.
+  interestRateStrategy: string = ethers.ZeroAddress,
+): unknown[] {
   return [
     [configWord], // configuration
     0n, // liquidityIndex
@@ -127,7 +139,7 @@ function aaveReserveData(configWord: bigint, variableDebtToken: string): unknown
     ethers.ZeroAddress, // aTokenAddress
     ethers.ZeroAddress, // stableDebtTokenAddress
     variableDebtToken,
-    ethers.ZeroAddress, // interestRateStrategyAddress
+    interestRateStrategy,
     0n, // accruedToTreasury
     0n, // unbacked
     0n, // isolationModeTotalDebt
@@ -335,6 +347,8 @@ const ATOKEN = '0x' + '77'.repeat(20);
 const AAVE_POOL = '0x' + '88'.repeat(20);
 const VARIABLE_DEBT = '0x' + '99'.repeat(20);
 const MTOKEN = '0x' + 'ab'.repeat(20);
+const MOONWELL_IRM = '0x' + 'be'.repeat(20);
+const AAVE_STRATEGY = '0x' + 'ef'.repeat(20);
 const EXECUTOR = '0x' + 'cd'.repeat(20);
 
 const AAVE_DIGEST = '0x' + 'a1'.repeat(32);
@@ -355,7 +369,7 @@ function stubVaultCore(chain: FakeChain, over: Partial<Record<string, unknown>> 
 }
 
 /** Compound: 4,000,000 USDC supplied at 85% utilization, 600,000 liquid, supply paused. */
-function stubCompound(chain: FakeChain): FakeChain {
+function stubCompound(chain: FakeChain, withIrm = true): FakeChain {
   chain
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'totalAssets', [], [1_000_000_000n])
     .on(ADAPTER_IFACE, COMPOUND_ADAPTER, 'maxWithdrawable', [], [900_000_000n])
@@ -367,11 +381,31 @@ function stubCompound(chain: FakeChain): FakeChain {
     .on(ERC20_IFACE, COMET, 'totalSupply', [], [4_000_000_000_000n])
     .on(ERC20_IFACE, USDC, 'balanceOf', [COMET], [600_000_000_000n])
     .on(COMET_IFACE, COMET, 'isSupplyPaused', [], [true]);
+  if (withIrm) stubCompoundIrm(chain);
   return chain;
 }
 
+/**
+ * Comet's SUPPLY-side rate model, PER SECOND at WAD scale — the four getters
+ * `getSupplyRate` is built from. Values are Base mainnet Comet USDC's at
+ * archive block 28,359,726, divided back to per-second from the annualized
+ * figures the archive stores (kink 90%, slopeLow ~5.40%/yr, slopeHigh
+ * ~303.6%/yr).
+ */
+function stubCompoundIrm(chain: FakeChain): FakeChain {
+  return chain
+    .on(COMET_IFACE, COMET, 'supplyKink', [], [900_000_000_000_000_000n])
+    .on(COMET_IFACE, COMET, 'supplyPerSecondInterestRateBase', [], [0n])
+    .on(COMET_IFACE, COMET, 'supplyPerSecondInterestRateSlopeLow', [], [1_712_328_767n])
+    .on(COMET_IFACE, COMET, 'supplyPerSecondInterestRateSlopeHigh', [], [96_207_020_547n]);
+}
+
 /** Aave: 800,000 borrowed against 200,000 liquid; reserve active and healthy. */
-function stubAave(chain: FakeChain, configWord = aaveConfigWord({ active: true })): FakeChain {
+function stubAave(
+  chain: FakeChain,
+  configWord = aaveConfigWord({ active: true, reserveFactorBps: 1000 }),
+  withIrm = true,
+): FakeChain {
   chain
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'totalAssets', [], [2_000_000_000n])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'maxWithdrawable', [], [1_800_000_000n])
@@ -381,13 +415,22 @@ function stubAave(chain: FakeChain, configWord = aaveConfigWord({ active: true }
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'aToken', [], [ATOKEN])
     .on(ADAPTER_IFACE, AAVE_ADAPTER, 'aavePool', [], [AAVE_POOL])
     .on(ERC20_IFACE, USDC, 'balanceOf', [ATOKEN], [200_000_000_000n])
-    .on(AAVE_POOL_IFACE, AAVE_POOL, 'getReserveData', [USDC], [aaveReserveData(configWord, VARIABLE_DEBT)])
+    .on(AAVE_POOL_IFACE, AAVE_POOL, 'getReserveData', [USDC], [
+      aaveReserveData(configWord, VARIABLE_DEBT, AAVE_STRATEGY),
+    ])
     .on(ERC20_IFACE, VARIABLE_DEBT, 'totalSupply', [], [800_000_000_000n]);
+  if (withIrm) {
+    // Aave V3.2's packed bps getter: optimal 90%, base 0, slope1 4.7%,
+    // slope2 10% — Base USDC's live values.
+    chain.on(AAVE_STRATEGY_V32_IFACE, AAVE_STRATEGY, 'getInterestRateDataBps', [USDC], [
+      [9000, 0, 470, 1000],
+    ]);
+  }
   return chain;
 }
 
 /** Moonwell: cash 300, borrows 700, reserves 100 (base units x1e6). */
-function stubMoonwell(chain: FakeChain, mintPaused = false): FakeChain {
+function stubMoonwell(chain: FakeChain, mintPaused = false, withIrm = true): FakeChain {
   chain
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'totalAssets', [], [3_000_000_000n])
     .on(ADAPTER_IFACE, MOONWELL_ADAPTER, 'maxWithdrawable', [], [2_700_000_000n])
@@ -399,6 +442,18 @@ function stubMoonwell(chain: FakeChain, mintPaused = false): FakeChain {
     .on(MTOKEN_IFACE, MTOKEN, 'getCash', [], [300_000_000n])
     .on(MTOKEN_IFACE, MTOKEN, 'totalBorrows', [], [700_000_000n])
     .on(MTOKEN_IFACE, MTOKEN, 'totalReserves', [], [100_000_000n]);
+  if (withIrm) {
+    // mUSDC's JumpRateModel: a BORROW curve, per timestamp, plus the reserve
+    // cut. Values are Base mUSDC's at archive block 16,659,726 (kink 90%,
+    // multiplier ~6.10%/yr, jumpMultiplier ~900.6%/yr, reserve factor 15%).
+    chain
+      .on(MTOKEN_IFACE, MTOKEN, 'interestRateModel', [], [MOONWELL_IRM])
+      .on(MTOKEN_IFACE, MTOKEN, 'reserveFactorMantissa', [], [150_000_000_000_000_000n])
+      .on(MOONWELL_IRM_IFACE, MOONWELL_IRM, 'kink', [], [900_000_000_000_000_000n])
+      .on(MOONWELL_IRM_IFACE, MOONWELL_IRM, 'baseRatePerTimestamp', [], [0n])
+      .on(MOONWELL_IRM_IFACE, MOONWELL_IRM, 'multiplierPerTimestamp', [], [1_934_302_557n])
+      .on(MOONWELL_IRM_IFACE, MOONWELL_IRM, 'jumpMultiplierPerTimestamp', [], [285_400_000_000n]);
+  }
   return chain;
 }
 
@@ -550,6 +605,91 @@ describe('SnapshotCollector.collect — per-venue market state', () => {
 
     for (const s of snap!.strategies) {
       expect(s.maxDeployable).not.toBe(s.maxWithdrawable);
+    }
+  });
+});
+
+describe('SnapshotCollector.collect — live interest-rate models (E1b)', () => {
+  /**
+   * Until 2026-09-10 the collector read no rate model at all, so
+   * `runtime/decision-driver.ts` had nothing to put in
+   * `MarketObservation.irmParams` and every live cycle simulated every venue
+   * from `DefaultConfigs` — measured at 7.5689 pp MAE (Compound), 7.2538 pp
+   * (Moonwell) and 3.9769 pp (Aave) against the archive's own stored supply
+   * rates. These fixtures are Base mainnet's real parameters at pinned
+   * archive blocks, so a decoding or scaling regression fails against a
+   * measurement rather than against the code's own opinion.
+   */
+  const SECONDS_PER_YEAR = 31_557_600n;
+  const RAY = 10n ** 27n;
+
+  it("reads Comet's SUPPLY curve and annualizes it, with reserveFactorBps 0 by design", async () => {
+    const snap = (await new SnapshotCollector(fullChain().asChainClient(), FULL_CONFIG).collect())!;
+    const irm = snap.strategies.find((s) => s.name === 'Compound')!.irm!;
+    expect(irm.address).toBe(COMET);
+    // Per-second getters x 365.25 days, and the WAD kink lifted to RAY.
+    expect(irm.baseRateWad).toBe(0n);
+    expect(irm.kinkRay).toBe((RAY * 90n) / 100n);
+    expect(irm.slopeLowWad).toBe(1_712_328_767n * SECONDS_PER_YEAR);
+    expect(irm.slopeHighWad).toBe(96_207_020_547n * SECONDS_PER_YEAR);
+    // Comet's supply curve is already net of reserves; charging one here
+    // would be a second cut.
+    expect(irm.reserveFactorBps).toBe(0);
+    // Not Aave's shape: no bounds, which is what keeps the two apart.
+    expect(irm.optimalUtilizationRay).toBeUndefined();
+  });
+
+  it("reads Moonwell's BORROW curve off the mToken's OWN interestRateModel(), plus the reserve cut", async () => {
+    const snap = (await new SnapshotCollector(fullChain().asChainClient(), FULL_CONFIG).collect())!;
+    const irm = snap.strategies.find((s) => s.name === 'Moonwell')!.irm!;
+    // Resolved per read, never pinned: mUSDC's model has been redeployed by
+    // governance repeatedly, and pinning it is the archive-side defect that
+    // misattributes a swap to the previous model.
+    // ethers returns a checksummed address; compare case-insensitively.
+    expect(irm.address.toLowerCase()).toBe(MOONWELL_IRM);
+    expect(irm.kinkRay).toBe((RAY * 90n) / 100n);
+    expect(irm.slopeLowWad).toBe(1_934_302_557n * SECONDS_PER_YEAR);
+    expect(irm.slopeHighWad).toBe(285_400_000_000n * SECONDS_PER_YEAR);
+    // reserveFactorMantissa 0.15e18 -> 1500 bps. A 0 here would overstate
+    // every Moonwell supply rate by exactly this factor.
+    expect(irm.reserveFactorBps).toBe(1500);
+    expect(irm.optimalUtilizationRay).toBeUndefined();
+  });
+
+  it("reads Aave's V3.2 packed bps strategy and converts it, carrying the reserve factor from the config word", async () => {
+    const snap = (await new SnapshotCollector(fullChain().asChainClient(), FULL_CONFIG).collect())!;
+    const irm = snap.strategies.find((s) => s.name === 'Aave')!.irm!;
+    expect(irm.address.toLowerCase()).toBe(AAVE_STRATEGY);
+    expect(irm.baseRateWad).toBe(0n);
+    expect(irm.slopeLowWad).toBe((470n * 10n ** 18n) / 10_000n); // 4.7%
+    expect(irm.slopeHighWad).toBe((1000n * 10n ** 18n) / 10_000n); // 10%
+    expect(irm.kinkRay).toBe((RAY * 90n) / 100n);
+    // The two Aave-only bounds ARE present, and they are what
+    // `irmSeamFor` requires before routing this into `aaveIrmParams`.
+    expect(irm.optimalUtilizationRay).toBe((RAY * 90n) / 100n);
+    expect(irm.maxUtilizationRay).toBe(RAY);
+    // Bits 64-79 of the reserve configuration word.
+    expect(irm.reserveFactorBps).toBe(1000);
+  });
+
+  it('omits the reading, but keeps the snapshot COMPLETE, when a rate model does not answer', async () => {
+    // A failed rate-model read is not a failed venue read: the state is still
+    // sound, so §12's "do not decide" rule must not trip. What must happen
+    // instead is that `irm` is ABSENT — never a substituted default — so
+    // `simulateCurves` falls back loudly, naming the market.
+    const chain = new FakeChain();
+    stubVaultCore(chain);
+    stubAave(chain, aaveConfigWord({ active: true, reserveFactorBps: 1000 }), false);
+    stubCompound(chain, false);
+    stubMoonwell(chain, false, false);
+    const snap = (await new SnapshotCollector(chain.asChainClient(), FULL_CONFIG).collect())!;
+
+    expect(snap.incomplete).toBe(false);
+    expect(snap.missingMarkets).toEqual([]);
+    for (const s of snap.strategies) {
+      expect(s.irm).toBeUndefined();
+      // The venue state itself is untouched.
+      expect(s.cash).toBeGreaterThan(0n);
     }
   });
 });

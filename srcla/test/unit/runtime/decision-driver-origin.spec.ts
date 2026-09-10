@@ -275,3 +275,182 @@ describe('buildRawOriginFromCollector feeds §9.1 churn state from persisted dec
     expect(where.timestamp.lte).toEqual(new Date(snapshotSeconds * 1000));
   });
 });
+
+// ---------------------------------------------------------------------------
+// The LIVE rate-model seam (E1b, 2026-09-10, GAP 2)
+//
+// `buildRawOriginFromCollector` populated NEITHER `irmParams` nor
+// `aaveIrmParams`, so the production keeper path ran every venue through
+// `DefaultConfigs` on every cycle -- Aave through the placeholder that E1
+// removed from the OFFLINE path only, Compound and Moonwell through
+// placeholders measured at 7.5689 pp and 7.2538 pp MAE against the archive's
+// own stored supply rates. `RateCurve.points` feeds `rateAt` ->
+// `annualLowerBound` -> both movement hurdles, so that is a wrong deployment
+// and rotation decision with real funds behind it.
+//
+// These tests are an INTEGRATION-LEVEL observation of the fix: they run the
+// real `buildRawOriginFromCollector` output through the real
+// `simulateCurves` and watch what `console.warn` does -- the placeholder
+// warning is the mechanism that makes a fallback impossible to miss, so
+// "does it fire" is the honest question, not "is the field set".
+// ---------------------------------------------------------------------------
+
+import { jest } from '@jest/globals';
+import { simulateCurves, __resetPlaceholderConfigWarnings } from '../../../src/policy/steps/simulate.js';
+import { irmSeamFor } from '../../../src/runtime/decision-driver.js';
+import type { DecisionInput } from '../../../src/policy/types.js';
+import type { StrategySnapshot, VenueIrmReading } from '../../../src/collector/types.js';
+
+const RAY = 10n ** 27n;
+
+/** Comet USDC's real shape: a SUPPLY curve, reserve factor 0 by design. */
+const COMPOUND_IRM: VenueIrmReading = {
+  address: '0xb125E6687d4313864e53df431d5425969c15Eb2F',
+  baseRateWad: 0n,
+  kinkRay: (RAY * 90n) / 100n,
+  slopeLowWad: 54_036_986_297_479_200n,
+  slopeHighWad: 3_036_078_082_168_372_800n,
+  reserveFactorBps: 0,
+};
+/** mUSDC's real shape: a BORROW curve plus the reserve cut. */
+const MOONWELL_IRM: VenueIrmReading = {
+  address: '0x54dC357F7461BcEEE5BdbA80996f5CB7d7512445',
+  baseRateWad: 0n,
+  kinkRay: (RAY * 90n) / 100n,
+  slopeLowWad: 61_041_780_821_613_600n,
+  slopeHighWad: 9_006_164_383_533_832_800n,
+  reserveFactorBps: 1500,
+};
+/** Aave's shape: two extra bounds, which is what tells the shapes apart. */
+const AAVE_IRM: VenueIrmReading = {
+  address: '0x86AB1C62A8bf868E1b3E1ab87d587Aba6fbCbDC5',
+  baseRateWad: 0n,
+  kinkRay: (RAY * 90n) / 100n,
+  slopeLowWad: (47n * 10n ** 18n) / 1000n,
+  slopeHighWad: (10n * 10n ** 18n) / 100n,
+  reserveFactorBps: 1000,
+  optimalUtilizationRay: (RAY * 90n) / 100n,
+  maxUtilizationRay: RAY,
+};
+
+function strategy(name: string, irm?: VenueIrmReading): StrategySnapshot {
+  const base: StrategySnapshot = {
+    address: '0x' + name.toLowerCase().padEnd(40, '0').slice(0, 40),
+    name,
+    totalAssets: 1_000_000_000n,
+    maxWithdrawable: 1_000_000_000n,
+    maxDeployable: 10n ** 13n,
+    supplyRate: (5n * 10n ** 18n) / 100n,
+    utilization: (85n * 10n ** 18n) / 100n,
+    cash: 500_000_000_000n,
+    borrows: 2_833_333_333_333n,
+    reserves: 0n,
+    paused: false,
+    configDigest: '0x' + 'cc'.repeat(32),
+  };
+  return irm ? { ...base, irm } : base;
+}
+
+function snapshotWith(strategies: StrategySnapshot[]): CollectedSnapshot {
+  return { ...fakeSnapshot(), strategies };
+}
+
+/** The kernel fields `simulateCurves` reads, and nothing else. */
+function kernelInput(markets: DecisionInput['markets']): DecisionInput {
+  return {
+    origin: { blockNumber: 1, blockHash: '0x' + '00'.repeat(32), timestampSeconds: 1_000, finalized: true },
+    markets,
+  } as unknown as DecisionInput;
+}
+
+describe('the live path simulates the observed rate model, not DefaultConfigs', () => {
+  let warn = jest.spyOn(console, 'warn');
+
+  beforeEach(() => {
+    __resetPlaceholderConfigWarnings();
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => warn.mockRestore());
+
+  it('does NOT warn when the collector supplied a reading for every venue', async () => {
+    const { prisma } = fakePrisma();
+    const snap = snapshotWith([
+      strategy('Aave', AAVE_IRM),
+      strategy('Compound', COMPOUND_IRM),
+      strategy('Moonwell', MOONWELL_IRM),
+    ]);
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), prisma, GAS, {}, CHURN);
+
+    // The seams are populated, in the shape each protocol's model takes.
+    const byId = new Map(out!.markets.map((m) => [m.marketId, m]));
+    expect(byId.get('Compound')!.irmParams).toBeDefined();
+    expect(byId.get('Moonwell')!.irmParams!.reserveFactorBps).toBe(1500);
+    expect(byId.get('Aave')!.aaveIrmParams).toBeDefined();
+    expect(byId.get('Aave')!.irmParams).toBeUndefined();
+
+    const curves = simulateCurves(
+      kernelInput(out!.markets),
+      ['Aave', 'Compound', 'Moonwell'],
+      100_000_000_000n,
+      3,
+    );
+    expect(curves).toHaveLength(3);
+    // THE OBSERVATION: no placeholder warning fired for any venue.
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('DOES warn, naming the market, for a venue whose reading is absent', async () => {
+    const { prisma } = fakePrisma();
+    // Moonwell's rate-model read failed at this block; the other two answered.
+    const snap = snapshotWith([
+      strategy('Aave', AAVE_IRM),
+      strategy('Compound', COMPOUND_IRM),
+      strategy('Moonwell'),
+    ]);
+    const out = await buildRawOriginFromCollector(fakeCollector(snap), prisma, GAS, {}, CHURN);
+    expect(out!.markets.find((m) => m.marketId === 'Moonwell')!.irmParams).toBeUndefined();
+
+    simulateCurves(kernelInput(out!.markets), ['Aave', 'Compound', 'Moonwell'], 100_000_000_000n, 3);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = warn.mock.calls[0]![0] as string;
+    expect(message).toContain('PLACEHOLDER RATE MODEL');
+    // Names the market -- a warning that does not say WHICH venue is on a
+    // placeholder is not actionable.
+    expect(message).toContain("market 'Moonwell'");
+    expect(message).toContain('moonwell');
+    // And says nothing about the two venues that ARE on real parameters.
+    expect(message).not.toContain("market 'Compound'");
+    expect(message).not.toContain("market 'Aave'");
+  });
+
+  it('the curve a real reading produces differs materially from the placeholder curve', async () => {
+    // The warning proves the fallback is announced; this proves it MATTERS.
+    const { prisma } = fakePrisma();
+    const withIrm = await buildRawOriginFromCollector(
+      fakeCollector(snapshotWith([strategy('Compound', COMPOUND_IRM)])),
+      prisma, GAS, {}, CHURN,
+    );
+    const withoutIrm = await buildRawOriginFromCollector(
+      fakeCollector(snapshotWith([strategy('Compound')])),
+      prisma, GAS, {}, CHURN,
+    );
+
+    const observed = simulateCurves(kernelInput(withIrm!.markets), ['Compound'], 100_000_000_000n, 3)[0]!;
+    const placeholder = simulateCurves(kernelInput(withoutIrm!.markets), ['Compound'], 100_000_000_000n, 3)[0]!;
+
+    // Real Comet at ~85% utilization on these parameters pays ~4.6%; the
+    // placeholder's 80% kink and 6.25% slope assert ~8.6%. `rateAt` reads
+    // exactly these points, and `annualLowerBound` reads `rateAt`.
+    expect(observed.points[0]).not.toBe(placeholder.points[0]);
+    expect(placeholder.points[0]!).toBeGreaterThan((observed.points[0]! * 15n) / 10n);
+  });
+
+  it('irmSeamFor refuses an Aave reading that is missing its own bounds', () => {
+    // Half of an Aave reading is not a Compound reading: routing it into
+    // `irmParams` would make `resolveConfig` throw on every live cycle.
+    const { optimalUtilizationRay: _o, ...noBounds } = AAVE_IRM;
+    expect(irmSeamFor('Aave', noBounds)).toEqual({});
+    expect(irmSeamFor('Aave', undefined)).toEqual({});
+  });
+});

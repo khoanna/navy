@@ -972,3 +972,83 @@ describe('buildDecisionInput headroom fields', () => {
     expect(aave.maxDeployableBase).not.toBe(aave.maxWithdrawableBase);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildDecisionInput: the LIVE rate-model seams (E1b, 2026-09-10)
+//
+// `MarketObservation.irmParams` existed and NOTHING FILLED IT, so every
+// Compound and Moonwell curve in every replay came from
+// `DEFAULT_COMPOUND_CONFIG` / `DEFAULT_MOONWELL_CONFIG` -- measured at
+// 7.5689 pp MAE and 7.2538 pp MAE respectively against the archive's own
+// stored supply rate over the calibration era. These tests pin that the
+// archive's per-origin reading now reaches the kernel, in the right seam for
+// each protocol's model SHAPE, and that a partial reading is refused rather
+// than half-populated.
+// ---------------------------------------------------------------------------
+
+describe('buildDecisionInput rate-model seams', () => {
+  const IRM = {
+    irmBaseRateWad: 0n,
+    irmKinkRay: (10n ** 27n * 90n) / 100n,
+    irmSlopeLowWad: 54_036_986_297_479_200n,
+    irmSlopeHighWad: 3_036_078_082_168_372_800n,
+    reserveFactorBps: 1000,
+  };
+  const AAVE_ONLY = {
+    irmOptimalUtilizationRay: (10n ** 27n * 90n) / 100n,
+    irmMaxUtilizationRay: 10n ** 27n,
+  };
+
+  const inputWith = (extra: (venue: string) => Partial<MarketSnapshot>) =>
+    buildDecisionInput(
+      createInitialState(TIER),
+      makeDataset(1, undefined, extra).snapshots[0]!,
+      [],
+      [],
+      harnessConfig(),
+      { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
+    );
+
+  it('routes a kinked reading into irmParams for compound and moonwell, and not into aaveIrmParams', () => {
+    const input = inputWith((v) => (v === 'aave-usdc' ? {} : IRM));
+    for (const marketId of ['compound-usdc', 'moonwell-usdc']) {
+      const m = input.markets.find((x) => x.marketId === marketId)!;
+      expect(m.irmParams).toEqual({
+        baseRateWad: IRM.irmBaseRateWad,
+        kinkRay: IRM.irmKinkRay,
+        slopeLowWad: IRM.irmSlopeLowWad,
+        slopeHighWad: IRM.irmSlopeHighWad,
+        reserveFactorBps: IRM.reserveFactorBps,
+      });
+      expect(m.aaveIrmParams).toBeUndefined();
+    }
+  });
+
+  it('routes an Aave reading into aaveIrmParams ONLY -- irmParams on an Aave market is a throw', () => {
+    // `resolveConfig` throws if an Aave market supplies irmParams, so this is
+    // not a stylistic preference: populating the wrong seam here would make
+    // every Aave origin of every replay raise.
+    const input = inputWith((v) => (v === 'aave-usdc' ? { ...IRM, ...AAVE_ONLY } : {}));
+    const aave = input.markets.find((m) => m.marketId === 'aave-usdc')!;
+    expect(aave.irmParams).toBeUndefined();
+    expect(aave.aaveIrmParams).toBeDefined();
+    expect(aave.aaveIrmParams!.optimalUtilizationRay).toBe(AAVE_ONLY.irmOptimalUtilizationRay);
+  });
+
+  it('refuses a PARTIAL reading rather than half-populating it', () => {
+    // reserveFactorBps missing: on Moonwell it is a multiplicative term in
+    // the borrow -> supply conversion, so a half-populated object reading it
+    // as 0 would overstate the supply rate by exactly that factor.
+    const { reserveFactorBps: _dropped, ...withoutRf } = IRM;
+    const input = inputWith((v) => (v === 'moonwell-usdc' ? withoutRf : {}));
+    expect(input.markets.find((m) => m.marketId === 'moonwell-usdc')!.irmParams).toBeUndefined();
+  });
+
+  it('leaves both seams undefined when the origin carries no reading at all', () => {
+    const input = inputWith(() => ({}));
+    for (const m of input.markets) {
+      expect(m.irmParams).toBeUndefined();
+      expect(m.aaveIrmParams).toBeUndefined();
+    }
+  });
+});

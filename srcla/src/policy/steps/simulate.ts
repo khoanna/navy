@@ -30,15 +30,16 @@ import type { DecisionInput, MarketObservation, RateCurve } from '../types.js';
  * rate) that has nothing to do with capacity.
  *
  * Moonwell reuses that same per-second function internally, but
- * `moonwell-simulator.ts#simulateRate` annualizes (`* SECONDS_PER_YEAR`)
- * before clamping against its `[minRate, maxRate]` oracle bounds, which are
- * themselves WAD-annualized (e.g. 1e16 = 1%) — so by the time its
- * `postDepositRate` reaches us it is already sitting on the WAD-annualized
- * scale. Re-annualizing it again here would push an already-annualized
- * number out by another `SECONDS_PER_YEAR` and produce nonsense. Aave's
- * simulator returns an annualized WAD SUPPLY rate directly (as of the
- * 2026-09-10 fix it applies the borrow -> supply conversion internally; see
- * `aave-simulator.ts`). So only Compound needs the conversion below.
+ * `moonwell-simulator.ts#calculateRateFromUtilization` annualizes
+ * (`* SECONDS_PER_YEAR`) before applying its borrow -> supply conversion —
+ * so by the time its `postDepositRate` reaches us it is already sitting on
+ * the WAD-annualized scale. Re-annualizing it again here would push an
+ * already-annualized number out by another `SECONDS_PER_YEAR` and produce
+ * nonsense. Aave's simulator returns an annualized WAD SUPPLY rate directly
+ * (as of the 2026-09-10 fix it applies the borrow -> supply conversion
+ * internally; see `aave-simulator.ts`). So only Compound needs the
+ * conversion below — and Compound is the one venue whose kinked coefficients
+ * really are a SUPPLY curve, so no conversion is owed there either.
  */
 const PER_SECOND_PROTOCOLS: ReadonlySet<ProtocolId> = new Set<ProtocolId>(['compound']);
 
@@ -88,13 +89,29 @@ export function __resetPlaceholderConfigWarnings(): void {
  *     optimalUtilization/maxUtilization) PLUS the reserve factor, which is a
  *     multiplicative term in Aave's borrow -> supply conversion.
  *
- * FIX 2026-09-10. There used to be no Aave seam at all: this function
+ * FIX 2026-09-10 (E1). There used to be no Aave seam at all: this function
  * returned `DefaultConfigs.aave` unconditionally, and threw if an Aave
  * market supplied `irmParams`. The archive has carried a per-origin chain
  * reading of Aave's real parameters all along, so the shipped controller was
  * simulating Base USDC with placeholders — slope1 4% / slope2 60% / optimal
  * 80% / max 95% against a live 4.7% / 10% / 90% / 100% — and discarding the
  * truth it already held. `aaveIrmParams` is that missing seam.
+ *
+ * FIX 2026-09-10 (E1b). The `irmParams` seam existed but NOTHING EVER FILLED
+ * IT: neither `evaluation/kernel/decision-input.ts` nor
+ * `runtime/decision-driver.ts` populated the field, so Compound and Moonwell
+ * fell through to `DefaultConfigs` on every origin of every run. Measured at
+ * each calibration row's own stored `utilizationE18`, against the stored
+ * `supplyRateE18`:
+ *
+ *   compound  placeholder  7.5689 pp MAE / 14.7411 pp max  (mean rate 4.9411 pp)
+ *   compound  chain-read   0        pp MAE / 0       pp max  — EXACT
+ *   moonwell  placeholder  7.2538 pp MAE / 55.8252 pp max  (mean rate 4.8575 pp)
+ *   moonwell  chain-read   2.76e-9  pp MAE / 5.73e-9 pp max on the 7,370 rows
+ *                          whose archive IRM address is correct
+ *
+ * Compound's placeholder error was LARGER than the Aave defect E1 existed to
+ * close (1.7163 pp). Both drivers now populate `irmParams`.
  *
  * The `irmParams`-on-Aave throw REMAINS, and is still right: a
  * Compound-shaped override on an Aave market is a caller/config error, and
@@ -144,9 +161,19 @@ function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorCon
     warnPlaceholderConfig(
       m.marketId,
       protocol,
-      `DefaultConfigs.${protocol}'s slopeLow/slopeHigh are explicitly documented ` +
-        `PLACEHOLDERS (see protocols/simulation/types.ts), not a chain reading; ` +
-        `populate MarketObservation.irmParams from the origin's snapshot.`
+      protocol === 'compound'
+        ? `DefaultConfigs.compound asserts an 80% kink and a 6.25% low slope; Base Comet USDC's ` +
+            `real values are 85-90% and ~3.6-4.8%, and they move with governance. Measured over ` +
+            `the calibration era at each row's own utilization, the placeholder misses Comet's ` +
+            `stored supply rate by 7.5689 pp MAE / 14.7411 pp max against a mean rate of ` +
+            `4.9411 pp, while the chain-read parameters reproduce it EXACTLY (max error 0); ` +
+            `populate MarketObservation.irmParams from the origin's snapshot.`
+        : `DefaultConfigs.moonwell asserts an 80% kink and a 6.25% multiplier; Base mUSDC's real ` +
+            `values have been 90% and ~6.10%, redeployed by governance repeatedly. Measured over ` +
+            `the calibration era the placeholder misses the mToken's stored supply rate by ` +
+            `7.2538 pp MAE / 55.8252 pp max against a mean rate of 4.8575 pp, while the ` +
+            `chain-read parameters reproduce it to 2.76e-9 pp MAE; populate ` +
+            `MarketObservation.irmParams from the origin's snapshot.`
     );
     return DefaultConfigs[protocol];
   }
@@ -158,17 +185,28 @@ function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorCon
     slopeHigh: slopeHighWad,
   };
   if (protocol === 'moonwell') {
-    // minRate/maxRate are Apollo oracle bounds, not part of the IRM curve
-    // shape irmParams carries — keep them from DefaultConfigs.
-    const defaults = DefaultConfigs.moonwell as MoonwellSimulatorConfig;
+    // Moonwell's four coefficients are a BORROW curve, so its reserve factor
+    // is part of the rate model, not decoration — `MoonwellSimulator`
+    // converts with it. It comes from the SAME origin's reading as the
+    // coefficients; nothing here defaults it.
+    //
+    // The `minRate`/`maxRate` "Apollo oracle bounds" this branch used to
+    // splice in from `DefaultConfigs` are GONE, not merely unused: they were
+    // invented, nothing on chain produces them, and the unclamped curve
+    // reproduces the mToken's stored rate exactly. See
+    // `MoonwellSimulatorConfig`.
     const moonwellConfig: MoonwellSimulatorConfig = {
       ...kinked,
-      minRate: defaults.minRate,
-      maxRate: defaults.maxRate,
+      reserveFactorBps: m.irmParams.reserveFactorBps,
     };
     return moonwellConfig;
   }
-  return kinked; // protocol === 'compound'
+  // protocol === 'compound'. Comet's kinked coefficients ARE the supply
+  // curve, already net of reserves, so `irmParams.reserveFactorBps` (0 for
+  // this venue by construction) is deliberately NOT carried into
+  // `CompoundSimulatorConfig` — a reserve cut applied here would be a second
+  // one.
+  return kinked;
 }
 
 function toMarketState(m: MarketObservation, origin: DecisionInput['origin']): MarketState {

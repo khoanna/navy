@@ -73,23 +73,40 @@ describe('cometBorrowsFromUtilization', () => {
 describe('decodeAaveReserveFlags / aaveReserveIsBlocked', () => {
   const bit = (n: bigint) => 1n << n;
 
+  // E1b 2026-09-10: `decodeAaveReserveFlags` now also returns the reserve
+  // factor from bits 64-79 of the same packed word, because the live
+  // collector needs it as a rate-model input (it is the multiplicative term
+  // in Aave's borrow -> supply conversion) and it is already in the word the
+  // caller has read. The expected objects below gain that field; none of the
+  // three flag assertions changed.
   it('reads active at bit 56, frozen at 57 and paused at 60 (AaveV3Adapter.sol:130-133)', () => {
-    expect(decodeAaveReserveFlags(bit(56n))).toEqual({ active: true, frozen: false, paused: false });
-    expect(decodeAaveReserveFlags(bit(57n))).toEqual({ active: false, frozen: true, paused: false });
-    expect(decodeAaveReserveFlags(bit(60n))).toEqual({ active: false, frozen: false, paused: true });
+    expect(decodeAaveReserveFlags(bit(56n))).toEqual({ active: true, frozen: false, paused: false, reserveFactorBps: 0 });
+    expect(decodeAaveReserveFlags(bit(57n))).toEqual({ active: false, frozen: true, paused: false, reserveFactorBps: 0 });
+    expect(decodeAaveReserveFlags(bit(60n))).toEqual({ active: false, frozen: false, paused: true, reserveFactorBps: 0 });
   });
 
   it('ignores the neighbouring configuration bits it does not own', () => {
     // bits 55, 58, 59 and 61 all set, none of the three flags
     const noise = bit(55n) | bit(58n) | bit(59n) | bit(61n);
-    expect(decodeAaveReserveFlags(noise)).toEqual({ active: false, frozen: false, paused: false });
+    expect(decodeAaveReserveFlags(noise)).toEqual({ active: false, frozen: false, paused: false, reserveFactorBps: 0 });
+  });
+
+  it('reads the reserve factor from bits 64-79, independently of the flag bits', () => {
+    // E1b: Base USDC's real reserve factor is 1000 bps (10%). Packed at bit
+    // 64 alongside an active reserve, both must decode.
+    const word = bit(56n) | (1000n << 64n);
+    expect(decodeAaveReserveFlags(word)).toEqual({ active: true, frozen: false, paused: false, reserveFactorBps: 1000 });
+    // A 16-bit field: bit 80 belongs to the borrow cap, not the reserve factor.
+    expect(decodeAaveReserveFlags(bit(80n)).reserveFactorBps).toBe(0);
+    expect(decodeAaveReserveFlags(0xffffn << 64n).reserveFactorBps).toBe(65535);
   });
 
   it('treats inactive and frozen reserves as blocked, exactly as maxDeployable does', () => {
-    expect(aaveReserveIsBlocked({ active: true, frozen: false, paused: false })).toBe(false);
-    expect(aaveReserveIsBlocked({ active: false, frozen: false, paused: false })).toBe(true);
-    expect(aaveReserveIsBlocked({ active: true, frozen: true, paused: false })).toBe(true);
-    expect(aaveReserveIsBlocked({ active: true, frozen: false, paused: true })).toBe(true);
+    const rf = { reserveFactorBps: 1000 };
+    expect(aaveReserveIsBlocked({ active: true, frozen: false, paused: false, ...rf })).toBe(false);
+    expect(aaveReserveIsBlocked({ active: false, frozen: false, paused: false, ...rf })).toBe(true);
+    expect(aaveReserveIsBlocked({ active: true, frozen: true, paused: false, ...rf })).toBe(true);
+    expect(aaveReserveIsBlocked({ active: true, frozen: false, paused: true, ...rf })).toBe(true);
   });
 });
 

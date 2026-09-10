@@ -44,6 +44,56 @@ export interface VenueState {
   reserves: bigint;
   /** True when the venue will not currently accept a deposit. */
   paused: boolean;
+  /**
+   * The venue's LIVE interest-rate-model parameters, read at the same block
+   * as the state above (paper §6.3-6.5).
+   *
+   * ABSENT means "the rate-model read did not succeed at this block", and
+   * that is a REFUSAL, never an invitation to substitute a default: the only
+   * consumer, `policy/steps/simulate.ts#resolveConfig`, falls back to
+   * `DefaultConfigs` and WARNS, naming the market. Absent is never
+   * half-populated — every field comes from the same block's reads or the
+   * whole object is omitted.
+   */
+  irm?: VenueIrmReading;
+}
+
+/**
+ * A venue's interest-rate-model parameters, normalised across protocols.
+ *
+ * WHAT THE COEFFICIENTS MEAN IS PROTOCOL-DEPENDENT and the shape does not
+ * say which — `MarketObservation.irmParams` carries the same warning, and
+ * `resolveConfig` dispatches on protocol for exactly this reason:
+ *
+ *   - compound: a SUPPLY curve, already net of reserves. `reserveFactorBps`
+ *     is 0 here BY DESIGN, matching what the archive stores for Comet.
+ *   - moonwell: a BORROW curve. supply = borrow * u * (1 - reserveFactor).
+ *   - aave:     a BORROW curve of a different SHAPE — `kinkRay` is the
+ *     optimal usage ratio and the slopes are variableRateSlope1/2. Aave-only
+ *     `optimalUtilizationRay`/`maxUtilizationRay` are populated for it and
+ *     ONLY for it, which is what lets a consumer tell the two shapes apart.
+ *
+ * Rates are WAD (1e18) ANNUALIZED; Compound and Moonwell report per-second
+ * and are annualized at the read site, Aave reports bps or RAY per year.
+ * Mirrors `collector/archive/calls.ts#IrmReading`, which is the same reading
+ * taken at an archive block.
+ */
+export interface VenueIrmReading {
+  /** Address of the model that produced these. Not constant over time. */
+  address: string;
+  /** Annualized rate at zero utilization, WAD. */
+  baseRateWad: bigint;
+  /** Kink / optimal utilization, RAY. */
+  kinkRay: bigint;
+  /** Annualized slope below the kink, WAD. */
+  slopeLowWad: bigint;
+  /** Annualized slope above the kink, WAD. */
+  slopeHighWad: bigint;
+  /** The venue's reserve cut, bps. 0 for Compound III by design. */
+  reserveFactorBps: number;
+  /** Aave V3 only: optimal and max usage ratio, RAY. */
+  optimalUtilizationRay?: bigint;
+  maxUtilizationRay?: bigint;
 }
 
 export interface CollectedSnapshot {
@@ -161,6 +211,15 @@ export interface StrategySnapshot {
   /** True when the venue will not currently accept a deposit. */
   paused: boolean;
   configDigest: string;
+  /**
+   * The venue's LIVE interest-rate-model parameters at this block — see
+   * `VenueIrmReading`. `runtime/decision-driver.ts` un-aliases this into
+   * `MarketObservation.irmParams` / `aaveIrmParams`, which is what makes the
+   * LIVE decision path simulate the real curve instead of `DefaultConfigs`.
+   * Absent is a refusal, not a default; the fallback warns and names the
+   * market.
+   */
+  irm?: VenueIrmReading;
   /** Effective cap after cold-start constraints (optional) */
   effectiveCap?: bigint;
 }

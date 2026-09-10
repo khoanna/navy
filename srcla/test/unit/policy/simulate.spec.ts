@@ -219,6 +219,12 @@ describe('simulateCurves — materiality guard (deposit must move the rate mater
       kinkRay: (8n * RAY) / 10n, // 80%
       slopeLowWad: (625n * WAD) / 10_000n, // 6.25% -> 5% at the 80% kink
       slopeHighWad: (150n * WAD) / 100n, // 150% -> steep above kink
+      // E1b 2026-09-10: irmParams now carries the venue's reserve factor,
+      // because Moonwell's kinked coefficients are a BORROW curve and the
+      // conversion needs it. This market is protocol 'compound', whose curve
+      // is already net of reserves, so 0 is the correct value and every
+      // number asserted below is unchanged.
+      reserveFactorBps: 0,
     };
     // Model's own rate at 90% util, zero deposit (exact, no truncation --
     // this is the observation's declared value, not a simulator output):
@@ -271,13 +277,16 @@ describe('simulateCurves — irmParams override is actually used', () => {
   }
 
   it('two different irmParams on the same market yield materially different curves', () => {
+    // E1b: `reserveFactorBps` is a new REQUIRED member of irmParams; both
+    // markets are protocol 'compound' (reserve factor 0 by design), so the
+    // asserted values below are unchanged.
     const steep = {
       baseRateWad: (3n * WAD) / 100n, kinkRay: (8n * RAY) / 10n,
-      slopeLowWad: (625n * WAD) / 10_000n, slopeHighWad: WAD,
+      slopeLowWad: (625n * WAD) / 10_000n, slopeHighWad: WAD, reserveFactorBps: 0,
     };
     const flat = {
       baseRateWad: (3n * WAD) / 100n, kinkRay: (8n * RAY) / 10n,
-      slopeLowWad: 0n, slopeHighWad: 0n,
+      slopeLowWad: 0n, slopeHighWad: 0n, reserveFactorBps: 0,
     };
     const QUANTUM = 1_000_000_000n;
     const [steepCurve] = simulateCurves(input([marketWithIrm(steep)]), ['override'], QUANTUM, 2);
@@ -296,6 +305,9 @@ const KINKED_IRM_PARAMS = {
   kinkRay: (8n * RAY) / 10n,
   slopeLowWad: (625n * WAD) / 10_000n,
   slopeHighWad: WAD,
+  // E1b: new REQUIRED member. This object exists only to be REJECTED by an
+  // Aave market, so its value is immaterial to what the test proves.
+  reserveFactorBps: 0,
 };
 
 function aaveMarketWith(irmParams?: MarketObservation['irmParams']): MarketObservation {

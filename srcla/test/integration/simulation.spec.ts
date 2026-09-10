@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { WAD, RAY } from '../../src/protocols/math.js';
+import { WAD, RAY, SECONDS_PER_YEAR } from '../../src/protocols/math.js';
 import { AaveV3Simulator } from '../../src/protocols/simulation/aave-simulator.js';
 import { CompoundV3Simulator } from '../../src/protocols/simulation/compound-simulator.js';
 import { MoonwellSimulator } from '../../src/protocols/simulation/moonwell-simulator.js';
@@ -268,12 +268,26 @@ describe('MoonwellSimulator', () => {
     expect(result.capacityRemaining).toBeGreaterThanOrEqual(0n);
   });
 
-  it('should respect rate bounds from Apollo oracle', () => {
+  // E1b 2026-09-10. This test used to be "should respect rate bounds from
+  // Apollo oracle" and asserted `postDepositRate >= DEFAULT_MOONWELL_CONFIG
+  // .minRate` (1%). ITS INTENT NO LONGER APPLIES: there are no Apollo oracle
+  // bounds. `minRate`/`maxRate` were invented, nothing on chain produces
+  // them, and the unclamped curve reproduces the mToken's stored
+  // `supplyRateE18` to 2.76e-9 pp MAE over the calibration era, including
+  // rows whose real supply rate is 20.83 pp -- above the invented 20%
+  // ceiling. The old assertion was true only because the code clamped to
+  // satisfy it.
+  //
+  // Rewritten, not weakened, to pin the relation that IS real, and at the
+  // utilization where the removed floor is most visible: a barely-borrowed
+  // market pays suppliers far LESS than the former 1% floor, because
+  // supply = borrow * u * (1 - reserveFactor) and u is tiny.
+  it('pays supply = borrow * u * (1 - reserveFactor), with no rate floor', () => {
     const veryLowUtilState: MarketState = {
       ...baseMarketState,
       cash: 500_000_000_000_000n, // 500M cash
       borrows: 10_000_000_000_000n, // 10M borrows -> ~2% utilization
-      supplyRate: 1n * WAD / 100n, // Very low rate (at minRate)
+      supplyRate: 1n * WAD / 100n,
     };
 
     const result = simulator.simulateRate(
@@ -282,8 +296,24 @@ describe('MoonwellSimulator', () => {
       DEFAULT_MOONWELL_CONFIG
     );
 
-    // Rate should be clamped to minRate
-    expect(result.postDepositRate).toBeGreaterThanOrEqual(DEFAULT_MOONWELL_CONFIG.minRate);
+    // Reconstruct the expected supply rate from the borrow curve, so this
+    // asserts the CONVERSION rather than agreeing with whatever simulateRate
+    // happened to return.
+    const utilRay = result.utilizationAfter;
+    const borrowAnnualWad =
+      simulator.calculateBorrowRateFromUtilization(utilRay, DEFAULT_MOONWELL_CONFIG) *
+      SECONDS_PER_YEAR;
+    const utilWad = utilRay / 10n ** 9n;
+    const rfWad = (BigInt(DEFAULT_MOONWELL_CONFIG.reserveFactorBps) * WAD) / 10_000n;
+    const expected = (((borrowAnnualWad * utilWad) / WAD) * (WAD - rfWad)) / WAD;
+
+    expect(result.postDepositRate).toBe(expected);
+    // The discriminating half: below the former 1% floor by two orders of
+    // magnitude. This assertion FAILS under the clamp this fix removed.
+    expect(result.postDepositRate).toBeLessThan(WAD / 100n);
+    // And it is strictly less than the borrow rate it was derived from --
+    // the borrow-rate-as-supply-rate defect would make these equal.
+    expect(result.postDepositRate).toBeLessThan(borrowAnnualWad);
   });
 
   it('should calculate capacityRemaining correctly with 95% max utilization', () => {

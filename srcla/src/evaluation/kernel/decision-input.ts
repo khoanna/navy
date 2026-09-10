@@ -198,6 +198,8 @@ export function buildDecisionInput(
       // ALL-OR-NOTHING: any missing field leaves `aaveIrmParams` undefined,
       // and `resolveConfig` then falls back to the placeholder AND warns.
       // Never half-populated, never defaulted field by field.
+      //
+      // The Compound/Moonwell half of the same seam is `irmParams`, below.
       ...(protocolOf(m.marketId) === 'aave' &&
       m.irmBaseRateWad !== undefined &&
       m.irmSlopeLowWad !== undefined &&
@@ -212,6 +214,52 @@ export function buildDecisionInput(
               variableRateSlope2Wad: m.irmSlopeHighWad,
               optimalUtilizationRay: m.irmOptimalUtilizationRay,
               maxUtilizationRay: m.irmMaxUtilizationRay,
+              reserveFactorBps: m.reserveFactorBps,
+            },
+          }
+        : {}),
+      // §6.4's Compound III kinked SUPPLY curve and §6.5's Moonwell
+      // JumpRateModel BORROW curve, read at THIS origin's own block by the
+      // archive backfill — not `DEFAULT_COMPOUND_CONFIG` /
+      // `DEFAULT_MOONWELL_CONFIG`.
+      //
+      // FIX 2026-09-10 (E1b). This seam existed on `MarketObservation` and
+      // NOTHING FILLED IT, here or on the live driver, so every Compound and
+      // Moonwell curve in every run came from the placeholders. Measured at
+      // each calibration row's own stored `utilizationE18` against its stored
+      // `supplyRateE18`: Compound's placeholder was off 7.5689 pp MAE /
+      // 14.7411 pp max (mean rate 4.9411 pp) where the chain-read parameters
+      // are EXACT (max error 0); Moonwell's was off 7.2538 pp MAE /
+      // 55.8252 pp max (mean rate 4.8575 pp) where the chain-read parameters
+      // reproduce the stored rate to 2.76e-9 pp MAE. Compound's error was
+      // larger than the Aave defect the block above exists to close.
+      //
+      // AAVE IS EXCLUDED, not merely unhandled: an Aave row carries these
+      // same four columns under a DIFFERENT meaning (`irmKinkRay` is its
+      // optimal usage ratio, the slopes are variableRateSlope1/2 of a
+      // structurally different curve), and `resolveConfig` THROWS if an Aave
+      // market supplies `irmParams`. The `protocolOf` gate here is what makes
+      // that throw unreachable from this path rather than a live hazard.
+      //
+      // ALL-OR-NOTHING, same discipline as the Aave block: any missing field
+      // leaves `irmParams` undefined and `resolveConfig` falls back to the
+      // placeholder AND warns, naming the market. `reserveFactorBps` is part
+      // of the model (Moonwell's borrow -> supply conversion) and is 0 for
+      // Compound by construction — `evaluation/dataset.ts#resolveReserveFactorBps`
+      // resolves Comet's NULL column to 0 for that venue only, so a genuinely
+      // missing reading on any other protocol still refuses.
+      ...(protocolOf(m.marketId) !== 'aave' &&
+      m.irmBaseRateWad !== undefined &&
+      m.irmKinkRay !== undefined &&
+      m.irmSlopeLowWad !== undefined &&
+      m.irmSlopeHighWad !== undefined &&
+      m.reserveFactorBps !== undefined
+        ? {
+            irmParams: {
+              baseRateWad: m.irmBaseRateWad,
+              kinkRay: m.irmKinkRay,
+              slopeLowWad: m.irmSlopeLowWad,
+              slopeHighWad: m.irmSlopeHighWad,
               reserveFactorBps: m.reserveFactorBps,
             },
           }

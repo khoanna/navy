@@ -72,20 +72,36 @@ export interface AaveSimulatorConfig {
 /**
  * Configuration for Compound III interest rate simulation.
  *
- * Compound III uses a kinked linear interest rate model based on utilization.
- * The rate has a "kink" point where the slope changes, per Compound Comet governance.
+ * Comet's kinked-linear curve IS THE SUPPLY CURVE, already net of reserves —
+ * `supplyPerSecondInterestRateBase/SlopeLow/SlopeHigh` and `supplyKink()` are
+ * distinct on-chain getters from the borrow-side ones, and
+ * `Comet.getSupplyRate(utilization)` applies no reserve-factor term at all.
+ * That is why this config has no `reserveFactorBps` and why the archive
+ * stores `reserveFactorBps = NULL` for Compound BY DESIGN
+ * (`evaluation/dataset.ts#resolveReserveFactorBps` resolves that NULL to 0
+ * for this venue only). Adding a reserve cut here would double-charge it.
  *
  * Rate formula (per docs.compound.finance/interest-rates/):
  *   - if util <= kink: rate = baseRate + slopeLow * util
  *   - if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
  *
+ * MEASURED 2026-09-10. Fed each calibration origin's OWN chain-read
+ * parameters and the archive's own `utilizationE18`, this map reproduces
+ * Comet's stored `supplyRateE18` EXACTLY — MAE 0, max absolute error 0,
+ * across all 10,632 calibration rows. Fed `DEFAULT_COMPOUND_CONFIG` instead
+ * it is off by 7.5689 pp MAE / 14.7411 pp max against a mean stored rate of
+ * 4.9411 pp. The parameters are the whole difference; the formula was
+ * already right.
+ *
  * @example
  * ```typescript
+ * // Base mainnet Comet USDC at block 16,659,726, read from chain and
+ * // annualized (its getters are per-second):
  * const config: CompoundSimulatorConfig = {
- *   baseRate: 3n * WAD / 100n,          // 3% APY minimum
- *   kink: 8n * RAY / 10n,               // 80% kink point
- *   slopeLow: 625n * WAD / 10_000n,       // 6.25% WAD -> 8% APY at 80% kink
- *   slopeHigh: WAD,                         // 100% WAD -> ~28% APY at 100% util
+ *   baseRate: 0n,                              // 0% base
+ *   kink: 85n * RAY / 100n,                    // 85%, not the placeholder's 80%
+ *   slopeLow: 48_032_876_705_364_000n,         // ~4.80%, not the placeholder's 6.25%
+ *   slopeHigh: 1_601_095_890_410_222_400n,     // ~160.1%
  * };
  * ```
  */
@@ -103,26 +119,64 @@ export interface CompoundSimulatorConfig {
 /**
  * Configuration for Moonwell interest rate simulation.
  *
- * Moonwell is a Compound III fork with Apollo oracle bounds. The rate is
- * similar to Compound III but bounded by [minRate, maxRate] from the oracle.
+ * Moonwell is a COMPOUND V2 fork, not a Compound III fork, and the
+ * distinction is the whole of this type. Its `JumpRateModel` stores a
+ * BORROW curve (`baseRatePerTimestamp` / `multiplierPerTimestamp` /
+ * `jumpMultiplierPerTimestamp` / `kink`), and the mToken derives the supply
+ * rate from it the Compound-v2 way:
+ *
+ *   supply(u) = borrow(u) * u * (1 - reserveFactor)
+ *
+ * so the same four coefficients that ARE a supply curve on Comet are a
+ * borrow curve here. `reserveFactorBps` is therefore a REQUIRED member of
+ * the rate model, not decoration - the same reason `AaveSimulatorConfig`
+ * requires it (see that type). It comes from the mToken's own
+ * `reserveFactorMantissa()`; Base mUSDC has run at 1000 bps and 1500 bps
+ * inside the calibration window.
+ *
+ * NO ORACLE BOUNDS. This type used to carry `minRate`/`maxRate`, described
+ * as "Apollo oracle bounds", and `MoonwellSimulator#simulateRate` clamped
+ * every result to them. Nothing on chain produces such a bound and the
+ * archive has never held a per-origin reading of one, because there is
+ * nothing to read: measured over the calibration era, this curve WITHOUT any
+ * clamp reproduces the mToken's stored `supplyRateE18` to 2.76e-9 pp MAE
+ * (max 5.73e-9 pp - integer truncation) on every one of the 7,370 rows whose
+ * IRM address the archive resolved correctly, including rows whose real
+ * supply rate is 20.83 pp, which the invented 20% ceiling would have
+ * clipped. The bounds were a fabrication; a fabricated clamp is exactly the
+ * class of silent substitution this subsystem keeps being bitten by, so they
+ * are gone rather than retained "harmlessly".
  *
  * @example
  * ```typescript
+ * // Base mainnet mUSDC at block 16,659,726 (IRM 0x54dC...2445), read from
+ * // chain and annualized (its getters are per-timestamp):
  * const config: MoonwellSimulatorConfig = {
- *   baseRate: 3n * WAD / 100n,              // 3% APY minimum
- *   kink: 8n * RAY / 10n,                   // 80% kink point
- *   slopeLow: 625n * WAD / 10_000n,        // 6.25% WAD -> 8% APY at 80% kink
- *   slopeHigh: WAD,                          // 100% WAD -> ~28% APY at 100% util
- *   minRate: 1n * WAD / 100n,              // 1% APY floor from oracle
- *   maxRate: 20n * WAD / 100n,              // 20% APY ceiling from oracle
+ *   baseRate: 0n,
+ *   kink: 9n * RAY / 10n,                    // 90%
+ *   slopeLow: 61_041_780_821_613_600n,       // ~6.10% borrow multiplier
+ *   slopeHigh: 9_006_164_383_533_832_800n,   // ~900.6% jump multiplier
+ *   reserveFactorBps: 1500,                  // 15%
  * };
  * ```
  */
-export interface MoonwellSimulatorConfig extends CompoundSimulatorConfig {
-  /** Minimum rate bound from Apollo oracle (WAD) */
-  minRate: bigint;
-  /** Maximum rate bound from Apollo oracle (WAD) */
-  maxRate: bigint;
+export interface MoonwellSimulatorConfig {
+  /** Annualized BORROW rate at 0% utilization (WAD). */
+  baseRate: bigint;
+  /** Utilization kink point (RAY, e.g. 9e26 = 90%). */
+  kink: bigint;
+  /** Annualized BORROW slope below the kink (the `multiplier`), WAD. */
+  slopeLow: bigint;
+  /** Annualized BORROW slope above the kink (the `jumpMultiplier`), WAD. */
+  slopeHigh: bigint;
+  /**
+   * The mToken's reserve factor, bps - the share of BORROW interest the
+   * protocol keeps instead of paying to suppliers. REQUIRED, not optional:
+   * it is a multiplicative term in the borrow -> supply conversion, and an
+   * absent value silently reading as 0 would overstate the supply rate by
+   * exactly this factor.
+   */
+  reserveFactorBps: number;
 }
 
 // ============================================================================
@@ -308,16 +362,35 @@ export const DEFAULT_COMPOUND_CONFIG: CompoundSimulatorConfig = {
 };
 
 /**
- * Default Moonwell simulation configuration.
- * Based on Moonwell Apollo deployment parameters.
+ * PLACEHOLDER Moonwell configuration - a LAST RESORT, not the live model.
+ *
+ * `baseRate`/`kink`/`slopeLow`/`slopeHigh` below are the same invented
+ * numbers as `DEFAULT_COMPOUND_CONFIG`'s and they are not Moonwell's: Base
+ * mUSDC's real kink has been 90%, not 80%, and its real multiplier ~6.10%
+ * against this 6.25%, changing at every governance redeploy of the rate
+ * model. Measured over the calibration era, simulating from this placeholder
+ * (as the shipped code did, oracle clamp included) misses the stored supply
+ * rate by 7.2538 pp MAE / 55.8252 pp max against a mean stored rate of
+ * 4.8575 pp.
+ *
+ * The real per-origin parameters are carried by
+ * `MarketObservation.irmParams` and are what
+ * `policy/steps/simulate.ts#resolveConfig` uses whenever they are present;
+ * falling back here emits a one-shot warning per market rather than
+ * substituting silently.
+ *
+ * Retained only so hand-built fixtures and synthetic datasets - which carry
+ * no chain reading at all - still produce a curve of the right SHAPE.
  */
 export const DEFAULT_MOONWELL_CONFIG: MoonwellSimulatorConfig = {
   baseRate: 3n * WAD / 100n,              // 3% APY
   kink: 8n * RAY / 10n,                   // 80% kink
   slopeLow: PLACEHOLDER_SLOPE_LOW,
   slopeHigh: PLACEHOLDER_SLOPE_HIGH,
-  minRate: 1n * WAD / 100n,              // 1% floor from oracle
-  maxRate: 20n * WAD / 100n,             // 20% ceiling from oracle (caps the
-                                          // kinked curve above ~92% util given
-                                          // the slopes above — intentional)
+  // The one field here that IS a live reading: Base mUSDC's reserve factor,
+  // 1500 bps at the end of the calibration window. There is no meaningful
+  // "shape-only" placeholder for a multiplicative term, and 0 would assert
+  // "suppliers keep all borrow interest", which is true of no Moonwell
+  // market. Same reasoning as DEFAULT_AAVE_CONFIG.reserveFactorBps.
+  reserveFactorBps: 1500,
 };

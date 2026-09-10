@@ -2,18 +2,33 @@
  * Moonwell Interest Rate Simulator
  *
  * Implements post-deposit interest rate simulation for Moonwell protocol.
- * Moonwell is a Compound III fork with Apollo oracle bounds on interest rates.
+ * Moonwell is a COMPOUND V2 fork (a `JumpRateModel` behind an mToken), NOT a
+ * Compound III fork.
  *
- * Rate Model (per docs.compound.finance/interest-rates/):
- *   baseRate = kinked linear rate from Compound model
- *   rate = clamp(baseRate, minRate, maxRate)
+ * Rate model:
+ *   borrow(u) = base + multiplier * u                       u <= kink
+ *   borrow(u) = base + multiplier * kink
+ *               + jumpMultiplier * (u - kink)                u >  kink
+ *   supply(u) = borrow(u) * u * (1 - reserveFactor)
  *
- * Where minRate and maxRate are provided by the Apollo oracle.
+ * THE BORROW -> SUPPLY CONVERSION IS THE POINT. The kinked coefficients an
+ * mToken's rate model stores are a BORROW curve; Comet's identically-shaped
+ * coefficients are a SUPPLY curve. Treating Moonwell's as Comet's -- which
+ * this file did until 2026-09-10 -- returns a borrow rate under a name and a
+ * type that every consumer reads as a supply rate, and
+ * `policy/steps/simulate.ts` wrote exactly that into `RateCurve.points`.
+ * Measured over the calibration era with each origin's own chain-read
+ * parameters, the unconverted borrow rate misses the mToken's stored
+ * `supplyRateE18` by 3.3671 pp MAE (max 87.3654 pp); with the conversion it
+ * reproduces it to 2.76e-9 pp MAE (max 5.73e-9 pp, integer truncation) on
+ * every row whose IRM address the archive resolved correctly.
  *
- * Key differences from Compound III:
- *   - Rate is bounded by [minRate, maxRate] from Apollo oracle
- *   - More conservative rate adjustments due to oracle bounds
- *   - Same kinked linear model as Compound
+ * NO ORACLE CLAMP. `simulateRate` used to clamp its result into
+ * `[minRate, maxRate]`, described as Apollo oracle bounds. Nothing on chain
+ * produces such a bound, the archive holds no reading of one, and the
+ * measurement above -- exact WITHOUT a clamp, on rows whose real supply rate
+ * reaches 20.83 pp against an invented 20% ceiling -- falsifies it outright.
+ * See `MoonwellSimulatorConfig` in ./types.ts.
  *
  * @module protocols/simulation
  */
@@ -21,10 +36,10 @@
 import { WAD, RAY, SECONDS_PER_YEAR, utilization as calcUtil } from '../math.js';
 import { calculateRateFromUtilization } from './compound-simulator.js';
 import {
-  CompoundSimulatorConfig,
   DEFAULT_MOONWELL_CONFIG,
   ISimulator,
   MarketState,
+  MoonwellSimulatorConfig,
   SimulatedRate,
   SimulatorConfig,
 } from './types.js';
@@ -44,7 +59,7 @@ import {
  *   10_000_000_000_000n,  // Deposit 10M USDC
  *   DEFAULT_MOONWELL_CONFIG
  * );
- * console.log(`Post-deposit rate: ${result.postDepositRate / WAD * 100}%`);
+ * console.log(`Post-deposit SUPPLY rate: ${result.postDepositRate / WAD * 100}%`);
  * ```
  */
 export class MoonwellSimulator implements ISimulator {
@@ -61,40 +76,67 @@ export class MoonwellSimulator implements ISimulator {
   }
 
   /**
-   * Calculate Moonwell supply rate from utilization (unbounded).
+   * Moonwell's BORROW rate at a given utilization, kinked-linear.
    *
-   * Uses Compound's kinked linear rate model:
-   *   if util <= kink: rate = baseRate + slopeLow * util
-   *   if util > kink:  rate = baseRate + slopeLow * kink + slopeHigh * (util - kink)
+   *   if util <= kink: borrow = baseRate + slopeLow * util
+   *   if util > kink:  borrow = baseRate + slopeLow * kink
+   *                             + slopeHigh * (util - kink)
+   *
+   * NAMED FOR THE QUANTITY IT RETURNS. It used to be called
+   * `calculateRateFromUtilization` under a docstring promising a supply
+   * rate; it never was one. See the module comment for the measurement.
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Moonwell configuration parameters
-   * @returns Supply rate per second (WAD scale) — this delegates to Compound's
-   *   `calculateRateFromUtilization`, which divides the annual config rates by
-   *   `SECONDS_PER_YEAR` internally (see compound-simulator.ts). Callers MUST
-   *   multiply by `SECONDS_PER_YEAR` before comparing against anything on the
-   *   WAD-annualized scale, such as the `minRate`/`maxRate` oracle bounds below.
-   *   (This docstring previously said "Annualized" — that was the bug.)
+   * @returns BORROW rate per second (WAD scale) — this delegates to
+   *   Compound's `calculateRateFromUtilization`, which divides the annual
+   *   config rates by `SECONDS_PER_YEAR` internally (see
+   *   compound-simulator.ts). Callers MUST multiply by `SECONDS_PER_YEAR` to
+   *   reach the WAD-annualized scale everything else here uses.
    */
-  calculateRateFromUtilization(
+  calculateBorrowRateFromUtilization(
     util: bigint,
-    config: CompoundSimulatorConfig
+    config: MoonwellSimulatorConfig
   ): bigint {
     return calculateRateFromUtilization(util, config);
   }
 
   /**
-   * Clamp a rate value to the [minRate, maxRate] bounds.
+   * Compound v2's borrow -> supply conversion, which is what an mToken
+   * actually pays a supplier:
    *
-   * @param rate - The rate to clamp (WAD)
-   * @param minRate - Minimum allowed rate (WAD)
-   * @param maxRate - Maximum allowed rate (WAD)
-   * @returns Rate clamped to bounds (WAD)
+   *   supply = borrow * u * (1 - reserveFactor)
+   *
+   * @param borrowRateAnnualWad - Annualized BORROW rate (WAD)
+   * @param utilWad - Utilization as a WAD fraction (WAD == 100%)
+   * @param reserveFactorBps - The mToken's reserve factor, bps
+   * @returns Annualized SUPPLY rate (WAD)
    */
-  clampRate(rate: bigint, minRate: bigint, maxRate: bigint): bigint {
-    if (rate < minRate) return minRate;
-    if (rate > maxRate) return maxRate;
-    return rate;
+  borrowToSupplyRate(
+    borrowRateAnnualWad: bigint,
+    utilWad: bigint,
+    reserveFactorBps: number
+  ): bigint {
+    const afterUtilization = (borrowRateAnnualWad * utilWad) / WAD;
+    const reserveFactorWad = (BigInt(Math.trunc(reserveFactorBps)) * WAD) / 10_000n;
+    return (afterUtilization * (WAD - reserveFactorWad)) / WAD;
+  }
+
+  /**
+   * The ANNUALIZED SUPPLY rate at a given utilization — the quantity every
+   * consumer of `SimulatedRate.postDepositRate` wants, and the composition
+   * of the two functions above.
+   *
+   * @param util - Utilization ratio (RAY)
+   * @param config - Moonwell configuration parameters
+   * @returns Annualized supply rate (WAD)
+   */
+  calculateRateFromUtilization(
+    util: bigint,
+    config: MoonwellSimulatorConfig
+  ): bigint {
+    const borrowAnnualWad = this.calculateBorrowRateFromUtilization(util, config) * SECONDS_PER_YEAR;
+    return this.borrowToSupplyRate(borrowAnnualWad, util / (RAY / WAD), config.reserveFactorBps);
   }
 
   /**
@@ -124,10 +166,16 @@ export class MoonwellSimulator implements ISimulator {
   }
 
   /**
-   * Simulate post-deposit interest rate with Apollo oracle bounds.
+   * Simulate the post-deposit SUPPLY rate.
    *
-   * Calculates the new utilization and resulting supply rate after
-   * a hypothetical deposit, then applies Apollo oracle rate bounds.
+   * Calculates the new utilization and the resulting supply rate after a
+   * hypothetical deposit, applying the Compound-v2 borrow -> supply
+   * conversion the mToken itself applies.
+   *
+   * NO ORACLE CLAMP. This function used to clamp its result into a
+   * `[minRate, maxRate]` pair described as Apollo oracle bounds. See the
+   * module comment: no such bound exists on chain, and the unclamped curve
+   * reproduces the mToken's stored rate exactly.
    *
    * @param state - Current market state
    * @param depositAmount - Amount to deposit (USDC base units)
@@ -140,7 +188,7 @@ export class MoonwellSimulator implements ISimulator {
     config: SimulatorConfig
   ): SimulatedRate {
     const { marketId, cash, borrows, supplyRate } = state;
-    const moonwellConfig = config as CompoundSimulatorConfig;
+    const moonwellConfig = config as MoonwellSimulatorConfig;
 
     // Calculate pre-deposit utilization
     const utilizationBefore = this.calculateUtilization(cash, borrows);
@@ -150,21 +198,10 @@ export class MoonwellSimulator implements ISimulator {
     const newCash = cash + depositAmount;
     const utilizationAfter = this.calculateUtilization(newCash, borrows);
 
-    // Calculate unbounded post-deposit rate using kinked linear model.
-    // calculateRateFromUtilization returns a WAD-**per-second** rate (it
-    // delegates to Compound's model, which divides by SECONDS_PER_YEAR
-    // internally). Annualize it BEFORE clamping — the [minRate, maxRate]
-    // Apollo oracle bounds below are WAD-**annualized** — otherwise the
-    // clamp compares a ~1e8-1e9 per-second number against ~1e16-1e17
-    // annualized bounds and saturates to minRate for every input,
-    // making the curve information-free regardless of utilization.
-    const unboundedRatePerSec = this.calculateRateFromUtilization(utilizationAfter, moonwellConfig);
-    const unboundedRate = unboundedRatePerSec * SECONDS_PER_YEAR;
-
-    // Apply Apollo oracle bounds for Moonwell
-    const minRate = (moonwellConfig as { minRate?: bigint }).minRate ?? (1n * WAD) / 100n;
-    const maxRate = (moonwellConfig as { maxRate?: bigint }).maxRate ?? (20n * WAD) / 100n;
-    const postDepositRate = this.clampRate(unboundedRate, minRate, maxRate);
+    // The annualized SUPPLY rate: kinked-linear borrow curve, annualized,
+    // then * u * (1 - reserveFactor). The conversion was absent before
+    // 2026-09-10 and the borrow rate was returned in its place.
+    const postDepositRate = this.calculateRateFromUtilization(utilizationAfter, moonwellConfig);
 
     // Calculate effective capacity
     const effectiveCapacity = this.calculateEffectiveCapacity(
@@ -178,11 +215,9 @@ export class MoonwellSimulator implements ISimulator {
     // the base utilization threshold (use 80% as reasonable optimal for penalty)
     const optimalUtilization = (80n * RAY) / 100n;
 
-    // Calculate rate before deposit — annualized and oracle-bounded the same
-    // way as postDepositRate above, so the ratePenalty comparison below is
-    // apples-to-apples (both WAD-annualized, both post-clamp).
-    const rateBeforePerSec = this.calculateRateFromUtilization(utilizationBefore, moonwellConfig);
-    const rateBefore = this.clampRate(rateBeforePerSec * SECONDS_PER_YEAR, minRate, maxRate);
+    // Calculate rate before deposit — through the same map, so the
+    // ratePenalty comparison below is apples-to-apples.
+    const rateBefore = this.calculateRateFromUtilization(utilizationBefore, moonwellConfig);
 
     // Calculate capacity remaining after deposit (floor at 0)
     const capacityRemaining = effectiveCapacity > depositAmount
@@ -261,22 +296,21 @@ export class MoonwellSimulator implements ISimulator {
    * @param _state - Current market state (unused, reserved for future use)
    * @param stressUtilization - Target utilization under stress (RAY)
    * @param config - Moonwell configuration
-   * @returns Stress rate (WAD)
+   * @returns Annualized SUPPLY rate at that utilization (WAD)
    */
   simulateStressRate(
     _state: MarketState,
     stressUtilization: bigint,
-    config: CompoundSimulatorConfig = DEFAULT_MOONWELL_CONFIG
+    config: MoonwellSimulatorConfig = DEFAULT_MOONWELL_CONFIG
   ): bigint {
-    if (stressUtilization === 0n) return config.baseRate;
+    // At zero utilization the mToken pays suppliers nothing, whatever the
+    // borrow curve's intercept is: supply = borrow * u * (1 - rf) and u = 0.
+    // This returned `config.baseRate` — a BORROW-curve intercept — before
+    // 2026-09-10.
+    if (stressUtilization === 0n) return 0n;
 
-    // Calculate rate at stress utilization using kinked linear model
-    const unboundedRate = this.calculateRateFromUtilization(stressUtilization, config);
-
-    // Apply bounds
-    const minRate = (config as { minRate?: bigint }).minRate ?? (1n * WAD) / 100n;
-    const maxRate = (config as { maxRate?: bigint }).maxRate ?? (20n * WAD) / 100n;
-
-    return this.clampRate(unboundedRate, minRate, maxRate);
+    // Annualized SUPPLY rate at the stress utilization. No oracle clamp: see
+    // the module comment.
+    return this.calculateRateFromUtilization(stressUtilization, config);
   }
 }

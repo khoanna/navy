@@ -254,22 +254,26 @@ export function meanForecast(
  *     changed here — it also backs the LIVE post-deposit curve
  *     (`policy/steps/simulate.ts`), and correcting it is a separate,
  *     larger-blast-radius fix outside this task; flagged in the fix report.
- *   - moonwell: `MoonwellSimulator#calculateRateFromUtilization` (kinked-
- *     linear, same shape as Compound, annualized from its own WAD-per-second
- *     return — see its docstring), THEN `* u * (1 - rf)`, for the same
- *     Compound-v2-fork reason as Aave. BELOW each regime's own kink this
- *     measures 0.08pp MAE (near-exact). ABOVE it, measured error is large
- *     (worst observed ~65pp on one 2024-03/04 regime) and UNRESOLVED: the
- *     stored rate stays nearly flat (~4-8pp) as utilization climbs from 83%
- *     to 90%+ under that regime's own (real, chain-read) coefficients, which
- *     this kinked-linear-plus-conversion map cannot reproduce. Hypothesis,
- *     not confirmed: Moonwell's Apollo-oracle rate bound (`minRate`/
- *     `maxRate`, modeled in `MoonwellSimulator#simulateRate` but with no
- *     stored PER-ORIGIN reading in this archive) is clamping the real rate
- *     and this map, lacking that data, cannot. NOT patched with
- *     `DEFAULT_MOONWELL_CONFIG`'s bounds — those are a guess at values this
- *     archive does not have, which is exactly the substitution this task
- *     exists to remove. Flagged in the fix report as an open finding.
+ *   - moonwell: `MoonwellSimulator#calculateBorrowRateFromUtilization`
+ *     (kinked-linear, same shape as Compound, annualized from its own
+ *     WAD-per-second return — see its docstring), THEN `* u * (1 - rf)`, for
+ *     the same Compound-v2-fork reason as Aave.
+ *
+ *     RESOLVED 2026-09-10 (this was an open finding). Round 2 reported a
+ *     large above-kink residue, worst ~65pp, and hypothesised an unmodeled
+ *     Apollo-oracle rate bound. There is no such bound. Re-measured over the
+ *     10,632 calibration rows at each row's own stored `utilizationE18`, this
+ *     map reproduces the mToken's stored `supplyRateE18` to 2.76e-9 pp MAE
+ *     (max 5.73e-9 pp — integer truncation) on 7,370 rows, and misses on
+ *     3,262. ALL 3,262 of the misses lie inside a 500-origin window
+ *     immediately preceding a recorded `irmAddress` change, i.e. inside a
+ *     single `addressRefreshEvery` chunk of the archive backfill
+ *     (`collector/archive/backfill.ts`, `addressRefreshEvery ?? 500`), which
+ *     re-resolves the rate-model address only once per ~21 days and so
+ *     attributes a governance model swap to the PREVIOUS model's
+ *     coefficients. The residue is a data defect, not a formula defect; the
+ *     formula is exact. That archive defect is unfixed and is a separate
+ *     concern from this map.
  * Aave/Moonwell reuse `protocols/math.ts#utilization`-shaped arithmetic
  * (reserves-aware) for the `u` in their conversions, matching what each
  * simulator's own `calculateUtilization` computes — so wherever this map IS
@@ -436,11 +440,18 @@ function stateSpaceResidualsFor(
         const borrowRateAnnualWad =
           protocol === 'aave'
             ? aaveBorrowRateAnnualWad(utilRay, irm)
-            : moonwellSimulator.calculateRateFromUtilization(utilRay, {
+            : moonwellSimulator.calculateBorrowRateFromUtilization(utilRay, {
                 baseRate: irm.baseRateWad,
                 kink: irm.kinkRay,
                 slopeLow: irm.slopeLowWad,
                 slopeHigh: irm.slopeHighWad,
+                // Read by `calculateRateFromUtilization`, not by the borrow
+                // half called here; supplied because the config type requires
+                // it. `borrowToSupplyWad` below applies it. Renamed call only
+                // (2026-09-10) -- the arithmetic is byte-identical to the
+                // former `calculateRateFromUtilization`, which returned this
+                // same per-second BORROW rate under a supply-rate name.
+                reserveFactorBps: irm.reserveFactorBps,
               }) * SECONDS_PER_YEAR; // WAD-per-second -> annualized, see MoonwellSimulator's own docstring.
 
         annualizedRateWad = borrowToSupplyWad(borrowRateAnnualWad, utilWad, irm.reserveFactorBps);

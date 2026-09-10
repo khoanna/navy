@@ -491,11 +491,16 @@ describe('P19 review round 2: per-protocol rate map, pinned against real formula
     const utilRay = (borrows * RAY) / (cash + borrows - reserves);
     const utilWad = utilRay / RAY_PER_WAD;
 
-    const perSecond = new MoonwellSimulator().calculateRateFromUtilization(utilRay, {
+    // E1b 2026-09-10: `calculateRateFromUtilization` now returns the
+    // ANNUALIZED SUPPLY rate; the per-second BORROW rate this test wants is
+    // `calculateBorrowRateFromUtilization`, which is the same function under
+    // its true name. Renamed call only -- every number below is unchanged.
+    const perSecond = new MoonwellSimulator().calculateBorrowRateFromUtilization(utilRay, {
       baseRate: irm.baseRateWad,
       kink: irm.kinkRay,
       slopeLow: irm.slopeLowWad,
       slopeHigh: irm.slopeHighWad,
+      reserveFactorBps: irm.reserveFactorBps,
     });
     const borrowRateAnnualWad = perSecond * SECONDS_PER_YEAR;
     const afterUtil = (borrowRateAnnualWad * utilWad) / WAD;

@@ -82,6 +82,16 @@ export const COMET_IFACE = new ethers.Interface([
   // straight into getSupplyRate, which returns a 1e18 per-second rate).
   'function getUtilization() view returns (uint256)',
   'function isSupplyPaused() view returns (bool)',
+  // The SUPPLY-side rate model (paper §6.4). These four getters are what
+  // `Comet.getSupplyRate(utilization)` is built from, and they are DISTINCT
+  // from the borrow-side ones — Comet's supply curve is already net of
+  // reserves, which is why nothing here reads a reserve factor.
+  // Same fragments the archive backfill reads (collector/archive/calls.ts);
+  // all four are PER-SECOND at WAD scale and are annualized at the read site.
+  'function supplyKink() view returns (uint256)',
+  'function supplyPerSecondInterestRateBase() view returns (uint256)',
+  'function supplyPerSecondInterestRateSlopeLow() view returns (uint256)',
+  'function supplyPerSecondInterestRateSlopeHigh() view returns (uint256)',
 ]);
 
 /** Moonwell mToken (contract/src/interfaces/IMToken.sol). */
@@ -89,6 +99,43 @@ export const MTOKEN_IFACE = new ethers.Interface([
   'function getCash() view returns (uint256)',
   'function totalBorrows() view returns (uint256)',
   'function totalReserves() view returns (uint256)',
+  // The rate model behind the mToken, and the reserve cut that turns its
+  // BORROW curve into the supply rate (paper §6.5). `interestRateModel()` is
+  // NOT constant over time — Base mUSDC's model has been redeployed by
+  // governance repeatedly — so it is resolved per read, never pinned.
+  'function interestRateModel() view returns (address)',
+  'function reserveFactorMantissa() view returns (uint256)',
+]);
+
+/**
+ * Moonwell's `JumpRateModel`. A Compound-v2 shape: these coefficients are a
+ * BORROW curve, PER TIMESTAMP (i.e. per second on Base), and the supply rate
+ * is `borrow(u) * u * (1 - reserveFactor)`. Same fragments the archive
+ * backfill reads (collector/archive/calls.ts).
+ */
+export const MOONWELL_IRM_IFACE = new ethers.Interface([
+  'function kink() view returns (uint256)',
+  'function baseRatePerTimestamp() view returns (uint256)',
+  'function multiplierPerTimestamp() view returns (uint256)',
+  'function jumpMultiplierPerTimestamp() view returns (uint256)',
+]);
+
+/**
+ * Aave V3's rate strategy, V3.2 shape: one packed getter in bps.
+ * `optimalUsageRatio` is bps of the usage ratio; the three rate fields are
+ * bps of an annual rate. Tried FIRST; V3.0's individual getters below are the
+ * fallback. Same versioning the archive backfill handles.
+ */
+export const AAVE_STRATEGY_V32_IFACE = new ethers.Interface([
+  'function getInterestRateDataBps(address reserve) view returns (tuple(uint16 optimalUsageRatio,uint32 baseVariableBorrowRate,uint32 variableRateSlope1,uint32 variableRateSlope2))',
+]);
+
+/** Aave V3's rate strategy, V3.0 shape: individual RAY-scaled getters. */
+export const AAVE_STRATEGY_V30_IFACE = new ethers.Interface([
+  'function OPTIMAL_USAGE_RATIO() view returns (uint256)',
+  'function getBaseVariableBorrowRate() view returns (uint256)',
+  'function getVariableRateSlope1() view returns (uint256)',
+  'function getVariableRateSlope2() view returns (uint256)',
 ]);
 
 /** The minimal ERC-20 surface needed to measure protocol-held cash. */
@@ -247,19 +294,29 @@ export interface AaveReserveFlags {
   active: boolean;
   frozen: boolean;
   paused: boolean;
+  /**
+   * The reserve factor, bps — bits 64-79 of the same word. It is a
+   * multiplicative term in Aave's borrow -> supply conversion, so it is part
+   * of the rate model rather than a flag; it rides here because it lives in
+   * the same packed configuration word the flags do.
+   */
+  reserveFactorBps: number;
 }
 
 /**
  * Bit positions in `ReserveConfigurationMap.data`, transcribed from
  * AaveV3Adapter.sol:130-133 (`maxDeployable`), which is the deployed
  * adapter's own reading of the same word:
- *   bit 56 = active, bit 57 = frozen, bit 60 = paused.
+ *   bit 56 = active, bit 57 = frozen, bit 60 = paused,
+ *   bits 64-79 = the reserve factor in bps.
  */
 export function decodeAaveReserveFlags(configData: bigint): AaveReserveFlags {
   return {
     active: ((configData >> 56n) & 1n) !== 0n,
     frozen: ((configData >> 57n) & 1n) !== 0n,
     paused: ((configData >> 60n) & 1n) !== 0n,
+    // Bits 64-79, the same field `collector/archive/calls.ts` decodes.
+    reserveFactorBps: Number((configData >> 64n) & 0xffffn),
   };
 }
 
