@@ -246,8 +246,19 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  const squeezed = out.results.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
-  checks.push(stressedLiquidCoverageCheck(squeezed, out.results.length, minStressed, opts.universeLiquidity));
+  // P20: this check is scoped to SRCLA's OWN runs. On the v0.6 secondary era
+  // every stressed-coverage violation belonged to a baseline or an ablation
+  // and none to SRCLA, yet the gate (ranging over every run) recorded it as
+  // SRCLA's failure. A comparator is not held to a constraint it never
+  // agreed to obey merely by appearing in the same batch as the candidate;
+  // its breach is still surfaced below, just not as a reason to block.
+  const srclaResults = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
+  const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id);
+  const squeezed = srclaResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  const reportedOnly = otherResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  checks.push(
+    stressedLiquidCoverageCheck(squeezed, srclaResults.length, minStressed, opts.universeLiquidity, reportedOnly),
+  );
 
   // 4. An INERT ablation removed nothing on this dataset: its decision
   //    sequence is byte-identical to SRCLA's, so any delta reported for it is
@@ -264,10 +275,20 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  // 5. §11.5's statistical criterion, per deployable baseline per tier, on
-  //    AFTER-COST per-period returns. B5 is excluded: §11.2 says it "cannot
-  //    establish deployability".
+  // 5. §11.5's statistical criterion, per deployable, ADMISSIBLE baseline
+  //    per tier, on AFTER-COST per-period returns.
+  //
+  //    Two exclusions from the comparison set, neither of which touch SRCLA:
+  //      - B5 (and any other `deployable: false` row): §11.2 says it "cannot
+  //        establish deployability".
+  //      - P20: a comparator that itself breached the stressed-liquid-
+  //        coverage floor SRCLA was held to. B1/B2/B2u earning 39% while
+  //        holding 0.878 coverage against the 0.99 floor is not a baseline
+  //        SRCLA has to beat -- it is an inadmissible comparator, and its
+  //        exclusion is recorded so "no comparison" and "no ADMISSIBLE
+  //        comparison" are never reported as the same thing.
   const comparisons: BaselineComparison[] = [];
+  const excludedForSafety: Array<{ baselineId: string; tier: string }> = [];
   const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((x, y) =>
     BigInt(x) < BigInt(y) ? -1 : BigInt(x) > BigInt(y) ? 1 : 0,
   );
@@ -283,19 +304,25 @@ export function evaluateRegisteredRelease(
     if (srcla === undefined) continue; // already failed the completeness check
     for (const b of atTier) {
       if (b.policy.id === SRCLA_POLICY.id || !b.policy.deployable) continue;
+      if (b.replay.minStressedLiquidCoverage < minStressed) {
+        excludedForSafety.push({ baselineId: b.policy.id, tier });
+        continue;
+      }
       comparisons.push(compareToBaseline(srcla, b, compareOpts));
     }
   }
+
+  const noAdmissibleComparator = comparisons.length === 0 && excludedForSafety.length > 0;
+  const notProducedDetail = noAdmissibleComparator
+    ? `NO ADMISSIBLE COMPARATOR: every deployable baseline breached the stressed-liquid-coverage ` +
+      `floor SRCLA held (${excludedForSafety.map((e) => `${e.baselineId}@${e.tier}`).join(', ')})`
+    : 'NOT PRODUCED: no SRCLA-vs-baseline comparison was available';
 
   const indistinguishable = comparisons.filter((c) => c.test.usable && c.test.pValue >= alpha);
   const unusable = comparisons.filter((c) => !c.test.usable);
   checks.push(
     comparisons.length === 0
-      ? check(
-          'Statistically distinguishable from every deployable baseline',
-          null,
-          'NOT PRODUCED: no SRCLA-vs-baseline comparison was available',
-        )
+      ? check('Statistically distinguishable from every deployable baseline', null, notProducedDetail)
       : check(
           'Statistically distinguishable from every deployable baseline',
           indistinguishable.length === 0 && unusable.length === 0,
@@ -305,20 +332,24 @@ export function evaluateRegisteredRelease(
               ? indistinguishable
                   .map((c) => `${c.baselineId}@${c.tier} p=${c.test.pValue.toFixed(3)}`)
                   .join(', ')
-              : `p < ${alpha} against all ${comparisons.length} deployable comparisons`,
+              : `p < ${alpha} against all ${comparisons.length} admissible deployable comparisons`,
         ),
   );
 
-  // 6. Outperformance, on the same deployable set.
+  // 6. Outperformance, on the same admissible deployable set.
   const notBeaten = comparisons.filter((c) => c.srclaNetApy <= c.baselineNetApy);
   checks.push(
     comparisons.length === 0
-      ? check('Outperforms every deployable baseline', null, 'NOT PRODUCED: no comparison available')
+      ? check(
+          'Outperforms every deployable baseline',
+          null,
+          noAdmissibleComparator ? notProducedDetail : 'NOT PRODUCED: no comparison available',
+        )
       : check(
           'Outperforms every deployable baseline',
           notBeaten.length === 0,
           notBeaten.length === 0
-            ? `ahead of all ${comparisons.length} deployable comparisons`
+            ? `ahead of all ${comparisons.length} admissible deployable comparisons`
             : notBeaten
                 .map(
                   (c) =>
@@ -412,23 +443,38 @@ const usd = (base: bigint): string => (base / 1_000_000n).toString();
  * NEVER rolls up into a pass -- the gate still blocks. This function must
  * never return `passed: true` for a batch that contains any sub-threshold
  * run, capacity-infeasible or not.
+ *
+ * P20: `squeezed`/`totalRuns` are SRCLA's own runs only -- this check GATES
+ * only on those. `reportedOnly` is every OTHER policy's sub-threshold run in
+ * the same batch (a baseline or an ablation that breached the same floor);
+ * it is folded into the detail string, prefixed `reported (not gating):`,
+ * so a comparator's breach stays visible without ever failing SRCLA's gate.
  */
 function stressedLiquidCoverageCheck(
   squeezed: readonly PolicyRunResult[],
   totalRuns: number,
   minStressed: number,
   universeLiquidity: RegisteredGateOptions['universeLiquidity'],
+  reportedOnly: readonly PolicyRunResult[] = [],
 ): RegisteredGateCheck {
   const name = 'Safety: stressed liquid coverage';
+  const reportedDetail =
+    reportedOnly.length > 0
+      ? ` reported (not gating): ${reportedOnly
+          .map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`)
+          .join(', ')}`
+      : '';
+
   if (squeezed.length === 0) {
-    return check(name, true, `>= ${minStressed} across ${totalRuns} runs`);
+    return check(name, true, `>= ${minStressed} across ${totalRuns} SRCLA runs${reportedDetail}`);
   }
 
   if (universeLiquidity === undefined) {
     return check(
       name,
       false,
-      squeezed.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', '),
+      squeezed.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', ') +
+        reportedDetail,
     );
   }
 
@@ -445,7 +491,8 @@ function stressedLiquidCoverageCheck(
     return check(
       name,
       false,
-      genuine.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', '),
+      genuine.map((r) => `${label(r)} ${r.replay.minStressedLiquidCoverage.toFixed(3)}`).join(', ') +
+        reportedDetail,
     );
   }
 
@@ -461,5 +508,5 @@ function stressedLiquidCoverageCheck(
         `CAPACITY_INFEASIBLE`,
     )
     .join('; ');
-  return check(name, null, detail);
+  return check(name, null, detail + reportedDetail);
 }

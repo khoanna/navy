@@ -197,9 +197,11 @@ describe('registered policy table', () => {
       'h5',
       'h6',
       'h7',
+      'h3d',
     ]);
     expect(REGISTERED_BASELINES).toHaveLength(7);
-    expect(REGISTERED_ABLATIONS).toHaveLength(7);
+    // h3d (P20) added alongside h1-h7 -- 8 ablations, not 7.
+    expect(REGISTERED_ABLATIONS).toHaveLength(8);
   });
 
   it('marks B5 and B2u non-deployable, per §11.2', () => {
@@ -224,6 +226,7 @@ describe('registered policy table', () => {
     expect(byId['h5']).toEqual({ dependencyCaps: true });
     expect(byId['h6']).toEqual({ liquidityCap: true });
     expect(byId['h7']).toEqual({ exitableWeight: true });
+    expect(byId['h3d']).toEqual({ deploymentHurdle: true });
   });
 
   it('distinguishes B2 (reserve-matched) from B2u (unreserved) — the P7 correction', () => {

@@ -230,6 +230,15 @@ export const REGISTERED_ABLATIONS: readonly RegisteredPolicy[] = [
     shape: 'kernel',
     disable: { exitableWeight: true },
   },
+  {
+    id: 'h3d',
+    name: 'H3d deployment hurdle',
+    paperDefinition: "remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle.",
+    section: '11.3',
+    deployable: true,
+    shape: 'kernel',
+    disable: { deploymentHurdle: true },
+  },
 ] as const;
 
 export const SRCLA_POLICY: RegisteredPolicy = {

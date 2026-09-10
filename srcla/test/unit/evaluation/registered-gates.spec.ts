@@ -159,6 +159,43 @@ function completeForkResults(): ForkReplayResult[] {
 const named = (r: ReturnType<typeof evaluateRegisteredRelease>, name: string) =>
   r.checks.find((c) => c.name === name)!;
 
+/**
+ * P20/P21 fixture: a COMPLETE evaluation with a few named policies nudged
+ * directly on the replay fields those tests care about
+ * (`minStressedLiquidCoverage`, `withdrawalSuccessRate`, `realizedNetApy`,
+ * `inertVsSrcla`), everything else left at `completeResults()`'s neutral
+ * defaults.
+ */
+function runResult(
+  overrides: Record<
+    string,
+    Partial<{
+      minStressedLiquidCoverage: number;
+      withdrawalSuccessRate: number | null;
+      realizedNetApy: number;
+      inertVsSrcla: boolean;
+    }>
+  >,
+): RegisteredEvaluationResult {
+  const results = completeResults((id) => {
+    const o = overrides[id];
+    if (o === undefined) return {};
+    return {
+      ...(o.minStressedLiquidCoverage !== undefined ? { minStressed: o.minStressedLiquidCoverage } : {}),
+      ...(o.withdrawalSuccessRate !== undefined ? { withdrawalSuccessRate: o.withdrawalSuccessRate } : {}),
+      ...(o.inertVsSrcla !== undefined ? { inert: o.inertVsSrcla } : {}),
+    };
+  }).map((r) => {
+    const o = overrides[r.policy.id];
+    if (o?.realizedNetApy === undefined) return r;
+    return { ...r, replay: { ...r.replay, realizedNetApy: o.realizedNetApy } };
+  });
+  return evaluation({ results });
+}
+
+/** Alias matching the brief's naming; identical to `evaluateRegisteredRelease`. */
+const runRegisteredGate = evaluateRegisteredRelease;
+
 describe('requiredRuns', () => {
   it('is the full cross product of §11.1 tiers and the registered policy set', () => {
     expect(requiredRuns()).toHaveLength(REGISTERED_TIERS.length * REGISTERED_POLICIES.length);
@@ -489,5 +526,69 @@ describe('compareToBaseline', () => {
     const opts = { minPairedObservations: 20, bootstrapIterations: 500 };
 
     expect(compareToBaseline(srcla, b0, opts)).toEqual(compareToBaseline(srcla, b0, opts));
+  });
+});
+
+describe('P20: safety is scoped to SRCLA; comparators are measured, not gating', () => {
+  const gateOpts = { minPairedObservations: 20, bootstrapIterations: 200 };
+
+  it('PASSES the safety check when only a BASELINE breaches coverage', () => {
+    const out = runResult({
+      srcla: { minStressedLiquidCoverage: 1.0 },
+      b1: { minStressedLiquidCoverage: 0.878 },
+    });
+    const gate = runRegisteredGate(out, gateOpts);
+    const safety = gate.checks.find((c) => c.name.startsWith('Safety: stressed'))!;
+    expect(safety.passed).toBe(true);
+    expect(safety.detail).toMatch(/b1/); // reported, not silent
+  });
+
+  it('FAILS the safety check when SRCLA breaches coverage', () => {
+    const out = runResult({ srcla: { minStressedLiquidCoverage: 0.9 } });
+    const gate = runRegisteredGate(out, gateOpts);
+    expect(gate.checks.find((c) => c.name.startsWith('Safety: stressed'))!.passed).toBe(false);
+  });
+
+  it('EXCLUDES a coverage-breaching baseline from the comparison set', () => {
+    const out = runResult({
+      srcla: { minStressedLiquidCoverage: 1.0 },
+      b1: { minStressedLiquidCoverage: 0.878 },
+    });
+    const gate = runRegisteredGate(out, gateOpts);
+    expect(gate.comparisons.some((c) => c.baselineId === 'b1')).toBe(false);
+  });
+
+  it('reports NO ADMISSIBLE COMPARATOR when every candidate comparator is excluded', () => {
+    // Every non-SRCLA policy breaches coverage here (baselines AND
+    // ablations, since ablations are not yet separated out of this loop --
+    // that separation is P21/Task 10). What this test pins down is that
+    // "every comparator was excluded on safety grounds" and "no comparison
+    // was ever attempted" report DIFFERENT detail strings.
+    const out = runResult({
+      srcla: { minStressedLiquidCoverage: 1.0 },
+      b0: { minStressedLiquidCoverage: 0.5 },
+      b1: { minStressedLiquidCoverage: 0.5 },
+      b2: { minStressedLiquidCoverage: 0.5 },
+      b3: { minStressedLiquidCoverage: 0.5 },
+      b4: { minStressedLiquidCoverage: 0.5 },
+      h1: { minStressedLiquidCoverage: 0.5 },
+      h2: { minStressedLiquidCoverage: 0.5 },
+      h3: { minStressedLiquidCoverage: 0.5 },
+      h4: { minStressedLiquidCoverage: 0.5 },
+      h5: { minStressedLiquidCoverage: 0.5 },
+      h6: { minStressedLiquidCoverage: 0.5 },
+      h7: { minStressedLiquidCoverage: 0.5 },
+      h3d: { minStressedLiquidCoverage: 0.5 },
+    });
+    const gate = runRegisteredGate(out, gateOpts);
+    const distinguishable = gate.checks.find(
+      (c) => c.name === 'Statistically distinguishable from every deployable baseline',
+    )!;
+    expect(distinguishable.passed).toBeNull();
+    expect(distinguishable.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
+
+    const outperforms = gate.checks.find((c) => c.name === 'Outperforms every deployable baseline')!;
+    expect(outperforms.passed).toBeNull();
+    expect(outperforms.detail).toMatch(/NO ADMISSIBLE COMPARATOR/);
   });
 });
