@@ -69,7 +69,13 @@ export async function loadDataset(
         lte: endDate,
       },
     },
-    orderBy: { timestamp: 'asc' },
+    // TOTAL order. `timestamp` alone ties the three venue rows that make up
+    // one origin, and Postgres returns a tie in whatever order it produced --
+    // which varies run to run. The venue order flows straight into `curves`,
+    // `lowerBounds` and `snapshotHash`, all of which the decision hash covers,
+    // so an unstable tie-break made every decision hash non-reproducible while
+    // the decisions themselves were unchanged.
+    orderBy: [{ timestamp: 'asc' }, { marketId: 'asc' }],
   });
 
   const rawLabels = await prisma.forecastLabel.findMany({
@@ -79,7 +85,8 @@ export async function loadDataset(
         lte: endDate,
       },
     },
-    orderBy: { availableAt: 'asc' },
+    // Same reason as the snapshots above: make the tie-break total.
+    orderBy: [{ availableAt: 'asc' }, { marketId: 'asc' }],
   });
 
   // Group snapshots by timestamp
@@ -144,7 +151,7 @@ export async function loadDataset(
 
   const rawWithdrawals = await prisma.withdrawalEvent.findMany({
     where: { timestamp: { gte: startDate, lte: endDate } },
-    orderBy: { timestamp: 'asc' },
+    orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
   });
 
   return {
@@ -365,7 +372,7 @@ export async function assertArchiveProvenance(
       irmAddress: true, irmBaseRateWad: true, irmKinkRay: true,
       irmSlopeLowWad: true, irmSlopeHighWad: true,
     },
-    orderBy: { timestamp: 'asc' },
+    orderBy: [{ timestamp: 'asc' }, { marketId: 'asc' }],
   })) as ProvenanceRow[];
 
   if (rows.length === 0) {

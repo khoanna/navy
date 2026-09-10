@@ -10,6 +10,7 @@
  *
  * It opens nothing sealed and writes nothing.
  */
+import { createHash } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { loadEra, loadWarmup } from '../src/evaluation/dataset.js';
 import { loadGasSeries } from '../src/evaluation/gas-series.js';
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
     lap('buildHindsightRates');
 
     const t0 = Date.now();
-    runRegisteredEvaluation({
+    const evaluation = runRegisteredEvaluation({
       dataset,
       config,
       artifact,
@@ -80,20 +81,18 @@ async function main(): Promise<void> {
       quantumStepsPerTier: Number(process.argv[3] ?? 100),
     });
     lap('replay done');
-    const ms = Date.now() - t0;
-    const perOrigin = ms / slice.length;
-    console.log(
-      `[bench] ${slice.length} origins x 1 policy x 1 tier in ${(ms / 1000).toFixed(1)}s ` +
-        `= ${perOrigin.toFixed(1)} ms per origin-decision`,
-    );
-    // Scale to the registered run: 16 policies x 4 tiers.
-    const unitsC = 2064 * 16 * 4;
-    const unitsB = 516 * 16 * 4;
-    console.log(
-      `[bench] projected heldout-c ${(perOrigin * unitsC / 60000).toFixed(0)} min, ` +
-        `heldout-b ${(perOrigin * unitsB / 60000).toFixed(0)} min, ` +
-        `total ${(perOrigin * (unitsC + unitsB) / 60000).toFixed(0)} min`,
-    );
+    // Compare the DECISION-RELEVANT outputs only. A digest of the whole
+    // result object is not comparable across processes -- it carries
+    // measured timings -- and a difference in it would say nothing about
+    // whether the policy decided differently.
+    for (const r of evaluation.results) {
+      const hashes = createHash('sha256').update(r.decisionHashes.join('|')).digest('hex');
+      console.log(
+        `[bench] ${r.policy.id} tier=${r.tier} rebalances=${r.rebalances} ` +
+          `netApy=${r.replay.realizedNetApy} decisions=${r.decisionHashes.length}:${hashes.slice(0, 16)}`,
+      );
+      console.log(`[bench]   first3 ${r.decisionHashes.slice(0, 3).map((h) => h.slice(0, 12)).join(' ')}`);
+    }
   } finally {
     await prisma.$disconnect();
   }
