@@ -10,6 +10,47 @@
 import { renderReport, type RunSummary } from '../../../src/evaluation/report/render-markdown.js';
 import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
+import type { ForecastGateResult } from '../../../src/evaluation/kernel/forecast-gate.js';
+
+/** §11.5's forecast gate, as the run record carries it. */
+function fakeForecastGate(pass: boolean): ForecastGateResult {
+  return pass
+    ? {
+        pass: true,
+        checks: [
+          {
+            name: 'Per-venue coverage — aave-v3-usdc',
+            passed: true,
+            detail: 'achieved 99.04% against target 99.00%',
+            gating: true,
+          },
+        ],
+        blockedReasons: [],
+        venues: [
+          {
+            marketId: 'aave-v3-usdc',
+            observations: 870,
+            achievedCoverage: 0.9904,
+            exceedances: 8,
+            kupiec: { lr: 0.02, pValue: 0.88 },
+            christoffersen: { lrCc: 0.5, lrInd: 0.1, pValue: 0.78, observations: 36 },
+          },
+        ],
+      }
+    : {
+        pass: false,
+        checks: [
+          {
+            name: 'Selection margin',
+            passed: false,
+            detail: 'margin 1.2740e-7 against the registered floor 1e-3',
+            gating: true,
+          },
+        ],
+        blockedReasons: ['Selection margin'],
+        venues: [],
+      };
+}
 
 function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
   const evaluation = {
@@ -85,6 +126,7 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
     provisional: false,
     missingPolicyIds: [],
     missingTiers: [],
+    forecastGate: fakeForecastGate(pass),
   } as unknown as RegisteredEvaluationResult;
 
   const gate = {
@@ -439,7 +481,8 @@ describe('renderReport — mandatory disclosures', () => {
   it('places Ablation contributions after the results table and before the gate table', () => {
     const resultsIdx = md.indexOf('## Results — era `heldout-c`');
     const ablationIdx = md.indexOf('## Ablation contributions');
-    const gateIdx = md.indexOf('### §11.5 gate');
+    // The forecast gate is the FIRST of §11.5's two gate tables.
+    const gateIdx = md.indexOf('### §11.5 forecast gate');
     expect(resultsIdx).toBeGreaterThan(-1);
     expect(ablationIdx).toBeGreaterThan(resultsIdx);
     expect(ablationIdx).toBeLessThan(gateIdx);
@@ -471,10 +514,50 @@ describe('renderReport — mandatory disclosures', () => {
   });
 });
 
+describe('renderReport — §11.5 has TWO gates', () => {
+  it('renders the forecast gate ABOVE the policy gate', () => {
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+    const forecastIdx = md.indexOf('### §11.5 forecast gate');
+    const policyIdx = md.indexOf('### §11.5 policy gate');
+    expect(forecastIdx).toBeGreaterThan(-1);
+    expect(policyIdx).toBeGreaterThan(forecastIdx);
+  });
+
+  it('publishes the per-venue calibration behind the forecast gate', () => {
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+    expect(md).toContain('| Venue | Residuals | Achieved coverage |');
+    expect(md).toMatch(/\|\s*aave-v3-usdc\s*\|\s*870\s*\|\s*99\.04%\s*\|/);
+  });
+
+  it('states a forecast-gate FAIL in the verdict line, separately from the policy gate', () => {
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', false)] });
+    expect(md).toMatch(/forecast gate \*\*FAIL\*\* — blocked on: Selection margin/);
+  });
+
+  it('does not let a passing policy gate stand in for an unrun forecast gate', () => {
+    const run = fakeRun('heldout-c', true);
+    const md = renderReport({
+      ...params,
+      runs: [
+        {
+          ...run,
+          evaluation: {
+            ...run.evaluation,
+            forecastGate: fakeForecastGate(false),
+          } as unknown as RegisteredEvaluationResult,
+        },
+      ],
+    });
+    expect(md).toMatch(/forecast gate \*\*FAIL\*\*/);
+    expect(md).toMatch(/policy gate \*\*PASS\*\*/);
+  });
+});
+
 describe('renderReport — a passing run', () => {
   it('does not print a blocked-reasons clause when the gate passed', () => {
     const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
-    expect(md).toMatch(/release gate \*\*PASS\*\*/);
+    expect(md).toMatch(/forecast gate \*\*PASS\*\*/);
+    expect(md).toMatch(/policy gate \*\*PASS\*\*/);
     expect(md).not.toMatch(/PASS\*\* — blocked on/);
   });
 });
@@ -507,6 +590,7 @@ describe('renderReport — ablation contributions edge cases', () => {
         provisional: false,
         missingPolicyIds: [],
         missingTiers: [],
+        forecastGate: fakeForecastGate(true),
       } as unknown as RegisteredEvaluationResult,
     };
     const md = renderReport({ ...params, runs: [bareRun] });
@@ -559,6 +643,7 @@ describe('renderReport — ablation contributions edge cases', () => {
         provisional: false,
         missingPolicyIds: [],
         missingTiers: [],
+        forecastGate: fakeForecastGate(true),
       } as unknown as RegisteredEvaluationResult,
     };
     const md = renderReport({ ...params, runs: [positiveOnlyRun] });

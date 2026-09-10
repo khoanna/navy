@@ -35,6 +35,11 @@ import {
   type HarnessConfig,
 } from './decision-input.js';
 import { buildResidualPanel } from '../../policy/steps/portfolio-quantile.js';
+import {
+  runForecastGate,
+  type ArtifactRegistration,
+  type ForecastGateResult,
+} from './forecast-gate.js';
 import { gasAt } from '../gas-series.js';
 import { buildIdentityPin } from '../../domain/config-digest.js';
 import { summariseLastAction, type PersistedActionRecord } from '../../policy/last-action.js';
@@ -134,6 +139,17 @@ export interface RegisteredEvaluationResult {
   missingPolicyIds: string[];
   /** Registered tiers with no result. §11.5 fails the gate on these too. */
   missingTiers: bigint[];
+  /**
+   * §11.5's FORECAST gate over the artifact this run used and the labels it
+   * evaluated it on.
+   *
+   * It lives here, beside the run, rather than being left to the caller for
+   * the reason the forecast gate had to be written in the first place: the
+   * only way half a release criterion goes four revisions without ever being
+   * evaluated is by being something a caller has to remember to invoke.
+   * Producing it as part of the run makes forgetting it impossible.
+   */
+  forecastGate: ForecastGateResult;
 }
 
 export interface RegisteredEvaluationOptions {
@@ -180,6 +196,14 @@ export interface RegisteredEvaluationOptions {
    * before the era contributes a return, a cost or a rebalance.
    */
   warmupSnapshots?: readonly TimeOrderedSnapshot[];
+  /**
+   * The `_registration` block beside the registered artifact file.
+   * `parseArtifact` drops it (it describes how the artifact was FIT, not what
+   * the policy reads), so it is threaded separately. Absent means the
+   * registration-dependent forecast-gate checks report NOT PRODUCED — which
+   * blocks, rather than passing on a missing input.
+   */
+  registration?: ArtifactRegistration;
 }
 
 /**
@@ -670,5 +694,8 @@ export function runRegisteredEvaluation(
     provisional: artifact._provisional !== undefined,
     missingPolicyIds,
     missingTiers: REGISTERED_TIERS.filter((t) => !seenTiers.has(t.toString())),
+    forecastGate: runForecastGate(artifact, labels, {
+      registration: options.registration,
+    }),
   };
 }

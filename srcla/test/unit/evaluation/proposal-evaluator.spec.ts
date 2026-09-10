@@ -1,5 +1,10 @@
 import { describe, it, expect } from '@jest/globals';
-import type { Action, RebalanceProposal } from '../../../src/evaluation/proposal-evaluator.js';
+import type {
+  Action,
+  ProposalEvaluator,
+  RebalanceProposal,
+} from '../../../src/evaluation/proposal-evaluator.js';
+import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 
 // Test the pure logic of proposal evaluation without complex mocking
 
@@ -345,5 +350,54 @@ describe('Action Kind Mapping', () => {
   it('should default unknown kinds to 0', () => {
     expect(kindToNumber('unknown')).toBe(0);
     expect(kindToNumber('')).toBe(0);
+  });
+});
+
+/**
+ * ONE policy-gate definition (§11.5).
+ *
+ * The operator path used to call a second, weaker implementation living in
+ * `evaluation/release-gates.ts` — B0 only, one p-value and a hardcoded
+ * `Sharpe >= 0.5` that the paper never states — while the registered
+ * evaluation was graded by `kernel/gates.ts`. Two graders for one criterion is
+ * the optimiser/grader divergence P10 removed, so the shape of the operator
+ * entry point is now pinned: it takes a REGISTERED EVALUATION, not five
+ * hand-supplied scalars.
+ */
+describe('the operator review path uses the registered policy gate', () => {
+  it('exposes reviewProposalWithGates as taking a registered evaluation result', () => {
+    type Second = Parameters<ProposalEvaluator['reviewProposalWithGates']>[1];
+    // Structural, not nominal: a `RegisteredEvaluationResult` fits, the old
+    // `{safetyViolations, pValue, srclaAPY, b0APY, srclaSharpe}` does not.
+    const fits: Second = {
+      results: [],
+      withdrawalSource: 'registered-schedule',
+      artifact: {} as never,
+      provisional: false,
+      missingPolicyIds: [],
+      missingTiers: [],
+      forecastGate: { pass: false, checks: [], blockedReasons: [], venues: [] },
+    };
+    expect(fits!.missingTiers).toEqual([]);
+  });
+
+  it('reports a non-verifying gate as "did not verify", covering NOT PRODUCED', () => {
+    // `evaluateRegisteredRelease` is three-valued: `pass` is false for a
+    // FAILED check and for a NOT PRODUCED one alike, and the operator path
+    // must not describe the second as a pass.
+    const gate: RegisteredGateResult = {
+      pass: false,
+      checks: [{ name: 'Fork replay', passed: null, detail: 'NOT PRODUCED', gating: true }],
+      comparisons: [],
+      blockedReasons: ['Fork replay'],
+      sustainability: [],
+      comparatorSustainability: [],
+      scaleInvariant: null,
+      excludedComparators: [],
+      skillWindows: [],
+      nonInferiorityMarginApy: 0.0043,
+    };
+    expect(gate.pass).toBe(false);
+    expect(gate.blockedReasons).toContain('Fork replay');
   });
 });

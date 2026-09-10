@@ -14,7 +14,12 @@
 import { Wallet, ethers } from 'ethers';
 import { loadConfig } from '../config.js';
 import { ChainClient } from '../chain/client.js';
-import { evaluatePolicyGate, type ReleaseGateResult } from './release-gates.js';
+import {
+  evaluateRegisteredRelease,
+  type RegisteredGateOptions,
+  type RegisteredGateResult,
+} from './kernel/gates.js';
+import type { RegisteredEvaluationResult } from './kernel/harness.js';
 
 export interface Action {
   index: number;
@@ -42,7 +47,13 @@ export interface ProposalEvaluation {
   valid: boolean;
   reasons: string[];
   policyChecks: PolicyChecks;
-  releaseGate?: ReleaseGateResult;
+  /**
+   * §11.5's policy gate, when the caller supplied a registered evaluation to
+   * gate against. There is now exactly ONE implementation of it —
+   * `kernel/gates.ts#evaluateRegisteredRelease` — shared by the registered
+   * run and by this operator path.
+   */
+  releaseGate?: RegisteredGateResult;
   signature?: string;
 }
 
@@ -139,29 +150,43 @@ export class ProposalEvaluator {
   }
 
   /**
-   * Review proposal with additional release gate checks
-   * Combines policy checks with SRCLA's release gate evaluation
+   * Review a proposal AND gate it against §11.5's policy gate.
+   *
+   * WHY THIS TAKES A REGISTERED RUN. It used to take five hand-supplied
+   * scalars — `{safetyViolations, pValue, srclaAPY, b0APY, srclaSharpe}` —
+   * and feed them to a second, weaker implementation of the gate in
+   * `release-gates.ts`: B0 only, one p-value, and a hardcoded `Sharpe >= 0.5`
+   * that appears nowhere in the paper. That reinstated exactly the
+   * optimiser/grader divergence P10 removed — the registered evaluation was
+   * graded by `kernel/gates.ts` while the operator endpoint graded the same
+   * release by something else, so the two could disagree about whether a
+   * policy was releasable and nothing would notice.
+   *
+   * There is now one definition. The caller passes the registered evaluation
+   * result (the same object `runRegisteredEvaluation` produces) and gets the
+   * same three-valued verdict, with the same absence-is-failure rule, that
+   * the report publishes. Omitting it means no gate was run — which leaves
+   * `releaseGate` undefined rather than fabricating a pass.
    */
   async reviewProposalWithGates(
     proposal: RebalanceProposal,
-    releaseGateInput?: {
-      safetyViolations: number;
-      pValue: number;
-      srclaAPY: number;
-      b0APY: number;
-      srclaSharpe: number;
-    }
+    evaluationResult?: RegisteredEvaluationResult,
+    gateOptions?: RegisteredGateOptions
   ): Promise<ProposalEvaluation> {
     const evaluation = await this.reviewProposal(proposal);
 
-    if (releaseGateInput) {
-      const releaseGate = evaluatePolicyGate(releaseGateInput);
+    if (evaluationResult) {
+      const releaseGate = evaluateRegisteredRelease(evaluationResult, gateOptions ?? {});
       evaluation.releaseGate = releaseGate;
 
-      // Update validity based on release gate
-      if (!releaseGate.passed) {
+      // A `null` check is NOT PRODUCED, and `pass` already refuses to roll one
+      // up into a verdict — so this branch fires on "did not verify", which
+      // covers both FAILED and NOT PRODUCED.
+      if (!releaseGate.pass) {
         evaluation.valid = false;
-        evaluation.reasons.push(`Release gate failed: ${releaseGate.blockedReason}`);
+        evaluation.reasons.push(
+          `Release gate did not verify: ${releaseGate.blockedReasons.join('; ')}`
+        );
       }
     }
 

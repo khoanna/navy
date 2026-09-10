@@ -20,9 +20,11 @@
 import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
 import {
   ablationContributions,
+  type RegisteredGateCheck,
   type RegisteredGateResult,
   type SkillWindow,
 } from '../kernel/gates.js';
+import type { ForecastGateResult, VenueCalibration } from '../kernel/forecast-gate.js';
 import {
   REGISTERED_DEMONSTRATION_FLOOR,
   type SustainabilityVerdict,
@@ -299,7 +301,15 @@ function gateDetail(detail: string): string {
   return cut.replace(/\|/g, '\\|');
 }
 
-function gateTable(gate: RegisteredGateResult): string {
+/**
+ * Both §11.5 gates render through this one table. It reads only `checks`, so
+ * it is typed on that alone rather than on `RegisteredGateResult` — the
+ * forecast gate deliberately does NOT carry the policy gate's comparison,
+ * sustainability and skill-window fields (see `kernel/forecast-gate.ts`), and
+ * widening it to fake them would be the absence-reads-as-success shape this
+ * whole report exists to avoid.
+ */
+function gateTable(gate: { checks: readonly RegisteredGateCheck[] }): string {
   const rows = gate.checks.map((c) => {
     const mark = c.passed === true ? 'PASS' : c.passed === false ? '**FAIL**' : '**NOT PRODUCED**';
     // A REPORTED check is not part of the verdict. Printing it in the same
@@ -309,6 +319,62 @@ function gateTable(gate: RegisteredGateResult): string {
     return `| ${mark} | ${gating} | ${c.name} | ${gateDetail(c.detail)} |`;
   });
   return ['| Verdict | Role | Check | Detail |', '|---|---|---|---|', ...rows].join('\n');
+}
+
+/**
+ * §11.5's FORECAST gate, and the per-venue calibration behind it.
+ *
+ * Rendered ABOVE the policy gate because that is the order §11.5 states them
+ * in and the order the argument runs: a policy result computed from a forecast
+ * that is not calibrated is not evidence about the policy. Until this release
+ * the forecast gate was never evaluated at all, so every prior version of this
+ * report published the policy half of a two-part criterion as though it were
+ * the whole of it.
+ */
+function forecastVenueTable(venues: readonly VenueCalibration[]): string {
+  if (venues.length === 0) {
+    return '_No per-venue calibration was measured; see the gate lines above for why._';
+  }
+  const rows = venues.map((v) => {
+    const kupiec = v.kupiec === null ? 'NOT PRODUCED' : v.kupiec.pValue.toFixed(4);
+    const cc =
+      v.christoffersen === null ? 'NOT PRODUCED' : v.christoffersen.pValue.toFixed(4);
+    const ccN = v.christoffersen === null ? '—' : String(v.christoffersen.observations);
+    return (
+      `| ${v.marketId} | ${v.observations} | ${(v.achievedCoverage * 100).toFixed(2)}% | ` +
+      `${v.exceedances} | ${kupiec} | ${cc} | ${ccN} |`
+    );
+  });
+  return [
+    '| Venue | Residuals | Achieved coverage | Exceedances | Kupiec p | Christoffersen p | Non-overlapping windows |',
+    '|---|---|---|---|---|---|---|',
+    ...rows,
+  ].join('\n');
+}
+
+function forecastGateSection(gate: ForecastGateResult): string[] {
+  const out: string[] = [];
+  out.push('### §11.5 forecast gate');
+  out.push('');
+  out.push(
+    `**${gate.pass ? 'PASS' : 'FAIL'}**` +
+      (gate.pass ? '' : ` — blocked on: ${gate.blockedReasons.join('; ')}`),
+  );
+  out.push('');
+  out.push(gateTable(gate));
+  out.push('');
+  out.push(
+    'Coverage is recomputed OUT OF SAMPLE. The artifact\'s per-venue quantile was solved ' +
+      'to hit the target on the calibration era, so its in-sample coverage is true by ' +
+      'construction and says nothing; what follows is the same quantile measured against ' +
+      'the labels this era produced. Christoffersen\'s independence test runs on a stream ' +
+      'thinned to NON-OVERLAPPING horizon windows — consecutive labels share most of their ' +
+      'window, so on the raw stream the test would reject clustering the sampling grid ' +
+      'created rather than clustering the forecast did.',
+  );
+  out.push('');
+  out.push(forecastVenueTable(gate.venues));
+  return out;
 }
 
 /**
@@ -663,7 +729,11 @@ export function renderReport(params: ReportParams): string {
     const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
     out.push(
       `- **${run.era}** (${span}, ${run.datasetOrigins} origins): ` +
-        `§11.5 release gate **${run.gate.pass ? 'PASS' : 'FAIL'}**` +
+        `§11.5 forecast gate **${run.evaluation.forecastGate.pass ? 'PASS' : 'FAIL'}**` +
+        (run.evaluation.forecastGate.pass
+          ? ''
+          : ` — blocked on: ${run.evaluation.forecastGate.blockedReasons.join('; ')}`) +
+        `; §11.5 policy gate **${run.gate.pass ? 'PASS' : 'FAIL'}**` +
         (run.gate.pass ? '' : ` — blocked on: ${run.gate.blockedReasons.join('; ')}`),
     );
   }
@@ -829,7 +899,9 @@ export function renderReport(params: ReportParams): string {
     out.push('');
     out.push(ablationContributionsSection(run.evaluation));
     out.push('');
-    out.push('### §11.5 gate');
+    out.push(...forecastGateSection(run.evaluation.forecastGate));
+    out.push('');
+    out.push('### §11.5 policy gate');
     out.push('');
     out.push(gateTable(run.gate));
     out.push('');

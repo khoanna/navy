@@ -28,6 +28,7 @@ import type { EvaluationDataset, TimeOrderedSnapshot } from '../../../src/evalua
 import type { MarketSnapshot } from '../../../src/domain/snapshots.js';
 import type { PolicyArtifact } from '../../../src/policy/types.js';
 import type { HarnessConfig } from '../../../src/evaluation/kernel/decision-input.js';
+import { runForecastGate } from '../../../src/evaluation/kernel/forecast-gate.js';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
@@ -178,6 +179,7 @@ function evaluation(overrides: Partial<RegisteredEvaluationResult> = {}): Regist
     provisional: true,
     missingPolicyIds: [],
     missingTiers: [],
+    forecastGate: runForecastGate(artifact(), []),
     ...overrides,
   };
 }

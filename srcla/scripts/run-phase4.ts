@@ -50,6 +50,7 @@ import {
 import { NOT_OBSERVED, type HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { buildRunRecord, manifestConfigForRun } from '../src/evaluation/kernel/provenance.js';
 import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
+import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gate.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 import {
   renderReport,
@@ -326,6 +327,16 @@ function serialisableRun(run: RunSummary): Record<string, unknown> {
       displayedVsRealizedGapApy: r.replay.displayedVsRealizedGapApy,
       policyViolations: r.replay.policyViolations,
     })),
+    // §11.5 has TWO mandatory gates. The forecast one is serialised first,
+    // and separately, because it is not a subset of the policy one: a policy
+    // result computed from an uncalibrated forecast is not evidence about the
+    // policy, whatever the policy gate says.
+    forecastGate: {
+      pass: run.evaluation.forecastGate.pass,
+      blockedReasons: run.evaluation.forecastGate.blockedReasons,
+      checks: run.evaluation.forecastGate.checks,
+      venues: run.evaluation.forecastGate.venues,
+    },
     releaseGate: {
       pass: run.gate.pass,
       blockedReasons: run.gate.blockedReasons,
@@ -356,6 +367,7 @@ async function runEra(
   tiers: readonly bigint[],
   commit: string,
   outDir: string,
+  registration: ArtifactRegistration,
 ): Promise<{ run: RunSummary; costRow: CostRangeRow }> {
   const b = eraBounds(era);
   console.error('');
@@ -405,6 +417,7 @@ async function runEra(
     decideOpts: DEFAULT_DECIDE_OPTS,
     calibrationFraction: CALIBRATION_FRACTION,
     warmupSnapshots,
+    registration,
   });
 
   const manifest = signManifest(
@@ -428,6 +441,21 @@ async function runEra(
       `(observed ${universeLiquidity.observedAtIso})`,
   );
   const gate = evaluateRegisteredRelease(evaluation, { universeLiquidity });
+
+  // §11.5's FIRST gate, printed first. It is not a subset of the policy gate
+  // and it was never run before this release.
+  console.error('');
+  for (const c of evaluation.forecastGate.checks) {
+    const mark = c.passed === true ? 'OK          ' : c.passed === false ? 'FAILED      ' : 'NOT PRODUCED';
+    console.error(`    [${mark}] (forecast) ${c.name}: ${c.detail.slice(0, 160)}`);
+  }
+  console.error(
+    evaluation.forecastGate.pass
+      ? `    §11.5 forecast gate PASSED for ${era}`
+      : `    §11.5 forecast gate BLOCKED for ${era}: ` +
+        `${evaluation.forecastGate.blockedReasons.join(', ')}`,
+  );
+  console.error('');
 
   for (const c of gate.checks) {
     const mark = c.passed === true ? 'OK          ' : c.passed === false ? 'FAILED      ' : 'NOT PRODUCED';
@@ -504,7 +532,7 @@ async function main(): Promise<void> {
 
   const artifact = loadRegisteredArtifact(artifactPath);
   const registration = JSON.parse(readFileSync(artifactPath, 'utf8')) as {
-    _registration?: {
+    _registration?: ArtifactRegistration & {
       calibrationEra: { start: string; end: string; days: number };
       coverageByMarket: Record<string, number>;
       noTradeBandKResolved: boolean;
@@ -533,7 +561,7 @@ async function main(): Promise<void> {
     const runs: RunSummary[] = [];
     const costByEra: CostRangeRow[] = [];
     for (const era of eras) {
-      const { run, costRow } = await runEra(prisma, era, artifact, tiers, commit, outDir);
+      const { run, costRow } = await runEra(prisma, era, artifact, tiers, commit, outDir, reg);
       runs.push(run);
       costByEra.push(costRow);
     }
@@ -601,12 +629,13 @@ async function main(): Promise<void> {
     console.error(`[phase4] wrote ${mdPath} and ${jsonPath}`);
     for (const r of runs) {
       console.error(
-        `[phase4] ${r.era}: ${r.gate.pass ? 'PASS' : 'FAIL'} — result hash ${r.provenance.resultHash}`,
+        `[phase4] ${r.era}: forecast ${r.evaluation.forecastGate.pass ? 'PASS' : 'FAIL'}, ` +
+          `policy ${r.gate.pass ? 'PASS' : 'FAIL'} — result hash ${r.provenance.resultHash}`,
       );
     }
     // A blocked gate is a failed run. Exiting 0 would let CI, and a reader,
     // treat "did not verify" as "verified".
-    if (runs.some((r) => !r.gate.pass)) process.exitCode = 1;
+    if (runs.some((r) => !r.gate.pass || !r.evaluation.forecastGate.pass)) process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }

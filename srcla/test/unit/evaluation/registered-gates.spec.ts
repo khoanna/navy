@@ -18,6 +18,7 @@ import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult
 import { REGISTERED_POLICIES, SRCLA_POLICY } from '../../../src/evaluation/kernel/registry.js';
 import { mulberry32 } from '../../../src/evaluation/metrics/significance.js';
 import type { PolicyArtifact } from '../../../src/policy/types.js';
+import { runForecastGate } from '../../../src/evaluation/kernel/forecast-gate.js';
 
 const WAD = 10n ** 18n;
 const PERIODS = 60;
@@ -150,6 +151,11 @@ function evaluation(overrides: Partial<RegisteredEvaluationResult> = {}): Regist
     provisional: false,
     missingPolicyIds,
     missingTiers: REGISTERED_TIERS.filter((t) => !seenTiers.has(t.toString())),
+    // §11.5's forecast gate over the same artifact. These fixtures carry no
+    // labels, so every measured check reports NOT PRODUCED — which is the
+    // right answer for a fixture and is why the POLICY gate is what these
+    // specs assert on.
+    forecastGate: runForecastGate(artifact(), []),
     ...overrides,
   };
 }
