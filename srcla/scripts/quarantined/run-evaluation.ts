@@ -30,7 +30,7 @@ import { calculateReturnMetrics } from '../../src/evaluation/metrics/returns.js'
 import { calculateRiskMetrics } from '../../src/evaluation/metrics/risk.js';
 import { calculateForecastMetrics, type ForecastMetrics } from '../../src/evaluation/metrics/forecast.js';
 import { welchTTest, bootstrapCI } from '../../src/evaluation/metrics/statistics.js';
-import { evaluateReleaseGate } from '../../src/evaluation/report/release-gate.js';
+import { evaluateReleaseGate } from '../../src/evaluation/quarantined/release-gate.js';
 import { formatReportMarkdown } from '../../src/evaluation/report/report.js';
 import { createSRCLAPolicy } from '../../src/evaluation/quarantined/srcla-policy.js';
 import { calibrateForecastMethods, validateCoverage } from '../../src/evaluation/forecast/calibration.js';

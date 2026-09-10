@@ -1,9 +1,32 @@
 /**
- * Release gate evaluation
+ * QUARANTINED — the retired v0.6 release gate.
+ *
+ * This is NOT the §11.5 policy gate. The live one is
+ * `src/evaluation/kernel/gates.ts#evaluateRegisteredRelease`, which carries
+ * the v0.8 criterion set: a demonstration floor, the four sustainability
+ * criteria, an admissibility predicate over comparators, and a three-valued
+ * outcome in which `null` (NOT PRODUCED) never rolls up into a pass.
+ *
+ * What survives here is the v0.6 shape the v0.7->v0.8 amendment record
+ * removed: an unconditional "outperform B1/B2 by a fixed margin" criterion
+ * (unattainable, and the reason the registered evaluation FAILED twice) and a
+ * hardcoded 5% max-drawdown threshold registered nowhere. It is two-valued
+ * (`pass: boolean`), so an absent measurement can only read as a failure or a
+ * success, never as "not produced".
+ *
+ * It is kept, not deleted, for the same reason as everything else in this
+ * directory: it is the provenance of the figures in earlier
+ * SRCLA-REPORT.{md,json} versions, and reproducing a published number needs
+ * the code that produced it. Its only caller is
+ * `scripts/quarantined/run-evaluation.ts`. It must never be imported from
+ * unquarantined `src/`.
  */
+import { assertQuarantineOptIn } from './guard.js';
 import type { ForecastMetrics } from '../metrics/forecast.js';
 import type { ReturnMetrics } from '../metrics/returns.js';
 import type { RiskMetrics } from '../metrics/risk.js';
+
+assertQuarantineOptIn('src/evaluation/quarantined/release-gate.ts');
 
 export interface GateCheck {
   name: string;

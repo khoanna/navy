@@ -9,7 +9,10 @@ import type { ManifestConfig } from '../manifest/types.js';
 import type { BaselineResult } from '../quarantined/baselines/types.js';
 import type { ForecastMetrics } from '../metrics/forecast.js';
 import type { RiskMetrics } from '../metrics/risk.js';
-import type { ReleaseGateResult } from './release-gate.js';
+// Same type-only borrow, from the retired v0.6 gate now quarantined beside
+// its only caller (`scripts/quarantined/run-evaluation.ts`). Erased at
+// runtime, so it does not trip that module's opt-in guard.
+import type { ReleaseGateResult } from '../quarantined/release-gate.js';
 
 export interface EvaluationReport {
   meta: {

@@ -1,9 +1,40 @@
 /**
- * `src/evaluation/report/release-gate.ts` — the safety gate that NEW-14 found
- * passing because the property it gates on was never tested.
+ * `src/evaluation/quarantined/release-gate.ts` — the RETIRED v0.6 gate, moved
+ * out of live `src/` (it is not the §11.5 policy gate; see the module header).
+ * Kept under test only because it is still the provenance of earlier published
+ * figures, and this case — the safety gate that NEW-14 found passing because
+ * the property it gates on was never tested — is the one behaviour of it worth
+ * pinning.
+ *
+ * The import is dynamic and preceded by the opt-in, because the module now
+ * throws at module scope without it (`assertQuarantineOptIn`). A static import
+ * would hoist above the env assignment and throw.
  */
-import { evaluateReleaseGate, type ReleaseGateParams } from '../../../src/evaluation/report/release-gate.js';
 import type { RiskMetrics } from '../../../src/evaluation/metrics/risk.js';
+import { QUARANTINE_ENV_VAR, assertQuarantineOptIn } from '../../../src/evaluation/quarantined/guard.js';
+
+type Mod = typeof import('../../../src/evaluation/quarantined/release-gate.js');
+type ReleaseGateParams = Mod['evaluateReleaseGate'] extends (p: infer P) => unknown ? P : never;
+
+let evaluateReleaseGate: Mod['evaluateReleaseGate'];
+
+beforeAll(async () => {
+  process.env[QUARANTINE_ENV_VAR] = '1';
+  ({ evaluateReleaseGate } = await import('../../../src/evaluation/quarantined/release-gate.js'));
+});
+
+it('is behind the quarantine opt-in it now calls at module scope', () => {
+  // The module-scope call is `assertQuarantineOptIn(...)`; this is that guard
+  // exercised directly, without perturbing the module registry the suite above
+  // depends on.
+  const previous = process.env[QUARANTINE_ENV_VAR];
+  delete process.env[QUARANTINE_ENV_VAR];
+  expect(() => assertQuarantineOptIn('src/evaluation/quarantined/release-gate.ts')).toThrow(
+    /QUARANTINED/,
+  );
+  process.env[QUARANTINE_ENV_VAR] = previous;
+  expect(() => assertQuarantineOptIn('src/evaluation/quarantined/release-gate.ts')).not.toThrow();
+});
 
 function params(risk: Partial<RiskMetrics> = {}): ReleaseGateParams {
   return {
