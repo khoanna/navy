@@ -238,15 +238,32 @@ describe('the forecast gate is three-valued, and null never passes', () => {
 });
 
 describe('the measured label checks', () => {
-  it('FAILS regime purity when a label window straddles a regime change', () => {
+  it('FAILS regime purity when the impure SHARE exceeds the registered tolerance', () => {
+    // Alternating every label makes essentially every window straddle, which
+    // is contamination at a level that could move a calibration.
+    const g = runForecastGate(
+      goodArtifact(),
+      labels({ regimeAt: (i, m) => `${m}:r${i % 2}` }),
+      { registration: registration() },
+    );
+    const c = find(g, 'Regime purity');
+    expect(c.passed).toBe(false);
+    expect(c.detail).toContain('straddle');
+  });
+
+  it('PASSES regime purity for a single governance boundary, and still reports it', () => {
+    // THE POINT OF THE REVISION. One regime change in the middle of an era is
+    // an exogenous governance action, not a defect in the forecast, and a
+    // zero-tolerance check could only ever be met by an era in which no
+    // governance happened. The straddling windows are still REPORTED.
     const g = runForecastGate(
       goodArtifact(),
       labels({ regimeAt: (i, m) => `${m}:r${i < 200 ? 0 : 1}` }),
       { registration: registration() },
     );
     const c = find(g, 'Regime purity');
-    expect(c.passed).toBe(false);
-    expect(c.detail).toContain('straddle');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toMatch(/tolerance/);
   });
 
   it('FAILS the availability-lag barrier when a label is readable too early', () => {

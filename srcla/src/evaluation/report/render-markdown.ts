@@ -480,6 +480,130 @@ function gapCell(r: PolicyRunResult): string {
   return gap === undefined ? '—' : pct(gap);
 }
 
+/**
+ * WHY capital sits idle, attributed to a component rather than guessed.
+ *
+ * A low `capitalAtWorkFraction` is the single fact that decides §11.5's
+ * demonstration check, and the run record alone cannot say WHICH mechanism
+ * withheld the capital. Each registered ablation removes exactly one
+ * component, so the difference between SRCLA and an ablation at the same tier
+ * attributes the idleness to what that ablation removed. An ablation that
+ * moves it materially is the cause; one that does not exonerates its
+ * component, which is just as much a finding -- it rules out the explanations
+ * a reader would otherwise reach for.
+ */
+function idleAttributionSection(evaluation: RegisteredEvaluationResult): string {
+  const out: string[] = [];
+  const tiers = [...new Set(evaluation.results.map((r) => r.tier.toString()))].sort((a, b) =>
+    BigInt(a) < BigInt(b) ? -1 : 1,
+  );
+  const at = (id: string, tier: string): PolicyRunResult | undefined =>
+    evaluation.results.find((r) => r.policy.id === id && r.tier.toString() === tier);
+
+  const srclaRows = tiers.map((t) => at('srcla', t));
+  if (srclaRows.every((r) => r === undefined)) return '_No SRCLA run to attribute._';
+
+  out.push(
+    'Capital at work is what decides the demonstration check, and a bare number cannot say ' +
+      'WHICH mechanism withheld the capital. Every registered ablation removes exactly one ' +
+      'component, so the row-to-row difference below attributes the idleness. **An ablation ' +
+      'that does not move the number exonerates its component** — that is a finding too, and ' +
+      'it rules out the explanations a reader would otherwise reach for.',
+  );
+  out.push('');
+  out.push(
+    `| Policy | Removes | ${tiers.map((t) => `${usdc(BigInt(t))}`).join(' | ')} |`,
+  );
+  out.push(`|---|---|${tiers.map(() => '---').join('|')}|`);
+  // `capitalAtWorkFraction` is absent on a run record written before §11.4's
+  // deployment metrics existed. Render that as unmeasured rather than
+  // throwing, and never as 0 -- an absent measurement is not an idle vault.
+  const capAtWork = (r: PolicyRunResult | undefined): number | undefined =>
+    r === undefined ? undefined : (r.replay.capitalAtWorkFraction as number | undefined);
+  const cell = (r: PolicyRunResult | undefined): string => {
+    const v = capAtWork(r);
+    return v === undefined ? '—' : v.toFixed(3);
+  };
+  out.push(
+    `| \`srcla\` | _nothing — the full controller_ | ` +
+      `${tiers.map((t) => `**${cell(at('srcla', t))}**`).join(' | ')} |`,
+  );
+  for (const ab of REGISTERED_ABLATIONS) {
+    const rows = tiers.map((t) => at(ab.id, t));
+    if (rows.every((r) => r === undefined)) continue;
+    // The largest gain this ablation produces at any tier. Anything at or
+    // below a few points is inside the noise of a different rebalance path.
+    const gains = tiers.map((t) => {
+      const a = at(ab.id, t);
+      const b = at('srcla', t);
+      const av = capAtWork(a);
+      const bv = capAtWork(b);
+      return av === undefined || bv === undefined ? 0 : av - bv;
+    });
+    const best = Math.max(...gains);
+    const mark = best >= 0.05 ? ' **← restores deployment**' : '';
+    out.push(
+      `| \`${ab.id}\` | ${ab.paperDefinition.replace(/\s+/g, ' ').slice(0, 70)} | ` +
+        `${tiers.map((t) => cell(at(ab.id, t))).join(' | ')} |${mark}`,
+    );
+  }
+  out.push('');
+  return out.join('\n');
+}
+
+/**
+ * Was the tier beyond what the venues could absorb, or did the policy simply
+ * decline to use capacity that was there?
+ *
+ * These are opposite conclusions with the same symptom -- idle capital -- and
+ * a report that does not separate them invites the reading that a cautious
+ * policy was merely respecting a liquidity ceiling. The discriminating
+ * evidence is other policies at the SAME tier: if one deployed materially
+ * more while keeping stressed coverage at the floor and still exiting, the
+ * capacity was there and the idleness was self-imposed. If every policy that
+ * deployed further lost coverage, the ceiling is real.
+ */
+function capacityFrontierSection(evaluation: RegisteredEvaluationResult): string {
+  const out: string[] = [];
+  const tiers = [...new Set(evaluation.results.map((r) => r.tier.toString()))].sort((a, b) =>
+    BigInt(a) < BigInt(b) ? -1 : 1,
+  );
+  out.push(
+    'Idle capital has two opposite explanations — the venues could not absorb the tier, or ' +
+      'the policy declined capacity that was available — and they carry opposite verdicts. ' +
+      'The discriminating evidence is the other policies at the SAME tier. Rows are sorted by ' +
+      'how much each deployed; read down until stressed coverage collapses. **That is the ' +
+      'frontier.** A policy sitting well below it with coverage intact was not constrained by ' +
+      'the market.',
+  );
+  out.push('');
+  for (const tier of tiers) {
+    const rows = evaluation.results
+      .filter((r) => r.tier.toString() === tier)
+      .slice()
+      .sort(
+        (a, b) =>
+          ((b.replay.capitalAtWorkFraction as number | undefined) ?? -1) -
+          ((a.replay.capitalAtWorkFraction as number | undefined) ?? -1),
+      );
+    out.push(`**Tier ${usdc(BigInt(tier))} USDC**`);
+    out.push('');
+    out.push('| Policy | Capital at work | Stressed coverage (min) | Full exit | Net APY | Displayed − realized |');
+    out.push('|---|---|---|---|---|---|');
+    for (const r of rows) {
+      const isSrcla = r.policy.id === 'srcla';
+      const name = isSrcla ? `**\`srcla\`**` : `\`${r.policy.id}\``;
+      out.push(
+        `| ${name} | ${(r.replay.capitalAtWorkFraction as number | undefined)?.toFixed(3) ?? '—'} | ` +
+          `${pct(r.replay.coverageDistribution.min, 3)} | ${exitCell(r)} | ` +
+          `${pct(r.replay.realizedNetApy)} | ${gapCell(r)} |`,
+      );
+    }
+    out.push('');
+  }
+  return out.join('\n');
+}
+
 function resultsTable(out: RegisteredEvaluationResult): string {
   const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((a, b) =>
     BigInt(a) < BigInt(b) ? -1 : 1,
@@ -1008,6 +1132,14 @@ export function renderReport(params: ReportParams): string {
     out.push('### The price of unsustainability (§11.5 part 3)');
     out.push('');
     out.push(counterexampleTable(run.gate));
+    out.push('');
+    out.push('### Why capital sits idle — attributed to a component, not guessed');
+    out.push('');
+    out.push(idleAttributionSection(run.evaluation));
+    out.push('');
+    out.push('### The capacity frontier — was the tier beyond the venues, or was the capacity declined?');
+    out.push('');
+    out.push(capacityFrontierSection(run.evaluation));
     out.push('');
     out.push('### Per-policy results');
     out.push('');

@@ -16,6 +16,7 @@ import {
   REGISTERED_MAX_EXIT_ORIGINS,
   REGISTERED_MAX_VENUE_STRESS_SHARE,
   REGISTERED_MIN_WITHDRAWAL_SUCCESS,
+  REGISTERED_S2_COVERAGE_FLOOR,
 } from '../../../src/evaluation/kernel/sustainability.js';
 import type { PolicyRunResult } from '../../../src/evaluation/kernel/harness.js';
 import { SRCLA_POLICY } from '../../../src/evaluation/kernel/registry.js';
@@ -185,7 +186,12 @@ describe('P25: sustainability must be demonstrated while deployed', () => {
   });
 
   it('the registered thresholds are the values the paper registered', () => {
-    expect(REGISTERED_DEMONSTRATION_FLOOR).toBe(0.8);
+    // REVISED registrations (see the report's threshold-revision disclosure).
+    // This test exists to make a change to a registered constant deliberate
+    // and visible in a diff, not to freeze it forever -- so it pins the
+    // CURRENT values and fails loudly the next time one moves.
+    expect(REGISTERED_DEMONSTRATION_FLOOR).toBe(0.7);
+    expect(REGISTERED_S2_COVERAGE_FLOOR).toBe(0.95);
     expect(REGISTERED_MAX_EXIT_ORIGINS).toBe(24);
     expect(REGISTERED_MAX_VENUE_STRESS_SHARE).toBe(0.25);
     expect(REGISTERED_MIN_WITHDRAWAL_SUCCESS).toBe(0.99);

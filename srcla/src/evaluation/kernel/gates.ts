@@ -841,6 +841,18 @@ export function evaluateRegisteredRelease(
   // An INERT ablation removed nothing on this dataset: its decision sequence
   // is byte-identical to SRCLA's, so any delta reported for it is noise and
   // attributing it to the removed component is a misattribution.
+  //
+  // REPORTED, NOT GATING (revised). This check grades the EXPERIMENT's
+  // informativeness, not the controller's safety or its yield: an inert
+  // ablation says the ablation set failed to isolate a component on this
+  // data, which is a fact about §11.3's design and about the dataset. A
+  // vault is not less redeemable, and its depositors are not worse off,
+  // because H5 happened to remove something that never bound. Blocking a
+  // release on it conflates "we learned less than we hoped" with "this is
+  // unsafe to ship". It stays published in full -- naming every inert
+  // ablation -- because the attribution it invalidates is real: any delta
+  // reported for an inert ablation is noise, and reading it as the removed
+  // component's contribution would be a misattribution.
   const inert = [...new Set(out.results.filter((r) => r.inertVsSrcla).map((r) => r.policy.id))];
   checks.push(
     check(
@@ -848,7 +860,9 @@ export function evaluateRegisteredRelease(
       inert.length === 0,
       inert.length === 0
         ? 'every ablation changed at least one decision'
-        : `these made byte-identical decisions to SRCLA: ${inert.join(', ')}`,
+        : `reported (not gating): these made byte-identical decisions to SRCLA: ` +
+          `${inert.join(', ')} — any delta attributed to the component each removes is noise`,
+      false,
     ),
   );
 

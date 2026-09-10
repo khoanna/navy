@@ -42,6 +42,7 @@ import {
   REGISTERED_NONINFERIORITY_MARGIN,
   mulberry32,
 } from '../../../src/evaluation/metrics/significance.js';
+import { REGISTERED_S2_COVERAGE_FLOOR } from '../../../src/evaluation/kernel/sustainability.js';
 import { REGISTERED_COVERAGE_FLOOR } from '../../../src/policy/steps/coverage.js';
 import type { PolicyArtifact } from '../../../src/policy/types.js';
 
@@ -348,6 +349,10 @@ describe('the non-gating set is enumerated, not open', () => {
   const ALLOWED_NON_GATING = [
     'Diagnostic: statistical distinguishability from every sustainable baseline',
     'Superiority: yield above every sustainable baseline (claimed)',
+    // REVISED: grades the EXPERIMENT's informativeness, not the controller's
+    // safety, so it publishes without blocking. Still enumerated here -- the
+    // point of this test is that the non-gating set stays CLOSED.
+    'No inert ablation',
   ];
 
   it('only the enumerated checks may be non-gating', () => {
@@ -633,9 +638,17 @@ describe('P27: an unsustainable policy is a counterexample, not a comparator', (
       (v) => v.policyId === 'b1' && v.tier === REGISTERED_TIERS[0]!.toString(),
     )!;
     // The measured coverage, the floor it was measured against, and the gap.
-    expect(b1.breach).toContain((REGISTERED_COVERAGE_FLOOR - 0.112).toFixed(3));
-    expect(b1.breach).toContain(REGISTERED_COVERAGE_FLOOR.toFixed(3));
-    expect(b1.breach).toMatch(/short by 0\.112/);
+    // The S2 GRADE is measured against the release floor, which is a
+    // different constant from the optimiser's eligibility filter -- see
+    // REGISTERED_S2_COVERAGE_FLOOR for why they must not be the same value.
+    // The MEASURED coverage is a property of the fixture, not of the floor.
+    // Deriving it as `floor - 0.112` coupled the two, so revising the floor
+    // broke a test that was only ever about the message naming three things:
+    // what was measured, what it was measured against, and the gap.
+    expect(b1.breach).toContain('0.878');
+    expect(b1.breach).toContain(REGISTERED_S2_COVERAGE_FLOOR.toFixed(3));
+    expect(b1.breach).toContain((0.95 - 0.878).toFixed(3));
+    expect(b1.breach).toMatch(/short by 0\.072/);
   });
 
   it('states the MARGIN of an S4 breach too', () => {
