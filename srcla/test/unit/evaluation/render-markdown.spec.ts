@@ -319,8 +319,8 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).not.toContain('26793');
     expect(md).not.toContain('26,793');
     expect(md).toMatch(/\| `heldout-b` \| 2026-08-24 \| open \| open \|/);
-    // The Verdict line for that era must not print a sentinel day count either.
-    expect(md).toContain('**heldout-b** (open-ended,');
+    // The Verdict heading for that era must not print a sentinel day count either.
+    expect(md).toContain('`heldout-b` — open-ended,');
   });
 
   // v0.6 re-cut the eras. This test previously PINNED the v0.5 text, so it
@@ -531,7 +531,10 @@ describe('renderReport — §11.5 has TWO gates', () => {
 
   it('states a forecast-gate FAIL in the verdict line, separately from the policy gate', () => {
     const md = renderReport({ ...params, runs: [fakeRun('heldout-c', false)] });
-    expect(md).toMatch(/forecast gate \*\*FAIL\*\* — blocked on: Selection margin/);
+    // The gate's own line says FAIL, and every blocked reason is itemised
+    // beneath it rather than joined into one unreadable paragraph.
+    expect(md).toMatch(/\*\*Forecast gate: FAIL\*\*/);
+    expect(md).toMatch(/^- Selection margin/m);
   });
 
   it('does not let a passing policy gate stand in for an unrun forecast gate', () => {
@@ -548,17 +551,23 @@ describe('renderReport — §11.5 has TWO gates', () => {
         },
       ],
     });
-    expect(md).toMatch(/forecast gate \*\*FAIL\*\*/);
-    expect(md).toMatch(/policy gate \*\*PASS\*\*/);
+    expect(md).toMatch(/\*\*Forecast gate: FAIL\*\*/);
+    expect(md).toMatch(/\*\*Policy gate: PASS\*\*/);
+    // A single blocked gate must reach the top-line decision.
+    expect(md).toContain('**DO NOT RELEASE.**');
   });
 });
 
 describe('renderReport — a passing run', () => {
   it('does not print a blocked-reasons clause when the gate passed', () => {
     const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
-    expect(md).toMatch(/forecast gate \*\*PASS\*\*/);
-    expect(md).toMatch(/policy gate \*\*PASS\*\*/);
+    expect(md).toMatch(/\*\*Forecast gate: PASS\*\*/);
+    expect(md).toMatch(/\*\*Policy gate: PASS\*\*/);
+    // A passing run must not emit a bullet list of reasons, and must reach
+    // the affirmative top-line decision.
     expect(md).not.toMatch(/PASS\*\* — blocked on/);
+    expect(md).toContain('**RELEASE.**');
+    expect(md).not.toContain('**DO NOT RELEASE.**');
   });
 });
 

@@ -59,6 +59,33 @@ export interface ForkReplayAction {
 }
 
 /** One (policy, tier)'s proposal at ONE origin, to be replayed on the fork. */
+/**
+ * A kernel decision hash as the `bytes32` `submitPlan` takes.
+ *
+ * The kernel stores `decisionHash` UNPREFIXED -- `decide.ts` adds `0x` only
+ * when it builds a plan -- while a stand-in produced by `keccak256` for a
+ * shape that never ran the kernel arrives already prefixed. `buildForkPlan`
+ * derives the planId with `BigInt(decisionHash)`, which throws on the
+ * unprefixed form. Left unnormalised, every policy that RAN THE KERNEL failed
+ * to replay with "Cannot convert <64 hex> to a BigInt" while the two
+ * hash-less shapes replayed fine: §11.1 reported 2 of 64 executed and the
+ * release gate blocked on infrastructure rather than on anything the chain
+ * had decided.
+ *
+ * Throws rather than coercing anything that is not 32 bytes of hex: a
+ * malformed hash must fail here, where the message names the policy, not
+ * inside an `eth_call`.
+ */
+export function forkDecisionHash(hash: string, label: string): string {
+  const withPrefix = hash.startsWith('0x') ? hash : `0x${hash}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) {
+    throw new Error(
+      `decision hash '${hash}' for ${label} is not 32 bytes of hex; submitPlan takes a bytes32`,
+    );
+  }
+  return withPrefix;
+}
+
 export interface ForkReplayPlan {
   policyId: string;
   tier: bigint;

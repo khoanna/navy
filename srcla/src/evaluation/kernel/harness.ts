@@ -53,6 +53,7 @@ import {
 } from './registry.js';
 import type { BaselineAction } from '../replay/replay.js';
 import {
+  forkDecisionHash,
   runForkReplays,
   type ForkReplayOptions,
   type ForkReplayPlan,
@@ -784,9 +785,12 @@ export async function runRegisteredForkReplays(
     // labelled, deterministic, non-zero stand-in: `submitPlan` rejects a zero
     // decision hash, and fabricating a kernel-looking hash for a policy that
     // never ran the kernel would misattribute the plan's provenance.
+    // The kernel's hash needs its `0x` restored before `submitPlan` can take
+    // it as a bytes32; see `forkDecisionHash`.
     const decisionHash =
-      proposal?.decisionHash ??
-      keccak256(toUtf8Bytes(`srcla-fork-replay|${r.policy.id}|${r.tier}|${proposal?.originIndex ?? -1}`));
+      proposal?.decisionHash !== undefined && proposal?.decisionHash !== null
+        ? forkDecisionHash(proposal.decisionHash, `${r.policy.id}@${r.tier}`)
+        : keccak256(toUtf8Bytes(`srcla-fork-replay|${r.policy.id}|${r.tier}|${proposal?.originIndex ?? -1}`));
     return {
       policyId: r.policy.id,
       tier: r.tier,

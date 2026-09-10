@@ -5,7 +5,12 @@
  * in `test/integration/fork-replay.spec.ts`.
  */
 import { ethers } from 'ethers';
-import { buildForkPlan, isChainRefusal, type ForkReplayPlan } from '../../../src/evaluation/fork-runner.js';
+import {
+  buildForkPlan,
+  forkDecisionHash,
+  isChainRefusal,
+  type ForkReplayPlan,
+} from '../../../src/evaluation/fork-runner.js';
 import { ActionKind, hashPlanAction, planDomain } from '../../../src/policy/steps/plan.js';
 
 const ADAPTERS = {
@@ -148,5 +153,37 @@ describe('isChainRefusal', () => {
     expect(isChainRefusal(Object.assign(new Error('could not connect'), { code: 'NETWORK_ERROR' }))).toBe(false);
     expect(isChainRefusal(new Error("no fork adapter registered for market 'euler'"))).toBe(false);
     expect(isChainRefusal('not an error at all')).toBe(false);
+  });
+});
+
+/**
+ * REGRESSION. The kernel stores `decisionHash` without a `0x`; `decide.ts`
+ * adds one only when it builds a plan. `buildForkPlan` derives the planId
+ * with `BigInt(decisionHash)`, which throws on the bare form. In the first
+ * registered run this made every policy that ran the kernel fail to replay --
+ * 58 of 64 -- with "Cannot convert <64 hex> to a BigInt", while the two
+ * shapes whose stand-in hash comes from `keccak256` (already prefixed)
+ * replayed fine. §11.1 then reported 2 of 64 EXECUTED and the release gate
+ * blocked on infrastructure rather than on a chain verdict.
+ */
+describe('forkDecisionHash', () => {
+  const BARE = 'a'.repeat(64);
+
+  it('restores the prefix on a bare kernel hash', () => {
+    expect(forkDecisionHash(BARE, 'srcla@10000')).toBe(`0x${BARE}`);
+  });
+
+  it('leaves an already-prefixed hash alone', () => {
+    expect(forkDecisionHash(`0x${BARE}`, 'b4@10000')).toBe(`0x${BARE}`);
+  });
+
+  it('produces something BigInt can parse — the conversion that was failing', () => {
+    expect(() => BigInt(forkDecisionHash(BARE, 'srcla@10000'))).not.toThrow();
+    expect(() => BigInt(BARE)).toThrow();
+  });
+
+  it('names the policy when the hash is not 32 bytes of hex', () => {
+    expect(() => forkDecisionHash('0xdeadbeef', 'srcla@10000')).toThrow(/srcla@10000/);
+    expect(() => forkDecisionHash('nothex'.repeat(11), 'b1@100000')).toThrow(/not 32 bytes of hex/);
   });
 });

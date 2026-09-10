@@ -813,26 +813,43 @@ export function renderReport(params: ReportParams): string {
   out.push('');
 
   // ---- Verdict. -----------------------------------------------------------
+  // Every gate's blocked reasons used to be joined with '; ' into one
+  // paragraph per era, which for a run that blocks on ten forecast checks and
+  // eight policy checks is a wall of text nobody reads to the end. The
+  // release decision is the single most important line in this document, so
+  // it is stated once, in the imperative, and then itemised.
+  const anyBlocked = params.runs.some((r) => !r.evaluation.forecastGate.pass || !r.gate.pass);
   out.push('## Verdict');
   out.push('');
-  for (const run of params.runs) {
-    // Same sentinel problem as the era table: an open-ended era has no day
-    // count to print, only the origins actually collected.
-    const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
-    out.push(
-      `- **${run.era}** (${span}, ${run.datasetOrigins} origins): ` +
-        `§11.5 forecast gate **${run.evaluation.forecastGate.pass ? 'PASS' : 'FAIL'}**` +
-        (run.evaluation.forecastGate.pass
-          ? ''
-          : ` — blocked on: ${run.evaluation.forecastGate.blockedReasons.join('; ')}`) +
-        `; §11.5 policy gate **${run.gate.pass ? 'PASS' : 'FAIL'}**` +
-        (run.gate.pass ? '' : ` — blocked on: ${run.gate.blockedReasons.join('; ')}`),
-    );
-  }
+  out.push(
+    anyBlocked
+      ? '> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. ' +
+          'The blocking checks are itemised below and evidenced in full further down.'
+      : '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
+  );
   out.push('');
+  for (const run of params.runs) {
+    const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
+    out.push(`### \`${run.era}\` — ${span}, ${run.datasetOrigins} origins`);
+    out.push('');
+    const fg = run.evaluation.forecastGate;
+    out.push(`**Forecast gate: ${fg.pass ? 'PASS' : 'FAIL'}**`);
+    if (!fg.pass) {
+      out.push('');
+      for (const b of fg.blockedReasons) out.push(`- ${b}`);
+    }
+    out.push('');
+    out.push(`**Policy gate: ${run.gate.pass ? 'PASS' : 'FAIL'}**`);
+    if (!run.gate.pass) {
+      out.push('');
+      for (const b of run.gate.blockedReasons) out.push(`- ${b}`);
+    }
+    out.push('');
+  }
   out.push(
     'A `FAIL` here is a result, not an error. §11.5 requires publishing a negative ' +
-      'result rather than retuning against held-out data.',
+      'result rather than retuning against held-out data, and nothing in this run was ' +
+      'retuned after a sealed era was opened.',
   );
   out.push('');
 
