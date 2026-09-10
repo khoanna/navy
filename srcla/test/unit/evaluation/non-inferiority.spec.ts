@@ -655,7 +655,13 @@ describe('P27: an unsustainable policy is a counterexample, not a comparator', (
       } as unknown as RegisteredEvaluationResult,
       gateOpts,
     );
-    expect(gate.sustainability[0]!.breach).toMatch(/S4 continuity \(3 policy violations vs 0 permitted, so over by 3\)/);
+    // Renamed with the check itself: `policyViolations` counts INVALID
+    // ACTIONS, not §11.5 S4's cap/dependency/reserve/loss classes, and the
+    // breach string now says both. The margin assertion is unchanged: the
+    // count, the permitted count and the overage must all still appear.
+    expect(gate.sustainability[0]!.breach).toMatch(
+      /S4 action validity \(3 invalid actions vs 0 permitted, so over by 3; §11\.5's cap\/dependency\/reserve\/loss classes NOT EVALUATED\)/,
+    );
   });
 
   it('reports NO SUSTAINABLE COMPARATOR when every deployable baseline breached', () => {

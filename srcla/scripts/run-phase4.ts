@@ -339,6 +339,25 @@ function serialisableRun(run: RunSummary): Record<string, unknown> {
       checks: run.evaluation.forecastGate.checks,
       venues: run.evaluation.forecastGate.venues,
     },
+    // §11.1's pinned-prestate fork replay, as DATA. Omitting it left the
+    // machine-readable half of the deliverable knowing about §11.1 only
+    // through a prose sentence inside a check detail — the same omission
+    // class already closed for the sustainability verdicts. `null` is the
+    // NOT PRODUCED case and is written explicitly, never left absent.
+    forkReplay:
+      run.forkResults === undefined
+        ? null
+        : run.forkResults.map((f) => ({
+            policyId: f.policyId,
+            tier: f.tier.toString(),
+            prestateBlock: f.prestateBlock,
+            executed: f.executed,
+            // A HOLD is `executed: true` with NO chain interaction. Both
+            // fields are serialised so a reader cannot count holds as
+            // executions, which is what the console line used to do.
+            held: f.held === true,
+            detail: f.detail,
+          })),
     releaseGate: {
       pass: run.gate.pass,
       blockedReasons: run.gate.blockedReasons,
@@ -453,8 +472,10 @@ async function runEra(
     forkResults === undefined
       ? '    §11.1 fork replay: NOT PRODUCED (set SRCLA_FORK_REPLAY_RPC_URL / ' +
           '_VAULT_ADDRESS / _ALLOCATOR_KEY / _ADAPTERS to produce one) — the release gate blocks'
-      : `    §11.1 fork replay: ${forkResults.filter((f) => f.executed).length}/${forkResults.length} ` +
-          `executed against ${forkOpts!.rpcUrl} at pinned block ${forkOpts!.prestateBlock}`,
+      : `    §11.1 fork replay: ${forkResults.filter((f) => f.executed && f.held !== true).length}` +
+          `/${forkResults.length} EXECUTED (${forkResults.filter((f) => f.held === true).length} ` +
+          `HOLD — no chain interaction) against ${forkOpts!.rpcUrl} at pinned block ` +
+          `${forkOpts!.prestateBlock}`,
   );
   const gate = evaluateRegisteredRelease(evaluation, {
     universeLiquidity,
@@ -519,6 +540,9 @@ async function runEra(
       evaluation,
       gate,
       datasetOrigins: dataset.snapshots.length,
+      // Carried onto the run summary so `serialisableRun` can put §11.1 in
+      // the JSON as data. `undefined` here IS the NOT PRODUCED case.
+      forkResults,
       provenance: {
         codeCommit: record.codeCommit,
         manifestHash: manifest.contentHashes.manifest,

@@ -126,7 +126,12 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   // re-declared so the two cannot drift apart.
   const s2 = r.minStressedLiquidCoverage >= REGISTERED_COVERAGE_FLOOR;
 
-  // S3 — capacity discipline, graded on the MAXIMUM share over origins: the
+  // S3 — venue-stress share, graded on the MAXIMUM share over origins. This
+  // is the SECOND of §11.5 S3's two clauses; the first — that the vault's own
+  // deposits do not push a venue past its registered utilization ceiling — is
+  // NOT EVALUATED anywhere, and is disclosed as such by the gate check and
+  // the rendered report rather than being implied by a "capacity discipline"
+  // label. Graded on the MAXIMUM share over origins: the
   // constraint is instantaneous (see `venueStressContribution`), and it is
   // graded the same way S2 and the exit time are, on the worst moment rather
   // than on an average that dilutes it. An empty contribution map means the
@@ -135,7 +140,13 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   const worstShare = shares.length === 0 ? 0 : Math.max(...shares);
   const s3 = worstShare <= REGISTERED_MAX_VENUE_STRESS_SHARE;
 
-  // S4 — operational continuity.
+  // S4 — ACTION VALIDITY. `policyViolations` counts actions the venue set
+  // could not honour as proposed (see `replay/replay.ts`): a deploy into a
+  // paused or absent venue, or a divest from a venue holding nothing. §11.5's
+  // S4 additionally names cap, dependency, reserve and loss violations and
+  // unrecoverable plan state; NONE of those five is measured here, and the
+  // gate check carrying this value is named and detailed accordingly rather
+  // than claiming "operational continuity".
   const s4 = (r.policyViolations ?? 0) === 0;
 
   const failed: string[] = [];
@@ -161,14 +172,14 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   }
   if (!s3) {
     failed.push(
-      `S3 capacity discipline (worst venue share ${worstShare.toFixed(3)} vs ` +
-        `${REGISTERED_MAX_VENUE_STRESS_SHARE})`,
+      `S3 venue-stress share (worst venue share ${worstShare.toFixed(3)} vs ` +
+        `${REGISTERED_MAX_VENUE_STRESS_SHARE}; §11.5 S3's utilization-ceiling clause NOT EVALUATED)`,
     );
   }
   if (!s4) {
     failed.push(
-      `S4 continuity (${r.policyViolations ?? 0} policy violations vs 0 permitted, so over by ` +
-        `${r.policyViolations ?? 0})`,
+      `S4 action validity (${r.policyViolations ?? 0} invalid actions vs 0 permitted, so over by ` +
+        `${r.policyViolations ?? 0}; §11.5's cap/dependency/reserve/loss classes NOT EVALUATED)`,
     );
   }
 

@@ -218,8 +218,9 @@ export interface ForkReplayResult {
    * A HOLD is `executed: true` — the chain trivially accepts doing nothing —
    * but it is not evidence that any allocation was accepted, so the check
    * counts holds separately rather than letting a run of holds read as a run
-   * of executions. A future policy shape that never reported a proposal would
-   * otherwise self-certify.
+   * of executions. This is ENFORCED, not merely disclosed: if EVERY SRCLA
+   * (policy, tier) run held, the §11.1 check reports `null` (NOT PRODUCED)
+   * and blocks, so a policy shape that never proposes cannot self-certify.
    */
   held?: boolean;
   detail: string;
@@ -636,15 +637,41 @@ export function evaluateRegisteredRelease(
     const required = new Set(requiredRuns());
     for (const f of fork) required.delete(`${f.policyId}@${f.tier}`);
     const notExecuted = fork.filter((f) => !f.executed);
+    // A HOLD is `executed: true` — the chain trivially accepts doing nothing
+    // — so a policy that proposed nothing at every replayed origin used to
+    // clear this check with ZERO chain interaction: the completeness set was
+    // full, `notExecuted` was empty, and only the prose detail changed. That
+    // is the absence-reads-as-success shape this revision exists to close,
+    // sitting on the one check it exists to wire, and the pathology it hid —
+    // a controller that never trades — is the original failure itself.
+    //
+    // §11.1 asks whether the chain ACCEPTS SRCLA's allocation. A run in which
+    // SRCLA never proposed one has not answered that question either way, so
+    // the outcome is NOT PRODUCED (`null`, which never rolls up into a pass),
+    // not a pass. Scoped to SRCLA's own runs, matching the sustainability
+    // section: a baseline that holds is a fact about the baseline.
+    const srclaFork = fork.filter((f) => f.policyId === SRCLA_POLICY.id);
+    const srclaExecutions = srclaFork.filter((f) => f.held !== true);
+    const noSrclaExecution = srclaExecutions.length === 0;
     checks.push(
       check(
         '§11.1 pinned-prestate fork replay',
-        required.size === 0 && notExecuted.length === 0,
+        required.size > 0 || notExecuted.length > 0
+          ? false
+          : noSrclaExecution
+            ? null
+            : true,
         required.size > 0
           ? `no fork replay for: ${[...required].sort().join(', ')}`
           : notExecuted.length > 0
             ? `did not execute on fork: ${notExecuted.map((f) => `${f.policyId}@${f.tier} (${f.detail})`).join(', ')}`
-            : forkClaim(fork),
+            : noSrclaExecution
+              ? `NOT PRODUCED: ${srclaFork.length} SRCLA (policy, tier) run(s) were replayed and ` +
+                `EVERY ONE held, so no allocation was ever submitted to the chain. A hold is ` +
+                `trivially executable and demonstrates nothing about whether the vault would ` +
+                `accept SRCLA's plan; §11.1 needs at least one non-held SRCLA execution. ` +
+                forkClaim(fork)
+              : forkClaim(fork),
       ),
     );
   }
@@ -725,26 +752,61 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  // S3 — capacity discipline. A vault that IS a venue's depth cannot exit it
+  // S3 — venue-stress share. A vault that IS a venue's depth cannot exit it
   // without moving it, so the yield it displays there is not a yield it can
   // realize at size. This is the criterion that makes the 10M tier a real
   // question rather than a rescaling of the 1M one.
+  //
+  // NAMED FOR WHAT IT MEASURES, WHICH IS HALF ITS PAPER CLAUSE. §11.5's S3
+  // has TWO clauses: (a) the vault's own deposits do not push a venue past
+  // its registered utilization ceiling, and (b) venue-stress contribution
+  // stays within bounds. Only (b) is graded here — `sustainability.ts`
+  // computes the worst venue share and nothing computes a post-deposit
+  // utilization against `irmMaxUtilizationRay`. Clause (a) is therefore NOT
+  // EVALUATED, and the check says so in its own detail rather than letting
+  // the name imply a measurement that was never taken. Grading it would need
+  // the replay to carry a post-deposit utilization per (origin, venue)
+  // against each venue's registered ceiling; adding that here, untested and
+  // outside a registered artifact, would be a new unvalidated rule rather
+  // than a disclosure.
   checks.push(
     sustainabilityCheck(
-      'Sustainability S3: capacity discipline',
+      'Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED)',
       sustainability,
       (v) => v.s3,
-      `no venue share above ${REGISTERED_MAX_VENUE_STRESS_SHARE} at any origin`,
+      `no venue share above ${REGISTERED_MAX_VENUE_STRESS_SHARE} at any origin. ` +
+        `NOT EVALUATED: §11.5 S3's first clause — that the vault's own deposits do not push a ` +
+        `venue past its registered utilization ceiling — is not measured by this run; only the ` +
+        `venue-stress bound is`,
     ),
   );
 
-  // S4 — operational continuity.
+  // S4 — ACTION VALIDITY, not the four §11.5 violation classes.
+  //
+  // §11.5 part 3 S4 reads "No cap, dependency, reserve, or loss violation; no
+  // unrecoverable plan state." NONE of those four is counted anywhere. What
+  // `replay/replay.ts` actually counts as a `policyViolation` is an action the
+  // venue set could not honour as proposed: a deploy into a paused or absent
+  // venue, or a divest from a venue holding nothing. That is a real and useful
+  // property — a correct policy proposes none — but it is action validity, not
+  // operational continuity, and printing the latter over the former is exactly
+  // the absence-reads-as-success shape: a PASS on the PRIMARY criterion drawn
+  // from a measurement of something else.
+  //
+  // Renamed and disclosed rather than implemented. Counting caps, reserve,
+  // dependency and loss in the replay means re-deriving four on-chain
+  // guardrails offline, and a second implementation of a rule the contract
+  // already owns is this branch's other recurring defect. The honest
+  // disclosure is cheap and correct; the reimplementation would be neither.
   checks.push(
     sustainabilityCheck(
-      'Sustainability S4: operational continuity',
+      'Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED)',
       sustainability,
       (v) => v.s4,
-      'no policy violation over any run',
+      'no invalid action over any run (a deploy into a paused or absent venue, or a divest from ' +
+        'a venue holding nothing). NOT EVALUATED: §11.5 S4 also names cap, dependency, reserve ' +
+        'and loss violations and unrecoverable plan state; none of those five is measured by ' +
+        'this run',
     ),
   );
 

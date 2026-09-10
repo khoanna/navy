@@ -20,6 +20,7 @@
 import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
 import {
   ablationContributions,
+  type ForkReplayResult,
   type RegisteredGateCheck,
   type RegisteredGateResult,
   type SkillWindow,
@@ -45,6 +46,14 @@ export interface RunSummary {
     gasSeriesDigest?: string;
   };
   datasetOrigins: number;
+  /**
+   * §11.1's pinned-prestate fork replay outcomes, when one was produced.
+   * `undefined` means NOT PRODUCED — the same fact the gate check reports —
+   * and is serialised as such rather than omitted, so the machine-readable
+   * half of the deliverable knows about §11.1 through data and not only
+   * through a prose string inside a check detail.
+   */
+  forkResults?: readonly ForkReplayResult[] | undefined;
 }
 
 /** One row of the DERIVED (measured) per-era coverage table — distinct from
@@ -622,7 +631,18 @@ function sustainabilityTable(gate: RegisteredGateResult): string {
       'is trivially redeemable and demonstrates nothing, so every criterion reports **ND** (NOT ' +
       'DEMONSTRATED) and no sustainability claim may be drawn from it.',
     '',
-    '| Tier | Demonstrated | S1 redeem | S2 coverage | S3 capacity | S4 continuity | Verdict | Net APY | Breach |',
+    '**What S3 and S4 do NOT cover.** Two of §11.5 part 3\'s clauses are not measured by this ' +
+      'run, and the columns are named for what they measure rather than for the clause:',
+    '',
+    '- **S3** grades only the venue-stress bound. §11.5 S3\'s first clause — that the vault\'s ' +
+      'own deposits do not push a venue past its **registered utilization ceiling** — is **NOT ' +
+      'EVALUATED**. A PASS in that column is not evidence about the ceiling.',
+    '- **S4** grades **action validity**: no deploy into a paused or absent venue, and no divest ' +
+      'from a venue holding nothing. §11.5 S4\'s named classes — **cap, dependency, reserve and ' +
+      'loss violations, and unrecoverable plan state** — are **NOT EVALUATED**. A PASS in that ' +
+      'column is not evidence that no cap or reserve was breached.',
+    '',
+    '| Tier | Demonstrated | S1 redeem | S2 coverage | S3 venue stress | S4 action validity | Verdict | Net APY | Breach |',
     '|---|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
@@ -645,8 +665,21 @@ function sustainabilityTable(gate: RegisteredGateResult): string {
  */
 function counterexampleTable(gate: RegisteredGateResult): string {
   const verdicts: SustainabilityVerdict[] = gate.comparatorSustainability ?? [];
+  // ABSENCE IS NOT A RESULT. An empty verdict list means NO COMPARATOR WAS
+  // GRADED, which is silence about the paper's headline quantity; an empty
+  // BREACHING list drawn from a nonempty verdict list is the measured claim
+  // that every graded comparator was sustainable. Rendering the first as the
+  // second published a positive finding from a measurement never produced.
+  if (verdicts.length === 0) {
+    return (
+      '**NOT PRODUCED.** No comparator sustainability verdict was graded for this run, so the ' +
+      'price of unsustainability was not measured. This is an ABSENT measurement, not a finding ' +
+      'that no comparator breached.'
+    );
+  }
   const breaching = verdicts.filter((v) => v.sustainable !== true);
-  if (breaching.length === 0) return '_No comparator breached: there is nothing to price._';
+  if (breaching.length === 0)
+    return `_All ${verdicts.length} graded comparator run(s) were sustainable: there is nothing to price._`;
 
   const rows = breaching
     .slice()

@@ -785,4 +785,43 @@ describe('renderReport — §11.5 sustainability sections', () => {
     expect(md).toContain('39.000%');
     expect(md).toMatch(/not comparators/);
   });
+
+  // ABSENCE IS NOT A FINDING. An empty `comparatorSustainability` used to
+  // render "No comparator breached: there is nothing to price." — a positive
+  // claim about the paper's headline quantity, drawn from a measurement that
+  // was never produced.
+  it('reports NOT PRODUCED, not "nothing to price", when no comparator was graded', () => {
+    const md = renderReport(
+      withVerdicts({ sustainability: [verdict({})], scaleInvariant: true, comparatorSustainability: [] }),
+    );
+    expect(md).toContain('**NOT PRODUCED.** No comparator sustainability verdict was graded');
+    expect(md).not.toContain('No comparator breached');
+  });
+
+  // ...and the graded-and-all-sustainable case is still reported as the
+  // measured claim it is, distinguishable from the absence above.
+  it('distinguishes "every graded comparator was sustainable" from "none was graded"', () => {
+    const md = renderReport(
+      withVerdicts({
+        sustainability: [verdict({})],
+        scaleInvariant: true,
+        comparatorSustainability: [verdict({ policyId: 'b0', sustainable: true })],
+      }),
+    );
+    expect(md).toContain('graded comparator run(s) were sustainable');
+    expect(md).not.toContain('NOT PRODUCED.** No comparator');
+  });
+
+  // §11.5 S3 has two clauses and S4 names five violation classes; this run
+  // measures one clause and none of the five. The columns are named for what
+  // they measure and the omission is stated, so a PASS cannot be read as
+  // evidence about a ceiling, a cap or a reserve.
+  it('discloses the S3 and S4 clauses this run does NOT evaluate', () => {
+    const md = renderReport(withVerdicts({ sustainability: [verdict({})], scaleInvariant: true }));
+    expect(md).toContain('S3 venue stress');
+    expect(md).toContain('S4 action validity');
+    expect(md).toContain('registered utilization ceiling');
+    expect(md).toContain('unrecoverable plan state');
+    expect(md).toMatch(/What S3 and S4 do \*\*NOT\*\* cover|What S3 and S4 do NOT cover/);
+  });
 });

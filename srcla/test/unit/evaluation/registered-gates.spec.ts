@@ -615,6 +615,62 @@ describe('evaluateRegisteredRelease: §11.1 fork replay', () => {
     expect(c.detail).toContain('1 proposed nothing at any origin (HOLD');
   });
 
+  // THE DEFECT THIS CHECK EXISTED TO AVOID. A HOLD is `executed: true`, so a
+  // run in which SRCLA proposed nothing at every replayed origin had a full
+  // completeness set and an empty `notExecuted` list, and the check reported
+  // PASS from ZERO chain interaction — a §11.1 pass certifying that the chain
+  // accepts an allocation that was never submitted. It is now NOT PRODUCED.
+  it('reports NOT PRODUCED and BLOCKS when EVERY SRCLA run held', () => {
+    const fork = completeForkResults();
+    for (const f of fork) if (f.policyId === SRCLA_POLICY.id) f.held = true;
+
+    const gate = evaluateRegisteredRelease(evaluation(), {
+      forkResults: fork,
+      minPairedObservations: 20,
+      bootstrapIterations: 200,
+    });
+    const c = named(gate, '§11.1 pinned-prestate fork replay');
+    expect(c.passed).toBeNull();
+    expect(c.detail).toContain('EVERY ONE held');
+    expect(gate.pass).toBe(false);
+  });
+
+  // ...and the NOT PRODUCED above is about the ABSENCE of an SRCLA execution,
+  // not about holds in general: one surviving non-held SRCLA run still passes.
+  it('still passes when SRCLA held at some but not all tiers', () => {
+    const fork = completeForkResults();
+    const srcla = fork.filter((f) => f.policyId === SRCLA_POLICY.id);
+    expect(srcla.length).toBeGreaterThan(1);
+    for (const f of srcla.slice(1)) f.held = true;
+
+    const c = named(
+      evaluateRegisteredRelease(evaluation(), {
+        forkResults: fork,
+        minPairedObservations: 20,
+        bootstrapIterations: 200,
+      }),
+      '§11.1 pinned-prestate fork replay',
+    );
+    expect(c.passed).toBe(true);
+  });
+
+  // A baseline that holds is a fact about the baseline: §11.1 asks whether the
+  // chain accepts SRCLA's allocation, so the scoping is to SRCLA's own runs.
+  it('does not report NOT PRODUCED when only baselines held', () => {
+    const fork = completeForkResults();
+    for (const f of fork) if (f.policyId !== SRCLA_POLICY.id) f.held = true;
+
+    const c = named(
+      evaluateRegisteredRelease(evaluation(), {
+        forkResults: fork,
+        minPairedObservations: 20,
+        bootstrapIterations: 200,
+      }),
+      '§11.1 pinned-prestate fork replay',
+    );
+    expect(c.passed).toBe(true);
+  });
+
   // The check's detail is the sentence a reader quotes. It must state the
   // scope of the partial, not a bare count that reads as a full §11.1 pass.
   it('states what was NOT replayed alongside what was', () => {
@@ -777,8 +833,8 @@ describe('§11.5: sustainability first, yield second', () => {
 
     expect(named(gate, 'Demonstration: sustainability was demonstrated while deployed').passed).toBe(false);
     expect(named(gate, 'Sustainability S1: complete exit within the registered bound').passed).toBeNull();
-    expect(named(gate, 'Sustainability S3: capacity discipline').passed).toBeNull();
-    expect(named(gate, 'Sustainability S4: operational continuity').passed).toBeNull();
+    expect(named(gate, 'Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED)').passed).toBeNull();
+    expect(named(gate, 'Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED)').passed).toBeNull();
     expect(gate.scaleInvariant).toBeNull();
     expect(gate.pass).toBe(false);
     expect(gate.sustainability.every((v) => v.sustainable === null)).toBe(true);
@@ -803,7 +859,7 @@ describe('§11.5: sustainability first, yield second', () => {
   it('a vault that IS the venue fails S3 capacity discipline', () => {
     const out = runResult({ srcla: { venueShare: 0.8 } });
     const gate = runRegisteredGate(out, { ...gateOpts, forkResults: completeForkResults() });
-    expect(named(gate, 'Sustainability S3: capacity discipline').passed).toBe(false);
+    expect(named(gate, 'Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED)').passed).toBe(false);
   });
 
   // P26 on the real B4 shape, applied to SRCLA's own runs: sustainable at
