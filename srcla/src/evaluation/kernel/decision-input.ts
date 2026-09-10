@@ -282,6 +282,29 @@ export function deriveCompletedLabels(
         // origin's own observed cash is that denominator, and it is
         // available here by construction — `m` IS the origin observation.
         originCashBase: m.cashBase,
+        // P19 (state-space forecast) needs the state and the map AS THEY
+        // STOOD AT THE ORIGIN, never at the horizon end — `m` is that same
+        // origin observation, so reading them here cannot be look-ahead.
+        // `irmKinkRay`/... are absent for a snapshot the collector never
+        // resolved a reading for; `originIrmParams` stays undefined rather
+        // than a half-populated object; see CompletedLabel's doc comment for
+        // why a consumer must treat that as a refusal.
+        originUtilizationWad: m.utilizationE18,
+        ...(m.irmBaseRateWad !== undefined &&
+        m.irmKinkRay !== undefined &&
+        m.irmSlopeLowWad !== undefined &&
+        m.irmSlopeHighWad !== undefined &&
+        m.reserveFactorBps !== undefined
+          ? {
+              originIrmParams: {
+                baseRateWad: m.irmBaseRateWad,
+                kinkRay: m.irmKinkRay,
+                slopeLowWad: m.irmSlopeLowWad,
+                slopeHighWad: m.irmSlopeHighWad,
+                reserveFactorBps: m.reserveFactorBps,
+              },
+            }
+          : {}),
       });
     }
   }

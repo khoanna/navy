@@ -6,6 +6,7 @@ import {
   fitPoint,
   meanForecast,
   registeredGrid,
+  residualsFor,
   selectPoint,
   solveQuantileForCoverage,
   sweep,
@@ -95,17 +96,18 @@ describe('meanForecast', () => {
       ['rolling', { windowObservations: 24 }],
       ['ew-residual', { decay: 0.97 }],
       ['direct-arx', { phi: 0.6 }],
-      ['state-space', { halfLifeObservations: 24 }],
     ] as const) {
       expect(meanForecast(m, p as Record<string, number>, flat)).toBe(10n ** 15n);
     }
   });
 
-  it('weights recent observations more heavily under state-space (P19)', () => {
-    const rising = Array.from({ length: 50 }, (_, i) => BigInt(i) * 10n ** 14n);
-    const fast = meanForecast('state-space', { halfLifeObservations: 4 }, rising);
-    const slow = meanForecast('state-space', { halfLifeObservations: 200 }, rising);
-    expect(fast).toBeGreaterThan(slow);
+  it("refuses 'state-space' -- it needs origin utilization+IRM, not a return history (P19 fix)", () => {
+    // A silent fallback to an EWMA on the return history would register a
+    // candidate under P19's name while running a different mechanism. This
+    // must be visible, not a quietly-returned proxy value.
+    expect(() => meanForecast('state-space', { halfLifeObservations: 24 }, flat)).toThrow(
+      /per-origin utilization and IRM/,
+    );
   });
 
   it('weights recent observations more heavily under ew-residual', () => {
@@ -250,5 +252,90 @@ describe('sweep and selectPoint', () => {
     const b = selectPoint(sweep(data, registeredGrid(), 30));
     expect(b.row.point).toEqual(a.row.point);
     expect(b.row.loss.total).toBe(a.row.loss.total);
+  });
+});
+
+/**
+ * P19 fix (review round 1): 'state-space' must run the REAL mechanism —
+ * forecast utilization, map it through the IRM observed at the label's own
+ * origin — not a return-series proxy wearing its name. These labels give a
+ * return-series method (rolling/ew-residual/direct-arx) nothing to react to
+ * (a perfectly flat `realizedReturnWad`) while the utilization trends
+ * clearly across the kink, so only a candidate that genuinely reads
+ * `originUtilizationWad`/`originIrmParams` can produce anything but a
+ * near-zero residual here.
+ */
+describe('P19 fix: state-space runs the real mechanism, not a return-series proxy', () => {
+  const HORIZON = 604_800 as const;
+  const WAD = 10n ** 18n;
+  const RAY = 10n ** 27n;
+  const irm = {
+    baseRateWad: 0n,
+    kinkRay: (RAY * 90n) / 100n,
+    slopeLowWad: (WAD * 36n) / 1000n,
+    slopeHighWad: (WAD * 30n) / 100n,
+    reserveFactorBps: 0,
+  };
+
+  /** Utilization ramps linearly from 50% to ~98%, crossing the 90% kink. */
+  function trendingLabels(count: number, regimeId = 'r1'): CompletedLabel[] {
+    const out: CompletedLabel[] = [];
+    for (let i = 0; i < count; i++) {
+      const utilWad = (WAD * BigInt(50 + Math.floor((i * 48) / count))) / 100n;
+      out.push({
+        marketId: 'compound-v3-usdc',
+        regimeId,
+        originSeconds: i * 3600,
+        horizonSeconds: HORIZON,
+        horizonEndSeconds: i * 3600 + HORIZON,
+        availableAtSeconds: i * 3600 + HORIZON + 900,
+        realizedReturnWad: 10n ** 15n, // FLAT: a return-series method sees no signal at all.
+        realizedMinCashBase: 1n,
+        originCashBase: 1n,
+        originUtilizationWad: utilWad,
+        originIrmParams: irm,
+      });
+    }
+    return out;
+  }
+
+  const point: GridPoint = {
+    method: 'state-space',
+    methodParams: { halfLifeObservations: 12 },
+    horizonSeconds: HORIZON,
+    coverageTarget: 0.95,
+  };
+
+  it('diverges from a flat return series because it tracks the real utilization state', () => {
+    const residuals = residualsFor(point, trendingLabels(60), 20)['compound-v3-usdc'];
+    expect(residuals).toBeDefined();
+    // A return-series method fit on a perfectly flat series would produce
+    // residuals indistinguishable from 0 everywhere -- exactly the
+    // degenerate path this fix removes. Utilization climbing through the
+    // kink must show real spread instead.
+    const first = residuals![0]!;
+    const last = residuals![residuals!.length - 1]!;
+    expect(first).not.toBe(last);
+    const spread = first > last ? first - last : last - first;
+    expect(spread).toBeGreaterThan(10n ** 13n);
+  });
+
+  it('refuses a label whose origin has no IRM parameters, rather than falling back', () => {
+    const labelsNoIrm = trendingLabels(30).map((l) => ({ ...l, originIrmParams: null }));
+    expect(residualsFor(point, labelsNoIrm, 20)['compound-v3-usdc']).toBeUndefined();
+  });
+
+  it('refuses to blend across a regime change instead of averaging through it', () => {
+    const withChange = trendingLabels(30);
+    // The origin of the LAST label sits under a brand-new configuration
+    // with no same-regime history behind it.
+    withChange[29] = { ...withChange[29]!, regimeId: 'r2' };
+    const withoutChange = trendingLabels(30);
+
+    const residualsChanged = residualsFor(point, withChange, 20)['compound-v3-usdc']!;
+    const residualsPlain = residualsFor(point, withoutChange, 20)['compound-v3-usdc']!;
+    // One fewer residual: index 29 refuses under the regime change and does
+    // not under the unchanged series.
+    expect(residualsChanged.length).toBe(residualsPlain.length - 1);
   });
 });

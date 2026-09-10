@@ -36,9 +36,14 @@
  * UNITS: returns and residuals are WAD over the horizon (not annualized).
  */
 import type { CompletedLabel } from '../policy/types.js';
-import { forecastUtilization } from './state-space.js';
+import { stateSpaceForecast } from './state-space.js';
 
 const WAD = 10n ** 18n;
+/** Matches `evaluation/kernel/decision-input.ts`'s own annualization constant
+ *  (365.25-day year) — `CompletedLabel.realizedReturnWad` was built with it,
+ *  so P19's forecast must convert `supplyRateAt`'s annualized rate to the
+ *  same horizon scale to be a residual against the same target. */
+const SECONDS_PER_YEAR = 31_557_600n;
 
 export type ForecastMethod = 'rolling' | 'ew-residual' | 'direct-arx' | 'state-space';
 
@@ -175,24 +180,109 @@ export function meanForecast(
     return mean + ((last - mean) * phi) / 1_000_000_000n;
   }
 
-  // state-space (P19): forecast the smooth bounded state and map it through
-  // the venue's own IRM (`state-space.ts#stateSpaceForecast`). THIS SWEEP'S
-  // ONLY INPUT IS `history`, the horizon-scaled REALIZED RETURN series
-  // derived from `CompletedLabel.realizedReturnWad` -- `CompletedLabel`
-  // carries no utilization or per-origin IRM parameters (those live on
-  // `MarketObservation`/`MarketSnapshot`, which this label-only calibration
-  // sweep never sees, and reaching them here would mean a schema change to
-  // `CompletedLabel` that is out of this candidate's scope). So here the
-  // candidate runs only the STATE half of P19 -- `forecastUtilization`'s
-  // half-life-parameterized exponential level, applied directly to the
-  // return series -- with no IRM mapping applied. The IRM half
-  // (`supplyRateAt`) is implemented and unit-tested standalone in
-  // `state-space.ts` and is exercised end to end only once a genuine
-  // per-origin utilization+IRM series is threaded through this sweep. It
-  // still competes on the same loss as every other method, on this
-  // degraded input, and wins only if it wins.
-  const halfLife = params.halfLifeObservations ?? 24;
-  return forecastUtilization(history, { halfLifeObservations: halfLife });
+  // 'state-space' (P19) CANNOT be computed here. Its whole premise is
+  // "forecast utilization, then map it through the venue's own IRM" — that
+  // needs the per-origin utilization series and IRM parameters, neither of
+  // which a bare return-history carries. An earlier revision of this
+  // dispatch ran `forecastUtilization` directly on `history` (the return
+  // series) as a degraded stand-in; review correctly rejected that as a
+  // candidate registered under P19's name while running a different
+  // mechanism (a return-series smoother), the same defect class as an
+  // artifact once recording `residualPanelBuilt: true` with no panel behind
+  // it. `residualsFor` below routes 'state-space' to
+  // `stateSpaceResidualsFor` instead, which threads the real
+  // `originUtilizationWad`/`originIrmParams` from `CompletedLabel` and never
+  // calls `meanForecast` for this method. Throwing here — rather than
+  // silently returning a proxy value — is what makes a future caller that
+  // bypasses that path fail loudly instead of quietly re-introducing the
+  // mislabeling.
+  throw new Error(
+    "meanForecast: 'state-space' needs per-origin utilization and IRM parameters that a " +
+      'bare return history cannot supply. Call it through `residualsFor` (which dispatches ' +
+      'to `stateSpaceResidualsFor`), not directly.',
+  );
+}
+
+/**
+ * P19's real candidate: forecast utilization from the label history, then
+ * map it through the IRM OBSERVED AT THE SAME ORIGIN AS THE LABEL BEING
+ * FORECAST — never the horizon-end reading, which would be look-ahead.
+ * `CompletedLabel.regimeId`/`originIrmParams`/`originUtilizationWad` are all
+ * captured at the origin by `deriveCompletedLabels`, so reading them here
+ * for label `i` cannot see anything past `i`'s own origin.
+ *
+ * REFUSES rather than substituting, in two cases (both leave the label
+ * contributing NO residual — exactly the same "insufficient data" shape
+ * `fitPoint` already handles for a market with no scorable labels):
+ *
+ *   - `originIrmParams` is absent for label i's own origin — the protocol
+ *     read failed, or the venue has no kinked-linear model (Aave's real
+ *     model is quadratic and may have no reading here at all).
+ *   - the trailing same-regime history is empty — label i is itself the
+ *     first observation under a new configuration, so forecasting it would
+ *     mean blending pre- and post-change utilization, which §7.3's
+ *     no-look-ahead discipline forbids as surely as reading the future does.
+ *     `regimeId` (the full identity+parameters digest) is what marks the
+ *     boundary; the scan below stops at the first regime mismatch walking
+ *     backward from `i - 1`, so history never crosses it.
+ *
+ * `observedRange` — the clamp `state-space.ts` enforces against
+ * extrapolation — is the min/max of that SAME trailing same-regime history,
+ * never including label i's own realized utilization, so the range itself
+ * carries no look-ahead either.
+ */
+function stateSpaceResidualsFor(
+  point: GridPoint,
+  labels: readonly CompletedLabel[],
+  minObservations: number,
+): Record<string, bigint[]> {
+  const byMarket = new Map<string, CompletedLabel[]>();
+  for (const l of labels) {
+    if (l.horizonSeconds !== point.horizonSeconds) continue;
+    const list = byMarket.get(l.marketId) ?? [];
+    list.push(l);
+    byMarket.set(l.marketId, list);
+  }
+
+  const halfLifeObservations = point.methodParams.halfLifeObservations ?? 24;
+  const out: Record<string, bigint[]> = {};
+
+  for (const [marketId, series] of byMarket) {
+    const residuals: bigint[] = [];
+    for (let i = minObservations; i < series.length; i++) {
+      const target = series[i]!;
+      const irm = target.originIrmParams;
+      if (irm === undefined || irm === null) continue; // REFUSE: no IRM at this origin.
+
+      // Trailing same-regime utilization history, oldest-to-newest; stops at
+      // the first regime mismatch scanning backward from i - 1.
+      const sameRegimeUtilization: bigint[] = [];
+      for (let j = i - 1; j >= 0 && series[j]!.regimeId === target.regimeId; j--) {
+        const u = series[j]!.originUtilizationWad;
+        if (u === undefined) break; // REFUSE: history gap, cannot forecast a state from it.
+        sameRegimeUtilization.unshift(u);
+      }
+      if (sameRegimeUtilization.length === 0) continue; // REFUSE: new regime, no prior state.
+
+      let minWad = sameRegimeUtilization[0]!;
+      let maxWad = sameRegimeUtilization[0]!;
+      for (const u of sameRegimeUtilization) {
+        if (u < minWad) minWad = u;
+        if (u > maxWad) maxWad = u;
+      }
+
+      const annualizedRateWad = stateSpaceForecast(
+        sameRegimeUtilization,
+        irm,
+        { halfLifeObservations },
+        { minWad, maxWad },
+      );
+      const muWad = (annualizedRateWad * BigInt(point.horizonSeconds)) / SECONDS_PER_YEAR;
+      residuals.push(target.realizedReturnWad - muWad);
+    }
+    if (residuals.length > 0) out[marketId] = residuals;
+  }
+  return out;
 }
 
 export interface SelectionLoss {
@@ -564,6 +654,14 @@ export function residualsFor(
   labels: readonly CompletedLabel[],
   minObservations: number,
 ): Record<string, bigint[]> {
+  // 'state-space' needs the origin's utilization+IRM, not the bare return
+  // history every other method is fit against — see `stateSpaceResidualsFor`
+  // and `meanForecast`'s refusal for why this is a separate path rather than
+  // a branch inside the loop below.
+  if (point.method === 'state-space') {
+    return stateSpaceResidualsFor(point, labels, minObservations);
+  }
+
   const byMarket = new Map<string, bigint[]>();
   for (const l of labels) {
     if (l.horizonSeconds !== point.horizonSeconds) continue;

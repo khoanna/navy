@@ -87,6 +87,35 @@ export interface CompletedLabel {
    * instead — so a missing input degrades conservatively, never optimistically.
    */
   originCashBase: bigint | null;
+  /**
+   * The venue's utilization AT THE FORECAST ORIGIN (never the horizon end —
+   * that would be look-ahead), Wad. Populated by
+   * `evaluation/kernel/decision-input.ts#deriveCompletedLabels` from the
+   * same origin snapshot the label's `regimeId` comes from. OPTIONAL and
+   * additive so every pre-existing `CompletedLabel` literal (test fixtures,
+   * hand-built datasets) keeps compiling unchanged; absent only where the
+   * source snapshot never carried it.
+   */
+  originUtilizationWad?: bigint;
+  /**
+   * Kinked-linear IRM parameters observed AT THE FORECAST ORIGIN, mirroring
+   * `forecast/state-space.ts#IrmParams` structurally (duck-typed rather than
+   * imported, so this core policy type does not depend on the forecast
+   * module). `null`/absent means the origin's snapshot carried no reading —
+   * a failed protocol read, or a protocol with no kinked-linear equivalent
+   * (Aave's real model is quadratic). `forecast/grid-sweep.ts`'s
+   * 'state-space' candidate MUST treat that as a REFUSAL for this label —
+   * never substitute `DEFAULT_*_CONFIG` or fall back to a return-series
+   * proxy, which would register a candidate under a name it does not
+   * implement.
+   */
+  originIrmParams?: {
+    baseRateWad: bigint;
+    kinkRay: bigint;
+    slopeLowWad: bigint;
+    slopeHighWad: bigint;
+    reserveFactorBps: number;
+  } | null;
 }
 
 export interface WithdrawalObservation {

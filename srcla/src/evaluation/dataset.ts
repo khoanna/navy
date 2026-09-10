@@ -90,6 +90,23 @@ export async function loadDataset(
       capBps: s.capBps,
       paused: s.paused,
       configDigest: s.configDigest,
+      // Additive: only present where the backfill collector resolved a
+      // kinked-linear IRM reading (prisma/schema.prisma's irm* columns are
+      // all nullable). Omitted entirely rather than defaulted, so an absent
+      // reading stays absent through to `forecast/state-space.ts`'s callers
+      // instead of silently becoming zero.
+      ...(s.irmBaseRateWad !== null &&
+      s.irmKinkRay !== null &&
+      s.irmSlopeLowWad !== null &&
+      s.irmSlopeHighWad !== null
+        ? {
+            irmBaseRateWad: BigInt(s.irmBaseRateWad),
+            irmKinkRay: BigInt(s.irmKinkRay),
+            irmSlopeLowWad: BigInt(s.irmSlopeLowWad),
+            irmSlopeHighWad: BigInt(s.irmSlopeHighWad),
+          }
+        : {}),
+      ...(s.reserveFactorBps !== null ? { reserveFactorBps: s.reserveFactorBps } : {}),
     };
     grouped.get(key)!.snapshots.push(marketSnapshot);
   });
