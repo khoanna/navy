@@ -243,6 +243,160 @@ export function createSyntheticDataset(
   return { manifestId, snapshots, labels: [] };
 }
 
+// ---------------------------------------------------------------------------
+// R30: a held-out era's rows must come from the archive backfill
+// ---------------------------------------------------------------------------
+
+/**
+ * The subset of `MarketSnapshot` that says WHERE A ROW CAME FROM.
+ *
+ * These four groups of columns are written by `collector/archive/backfill.ts`
+ * and by nothing else. The live path (`runtime/scheduler.ts`,
+ * `collector/orchestrator.ts`) upserts state columns only: no `blockNumber`,
+ * no `eraTag`, no `irm*`, and a `marketId` that is an ADAPTER ADDRESS rather
+ * than a registered venue id.
+ */
+export interface ProvenanceRow {
+  marketId: string;
+  timestamp: Date;
+  blockNumber: bigint | null;
+  eraTag: string | null;
+  irmAddress: string | null;
+  irmBaseRateWad: string | null;
+  irmKinkRay: string | null;
+  irmSlopeLowWad: string | null;
+  irmSlopeHighWad: string | null;
+}
+
+export interface ProvenanceViolation {
+  marketId: string;
+  timestampIso: string;
+  reasons: string[];
+}
+
+/**
+ * Rows in a held-out era that were NOT produced by the archive backfill.
+ *
+ * WHY THIS EXISTS (ruling R30). `heldout-b` is registered OPEN_ENDED, so its
+ * window includes the present and the live collector is writing into it right
+ * now. If the era were ever "populated" by relabelling those live rows instead
+ * of by re-running `backfill.ts`, it would inherit a separate defect: the live
+ * upsert persists only state columns, so every such row carries NULL `irm*`
+ * and every venue would fall back to `DefaultConfigs` -- measured at 7.5689 pp
+ * MAE for Compound and 7.2538 pp for Moonwell against mean rates near 4.9 pp.
+ * The project's most valuable sealed era would then be built on placeholder
+ * rate models, and nothing in the output would say so.
+ *
+ * A comment cannot prevent that and a runbook line cannot either, so this is a
+ * predicate `loadEra` enforces. It is PURE, so the rule is unit-tested on
+ * hand-built rows rather than only against a database.
+ */
+export function archiveProvenanceViolations(
+  tag: EraTag,
+  rows: readonly ProvenanceRow[],
+): ProvenanceViolation[] {
+  const out: ProvenanceViolation[] = [];
+  for (const r of rows) {
+    const reasons: string[] = [];
+    if (r.eraTag !== tag) {
+      reasons.push(
+        `eraTag is ${r.eraTag === null ? 'NULL' : `'${r.eraTag}'`}, not '${tag}' -- the ` +
+          `backfill stamps it at write time and the live upsert never does`,
+      );
+    }
+    if (r.blockNumber === null) {
+      reasons.push('no archive block height -- the live upsert keys on blockHash alone');
+    }
+    try {
+      protocolOf(r.marketId);
+    } catch {
+      reasons.push(
+        `'${r.marketId}' is not a registered venue id -- the live collector writes the ` +
+          `adapter's ADDRESS here`,
+      );
+    }
+    const irmMissing = (
+      [
+        ['irmAddress', r.irmAddress],
+        ['irmBaseRateWad', r.irmBaseRateWad],
+        ['irmKinkRay', r.irmKinkRay],
+        ['irmSlopeLowWad', r.irmSlopeLowWad],
+        ['irmSlopeHighWad', r.irmSlopeHighWad],
+      ] as const
+    )
+      .filter(([, v]) => v === null)
+      .map(([k]) => k);
+    if (irmMissing.length > 0) {
+      reasons.push(
+        `no rate-model parameters (${irmMissing.join(', ')} NULL) -- this row would be ` +
+          `simulated on DefaultConfigs, a PLACEHOLDER model`,
+      );
+    }
+    if (reasons.length > 0) {
+      out.push({ marketId: r.marketId, timestampIso: r.timestamp.toISOString(), reasons });
+    }
+  }
+  return out;
+}
+
+/**
+ * Enforce R30 for one era. Throws, loudly, naming the offending rows.
+ *
+ * Deliberately NOT a warning and NOT a filter. Dropping the bad rows would
+ * leave a shorter era that still reports a number, and a number computed on a
+ * silently truncated held-out era is worse than no number: §11.5 forbids
+ * adjusting a held-out run to avoid a failure, and quietly discarding part of
+ * it is that adjustment.
+ */
+export async function assertArchiveProvenance(
+  prisma: PrismaClient,
+  tag: EraTag,
+): Promise<void> {
+  const era = REGISTERED_ERAS[tag];
+  const rows = (await prisma.marketSnapshot.findMany({
+    where: {
+      timestamp: {
+        gte: new Date(era.startSeconds * 1000),
+        lte: new Date(Math.min(era.endSeconds, Math.floor(Date.now() / 1000)) * 1000),
+      },
+    },
+    select: {
+      marketId: true, timestamp: true, blockNumber: true, eraTag: true,
+      irmAddress: true, irmBaseRateWad: true, irmKinkRay: true,
+      irmSlopeLowWad: true, irmSlopeHighWad: true,
+    },
+    orderBy: { timestamp: 'asc' },
+  })) as ProvenanceRow[];
+
+  if (rows.length === 0) {
+    throw new Error(
+      `Era '${tag}' holds NO rows in ${new Date(era.startSeconds * 1000).toISOString()} .. ` +
+        `${new Date(era.endSeconds * 1000).toISOString()}. An empty era is not an era with no ` +
+        `events; it is a collection that never ran. Run 'pnpm backfill:history --era ${tag}'.`,
+    );
+  }
+
+  const violations = archiveProvenanceViolations(tag, rows);
+  if (violations.length === 0) return;
+
+  const NL = String.fromCharCode(10);
+  const shown = violations
+    .slice(0, 5)
+    .map((v) => `  ${v.timestampIso}  ${v.marketId}` + NL + v.reasons.map((r) => `      - ${r}`).join(NL));
+  const more =
+    violations.length > shown.length ? `${NL}  ... and ${violations.length - shown.length} more` : '';
+  throw new Error(
+    `Era '${tag}': ${violations.length} of ${rows.length} rows were NOT produced by the ` +
+      `archive backfill (ruling R30).` + NL + shown.join(NL) + more + NL + NL +
+      `A held-out era must be built by 'pnpm backfill:history --era ${tag}', which reads ` +
+      `Comet, the Aave Pool and the mToken directly at each origin's own block and records the ` +
+      `rate model in force there. It must NOT be built by promoting rows the live collector ` +
+      `wrote: those carry no IRM parameters, so every venue would be replayed on ` +
+      `DefaultConfigs and the run would report a yield claim measured against a placeholder ` +
+      `rate model.`,
+  );
+}
+
 /**
  * Load exactly one registered era, THROUGH the sealing guard.
  *
@@ -263,6 +417,12 @@ export async function loadEra(
   opts: { allowSealed?: boolean } = {},
 ): Promise<EvaluationDataset> {
   if (opts.allowSealed !== true) assertNotSealed(tag, purpose);
+
+  // R30. Runs only for a HELD-OUT era, and only after the seal has been
+  // legitimately opened above -- so the check reads provenance columns at the
+  // one moment the era is meant to be read at all, and a violation fails the
+  // registered run rather than being discovered in its published numbers.
+  if (REGISTERED_ERAS[tag].sealed) await assertArchiveProvenance(prisma, tag);
 
   const era = REGISTERED_ERAS[tag];
   const start = new Date(era.startSeconds * 1000);
