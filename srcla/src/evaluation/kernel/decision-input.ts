@@ -288,7 +288,10 @@ export function deriveCompletedLabels(
         // `irmKinkRay`/... are absent for a snapshot the collector never
         // resolved a reading for; `originIrmParams` stays undefined rather
         // than a half-populated object; see CompletedLabel's doc comment for
-        // why a consumer must treat that as a refusal.
+        // why a consumer must treat that as a refusal. `originBorrowsBase`
+        // is `originCashBase`'s other half of the (cash, borrows) state pair.
+        originBorrowsBase: m.borrowsBase,
+        originReservesBase: m.reservesBase,
         originUtilizationWad: m.utilizationE18,
         ...(m.irmBaseRateWad !== undefined &&
         m.irmKinkRay !== undefined &&

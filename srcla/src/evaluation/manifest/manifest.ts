@@ -23,6 +23,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { BASELINES, ABLATIONS } from './constants.js';
 import type { BaselineId, AblationId } from './constants.js';
+import { REGISTERED_HORIZONS_SECONDS } from '../../policy/registered.js';
 
 // ============================================================================
 // Market Configuration
@@ -93,6 +94,10 @@ export const FORECAST_METHODS: ForecastMethod[] = [
   { id: 'rolling', name: 'Rolling Quantile', config: { windowDays: 7, quantile: 0.05 } },
   { id: 'ew-residual', name: 'EW-Residual', config: { decay: 0.95, residualQuantile: 0.05 } },
   { id: 'arx', name: 'Autoregressive X', config: { lags: 7 } },
+  // P19 — must match forecast/grid-sweep.ts's ForecastMethod/METHOD_PARAMS
+  // and policy/registered.ts's REGISTERED_METHODS (review round 2, fix 4:
+  // this list had drifted to 3 after P19 registered a 4th candidate).
+  { id: 'state-space', name: 'State-Space (P19)', config: { halfLifeObservations: 24 } },
 ];
 
 // ============================================================================
@@ -118,7 +123,10 @@ export interface CalibrationConfig {
  */
 export const DEFAULT_CALIBRATION: Omit<CalibrationConfig, 'selectedMethod' | 'selectedConfig' | 'artifactHash' | 'calibrationEndDate' | 'heldOutStartDate'> = {
   methods: FORECAST_METHODS,
-  horizonsDays: [1, 7, 30],
+  // Derived from the registered seconds so this can never drift from
+  // grid-sweep.ts's REGISTERED_HORIZONS again (review round 2, fix 4: this
+  // was a stale [1, 7, 30] — the actual registered horizons are 1/7/14 days).
+  horizonsDays: REGISTERED_HORIZONS_SECONDS.map((s) => s / 86_400),
   coverageTargets: [0.90, 0.95, 0.99],
 };
 

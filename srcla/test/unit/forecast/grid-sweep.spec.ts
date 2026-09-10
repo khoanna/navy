@@ -12,7 +12,14 @@ import {
   sweep,
   type GridPoint,
 } from '../../../src/forecast/grid-sweep.js';
+import { supplyRateAt } from '../../../src/forecast/state-space.js';
+import { SECONDS_PER_YEAR } from '../../../src/protocols/math.js';
+import { MoonwellSimulator } from '../../../src/protocols/simulation/moonwell-simulator.js';
 import type { CompletedLabel } from '../../../src/policy/types.js';
+
+const WAD = 10n ** 18n;
+const RAY = 10n ** 27n;
+const RAY_PER_WAD = 10n ** 9n;
 
 
 describe('registeredGrid (closes F1)', () => {
@@ -267,8 +274,6 @@ describe('sweep and selectPoint', () => {
  */
 describe('P19 fix: state-space runs the real mechanism, not a return-series proxy', () => {
   const HORIZON = 604_800 as const;
-  const WAD = 10n ** 18n;
-  const RAY = 10n ** 27n;
   const irm = {
     baseRateWad: 0n,
     kinkRay: (RAY * 90n) / 100n,
@@ -337,5 +342,236 @@ describe('P19 fix: state-space runs the real mechanism, not a return-series prox
     // One fewer residual: index 29 refuses under the regime change and does
     // not under the unchanged series.
     expect(residualsChanged.length).toBe(residualsPlain.length - 1);
+  });
+
+  it(
+    'REVIEW ROUND 2, FIX 2: gates on same-regime HISTORY LENGTH, not on i\'s absolute ' +
+      'position -- a regime change mid-series must not score with a short post-change history',
+    () => {
+      // 50 labels: indices 0-24 regime 'r1', 25-49 regime 'r2'. With
+      // minObservations=20: r1 scores indices 20-24 (5), r2 scores indices
+      // 45-49 (5) -- 10 total. Round 1's bug (gate i against the WHOLE
+      // series, treat any NONEMPTY same-regime history as enough) would have
+      // additionally scored r2's indices 26-44 off same-regime histories of
+      // 1-19 observations: 24 more, 29 wrongly-scored in total for r2 alone.
+      const labels: CompletedLabel[] = [];
+      for (let i = 0; i < 50; i++) {
+        const regimeId = i < 25 ? 'r1' : 'r2';
+        labels.push({
+          marketId: 'compound-v3-usdc',
+          regimeId,
+          originSeconds: i * 3600,
+          horizonSeconds: HORIZON,
+          horizonEndSeconds: i * 3600 + HORIZON,
+          availableAtSeconds: i * 3600 + HORIZON + 900,
+          realizedReturnWad: 10n ** 15n,
+          realizedMinCashBase: 1n,
+          originCashBase: 1n,
+          originUtilizationWad: (WAD * 70n) / 100n,
+          originIrmParams: irm,
+        });
+      }
+      const residuals = residualsFor(point, labels, 20)['compound-v3-usdc']!;
+      expect(residuals.length).toBe(10);
+    },
+  );
+});
+
+/**
+ * REVIEW ROUND 2, FIX 1 & PER-PROTOCOL MAP: pin each protocol's mapped rate
+ * against an independently-computed expected value, using REAL on-chain
+ * parameter shapes (not DEFAULT_*_CONFIG). Each fixture is a FLAT history so
+ * `forecastUtilization`/the EWMA state forecast reproduces the historical
+ * value exactly (verified in state-space.spec.ts), isolating "does the RATE
+ * MAP match" from "does the forecast converge".
+ */
+describe('P19 review round 2: per-protocol rate map, pinned against real formulas', () => {
+  const HORIZON = 604_800 as const;
+  const point: GridPoint = {
+    method: 'state-space',
+    methodParams: { halfLifeObservations: 12 },
+    horizonSeconds: HORIZON,
+    coverageTarget: 0.95,
+  };
+
+  /** A flat 25-observation same-regime history ending in one scorable label. */
+  function flatLabel(marketId: string, fields: Partial<CompletedLabel>): CompletedLabel[] {
+    const out: CompletedLabel[] = [];
+    for (let i = 0; i < 25; i++) {
+      out.push({
+        marketId,
+        regimeId: 'r1',
+        originSeconds: i * 3600,
+        horizonSeconds: HORIZON,
+        horizonEndSeconds: i * 3600 + HORIZON,
+        availableAtSeconds: i * 3600 + HORIZON + 900,
+        realizedReturnWad: 0n, // overwritten below once the expected mu is known
+        realizedMinCashBase: 1n,
+        originCashBase: 1n,
+        ...fields,
+      });
+    }
+    return out;
+  }
+
+  it('COMPOUND: reproduces supplyRateAt exactly (max error 0) -- the pin the review asked for', () => {
+    const irm = {
+      baseRateWad: 0n,
+      kinkRay: (RAY * 90n) / 100n,
+      slopeLowWad: (WAD * 36n) / 1000n,
+      slopeHighWad: (WAD * 30n) / 100n,
+      reserveFactorBps: 0, // dataset.ts's venue-aware default for Comet
+    };
+    const utilWad = (WAD * 70n) / 100n; // flat 70%, below the 90% kink
+    const expectedAnnualWad = supplyRateAt(utilWad, irm);
+    const expectedMuWad = (expectedAnnualWad * BigInt(HORIZON)) / SECONDS_PER_YEAR;
+
+    const labels = flatLabel('compound-v3-usdc', {
+      originUtilizationWad: utilWad,
+      originIrmParams: irm,
+    }).map((l) => ({ ...l, realizedReturnWad: expectedMuWad }));
+
+    const residuals = residualsFor(point, labels, 20)['compound-v3-usdc']!;
+    expect(residuals.every((r) => r === 0n)).toBe(true);
+  });
+
+  it('AAVE: is LINEAR in the excess ratio, not squared -- pinned against an independent formula', () => {
+    // Real Base USDC-shaped Aave coefficients (kink/optimal 90%, slope1 6.5%,
+    // slope2 60%, reserve factor 10%), verified against 10,632 live
+    // calibration rows to reproduce Aave's real curve at 0.21pp MAE.
+    const irm = {
+      baseRateWad: 0n,
+      kinkRay: (RAY * 90n) / 100n,
+      slopeLowWad: (WAD * 65n) / 1000n,
+      slopeHighWad: (WAD * 60n) / 100n,
+      reserveFactorBps: 1000,
+    };
+    // cash=30, borrows=70, reserves=0 -> u = 70%, below the 90% optimal.
+    const cash = 30_000_000n;
+    const borrows = 70_000_000n;
+    const utilRay = (borrows * RAY) / (cash + borrows);
+    // Independent reference: base + slope1 * (u / optimal), LINEAR.
+    const borrowRateAnnualWad = irm.baseRateWad + (irm.slopeLowWad * utilRay) / irm.kinkRay;
+    const utilWad = utilRay / RAY_PER_WAD;
+    const afterUtil = (borrowRateAnnualWad * utilWad) / WAD;
+    const rfWad = (BigInt(irm.reserveFactorBps) * WAD) / 10_000n;
+    const expectedAnnualWad = (afterUtil * (WAD - rfWad)) / WAD;
+    const expectedMuWad = (expectedAnnualWad * BigInt(HORIZON)) / SECONDS_PER_YEAR;
+
+    // A SQUARED reference (what AaveV3Simulator computes) would differ
+    // materially here -- this is the assertion that catches a regression
+    // back to the squared formula.
+    const squaredRatio = (utilRay * utilRay) / irm.kinkRay / RAY;
+    const squaredBorrowRateAnnualWad = irm.baseRateWad + (irm.slopeLowWad * squaredRatio) / RAY;
+    expect(squaredBorrowRateAnnualWad).not.toBe(borrowRateAnnualWad);
+
+    const labels = flatLabel('aave-v3-usdc', {
+      originCashBase: cash,
+      originBorrowsBase: borrows,
+      originReservesBase: 0n,
+      originIrmParams: irm,
+    }).map((l) => ({ ...l, realizedReturnWad: expectedMuWad }));
+
+    const residuals = residualsFor(point, labels, 20)['aave-v3-usdc']!;
+    expect(residuals.every((r) => r === 0n)).toBe(true);
+  });
+
+  it('MOONWELL: applies * u * (1 - reserveFactor) on top of the kinked-linear borrow curve', () => {
+    const irm = {
+      baseRateWad: 0n,
+      kinkRay: (RAY * 90n) / 100n,
+      slopeLowWad: (WAD * 36n) / 1000n,
+      slopeHighWad: (WAD * 300n) / 1000n,
+      reserveFactorBps: 1000,
+    };
+    // cash=25, borrows=70, reserves=5 -> supplied=90, u = 70/90 = 77.78%.
+    const cash = 25_000_000n;
+    const borrows = 70_000_000n;
+    const reserves = 5_000_000n;
+    const utilRay = (borrows * RAY) / (cash + borrows - reserves);
+    const utilWad = utilRay / RAY_PER_WAD;
+
+    const perSecond = new MoonwellSimulator().calculateRateFromUtilization(utilRay, {
+      baseRate: irm.baseRateWad,
+      kink: irm.kinkRay,
+      slopeLow: irm.slopeLowWad,
+      slopeHigh: irm.slopeHighWad,
+    });
+    const borrowRateAnnualWad = perSecond * SECONDS_PER_YEAR;
+    const afterUtil = (borrowRateAnnualWad * utilWad) / WAD;
+    const rfWad = (BigInt(irm.reserveFactorBps) * WAD) / 10_000n;
+    const expectedAnnualWad = (afterUtil * (WAD - rfWad)) / WAD;
+    const expectedMuWad = (expectedAnnualWad * BigInt(HORIZON)) / SECONDS_PER_YEAR;
+
+    // The bug this fix closes: using the borrow curve's raw output AS the
+    // supply rate (no * u, no reserve haircut) would be a materially
+    // different, larger number.
+    expect(borrowRateAnnualWad).not.toBe(expectedAnnualWad);
+
+    const labels = flatLabel('moonwell-usdc', {
+      originCashBase: cash,
+      originBorrowsBase: borrows,
+      originReservesBase: reserves,
+      originIrmParams: irm,
+    }).map((l) => ({ ...l, realizedReturnWad: expectedMuWad }));
+
+    const residuals = residualsFor(point, labels, 20)['moonwell-usdc']!;
+    expect(residuals.every((r) => r === 0n)).toBe(true);
+  });
+});
+
+/**
+ * REVIEW ROUND 2, FIX 3: a 'state-space' grid point must cover the same
+ * venue set an incumbent method would, or fail loudly rather than silently
+ * freeze a partial artifact.
+ */
+describe('P19 review round 2, fix 3: venue coverage is asserted, not assumed', () => {
+  const HORIZON = 604_800 as const;
+  const irm = {
+    baseRateWad: 0n,
+    kinkRay: (RAY * 90n) / 100n,
+    slopeLowWad: (WAD * 36n) / 1000n,
+    slopeHighWad: (WAD * 30n) / 100n,
+    reserveFactorBps: 0,
+  };
+  const point: GridPoint = {
+    method: 'state-space',
+    methodParams: { halfLifeObservations: 12 },
+    horizonSeconds: HORIZON,
+    coverageTarget: 0.95,
+  };
+
+  function labelsFor(marketId: string, count: number, withIrm: boolean): CompletedLabel[] {
+    const out: CompletedLabel[] = [];
+    for (let i = 0; i < count; i++) {
+      out.push({
+        marketId,
+        regimeId: 'r1',
+        originSeconds: i * 3600,
+        horizonSeconds: HORIZON,
+        horizonEndSeconds: i * 3600 + HORIZON,
+        availableAtSeconds: i * 3600 + HORIZON + 900,
+        realizedReturnWad: 10n ** 15n,
+        realizedMinCashBase: 1n,
+        originCashBase: 1n,
+        originUtilizationWad: (WAD * 70n) / 100n,
+        ...(withIrm ? { originIrmParams: irm } : {}),
+      });
+    }
+    return out;
+  }
+
+  it('throws when state-space scores fewer venues than an incumbent method would', () => {
+    const labels = [
+      ...labelsFor('compound-v3-usdc', 30, true), // scorable under state-space
+      ...labelsFor('aave-v3-usdc', 30, false), // enough labels, but NEVER has IRM -- always refuses
+    ];
+    expect(() => fitPoint(point, labels, 20)).toThrow(/aave-v3-usdc/);
+    expect(() => fitPoint(point, labels, 20)).toThrow(/venues/i);
+  });
+
+  it('does not throw when every expected venue is actually scored', () => {
+    const labels = labelsFor('compound-v3-usdc', 30, true);
+    expect(() => fitPoint(point, labels, 20)).not.toThrow();
   });
 });

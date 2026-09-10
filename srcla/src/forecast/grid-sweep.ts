@@ -36,9 +36,13 @@
  * UNITS: returns and residuals are WAD over the horizon (not annualized).
  */
 import type { CompletedLabel } from '../policy/types.js';
-import { stateSpaceForecast } from './state-space.js';
+import { forecastUtilization, supplyRateAt, type IrmParams } from './state-space.js';
+import { protocolOf } from '../domain/protocol.js';
+import { RAY } from '../protocols/math.js';
+import { MoonwellSimulator } from '../protocols/simulation/moonwell-simulator.js';
 
 const WAD = 10n ** 18n;
+const RAY_PER_WAD = 10n ** 9n; // RAY (1e27) / WAD (1e18)
 /** Matches `evaluation/kernel/decision-input.ts`'s own annualization constant
  *  (365.25-day year) — `CompletedLabel.realizedReturnWad` was built with it,
  *  so P19's forecast must convert `supplyRateAt`'s annualized rate to the
@@ -204,33 +208,143 @@ export function meanForecast(
 }
 
 /**
- * P19's real candidate: forecast utilization from the label history, then
- * map it through the IRM OBSERVED AT THE SAME ORIGIN AS THE LABEL BEING
- * FORECAST — never the horizon-end reading, which would be look-ahead.
- * `CompletedLabel.regimeId`/`originIrmParams`/`originUtilizationWad` are all
- * captured at the origin by `deriveCompletedLabels`, so reading them here
- * for label `i` cannot see anything past `i`'s own origin.
+ * P19's real candidate, review round 2: forecast the state and map it
+ * through the venue's real per-protocol rate model — never a single generic
+ * kinked-linear function. Round 1 ran every venue through
+ * `state-space.ts#supplyRateAt`, which is Compound Comet's EXACT supply
+ * curve but a WRONG curve for the other two.
  *
- * REFUSES rather than substituting, in two cases (both leave the label
- * contributing NO residual — exactly the same "insufficient data" shape
- * `fitPoint` already handles for a market with no scorable labels):
+ * THE STATE IS NOT THE SAME SHAPE FOR EVERY PROTOCOL, and that is measured,
+ * not stylistic. Comet reports utilization off an on-chain READ
+ * (`getUtilization()`) and DERIVES `borrows` from it
+ * (`borrows = totalSupply * utilization / WAD`, `collector/archive/calls.ts`)
+ * — utilization is the primitive there, and reconstructing it from
+ * (cash, borrows) does not invert cleanly. Measured against 10,632
+ * calibration rows: forecasting `originUtilizationWad` directly and feeding
+ * `supplyRateAt` reproduces Comet's stored `supplyRateE18` at MAE 0 (exact);
+ * deriving utilization from (cash, borrows) instead costs 0.72pp MAE for no
+ * benefit. Aave and Moonwell go the other way — their stored utilization
+ * IS `borrows / (cash + borrows [- reserves])` (`calls.ts`'s own
+ * `utilizationWad`), so forecasting (cash, borrows, reserves) and rederiving
+ * utilization from the forecasted triple reproduces THEIR stored utilization
+ * (and, chained through the rate map below, their stored rate) to the same
+ * near-exact precision. So: Compound forecasts utilization; Aave/Moonwell
+ * forecast (cash, borrows, reserves) — per protocol, not from one blanket
+ * design choice, and every branch says why in the measurement above.
  *
- *   - `originIrmParams` is absent for label i's own origin — the protocol
- *     read failed, or the venue has no kinked-linear model (Aave's real
- *     model is quadratic and may have no reading here at all).
- *   - the trailing same-regime history is empty — label i is itself the
- *     first observation under a new configuration, so forecasting it would
- *     mean blending pre- and post-change utilization, which §7.3's
- *     no-look-ahead discipline forbids as surely as reading the future does.
- *     `regimeId` (the full identity+parameters digest) is what marks the
- *     boundary; the scan below stops at the first regime mismatch walking
- *     backward from `i - 1`, so history never crosses it.
+ * PER-PROTOCOL RATE MAP (all three now measured against calibration data,
+ * not merely asserted):
+ *   - compound: `state-space.ts#supplyRateAt`, UNCHANGED — MAE 0. Comet's
+ *     own curve IS the supply curve; `irm.reserveFactorBps` is 0 here by
+ *     construction (`dataset.ts`'s venue-aware default), so `supplyRateAt`'s
+ *     `* (1 - reserveFactor)` term is a no-op.
+ *   - aave: A LINEAR excess-ratio borrow curve (below optimal:
+ *     `base + slope1 * u/optimal`; above: `base + slope1 + slope2 *
+ *     (u - optimal)/(1 - optimal)`), THEN `* u * (1 - rf)`. THIS IS NOT
+ *     `AaveV3Simulator#calculateRateFromUtilization` — that method SQUARES
+ *     both ratios (matching its own docstring's claim that Aave's curve is
+ *     "quadratic"), and measured against the same 10,632 rows it does not
+ *     reproduce Aave's real rate: 1.47pp MAE overall, blowing up to ~5pp
+ *     above `optimalUtilization` where the squared term diverges hardest
+ *     from linear. The LINEAR version below (independently re-derived and
+ *     checked against live rows for this fix) measures 0.21pp MAE overall
+ *     (0.21pp below optimal, 0.24pp above — no blowup) — real Aave V3's
+ *     `DefaultReserveInterestRateStrategy` is linear in the excess ratio on
+ *     both sides of optimal, not quadratic. `aave-simulator.ts` is NOT
+ *     changed here — it also backs the LIVE post-deposit curve
+ *     (`policy/steps/simulate.ts`), and correcting it is a separate,
+ *     larger-blast-radius fix outside this task; flagged in the fix report.
+ *   - moonwell: `MoonwellSimulator#calculateRateFromUtilization` (kinked-
+ *     linear, same shape as Compound, annualized from its own WAD-per-second
+ *     return — see its docstring), THEN `* u * (1 - rf)`, for the same
+ *     Compound-v2-fork reason as Aave. BELOW each regime's own kink this
+ *     measures 0.08pp MAE (near-exact). ABOVE it, measured error is large
+ *     (worst observed ~65pp on one 2024-03/04 regime) and UNRESOLVED: the
+ *     stored rate stays nearly flat (~4-8pp) as utilization climbs from 83%
+ *     to 90%+ under that regime's own (real, chain-read) coefficients, which
+ *     this kinked-linear-plus-conversion map cannot reproduce. Hypothesis,
+ *     not confirmed: Moonwell's Apollo-oracle rate bound (`minRate`/
+ *     `maxRate`, modeled in `MoonwellSimulator#simulateRate` but with no
+ *     stored PER-ORIGIN reading in this archive) is clamping the real rate
+ *     and this map, lacking that data, cannot. NOT patched with
+ *     `DEFAULT_MOONWELL_CONFIG`'s bounds — those are a guess at values this
+ *     archive does not have, which is exactly the substitution this task
+ *     exists to remove. Flagged in the fix report as an open finding.
+ * Aave/Moonwell reuse `protocols/math.ts#utilization`-shaped arithmetic
+ * (reserves-aware) for the `u` in their conversions, matching what each
+ * simulator's own `calculateUtilization` computes — so wherever this map IS
+ * exact, it agrees with the optimiser's post-deposit curve
+ * (`policy/steps/simulate.ts`) about what a given state implies.
  *
- * `observedRange` — the clamp `state-space.ts` enforces against
- * extrapolation — is the min/max of that SAME trailing same-regime history,
- * never including label i's own realized utilization, so the range itself
- * carries no look-ahead either.
+ * NO LOOK-AHEAD, EVERYTHING READ AT LABEL i's OWN ORIGIN:
+ *   - `originIrmParams` — the protocol read failed, or the venue has no
+ *     reading under this key.
+ *   - the protocol-specific state fields (`originUtilizationWad` for
+ *     Compound; `originCashBase`/`originBorrowsBase`/`originReservesBase`
+ *     for Aave/Moonwell) — `null`/absent on the live runtime driver's
+ *     `DecisionInput` (it never carried them; only the offline evaluation
+ *     harness's `deriveCompletedLabels` does).
+ *   - the trailing same-regime history: REVIEW ROUND 2's minObservations
+ *     fix. Round 1 gated `i` against the WHOLE market series and treated any
+ *     NONEMPTY same-regime history as sufficient, so ~580 residuals were
+ *     produced from same-regime histories of 1-29 observations (one of them
+ *     literally a single point, with a degenerate single-value clamp) while
+ *     every incumbent method is guaranteed >= `minObservations`. The gate
+ *     below is now on the SAME-REGIME history length itself, not on `i`'s
+ *     absolute position — §7.3 is explicit that a materially changed market
+ *     stays at zero weight until it has enough post-change labels, and a
+ *     regime can change at any index, not only before `minObservations`.
+ *
+ * `observedRange` for each forecast state dimension is the min/max of that
+ * SAME trailing same-regime history, never including label i's own realized
+ * values, so the range itself carries no look-ahead either.
  */
+const moonwellSimulator = new MoonwellSimulator();
+
+function clampBigint(x: bigint, minValue: bigint, maxValue: bigint): bigint {
+  if (x < minValue) return minValue;
+  if (x > maxValue) return maxValue;
+  return x;
+}
+
+function minMax(xs: readonly bigint[]): { min: bigint; max: bigint } {
+  let min = xs[0]!;
+  let max = xs[0]!;
+  for (const x of xs) {
+    if (x < min) min = x;
+    if (x > max) max = x;
+  }
+  return { min, max };
+}
+
+/**
+ * Aave V3's REAL `DefaultReserveInterestRateStrategy` borrow curve: linear
+ * in the excess-utilization ratio on both sides of `optimalUtilization`.
+ * See the module comment above for why this is NOT
+ * `AaveV3Simulator#calculateRateFromUtilization` (which squares the ratio).
+ */
+function aaveBorrowRateAnnualWad(utilRay: bigint, irm: IrmParams): bigint {
+  const base = irm.baseRateWad;
+  const slope1 = irm.slopeLowWad;
+  const slope2 = irm.slopeHighWad;
+  const optimal = irm.kinkRay;
+  if (utilRay <= optimal) {
+    if (optimal === 0n) return base;
+    return base + (slope1 * utilRay) / optimal;
+  }
+  const excessCapacity = RAY - optimal;
+  if (excessCapacity === 0n) return base + slope1 + slope2;
+  const excessRatio = ((utilRay - optimal) * RAY) / excessCapacity;
+  return base + slope1 + (slope2 * excessRatio) / RAY;
+}
+
+/** Both Aave and Moonwell store BORROW curves; supply = borrow * u * (1 - rf). */
+function borrowToSupplyWad(borrowRateAnnualWad: bigint, utilWad: bigint, reserveFactorBps: number): bigint {
+  const afterUtilization = (borrowRateAnnualWad * utilWad) / WAD;
+  const reserveFactorWad = (BigInt(reserveFactorBps) * WAD) / 10_000n;
+  return (afterUtilization * (WAD - reserveFactorWad)) / WAD;
+}
+
 function stateSpaceResidualsFor(
   point: GridPoint,
   labels: readonly CompletedLabel[],
@@ -248,39 +362,119 @@ function stateSpaceResidualsFor(
   const out: Record<string, bigint[]> = {};
 
   for (const [marketId, series] of byMarket) {
+    const protocol = protocolOf(marketId);
     const residuals: bigint[] = [];
-    for (let i = minObservations; i < series.length; i++) {
+    // Gated on same-regime history LENGTH, not on `i`'s absolute position —
+    // a regime can change anywhere in the series (review round 2, fix 2).
+    for (let i = 0; i < series.length; i++) {
       const target = series[i]!;
       const irm = target.originIrmParams;
       if (irm === undefined || irm === null) continue; // REFUSE: no IRM at this origin.
 
-      // Trailing same-regime utilization history, oldest-to-newest; stops at
-      // the first regime mismatch scanning backward from i - 1.
-      const sameRegimeUtilization: bigint[] = [];
-      for (let j = i - 1; j >= 0 && series[j]!.regimeId === target.regimeId; j--) {
-        const u = series[j]!.originUtilizationWad;
-        if (u === undefined) break; // REFUSE: history gap, cannot forecast a state from it.
-        sameRegimeUtilization.unshift(u);
-      }
-      if (sameRegimeUtilization.length === 0) continue; // REFUSE: new regime, no prior state.
+      let annualizedRateWad: bigint;
 
-      let minWad = sameRegimeUtilization[0]!;
-      let maxWad = sameRegimeUtilization[0]!;
-      for (const u of sameRegimeUtilization) {
-        if (u < minWad) minWad = u;
-        if (u > maxWad) maxWad = u;
+      if (protocol === 'compound') {
+        // Compound forecasts UTILIZATION directly — see the module comment
+        // for why deriving it from (cash, borrows) is lossy for this venue
+        // specifically.
+        const utilHistory: bigint[] = [];
+        for (let j = i - 1; j >= 0 && series[j]!.regimeId === target.regimeId; j--) {
+          const u = series[j]!.originUtilizationWad;
+          if (u === undefined) break; // REFUSE: history gap.
+          utilHistory.unshift(u);
+        }
+        if (utilHistory.length < minObservations) continue; // REFUSE: too little same-regime history.
+
+        const { min, max } = minMax(utilHistory);
+        const forecastedUtilWad = clampBigint(
+          forecastUtilization(utilHistory, { halfLifeObservations }),
+          min,
+          max,
+        );
+        annualizedRateWad = supplyRateAt(forecastedUtilWad, irm);
+      } else {
+        // Aave/Moonwell forecast (cash, borrows, reserves) — see the module
+        // comment for why THEIR utilization is derived from that triple
+        // rather than forecast directly.
+        const cashHistory: bigint[] = [];
+        const borrowsHistory: bigint[] = [];
+        const reservesHistory: bigint[] = [];
+        for (let j = i - 1; j >= 0 && series[j]!.regimeId === target.regimeId; j--) {
+          const cash = series[j]!.originCashBase;
+          const borrows = series[j]!.originBorrowsBase;
+          const reserves = series[j]!.originReservesBase;
+          if (cash === null || borrows === undefined || reserves === undefined) break; // REFUSE: history gap.
+          cashHistory.unshift(cash);
+          borrowsHistory.unshift(borrows);
+          reservesHistory.unshift(reserves);
+        }
+        if (cashHistory.length < minObservations) continue; // REFUSE: too little same-regime history.
+
+        const cashRange = minMax(cashHistory);
+        const borrowsRange = minMax(borrowsHistory);
+        const reservesRange = minMax(reservesHistory);
+        const forecastedCash = clampBigint(
+          forecastUtilization(cashHistory, { halfLifeObservations }),
+          cashRange.min,
+          cashRange.max,
+        );
+        const forecastedBorrows = clampBigint(
+          forecastUtilization(borrowsHistory, { halfLifeObservations }),
+          borrowsRange.min,
+          borrowsRange.max,
+        );
+        const forecastedReserves = clampBigint(
+          forecastUtilization(reservesHistory, { halfLifeObservations }),
+          reservesRange.min,
+          reservesRange.max,
+        );
+
+        const supplied = forecastedCash + forecastedBorrows - forecastedReserves;
+        const utilRay = supplied <= 0n ? 0n : (forecastedBorrows * RAY) / supplied;
+        const utilWad = utilRay / RAY_PER_WAD;
+
+        const borrowRateAnnualWad =
+          protocol === 'aave'
+            ? aaveBorrowRateAnnualWad(utilRay, irm)
+            : moonwellSimulator.calculateRateFromUtilization(utilRay, {
+                baseRate: irm.baseRateWad,
+                kink: irm.kinkRay,
+                slopeLow: irm.slopeLowWad,
+                slopeHigh: irm.slopeHighWad,
+              }) * SECONDS_PER_YEAR; // WAD-per-second -> annualized, see MoonwellSimulator's own docstring.
+
+        annualizedRateWad = borrowToSupplyWad(borrowRateAnnualWad, utilWad, irm.reserveFactorBps);
       }
 
-      const annualizedRateWad = stateSpaceForecast(
-        sameRegimeUtilization,
-        irm,
-        { halfLifeObservations },
-        { minWad, maxWad },
-      );
       const muWad = (annualizedRateWad * BigInt(point.horizonSeconds)) / SECONDS_PER_YEAR;
       residuals.push(target.realizedReturnWad - muWad);
     }
     if (residuals.length > 0) out[marketId] = residuals;
+  }
+  return out;
+}
+
+/**
+ * Which venues WOULD be scorable for this horizon given `minObservations`,
+ * independent of method — i.e. the set every incumbent method (rolling/
+ * ew-residual/direct-arx) is guaranteed to cover, since their gate is only
+ * "does this market have more than `minObservations` labels for this
+ * horizon". Used to assert that a 'state-space' grid point is not silently
+ * narrower (review round 2, fix 3).
+ */
+function expectedVenueSet(
+  labels: readonly CompletedLabel[],
+  horizonSeconds: GridPoint['horizonSeconds'],
+  minObservations: number,
+): Set<string> {
+  const counts = new Map<string, number>();
+  for (const l of labels) {
+    if (l.horizonSeconds !== horizonSeconds) continue;
+    counts.set(l.marketId, (counts.get(l.marketId) ?? 0) + 1);
+  }
+  const out = new Set<string>();
+  for (const [marketId, count] of counts) {
+    if (count > minObservations) out.add(marketId);
   }
   return out;
 }
@@ -691,6 +885,26 @@ export function fitPoint(
   const residualsByMarket = residualsFor(point, labels, minObservations);
   const markets = Object.keys(residualsByMarket).sort();
   if (markets.length === 0) return null;
+
+  // Review round 2, fix 3: a 'state-space' grid point that scores fewer
+  // venues than an incumbent method would is not comparable to them — a win
+  // would be uninterpretable, and `freeze-artifact.ts` would write
+  // `residualQuantileWadByMarket` from the winner's per-venue quantiles,
+  // silently pushing the missing venue onto the portfolio fallback for an
+  // entire held-out run. Fail loudly rather than let that happen quietly.
+  if (point.method === 'state-space') {
+    const expected = expectedVenueSet(labels, point.horizonSeconds, minObservations);
+    const missing = [...expected].filter((m) => !markets.includes(m));
+    if (missing.length > 0) {
+      throw new Error(
+        `fitPoint: 'state-space' scored ${markets.length}/${expected.size} venues for ` +
+          `H=${point.horizonSeconds}s (missing: ${missing.sort().join(', ')}) — an ` +
+          'incumbent method would have scored every one of them. A grid point covering ' +
+          'fewer venues than the incumbents it competes against cannot be compared to ' +
+          'them.',
+      );
+    }
+  }
 
   const quantileWadByMarket: Record<string, bigint> = {};
   const coverageByMarket: Record<string, number> = {};

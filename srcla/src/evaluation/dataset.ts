@@ -4,6 +4,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { MarketSnapshot } from '../domain/snapshots.js';
 import type { WithdrawalObservation } from '../policy/types.js';
+import { protocolOf } from '../domain/protocol.js';
 import { REGISTERED_ERAS, assertNotSealed, type EraTag } from './eras.js';
 
 export interface TimeOrderedSnapshot {
@@ -32,6 +33,24 @@ export interface EvaluationDataset {
    * be sized against. Optional only for hand-built test datasets.
    */
   withdrawals?: WithdrawalObservation[];
+}
+
+/**
+ * VENUE-AWARE reserve-factor default, not generic (review round 2, fix 1).
+ * Compound III (Comet) sets `reserveFactorBps` NULL BY DESIGN
+ * (`collector/archive/calls.ts`) because its supply curve is already net of
+ * reserves -- there is no separate reserve cut to apply, so 0 is exactly
+ * right THERE. Defaulting a null reading to 0 for ANY other protocol would
+ * silently assert "no reserve cut" for a venue that really does apply one
+ * (Aave, Moonwell): this only ever substitutes for 'compound'; a null for
+ * any other protocol is a genuine missing reading and stays `undefined`, so
+ * `forecast/grid-sweep.ts`'s state-space candidate refuses that label rather
+ * than guessing. PURE and exported so this venue-aware branch is unit
+ * tested directly rather than only through a Prisma-backed `loadDataset`.
+ */
+export function resolveReserveFactorBps(marketId: string, storedReserveFactorBps: number | null): number | undefined {
+  if (storedReserveFactorBps !== null) return storedReserveFactorBps;
+  return protocolOf(marketId) === 'compound' ? 0 : undefined;
 }
 
 /**
@@ -106,7 +125,9 @@ export async function loadDataset(
             irmSlopeHighWad: BigInt(s.irmSlopeHighWad),
           }
         : {}),
-      ...(s.reserveFactorBps !== null ? { reserveFactorBps: s.reserveFactorBps } : {}),
+      ...(resolveReserveFactorBps(s.marketId, s.reserveFactorBps) !== undefined
+        ? { reserveFactorBps: resolveReserveFactorBps(s.marketId, s.reserveFactorBps)! }
+        : {}),
     };
     grouped.get(key)!.snapshots.push(marketSnapshot);
   });

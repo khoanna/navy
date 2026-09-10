@@ -88,6 +88,30 @@ export interface CompletedLabel {
    */
   originCashBase: bigint | null;
   /**
+   * The venue's total BORROWS outstanding AT THE FORECAST ORIGIN, USDC base
+   * units — the other half of the (cash, borrows) pair §7.2 registers as the
+   * state a mean-reverting level model runs on (utilization is the ratio of
+   * the two, not itself the primitive state). Populated alongside
+   * `originCashBase` by the same origin snapshot; OPTIONAL and additive
+   * rather than `bigint | null` like its sibling, so every pre-existing
+   * `CompletedLabel` literal keeps compiling unchanged. Absent/undefined
+   * means the same as `originCashBase === null`: the state-space candidate
+   * (`forecast/grid-sweep.ts`) must refuse this label, not substitute 0 or
+   * any other value.
+   */
+  originBorrowsBase?: bigint;
+  /**
+   * The venue's protocol RESERVES AT THE FORECAST ORIGIN, USDC base units —
+   * the third state component `forecast/grid-sweep.ts` needs to derive
+   * Aave's/Moonwell's utilization the same way the collector computed the
+   * stored one (`borrows / (cash + borrows - reserves)`), rather than the
+   * reserves-blind `borrows / (cash + borrows)`. Always 0 for Aave by
+   * construction (its on-chain reserves are denominated in scaled aToken
+   * units, not underlying, so the collector never nets them in). OPTIONAL
+   * and additive for the same reason as its siblings.
+   */
+  originReservesBase?: bigint;
+  /**
    * The venue's utilization AT THE FORECAST ORIGIN (never the horizon end —
    * that would be look-ahead), Wad. Populated by
    * `evaluation/kernel/decision-input.ts#deriveCompletedLabels` from the
@@ -95,6 +119,19 @@ export interface CompletedLabel {
    * additive so every pre-existing `CompletedLabel` literal (test fixtures,
    * hand-built datasets) keeps compiling unchanged; absent only where the
    * source snapshot never carried it.
+   *
+   * COMPOUND-ONLY PRIMITIVE. `forecast/grid-sweep.ts`'s state-space
+   * candidate forecasts THIS field directly for Compound rather than
+   * deriving utilization from (cash, borrows): Comet reports utilization
+   * off-chain-read (`getUtilization()`) and DERIVES `borrows` from it
+   * (`borrows = totalSupply * utilization / WAD`), so recomputing
+   * utilization back from (cash, borrows) does not invert cleanly — measured
+   * against 10,632 calibration rows, doing so cost 0.72pp MAE that reading
+   * this field directly does not. Aave and Moonwell go the other way
+   * (`originCashBase`/`originBorrowsBase`/`originReservesBase` are the
+   * primitives for them, matching how the collector derived THEIR stored
+   * utilization) — see `grid-sweep.ts`'s module comment for the full
+   * per-protocol reasoning and the measured evidence.
    */
   originUtilizationWad?: bigint;
   /**
