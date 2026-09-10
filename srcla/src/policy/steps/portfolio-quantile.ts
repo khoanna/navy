@@ -47,6 +47,34 @@ const WAD = 10n ** 18n;
  * fallback is documented rather than silent: `portfolioQuantileProvenance`
  * below says which of the two a caller got.
  */
+/**
+ * Memo for `portfolioResidualQuantileFor`, keyed by the residual panel that
+ * the quantile is taken over and then by the weight vector.
+ *
+ * WHY THIS IS NEEDED, AND WHY IT IS EXACT. The quantile is a pure function of
+ * `(panel, weights, coverageTarget)` and NOTHING else -- in particular it does
+ * not depend on the origin being decided, the tier, or the policy. But §8.2's
+ * enumeration calls it once per CANDIDATE, and the candidate grid is the same
+ * simplex of weights at every origin. Uncached, a registered era therefore
+ * recomputes the identical quantile ~2,000 times over: for each of ~5,151
+ * candidates it built a 10,608-element portfolio series in BigInt and then
+ * SORTED it, about 170k BigInt operations per candidate, ~8.8 ms each. Over
+ * the registered evaluation (16 policies x 4 tiers x 2 eras) that is on the
+ * order of three months of CPU, i.e. the evaluation could not be run at all.
+ *
+ * Caching collapses it to at most one computation per distinct weight vector
+ * for the lifetime of the artifact. It changes no result: the cached value is
+ * the value the uncached path would have returned, bit for bit. The tests
+ * pin this by asserting cached and uncached agree.
+ *
+ * The outer map is WEAK on the panel, so the cache dies with the artifact
+ * rather than pinning every panel a long-lived process ever saw. The inner
+ * map is capped: a caller that somehow produces unbounded distinct weights
+ * degrades to recomputation rather than growing without limit.
+ */
+const MAX_CACHED_WEIGHTS = 1 << 16;
+const quantileCache = new WeakMap<ResidualPanel, Map<string, bigint>>();
+
 export function portfolioResidualQuantileFor(
   artifact: PolicyArtifact,
   target: ReadonlyMap<string, bigint>,
@@ -59,6 +87,29 @@ export function portfolioResidualQuantileFor(
   const weights = portfolioWeightsWad(panel.marketIds, target);
   if (weights === null) return artifact.portfolioResidualQuantileWad;
 
+  // The coverage target is part of the key, not just the panel: the same
+  // panel under a different target is a different quantile.
+  const key = `${artifact.coverageTarget}|${weights.join(',')}`;
+  let byWeights = quantileCache.get(panel);
+  if (byWeights === undefined) {
+    byWeights = new Map<string, bigint>();
+    quantileCache.set(panel, byWeights);
+  }
+  const hit = byWeights.get(key);
+  if (hit !== undefined) return hit;
+
+  const value = computePortfolioResidualQuantile(panel, weights, artifact.coverageTarget);
+  if (byWeights.size < MAX_CACHED_WEIGHTS) byWeights.set(key, value);
+  return value;
+}
+
+/** The uncached computation. Extracted so the cache wraps one expression and
+ *  the tests can compare the two paths directly. */
+function computePortfolioResidualQuantile(
+  panel: ResidualPanel,
+  weights: readonly bigint[],
+  coverageTarget: number,
+): bigint {
   const series: bigint[] = [];
   for (const row of panel.rows) {
     let acc = 0n;
@@ -70,7 +121,7 @@ export function portfolioResidualQuantileFor(
     series.push(acc);
   }
 
-  const q = empiricalLowerQuantile(series, artifact.coverageTarget);
+  const q = empiricalLowerQuantile(series, coverageTarget);
   // The bound must be conservative: `forecast.ts#lowerBoundAt` rejects a
   // positive quantile outright, and a positive portfolio quantile would push
   // the objective ABOVE the point forecast.

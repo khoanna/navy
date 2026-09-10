@@ -79,6 +79,60 @@ const VENUE_META: Record<string, { displayName: string; address: string }> = {
   [MARKET_IDS.moonwell]: { displayName: 'Moonwell mUSDC', address: BASE.mToken },
 };
 
+/**
+ * Facts about this repository's history that the run cannot derive from its
+ * own inputs, and that a reader must have to weigh the numbers. They live
+ * here — next to the run that publishes them — rather than inside the pure
+ * renderer, which must stay free of one-off history.
+ *
+ * Each entry states the defect, its MEASURED magnitude, and the decision
+ * taken. An entry is removed only when the underlying fact stops being true,
+ * never because it is inconvenient.
+ */
+const REGISTERED_DISCLOSURES = {
+  artifactFreeze: [
+    'The artifact was frozen by `pnpm phase4:freeze` against the CORRECTED archive — the ' +
+      'one in which every venue rate map reproduces chain and per-origin IRM attribution ' +
+      'is present for all five eras. It selects `state-space` at a 1-day horizon on a ' +
+      'selection margin of 0.4095 over the runner-up, so the choice is not a coin flip ' +
+      'between near-ties.',
+    'The freeze ran twelve seconds BEFORE the commit that unified the Aave rate map ' +
+      'between the archive reader and the optimiser, so the artifact was fit with the ' +
+      'pre-unification map. The difference between the two maps is RAY-vs-WAD input ' +
+      'truncation, i.e. a relative perturbation on the order of 1e-9 to the fitted ' +
+      'residual quantiles, against a selection margin of 0.4095. The artifact was ' +
+      'therefore DISCLOSED rather than re-frozen: a re-freeze taken after the sealed eras ' +
+      'were in view would be a worse defect than a 1e-9 input truncation.',
+    "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
+      'carried at its registered default. Every result that depends on it is provisional; ' +
+      'see the artifact section above.',
+  ],
+  archive: [
+    '**31 spurious single-hour Aave regime boundaries** survive in the `burned` (17 rows) ' +
+      'and `heldout-c` (14 rows) eras. Each is an isolated one-hour flip of ' +
+      '`irmSlopeLowWad` (450 bps → 460 bps → 450 bps) at an IDENTICAL block number and an ' +
+      'identical strategy address, reverting at the next hourly sample — the signature of ' +
+      'an inconsistent archive read against a lagging RPC replica, not of governance ' +
+      'action. The controls are direct: `burned-a` shows zero such flips, and ' +
+      "calibration's 1,082 Aave regime changes are 100% genuine rate-model ADDRESS swaps " +
+      'with zero same-address flicker. Measured effect on the Aave rate-model mean ' +
+      'absolute error is 5.8e-4 percentage points. The rows were NOT re-read: the ' +
+      'magnitude is immaterial to every reported result, and re-reading archive data once ' +
+      'a sealed era is open is itself a hazard. Disclosed, not repaired.',
+    'An earlier account of this defect — that Aave V3.2 mutates rate parameters in place — ' +
+      'was WRONG and is retracted. Row-level diffing showed isolated same-block, ' +
+      'same-address flicker, which no in-place governance mutation produces.',
+  ],
+  reproducibility: [
+    '**Decision hashes from this version are not comparable to v0.6 ones.** The hashed ' +
+      'decision component is now `legs` where it was a permanently-constant empty `costs` ' +
+      'object, and the bootstrap `artifactHash` moved. Nothing in the repository pins a ' +
+      'literal hash, and the run reproduces from its own manifest — but an externally ' +
+      'recorded decision hash from before this change will not reproduce, and that is a ' +
+      'documented format change rather than evidence of non-determinism.',
+  ],
+} as const;
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -641,6 +695,7 @@ async function main(): Promise<void> {
         calibrationEra: reg.calibrationEra,
         perVenueCoverage: reg.coverageByMarket,
       },
+      disclosures: REGISTERED_DISCLOSURES,
     });
 
     const mdPath = join(outDir, 'SRCLA-REPORT.md');

@@ -19,7 +19,7 @@ contract DeployAndFund is Script {
     address constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
     address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
     address constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address constant MOONWELL_IRM = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
+    address constant MOONWELL_IRM = 0xcD6b4B047e55A513b8efc2B61F58B9f7Fa6096FC;
     address constant SWAP_ROUTER = 0x2626664C2603336E57b271C5c0b26F42121e30D0;
     address constant FACTORY = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
     address constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
@@ -28,20 +28,14 @@ contract DeployAndFund is Script {
         uint256 deployerPk = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         address deployer = vm.addr(deployerPk);
 
-        // Get USDC from Compound Comet - it holds USDC
-        console2.log("Getting USDC from Comet...");
-        address comet = COMET;
-        uint256 cometBal = IERC20(USDC).balanceOf(comet);
-        console2.log("Comet USDC balance: %s", cometBal);
-
-        // Impersonate Comet and transfer USDC to deployer
-        vm.startPrank(comet);
-        uint256 availableBal = IERC20(USDC).balanceOf(comet);
-        IERC20(USDC).transfer(deployer, availableBal); // Take all available
-        vm.stopPrank();
-
+        // The deployer must already hold USDC on the fork. Funding it here via
+        // vm.prank would only affect the simulation pass - the broadcast pass
+        // replays against the live chain, where the prank never happened, and
+        // every transfer below reverts with "transfer amount exceeds balance".
+        // Fund it out of band instead (anvil_impersonateAccount + transfer).
         uint256 deployerBal = IERC20(USDC).balanceOf(deployer);
         console2.log("Deployer USDC balance: %s", deployerBal);
+        require(deployerBal >= 120_000e6, "deployer USDC not funded; see script header");
 
         vm.startBroadcast(deployerPk);
 

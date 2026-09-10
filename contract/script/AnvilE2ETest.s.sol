@@ -39,7 +39,7 @@ contract AnvilE2ETest is Script {
     // Moonwell on Base
     address constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
     address constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address constant MOONWELL_IRM = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
+    address constant MOONWELL_IRM = 0xcD6b4B047e55A513b8efc2B61F58B9f7Fa6096FC;
 
     // Uniswap V3 on Base
     address constant SWAP_ROUTER = 0x2626664C2603336E57b271C5c0b26F42121e30D0;

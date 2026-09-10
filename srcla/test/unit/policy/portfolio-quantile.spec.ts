@@ -326,3 +326,97 @@ describe('portfolioLowerBound with a calibrated quantile', () => {
   });
 });
 
+
+/**
+ * The memo added to `portfolioResidualQuantileFor`.
+ *
+ * The quantile is a pure function of `(panel, weights, coverageTarget)`, so
+ * §8.2's enumeration -- which asks for the same weight vectors at every
+ * origin -- was recomputing an identical 10,608-row weighted series and
+ * re-sorting it once per candidate. Measured on the registered artifact that
+ * was ~8.8 ms per candidate, which put the registered evaluation on the order
+ * of months of CPU. The cache is an optimisation ONLY: these tests fail if it
+ * ever returns something the uncached path would not have.
+ */
+describe('portfolioResidualQuantileFor caching', () => {
+  it('returns the same value on the second call as on the first', () => {
+    const a = artifact();
+    const target = new Map<string, bigint>([
+      ['a', 700_000n],
+      ['b', 300_000n],
+    ]);
+    const first = portfolioResidualQuantileFor(a, target);
+    const second = portfolioResidualQuantileFor(a, target);
+    const third = portfolioResidualQuantileFor(a, new Map(target));
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('still discriminates between mixes after a cache is warm', () => {
+    const a = artifact();
+    const concentrated = portfolioResidualQuantileFor(a, new Map([['a', 1_000_000n]]));
+    const mixed = portfolioResidualQuantileFor(
+      a,
+      new Map([
+        ['a', 500_000n],
+        ['b', 500_000n],
+      ]),
+    );
+    // Warm, then re-ask in the opposite order: a key collision between
+    // distinct weight vectors would show up as these two becoming equal.
+    expect(portfolioResidualQuantileFor(a, new Map([['a', 1_000_000n]]))).toBe(concentrated);
+    expect(
+      portfolioResidualQuantileFor(
+        a,
+        new Map([
+          ['a', 500_000n],
+          ['b', 500_000n],
+        ]),
+      ),
+    ).toBe(mixed);
+    expect(concentrated).not.toBe(mixed);
+  });
+
+  it('keys on the coverage target, so two targets over one panel disagree', () => {
+    const target = new Map<string, bigint>([
+      ['a', 600_000n],
+      ['b', 400_000n],
+    ]);
+    // Same panel OBJECT in both artifacts -- this is the case a panel-only
+    // cache key would get wrong.
+    const weights = portfolioWeightsWad(TWO_VENUE_PANEL.marketIds, target)!;
+    const series = TWO_VENUE_PANEL.rows.map((row) => {
+      let acc = 0n;
+      for (let i = 0; i < TWO_VENUE_PANEL.marketIds.length; i++) {
+        acc += (weights[i]! * (row[i] ?? 0n)) / WAD;
+      }
+      return acc;
+    });
+    // Warm at 0.9 FIRST, then ask at 0.99 over the same panel object. A cache
+    // keyed on the panel alone would hand back the 0.9 answer here.
+    const loose = portfolioResidualQuantileFor(artifact({ coverageTarget: 0.9 }), target);
+    const tight = portfolioResidualQuantileFor(artifact({ coverageTarget: 0.99 }), target);
+    expect(loose).toBe(empiricalLowerQuantile(series, 0.9));
+    expect(tight).toBe(empiricalLowerQuantile(series, 0.99));
+  });
+
+  it('agrees with an independent recomputation of the same definition', () => {
+    const a = artifact();
+    const target = new Map<string, bigint>([
+      ['a', 250_000n],
+      ['b', 750_000n],
+    ]);
+    const cached = portfolioResidualQuantileFor(a, target);
+
+    const weights = portfolioWeightsWad(TWO_VENUE_PANEL.marketIds, target)!;
+    const series = TWO_VENUE_PANEL.rows.map((row) => {
+      let acc = 0n;
+      for (let i = 0; i < TWO_VENUE_PANEL.marketIds.length; i++) {
+        acc += (weights[i]! * (row[i] ?? 0n)) / WAD;
+      }
+      return acc;
+    });
+    const q = empiricalLowerQuantile(series, a.coverageTarget);
+    expect(cached).toBe(q > 0n ? 0n : q);
+  });
+});

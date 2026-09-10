@@ -130,6 +130,21 @@ export interface ReportParams {
   /** Chain, collection method, block ranges, venue registry and measured
    * cost inputs — derived from the dataset, never hardcoded here. */
   provenance: DatasetProvenance;
+  /**
+   * Disclosures the RUN cannot derive from its own inputs: how the registered
+   * artifact came to be frozen, and known defects in the archive it was frozen
+   * against. These are facts about this repository's history, so the caller
+   * supplies them rather than the renderer hardcoding them — but they are
+   * REQUIRED reading, so they render as their own sections and not footnotes.
+   */
+  disclosures?: {
+    /** How and when the registered artifact was frozen, and against what. */
+    artifactFreeze?: readonly string[];
+    /** Known archive-read inconsistencies surviving in the evaluated data. */
+    archive?: readonly string[];
+    /** Reproducibility caveats — e.g. hash formats that changed. */
+    reproducibility?: readonly string[];
+  };
 }
 
 const pct = (x: number, dp = 3): string => `${(x * 100).toFixed(dp)}%`;
@@ -753,7 +768,51 @@ export function renderReport(params: ReportParams): string {
   );
   out.push('');
 
-  // ---- Verdict first. -----------------------------------------------------
+  // ---- What is being claimed, BEFORE any number. --------------------------
+  // WHY THIS IS FIRST. Without it a reader arrives at a table of APYs and
+  // reads the study as a yield contest, and every subsequent caveat reads as
+  // an excuse for a number that lost. The claim is not that SRCLA earns the
+  // most; it is that it stays redeemable while earning a rate that is not
+  // materially worse. §11.5 is ordered to match, and so is this document.
+  out.push('## What this study claims — and what it does not');
+  out.push('');
+  out.push(
+    'This report evaluates **sustainability**, not yield superiority. The claim under test ' +
+      'is that SRCLA remains **redeemable, liquid and within its own limits at every ' +
+      'registered scale**, while earning a rate that is **not materially worse** than a ' +
+      'baseline that is itself sustainable at that scale.',
+  );
+  out.push('');
+  out.push(
+    'The motivation is that the highest advertised APY is frequently the least redeemable ' +
+      'one. A rate is quoted on a venue at a utilization the quote itself helped create; ' +
+      'a depositor large enough to move that utilization is a depositor who cannot leave ' +
+      'without moving it back. §11.4 measures three quantities that a yield table cannot ' +
+      'show: how long a full exit takes, how much of a venue the vault itself became, and ' +
+      'how far the **displayed** rate sat above the rate actually **realized**.',
+  );
+  out.push('');
+  out.push('Concretely, this report does **not** claim, and must not be cited as claiming:');
+  out.push('');
+  out.push('- that SRCLA earns the highest return among the policies evaluated;');
+  out.push(
+    '- that a policy excluded from the yield comparison was outperformed — it was excluded ' +
+      'for **breaching a sustainability criterion SRCLA is held to**, and its return is ' +
+      'published in full as the measured price of that breach;',
+  );
+  out.push(
+    '- that any figure here describes real user redemption behaviour (withdrawals are a ' +
+      'registered schedule — see below).',
+  );
+  out.push('');
+  out.push(
+    'The release decision therefore reads in §11.5\'s order: **demonstration → completeness → ' +
+      'sustainability → yield**. A run that is not sustainable at every registered tier does ' +
+      'not reach the yield question at all, however well it scored on it.',
+  );
+  out.push('');
+
+  // ---- Verdict. -----------------------------------------------------------
   out.push('## Verdict');
   out.push('');
   for (const run of params.runs) {
@@ -842,6 +901,27 @@ export function renderReport(params: ReportParams): string {
   }
   out.push('');
 
+  // ---- Disclosures the run cannot derive from its own inputs. -------------
+  const d = params.disclosures;
+  if (d?.archive !== undefined && d.archive.length > 0) {
+    out.push('### Known archive-read inconsistencies');
+    out.push('');
+    out.push(
+      'The archive is read from Base mainnet at historical blocks, and a historical read can ' +
+        'be wrong in ways a gap check does not catch. Every such defect found is listed here ' +
+        'with its measured magnitude, whether or not it changes a result.',
+    );
+    out.push('');
+    for (const n of d.archive) out.push(`- ${n}`);
+    out.push('');
+  }
+  if (d?.reproducibility !== undefined && d.reproducibility.length > 0) {
+    out.push('### Reproducibility caveats');
+    out.push('');
+    for (const n of d.reproducibility) out.push(`- ${n}`);
+    out.push('');
+  }
+
   // ---- The artifact. ------------------------------------------------------
   out.push('## The registered forecast artifact');
   out.push('');
@@ -872,6 +952,18 @@ export function renderReport(params: ReportParams): string {
           `not be a registration.`,
   );
   out.push('');
+
+  if (d?.artifactFreeze !== undefined && d.artifactFreeze.length > 0) {
+    out.push('### Freeze provenance');
+    out.push('');
+    out.push(
+      'A registered artifact is frozen before any sealed era is opened and is never refit ' +
+        'afterwards. How this one came to be frozen, and against what:',
+    );
+    out.push('');
+    for (const n of d.artifactFreeze) out.push(`- ${n}`);
+    out.push('');
+  }
 
   // ---- Dataset and provenance, BEFORE the results. -------------------------
   out.push(datasetProvenanceSection(params.provenance));
