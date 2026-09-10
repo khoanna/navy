@@ -36,13 +36,13 @@
  * UNITS: returns and residuals are WAD over the horizon (not annualized).
  */
 import type { CompletedLabel } from '../policy/types.js';
-import { forecastUtilization, supplyRateAt, type IrmParams } from './state-space.js';
+import { forecastUtilization, supplyRateAt } from './state-space.js';
 import { protocolOf } from '../domain/protocol.js';
 import { RAY } from '../protocols/math.js';
+import { AaveV3Simulator } from '../protocols/simulation/aave-simulator.js';
 import { MoonwellSimulator } from '../protocols/simulation/moonwell-simulator.js';
 
 const WAD = 10n ** 18n;
-const RAY_PER_WAD = 10n ** 9n; // RAY (1e27) / WAD (1e18)
 /** Matches `evaluation/kernel/decision-input.ts`'s own annualization constant
  *  (365.25-day year) — `CompletedLabel.realizedReturnWad` was built with it,
  *  so P19's forecast must convert `supplyRateAt`'s annualized rate to the
@@ -238,22 +238,22 @@ export function meanForecast(
  *     own curve IS the supply curve; `irm.reserveFactorBps` is 0 here by
  *     construction (`dataset.ts`'s venue-aware default), so `supplyRateAt`'s
  *     `* (1 - reserveFactor)` term is a no-op.
- *   - aave: A LINEAR excess-ratio borrow curve (below optimal:
- *     `base + slope1 * u/optimal`; above: `base + slope1 + slope2 *
- *     (u - optimal)/(1 - optimal)`), THEN `* u * (1 - rf)`. THIS IS NOT
- *     `AaveV3Simulator#calculateRateFromUtilization` — that method SQUARES
- *     both ratios (matching its own docstring's claim that Aave's curve is
- *     "quadratic"), and measured against the same 10,632 rows it does not
- *     reproduce Aave's real rate: 1.47pp MAE overall, blowing up to ~5pp
- *     above `optimalUtilization` where the squared term diverges hardest
- *     from linear. The LINEAR version below (independently re-derived and
- *     checked against live rows for this fix) measures 0.21pp MAE overall
- *     (0.21pp below optimal, 0.24pp above — no blowup) — real Aave V3's
- *     `DefaultReserveInterestRateStrategy` is linear in the excess ratio on
- *     both sides of optimal, not quadratic. `aave-simulator.ts` is NOT
- *     changed here — it also backs the LIVE post-deposit curve
- *     (`policy/steps/simulate.ts`), and correcting it is a separate,
- *     larger-blast-radius fix outside this task; flagged in the fix report.
+ *   - aave: `AaveV3Simulator#calculateBorrowRateFromUtilization` (LINEAR in
+ *     the excess-utilization ratio on both sides of optimal, mirroring
+ *     `DefaultReserveInterestRateStrategy`), THEN
+ *     `AaveV3Simulator#borrowToSupplyRate`, i.e. `* u * (1 - rf)`. Measures
+ *     0.21pp MAE against the 10,632 calibration rows (0.21pp below optimal,
+ *     0.24pp above — no blowup).
+ *
+ *     THE SIMULATOR IS THE ONLY MAP. Until 2026-09-10 this module carried a
+ *     private re-implementation of that curve plus its own borrow -> supply
+ *     conversion, under a comment saying the simulator squared both ratios
+ *     and must not be used. That was true when written and stopped being
+ *     true once the simulator was made linear and given
+ *     `borrowToSupplyRate`; the duplicate then agreed numerically while
+ *     telling every reader the opposite. The forecast and the optimiser
+ *     (`policy/steps/simulate.ts`, which drives the same simulator) now
+ *     share one map, so they cannot disagree about what a state implies.
  *   - moonwell: `MoonwellSimulator#calculateBorrowRateFromUtilization`
  *     (kinked-linear, same shape as Compound, annualized from its own
  *     WAD-per-second return — see its docstring), THEN `* u * (1 - rf)`, for
@@ -304,6 +304,7 @@ export function meanForecast(
  * values, so the range itself carries no look-ahead either.
  */
 const moonwellSimulator = new MoonwellSimulator();
+const aaveSimulator = new AaveV3Simulator();
 
 function clampBigint(x: bigint, minValue: bigint, maxValue: bigint): bigint {
   if (x < minValue) return minValue;
@@ -319,34 +320,6 @@ function minMax(xs: readonly bigint[]): { min: bigint; max: bigint } {
     if (x > max) max = x;
   }
   return { min, max };
-}
-
-/**
- * Aave V3's REAL `DefaultReserveInterestRateStrategy` borrow curve: linear
- * in the excess-utilization ratio on both sides of `optimalUtilization`.
- * See the module comment above for why this is NOT
- * `AaveV3Simulator#calculateRateFromUtilization` (which squares the ratio).
- */
-function aaveBorrowRateAnnualWad(utilRay: bigint, irm: IrmParams): bigint {
-  const base = irm.baseRateWad;
-  const slope1 = irm.slopeLowWad;
-  const slope2 = irm.slopeHighWad;
-  const optimal = irm.kinkRay;
-  if (utilRay <= optimal) {
-    if (optimal === 0n) return base;
-    return base + (slope1 * utilRay) / optimal;
-  }
-  const excessCapacity = RAY - optimal;
-  if (excessCapacity === 0n) return base + slope1 + slope2;
-  const excessRatio = ((utilRay - optimal) * RAY) / excessCapacity;
-  return base + slope1 + (slope2 * excessRatio) / RAY;
-}
-
-/** Both Aave and Moonwell store BORROW curves; supply = borrow * u * (1 - rf). */
-function borrowToSupplyWad(borrowRateAnnualWad: bigint, utilWad: bigint, reserveFactorBps: number): bigint {
-  const afterUtilization = (borrowRateAnnualWad * utilWad) / WAD;
-  const reserveFactorWad = (BigInt(reserveFactorBps) * WAD) / 10_000n;
-  return (afterUtilization * (WAD - reserveFactorWad)) / WAD;
 }
 
 function stateSpaceResidualsFor(
@@ -435,11 +408,23 @@ function stateSpaceResidualsFor(
 
         const supplied = forecastedCash + forecastedBorrows - forecastedReserves;
         const utilRay = supplied <= 0n ? 0n : (forecastedBorrows * RAY) / supplied;
-        const utilWad = utilRay / RAY_PER_WAD;
-
         const borrowRateAnnualWad =
           protocol === 'aave'
-            ? aaveBorrowRateAnnualWad(utilRay, irm)
+            ? aaveSimulator.calculateBorrowRateFromUtilization(utilRay, {
+                baseRate: irm.baseRateWad,
+                variableRateSlope1: irm.slopeLowWad,
+                variableRateSlope2: irm.slopeHighWad,
+                optimalUtilization: irm.kinkRay,
+                // `IrmParams` carries no max-utilization reading because no
+                // producer has one: every Aave venue in the registered window
+                // reports `maxUtilizationRay === RAY`, which makes the
+                // simulator's cap branch unreachable except exactly at 100%
+                // usage, where the linear branch returns the same value.
+                maxUtilization: RAY,
+                // Read by `calculateRateFromUtilization`, not by the borrow
+                // half called here; `borrowToSupplyRate` below applies it.
+                reserveFactorBps: irm.reserveFactorBps,
+              })
             : moonwellSimulator.calculateBorrowRateFromUtilization(utilRay, {
                 baseRate: irm.baseRateWad,
                 kink: irm.kinkRay,
@@ -454,7 +439,14 @@ function stateSpaceResidualsFor(
                 reserveFactorBps: irm.reserveFactorBps,
               }) * SECONDS_PER_YEAR; // WAD-per-second -> annualized, see MoonwellSimulator's own docstring.
 
-        annualizedRateWad = borrowToSupplyWad(borrowRateAnnualWad, utilWad, irm.reserveFactorBps);
+        // Both Aave and Moonwell store BORROW curves; supply = borrow * u *
+        // (1 - rf). One implementation, the simulator's, for both — it takes
+        // `u` in RAY, which is the precision `utilRay` was computed at.
+        annualizedRateWad = aaveSimulator.borrowToSupplyRate(
+          borrowRateAnnualWad,
+          utilRay,
+          irm.reserveFactorBps,
+        );
       }
 
       const muWad = (annualizedRateWad * BigInt(point.horizonSeconds)) / SECONDS_PER_YEAR;
