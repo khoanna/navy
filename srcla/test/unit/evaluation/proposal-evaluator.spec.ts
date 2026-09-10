@@ -102,6 +102,17 @@ describe('ProposalEvaluator Interfaces', () => {
 });
 
 describe('Action Cost Estimation', () => {
+  // HISTORICAL: this block re-implements the pre-R34 `estimateActionCost`/
+  // `estimateTotalCost` formula inline (it never imported the real private
+  // methods). R34 fixed a live defect in that formula — it charged
+  // slippage/MEV bps against `deploy`/`divest` amounts as though a lending
+  // supply/withdraw were a swap — and re-pointed the production code at
+  // `policy/steps/cost.ts#movementCostBase`, which charges impact/slippage/
+  // MEV to the `harvest` leg only. This describe block is retained
+  // unmodified as documentation of the `Action` shape and the OLD formula's
+  // arithmetic; it does not exercise (and after R34 no longer matches) the
+  // production cost model. See `src/evaluation/proposal-evaluator.ts`'s
+  // `estimateTotalCost` for the current one.
   // Test the cost calculation logic
   const estimateActionCost = (action: Action, srclaConfig: {
     costGateGasLimit: bigint;

@@ -20,6 +20,9 @@ import {
   type RegisteredGateResult,
 } from './kernel/gates.js';
 import type { RegisteredEvaluationResult } from './kernel/harness.js';
+import { DEFAULT_DECIDE_OPTS } from '../policy/decide.js';
+import { movementCostBase, type Move } from '../policy/steps/cost.js';
+import type { DecisionInput } from '../policy/types.js';
 
 export interface Action {
   index: number;
@@ -314,7 +317,7 @@ export class ProposalEvaluator {
     const srclaConfig = this.config.srcla;
 
     // Estimate total cost of actions
-    const totalCost = this.estimateTotalCost(proposal.actions);
+    const totalCost = await this.estimateTotalCost(proposal.actions, state);
 
     // Calculate expected idle after proposal
     const deployTotal = proposal.actions
@@ -342,8 +345,29 @@ export class ProposalEvaluator {
       return true; // Below minimum threshold, automatically passes
     }
 
-    // Compare total movement cost (gas + slippage + MEV) against maximum allowed cost bound
-    const maxAllowedCost = (state.totalAssets * BigInt(srclaConfig.costGateSlippageBps + srclaConfig.costGateMevBps)) / 10000n;
+    // R34 FIX (defect 2 of 2): the threshold used to be
+    // `totalAssets * (slippageBps + mevBps) / 10000` — a PORTFOLIO-scaled
+    // bound compared against a MOVEMENT-scaled cost. Because
+    // `costGateSlippageBps`/`costGateMevBps` are small constants (tens of
+    // bps), that made the gate nearly independent of how much was actually
+    // being moved: a tiny rebalance of a large vault got the same generous
+    // ceiling as a proposal moving the whole vault. A cost gate must scale
+    // its tolerance with the size of the move it is gating, not with the
+    // size of the vault.
+    //
+    // Fixed by scaling the SAME bps knobs off the total notional the
+    // proposal actually moves (every action's amount — deploy, divest,
+    // harvest and emergency alike, matching what `estimateTotalCost` prices)
+    // instead of `state.totalAssets`. This needs no new registered constant
+    // (the existing `costGateSlippageBps`/`costGateMevBps` config already
+    // exist for this purpose); the §9.1 payback-period framing
+    // (`paybackSeconds` on a registered `PolicyArtifact`) was considered but
+    // is unnecessary here since a movement-scaled bps bound is already
+    // dimensionally correct, and pulling in artifact/rate-curve machinery
+    // for a coarse portfolio-level backstop would be a materially bigger
+    // change than this defect calls for.
+    const movedNotional = proposal.actions.reduce((sum, a) => sum + a.amount, 0n);
+    const maxAllowedCost = (movedNotional * BigInt(srclaConfig.costGateSlippageBps + srclaConfig.costGateMevBps)) / 10000n;
     return totalCost <= maxAllowedCost;
   }
 
@@ -427,39 +451,96 @@ export class ProposalEvaluator {
   }
 
   /**
-   * Estimate total cost of actions
+   * Estimate total cost of actions.
+   *
+   * R34 FIX (defect 1 of 2): this used to charge `slippageBps`/`mevBps` of
+   * NOTIONAL against every action, including `deploy`/`divest` — i.e. it
+   * priced a lending supply/withdraw as though it were a swap. A lending
+   * deposit or withdrawal executes at the protocol's own index: there is no
+   * quoted price to slip against, no counterparty spread, and no sandwich
+   * surface, and the rate consequence of size is already priced by the
+   * post-deposit capacity curve elsewhere in the policy — so bps-of-notional
+   * on those legs both invented a cost and double-counted that curve. This
+   * was the fourth surviving copy of that defect; the other three
+   * (`policy/steps/cost.ts#movementCostBase`, and its callers in
+   * `policy/steps/hurdles.ts` / `policy/harvest.ts` / `forecast/decision-
+   * score.ts`) already attribute impact/slippage/MEV to the `harvest`
+   * (reward-swap) leg only. Re-pointing this call site at that single model
+   * rather than re-deriving a fifth one.
+   *
+   * `movementCostBase` only reads `input.gas` off its `DecisionInput`
+   * argument (see its body) — it never touches `origin`/`vault`/`markets`/
+   * `dependencyGroups`/`withdrawals`/`history`/`lastAction`. Those fields
+   * are still required by the type, so they are filled with honestly-labelled
+   * placeholders below (some, like `vault`, from the real state this method
+   * already fetched) rather than left to silently coerce; if a future change
+   * to `movementCostBase` starts reading them, this call site would need
+   * those real values plumbed in from the runtime driver — it cannot
+   * currently source per-origin market/gas-oracle/last-action state itself.
+   *
+   * Gas/oracle inputs mirror the exact pattern `src/index.ts`'s `loadOrigin`
+   * uses for the live decision path: the L2 base fee is read live off the
+   * RPC, and L1 blob fee / ETH-USD / USDC-USD are the registered
+   * `SRCLA_REAL_*` config placeholders (`config.srcla.placeholder*`) — not a
+   * fabricated fifth set of numbers.
+   *
+   * Cost params are `DEFAULT_DECIDE_OPTS.cost` (`policy/decide.ts`) verbatim
+   * — the one registered `CostParams` the live decision path itself uses —
+   * rather than the narrower, operator-local `costGate{GasLimit,
+   * SlippageBps,MevBps}` config, which priced only gas+bps per action and
+   * cannot express `movementCostBase`'s eleven §9.1 terms.
    */
-  private estimateTotalCost(actions: Action[]): bigint {
-    const srclaConfig = this.config.srcla;
+  private async estimateTotalCost(actions: Action[], state: EvaluatorVaultState): Promise<bigint> {
+    if (actions.length === 0) return 0n;
 
-    let totalCost = 0n;
+    const gas = {
+      l2BaseFeeWei: await this.chainClient.getGasPrice(),
+      l1BaseFeeWei: this.config.srcla.placeholderL1BaseFeeWei,
+      l1BlobBaseFeeWei: this.config.srcla.placeholderL1BlobBaseFeeWei,
+      ethUsdE8: this.config.srcla.placeholderEthUsdE8,
+      usdcUsdE8: this.config.srcla.placeholderUsdcUsdE8,
+    };
 
-    for (const action of actions) {
-      const cost = this.estimateActionCost(action, srclaConfig);
-      totalCost += cost;
-    }
+    // Placeholder DecisionInput fields movementCostBase does not read (see
+    // the method comment above) — `vault` is filled from the real state
+    // already fetched by the caller since it costs nothing to be accurate,
+    // the rest are inert empties.
+    const input: DecisionInput = {
+      origin: {
+        blockNumber: 0,
+        blockHash: ethers.ZeroHash,
+        timestampSeconds: Math.floor(Date.now() / 1000),
+        finalized: true,
+      },
+      vault: {
+        totalAssetsBase: state.totalAssets,
+        idleBase: state.idleBase,
+        sharesOutstanding: state.totalShares,
+        adminReserveBase: 0n,
+        dynamicReserveBase: 0n,
+        minIdleBps: 0,
+        paused: false,
+        configurationDigest: '',
+      },
+      markets: [],
+      dependencyGroups: [],
+      withdrawals: [],
+      gas,
+      history: [],
+      lastAction: { timestampSeconds: null, turnoverWindowBase: 0n, recentMoves: [] },
+    };
 
-    return totalCost;
-  }
+    // `emergency` has no equivalent in `Move.kind` — it is an exit from an
+    // adapter (contract-side ActionKind 3, `kindToNumber` below), so it is
+    // priced as a `divest` for gas purposes; like `deploy`/`divest`, it
+    // carries no impact/slippage/MEV term in `movementCostBase`.
+    const moves: Move[] = actions.map((a) => ({
+      adapter: a.adapter,
+      amountBase: a.amount,
+      kind: a.kind === 'emergency' ? 'divest' : a.kind,
+    }));
 
-  /**
-   * Estimate cost for a single action
-   */
-  private estimateActionCost(action: Action, srclaConfig: ReturnType<typeof loadConfig>['srcla']): bigint {
-    const gasLimit = srclaConfig.costGateGasLimit;
-    const gasPrice = 30_000_000_000n; // 30 gwei
-
-    const gasCost = gasLimit * gasPrice;
-
-    // Slippage cost (based on amount and slippage bps)
-    const slippageBps = BigInt(srclaConfig.costGateSlippageBps);
-    const slippageCost = (action.amount * slippageBps) / 10000n;
-
-    // MEV cost
-    const mevBps = BigInt(srclaConfig.costGateMevBps);
-    const mevCost = (action.amount * mevBps) / 10000n;
-
-    return gasCost + slippageCost + mevCost;
+    return movementCostBase(input, moves, DEFAULT_DECIDE_OPTS.cost).totalBase;
   }
 
   /**
