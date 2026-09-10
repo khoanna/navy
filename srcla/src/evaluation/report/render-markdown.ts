@@ -910,11 +910,24 @@ export function renderReport(params: ReportParams): string {
   // ---- Limitations. -------------------------------------------------------
   out.push('## Limitations');
   out.push('');
+  // The fork-replay limitation is CONDITIONAL: once a run supplies replays,
+  // printing "not produced" beneath a gate line that says otherwise would be
+  // a false limitation, which is as misleading as a missing one.
+  const forkChecks = params.runs
+    .map((r) => r.gate.checks.find((c) => c.name === '§11.1 pinned-prestate fork replay'))
+    .filter((c): c is RegisteredGateCheck => c !== undefined);
+  const forkProduced = forkChecks.length > 0 && forkChecks.every((c) => c.passed === true);
   out.push(
-    '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
-      '`src/evaluation/fork-runner.ts` is the scaffold for it and is wired to nothing, so ' +
-      'the gate reports NOT PRODUCED and blocks. No allocation in this report has been ' +
-      'shown to be one the chain would have accepted.',
+    forkProduced
+      ? '- **§11.1\'s pinned-prestate fork replay covers ONE origin per (policy, tier)** — the ' +
+          'first origin at which each policy proposed a move — not every origin of the era. It ' +
+          'shows the chain accepts each policy\'s proposal from the pinned prestate; it does not ' +
+          're-derive the era\'s returns on chain.'
+      : '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
+          '`src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base ' +
+          'fork with the vault deployed; this run supplied none, so the gate reports NOT ' +
+          'PRODUCED and blocks. No allocation in this report has been shown to be one the ' +
+          'chain would have accepted.',
   );
   out.push(
     '- **Withdrawals are synthetic** (see above), so the withdrawal-success and ' +

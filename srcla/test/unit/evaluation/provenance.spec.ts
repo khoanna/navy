@@ -114,6 +114,7 @@ function row(policyId: string, tier: bigint, apy: number): PolicyRunResult {
     policy,
     tier,
     decisionHashes: [`0xdecision-${policyId}-0`],
+    firstProposal: null,
     rebalances: 2,
     inertVsSrcla: false,
     replay: {

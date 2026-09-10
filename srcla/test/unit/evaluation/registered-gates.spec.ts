@@ -82,6 +82,7 @@ function run(
     policy,
     tier,
     decisionHashes: ['0xd'],
+    firstProposal: null,
     rebalances: 1,
     inertVsSrcla: opts.inert ?? false,
     replay: {

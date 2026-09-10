@@ -52,6 +52,13 @@ import {
   type RegisteredPolicy,
 } from './registry.js';
 import type { BaselineAction } from '../replay/replay.js';
+import {
+  runForkReplays,
+  type ForkReplayOptions,
+  type ForkReplayPlan,
+} from '../fork-runner.js';
+import type { ForkReplayResult } from './gates.js';
+import { keccak256, toUtf8Bytes } from 'ethers';
 
 /** §11.1: "Vault tiers are exactly 10,000; 100,000; 1,000,000; and 10,000,000
  *  USDC." All four, in USDC base units. The harness that produced
@@ -108,6 +115,16 @@ export interface PolicyRunResult {
   replay: ReplayResult & DeploymentMetrics;
   /** Kernel decision hashes, one per origin. The evidence for `inert`. */
   decisionHashes: string[];
+  /**
+   * The FIRST origin at which this policy actually proposed a move, kept so
+   * §11.1's pinned-prestate fork replay has something to replay.
+   *
+   * One origin, not all of them: see `evaluation/fork-runner.ts`'s module
+   * header for why the replay is per (policy, tier) rather than per origin,
+   * and note that `null` here means the policy held at EVERY origin — which
+   * the replay reports as a HOLD, not as an execution.
+   */
+  firstProposal: CapturedProposal | null;
   /** Number of origins whose action was 'rebalance'. */
   rebalances: number;
   /**
@@ -118,6 +135,20 @@ export interface PolicyRunResult {
    * own comment admitted it.
    */
   inertVsSrcla: boolean;
+}
+
+/**
+ * One origin's proposal, captured verbatim from the replay so it can be
+ * re-executed on a Base fork (§11.1). `decisionHash` is `null` for the policy
+ * shapes that never call the kernel (`idle`, `frozen-equal-weight`) and have
+ * no hash of their own; the fork replay labels those rather than inventing a
+ * kernel hash for them.
+ */
+export interface CapturedProposal {
+  originIndex: number;
+  originTimestampSeconds: number;
+  decisionHash: string | null;
+  actions: BaselineAction[];
 }
 
 export interface RegisteredEvaluationResult {
@@ -457,6 +488,13 @@ export function createKernelPolicyFn(
     /** §11.4 census, mutated in place across every origin this policy runs. */
     hurdleBlocks: Record<string, number>;
     onRebalance: () => void;
+    /**
+     * Called with EVERY non-empty proposal this policy makes. The harness
+     * keeps only the first (see `PolicyRunResult.firstProposal`); the hook is
+     * per-proposal rather than first-only so a caller that wants a different
+     * origin does not have to re-run the replay to get one.
+     */
+    onProposal?: (proposal: CapturedProposal) => void;
   },
 ): PolicyFn {
   let frozen: Map<string, bigint> | null = null;
@@ -523,6 +561,12 @@ export function createKernelPolicyFn(
       if (actions.length > 0) {
         recordAction(originSeconds, actions);
         ctx.onRebalance();
+        ctx.onProposal?.({
+          originIndex: snapshot.index,
+          originTimestampSeconds: originSeconds,
+          decisionHash: null,
+          actions,
+        });
       }
       return actions;
     }
@@ -541,6 +585,12 @@ export function createKernelPolicyFn(
 
     recordAction(originSeconds, actions);
     ctx.onRebalance();
+    ctx.onProposal?.({
+      originIndex: snapshot.index,
+      originTimestampSeconds: originSeconds,
+      decisionHash: out.decisionHash,
+      actions,
+    });
     return actions;
   };
 }
@@ -595,6 +645,7 @@ export function runRegisteredEvaluation(
       const decisionHashes: string[] = [];
       const hurdleBlocks: Record<string, number> = {};
       let rebalances = 0;
+      let firstProposal: CapturedProposal | null = null;
       const policyFn = createKernelPolicyFn(policy, {
         artifact,
         opts,
@@ -606,6 +657,9 @@ export function runRegisteredEvaluation(
         hurdleBlocks,
         onRebalance: () => {
           rebalances += 1;
+        },
+        onProposal: (proposal) => {
+          if (firstProposal === null) firstProposal = proposal;
         },
       });
 
@@ -648,6 +702,7 @@ export function runRegisteredEvaluation(
         decisionHashes,
         rebalances,
         inertVsSrcla: false,
+        firstProposal,
       });
     }
 
@@ -698,4 +753,51 @@ export function runRegisteredEvaluation(
       registration: options.registration,
     }),
   };
+}
+
+/**
+ * §11.1's PINNED-PRESTATE FORK REPLAY, for a completed registered run.
+ *
+ * This is `fork-runner.ts`'s caller. Each (policy, tier) contributes the
+ * first origin at which it actually proposed a move; that proposal is
+ * re-executed against the deployed vault on a Base fork, from the same
+ * pinned prestate, through `submitPlan` + `executeNextActionWithProof`.
+ *
+ * It is DELIBERATELY not called by `runRegisteredEvaluation`. That function
+ * is synchronous and pure over a dataset; this one needs a live RPC, a
+ * deployed vault and an allocator key. An offline run therefore supplies no
+ * `forkResults`, and §11.5's completeness check reports NOT PRODUCED and
+ * blocks — which is the correct verdict for a run that produced no replay,
+ * and is why this is a separate call rather than a best-effort step inside
+ * the evaluation that could silently no-op.
+ *
+ * A policy that held at every origin is replayed as a HOLD: the result says
+ * so in its `detail` and does not claim an execution.
+ */
+export async function runRegisteredForkReplays(
+  out: RegisteredEvaluationResult,
+  opts: ForkReplayOptions,
+): Promise<ForkReplayResult[]> {
+  const plans: ForkReplayPlan[] = out.results.map((r) => {
+    const proposal = r.firstProposal;
+    // Shapes with no kernel hash (`idle`, `frozen-equal-weight`) get a
+    // labelled, deterministic, non-zero stand-in: `submitPlan` rejects a zero
+    // decision hash, and fabricating a kernel-looking hash for a policy that
+    // never ran the kernel would misattribute the plan's provenance.
+    const decisionHash =
+      proposal?.decisionHash ??
+      keccak256(toUtf8Bytes(`srcla-fork-replay|${r.policy.id}|${r.tier}|${proposal?.originIndex ?? -1}`));
+    return {
+      policyId: r.policy.id,
+      tier: r.tier,
+      originIndex: proposal?.originIndex ?? -1,
+      decisionHash,
+      actions: (proposal?.actions ?? []).map((a) => ({
+        kind: a.kind,
+        marketId: a.adapter,
+        amountBase: a.amount,
+      })),
+    };
+  });
+  return runForkReplays(plans, opts);
 }

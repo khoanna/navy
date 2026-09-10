@@ -45,11 +45,13 @@ import { loadRegisteredArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import {
   runRegisteredEvaluation,
+  runRegisteredForkReplays,
   REGISTERED_TIERS,
 } from '../src/evaluation/kernel/harness.js';
 import { NOT_OBSERVED, type HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { buildRunRecord, manifestConfigForRun } from '../src/evaluation/kernel/provenance.js';
 import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
+import { forkReplayOptionsFromEnv } from '../src/evaluation/fork-runner.js';
 import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gate.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 import {
@@ -440,7 +442,24 @@ async function runEra(
     `    worst-case venue universe: $${(universeLiquidity.worstTotalCashBase / 1_000_000n).toString()} ` +
       `(observed ${universeLiquidity.observedAtIso})`,
   );
-  const gate = evaluateRegisteredRelease(evaluation, { universeLiquidity });
+  // §11.1's pinned-prestate fork replay. Produced only when the environment
+  // names a live Base fork with the vault deployed; otherwise NOTHING is
+  // passed and the completeness check reports NOT PRODUCED and blocks. There
+  // is deliberately no default that lets the gate pass without the evidence.
+  const forkOpts = await forkReplayOptionsFromEnv();
+  const forkResults =
+    forkOpts === null ? undefined : await runRegisteredForkReplays(evaluation, forkOpts);
+  console.error(
+    forkResults === undefined
+      ? '    §11.1 fork replay: NOT PRODUCED (set SRCLA_FORK_REPLAY_RPC_URL / ' +
+          '_VAULT_ADDRESS / _ALLOCATOR_KEY / _ADAPTERS to produce one) — the release gate blocks'
+      : `    §11.1 fork replay: ${forkResults.filter((f) => f.executed).length}/${forkResults.length} ` +
+          `executed against ${forkOpts!.rpcUrl} at pinned block ${forkOpts!.prestateBlock}`,
+  );
+  const gate = evaluateRegisteredRelease(evaluation, {
+    universeLiquidity,
+    ...(forkResults === undefined ? {} : { forkResults }),
+  });
 
   // §11.5's FIRST gate, printed first. It is not a subset of the policy gate
   // and it was never run before this release.

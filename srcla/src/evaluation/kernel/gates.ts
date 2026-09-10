@@ -197,11 +197,12 @@ export interface RegisteredGateResult {
 /**
  * A §11.1 pinned-prestate fork replay outcome for one (policy, tier).
  *
- * The scaffold that would produce these is `src/evaluation/fork-runner.ts`,
- * which is currently wired to nothing — so in practice `forkResults` is
- * absent and the fork check reports NOT PRODUCED and blocks the gate. That
- * is the correct behaviour for an unimplemented paper requirement: it is
- * visible in the gate output rather than silently skipped.
+ * These are produced by `src/evaluation/fork-runner.ts#runForkReplays`,
+ * called by `kernel/harness.ts#runRegisteredForkReplays`. Producing them
+ * needs a live Anvil fork of Base with the vault deployed, so an offline run
+ * supplies none and the fork check reports NOT PRODUCED and blocks the gate.
+ * That is deliberate: absence is failure, and it is visible in the gate
+ * output rather than silently skipped.
  */
 export interface ForkReplayResult {
   policyId: string;
@@ -567,18 +568,23 @@ export function evaluateRegisteredRelease(
     ),
   );
 
-  // §11.1's per-policy pinned-prestate fork replay. Unimplemented today:
-  // `src/evaluation/fork-runner.ts` is the scaffold and nothing calls it, so
-  // this reports NOT PRODUCED and blocks. Skipping it silently is how a
-  // paper requirement gets quietly dropped.
+  // §11.1's per-policy pinned-prestate fork replay.
+  // `src/evaluation/fork-runner.ts#runForkReplays` produces these and
+  // `kernel/harness.ts#runRegisteredForkReplays` calls it, but only a run
+  // with a live Base fork can supply them. ABSENCE IS STILL FAILURE: with no
+  // replay this reports NOT PRODUCED and blocks, because a run that did not
+  // replay has not shown its allocation is one the chain would accept.
+  // Skipping it silently is how a paper requirement gets quietly dropped.
   const fork = opts.forkResults;
   if (fork === undefined) {
     checks.push(
       check(
         '§11.1 pinned-prestate fork replay',
         null,
-        'NOT PRODUCED: no fork replay was supplied. src/evaluation/fork-runner.ts is the ' +
-          'scaffold for this and is wired to nothing.',
+        'NOT PRODUCED: no fork replay was supplied. Produce one with ' +
+          'src/evaluation/fork-runner.ts#runForkReplays (via ' +
+          'kernel/harness.ts#runRegisteredForkReplays) against an Anvil fork of Base ' +
+          'with the vault deployed, and pass it as `forkResults`.',
       ),
     );
   } else {

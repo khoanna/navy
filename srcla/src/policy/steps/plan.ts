@@ -138,7 +138,7 @@ function sortedHash(a: string, b: string): string {
  * that hits an odd level, which is silent on chain until the very first
  * `executeNextActionWithProof` call reverts with `InvalidMerkleProof`.)
  */
-function merkleLevels(leaves: string[]): string[][] {
+export function merkleLevels(leaves: string[]): string[][] {
   const levels: string[][] = [leaves];
   let current = leaves;
   while (current.length > 1) {
@@ -161,7 +161,7 @@ function merkleLevels(leaves: string[]): string[][] {
  * Sibling path for `index`, matching what `MerkleTree.verifyProof` expects to
  * consume: a promoted (unpaired) node contributes NO entry at that level.
  */
-function proofFor(levels: string[][], index: number): string[] {
+export function proofFor(levels: string[][], index: number): string[] {
   const proof: string[] = [];
   let idx = index;
   for (let level = 0; level < levels.length - 1; level++) {

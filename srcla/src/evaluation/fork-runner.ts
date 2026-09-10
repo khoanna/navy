@@ -1,179 +1,506 @@
 /**
- * Scaffold for paper §11.1's per-policy PINNED-PRESTATE FORK REPLAY, and for
- * §11.4's pinned Base-fork validation of exact adapter math.
+ * Paper §11.1's per-policy PINNED-PRESTATE FORK REPLAY.
  *
- * ForkRunner spawns a local Anvil process with a mainnet fork, takes vault
- * state snapshots, and cleans up when done.
+ * §11.1: "Counterfactual Base-fork executions restore the same pinned
+ * prestate before each candidate policy." `runForkReplays` is what does
+ * that, and `kernel/harness.ts#runRegisteredForkReplays` is its caller.
  *
  * ---------------------------------------------------------------------------
- * STATUS: NOT WIRED. Nothing in `src/`, `scripts/` or `test/` calls this.
- *
- * DO NOT DELETE IT AS DEAD CODE. §11.1 requires each policy's decisions to be
- * replayed against a pinned chain prestate so the reported allocation is one
- * the chain would actually have accepted; that requirement is currently
- * UNMET, and this file is the only thing in the repo that could meet it.
- * Removing it would silently drop the requirement instead of cleaning
- * anything up. The harness that produced SRCLA-REPORT.md hand-fed constants
- * from `fork-measurements.txt` in place of doing this.
- *
- * The gap is VISIBLE rather than silent: `evaluation/kernel/gates.ts`
- * declares a `§11.1 pinned-prestate fork replay` check that reports
- * NOT PRODUCED (and therefore BLOCKS the release gate) whenever no
- * `ForkReplayResult[]` is supplied — which, until this runner is wired, is
- * always.
- *
- * To wire it: drive `ForkRunner` once per (policy, tier) at the manifest's
- * pinned block, execute the decision sequence `kernel/harness.ts` recorded
- * (`PolicyRunResult.decisionHashes` identifies it), and map each outcome to a
- * `ForkReplayResult` for `evaluateRegisteredRelease({ forkResults })`. Note
- * that doing so requires starting an Anvil process, which is why it is not
- * exercised by the unit suite.
+ * WHAT THIS ESTABLISHES, AND WHAT IT DOES NOT
  * ---------------------------------------------------------------------------
+ * It establishes that the allocation a policy PROPOSES is one the deployed
+ * `NavyVaultSRCLA` on a Base fork will actually accept: the plan is built
+ * exactly as the production keeper builds one (`policy/steps/plan.ts`'s
+ * `planDomain`/`hashPlanAction`/Merkle shape), submitted through
+ * `submitPlan`, and executed action by action through
+ * `executeNextActionWithProof` — so every on-chain guardrail (adapter
+ * registration, exposure caps, `minIdleBps`, the plan's own
+ * `minFinalAssets`/`maxRecognizedLoss`/`turnoverLimit`, the sequential index,
+ * the Merkle proof and the configuration-digest recheck) is applied by the
+ * contract, not asserted here.
+ *
+ * It does NOT re-derive returns on chain, and it does not replay every origin
+ * of an era: each `ForkReplayPlan` carries ONE origin's proposal per
+ * (policy, tier). A replay of all ~17,700 origins would need an archive fork
+ * per origin and is not what the §11.5 completeness check asks for; what it
+ * asks for is that each required (policy, tier) has a replay that executed.
+ * The `detail` on every result says which origin was replayed so a reader is
+ * never left to assume it was all of them.
+ *
+ * TIME. The plan HEADER's `createdAt`/`expiresAt` are taken from the fork's
+ * block timestamp, not the historical origin's: `submitPlan` reverts
+ * `InvalidPlan` on `createdAt > block.timestamp` and `PlanExecutionExpired`
+ * on an `expiresAt` in the past, so a 2024 origin's window could never be
+ * submitted against a 2026 fork head. The plan's IDENTITY — its
+ * `decisionHash`, its action list, amounts and ordering — is the policy's and
+ * is replayed unchanged. `snapshotBlockNumber` is the PINNED prestate block.
+ *
+ * PRESTATE. `evm_snapshot` is taken once, before the first policy; every
+ * policy is preceded by an `evm_revert` back to it and a re-snapshot (Anvil
+ * invalidates a snapshot id on revert). A FINGERPRINT of the prestate
+ * (block number, vault NAV, idle asset balance, every adapter's
+ * `strategyAssets`) is recomputed after each restore and compared against the
+ * pinned one: a policy whose prestate does not match the pin is reported
+ * `executed: false` rather than silently being run against a different chain.
  */
 
-import { spawn, ChildProcess } from 'child_process';
-import { JsonRpcProvider, Contract, ethers } from 'ethers';
+import { ethers, JsonRpcProvider, Contract, Wallet } from 'ethers';
+import { merkleLevels, planDomain, hashPlanAction, proofFor, ActionKind } from '../policy/steps/plan.js';
+import type { ForkReplayResult } from './kernel/gates.js';
+import type { PlanDraft } from '../policy/types.js';
 
-export interface ForkConfig {
-  rpcUrl: string;
-  forkBlock: number;
-  vaultAddress: string;
-  adapterAddresses: string[];
-  keeperPrivateKey?: string;
+/** One proposed move, in the shape `replay/replay.ts` emits. */
+export interface ForkReplayAction {
+  kind: 'deploy' | 'divest';
+  /** Registered venue id (`compound` | `aave` | `moonwell`), NOT an address. */
+  marketId: string;
+  /** USDC base units (6 dp). */
+  amountBase: bigint;
 }
 
-export interface ForkSnapshot {
-  blockNumber: number;
-  totalAssets: bigint;
-  idleBase: bigint;
-  adapterBalances: Map<string, bigint>;
-  sharePrice: bigint;
-  timestamp: Date;
-}
-
-export interface ForkResult {
+/** One (policy, tier)'s proposal at ONE origin, to be replayed on the fork. */
+export interface ForkReplayPlan {
   policyId: string;
   tier: bigint;
-  snapshots: ForkSnapshot[];
-  realizedNetApy: number;
-  totalTurnover: bigint;
-  withdrawalSuccessRate: number;
-  totalCosts: bigint;
+  /** Index of the origin within the evaluated era whose proposal this is. */
+  originIndex: number;
+  /** The kernel decision hash for that origin. Must be non-zero. */
+  decisionHash: string;
+  actions: readonly ForkReplayAction[];
+  /** §8.1's reserve for that decision, if the run recorded one. */
+  reserveBase?: bigint;
+}
+
+export interface ForkReplayOptions {
+  /** RPC of a RUNNING Anvil fork of Base. */
+  rpcUrl: string;
+  /** The block the prestate is pinned at. Must be the fork's current head. */
+  prestateBlock: number;
+  /** Deployed `NavyVaultSRCLA` on that fork. */
+  vaultAddress: string;
+  /** Key holding ALLOCATOR_ROLE on that vault. */
+  allocatorPrivateKey: string;
+  /** marketId -> the `IYieldAdapter` registered on the vault for that venue. */
+  adapterByMarketId: Readonly<Record<string, string>>;
+  /** Per-action tolerated slippage; also sizes `maxRecognizedLoss`. */
+  maxLossBps?: number;
+  /** Plan validity window, seconds from the fork head's timestamp. */
+  planExpirySeconds?: number;
+  /** Gas limit for plan transactions. */
+  gasLimit?: bigint;
 }
 
 const VAULT_ABI = [
+  'function asset() view returns (address)',
   'function totalAssets() view returns (uint256)',
-  'function idle() view returns (uint256)',
-  'function convertToAssets(uint256 shares) view returns (uint256)',
-  'function adapterBalances(address) view returns (uint256)',
+  'function strategyAssets(address) view returns (uint256)',
+  'function registeredAdapters(address) view returns (bool)',
+  'function currentConfigurationDigest() view returns (bytes32)',
+  'function activePlanId() view returns (bytes32)',
+  'function activePlanNextActionIndex() view returns (uint64)',
+  'function ALLOCATOR_ROLE() view returns (bytes32)',
+  'function hasRole(bytes32,address) view returns (bool)',
+  'function cancelPlan()',
+  'function submitPlan((uint256 planId, uint64 policyVersion, uint64 createdAt, uint64 expiresAt, uint32 actionCount, uint256 snapshotBlockNumber, bytes32 snapshotHash, bytes32 decisionHash, bytes32 configurationDigest, uint256 reserve, uint256 minFinalAssets, uint256 maxRecognizedLoss, uint256 turnoverLimit) header, bytes32 merkleRoot)',
+  'function executeNextActionWithProof(bytes32[] merkleProof, (uint256 planId, uint32 index, uint8 kind, address adapter, uint256 amount, uint256 minOut, bytes32 dataHash) action)',
 ];
 
-export class ForkRunner {
-  private anvilProcess: ChildProcess | null = null;
-  private provider: JsonRpcProvider | null = null;
-  private port = 8545;
+const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
-  /**
-   * Start Anvil with a forked chain at a specific block.
-   * Polls until the RPC is responsive (up to 30 attempts × 500 ms).
-   * @returns The local RPC URL (e.g. http://localhost:8545)
-   */
-  async startFork(config: ForkConfig): Promise<string> {
-    const url = `http://localhost:${this.port}`;
-    this.anvilProcess = spawn('anvil', [
-      '--fork-url', config.rpcUrl,
-      '--fork-block-number', config.forkBlock.toString(),
-      '--port', this.port.toString(),
-      '--host', '0.0.0.0',
-    ]);
+/** The measurable identity of the pinned prestate. */
+export interface PrestateFingerprint {
+  blockNumber: number;
+  totalAssetsBase: bigint;
+  idleBase: bigint;
+  /** adapter address (lowercased) -> strategyAssets */
+  strategyAssets: Record<string, bigint>;
+}
 
-    // Silently consume stdout/stderr to prevent blocking
-    this.anvilProcess.stdout?.resume();
-    this.anvilProcess.stderr?.resume();
+export function fingerprintDigest(f: PrestateFingerprint): string {
+  const legs = Object.keys(f.strategyAssets)
+    .sort()
+    .map((a) => `${a}:${f.strategyAssets[a]!.toString()}`)
+    .join(',');
+  return ethers.keccak256(
+    ethers.toUtf8Bytes(`${f.blockNumber}|${f.totalAssetsBase}|${f.idleBase}|${legs}`),
+  );
+}
 
-    let attempts = 0;
-    while (attempts < 30) {
+async function readPrestate(
+  provider: JsonRpcProvider,
+  vault: Contract,
+  asset: Contract,
+  adapters: readonly string[],
+): Promise<PrestateFingerprint> {
+  const blockNumber = await provider.getBlockNumber();
+  const totalAssetsBase = (await vault.totalAssets!()) as bigint;
+  const idleBase = (await asset.balanceOf!(await vault.getAddress())) as bigint;
+  const strategyAssets: Record<string, bigint> = {};
+  for (const a of adapters) {
+    strategyAssets[a.toLowerCase()] = (await vault.strategyAssets!(a)) as bigint;
+  }
+  return { blockNumber, totalAssetsBase, idleBase, strategyAssets };
+}
+
+/**
+ * Assemble the on-chain plan for one proposal. Mirrors
+ * `policy/steps/plan.ts#buildPlan`'s encoding exactly — divests before
+ * deploys (`_enforceDivestBeforeDeploy`), the same header tuple, the same
+ * domain-bound leaves, the same Merkle shape — but takes its header time and
+ * configuration digest from the LIVE fork rather than from a `DecisionInput`,
+ * for the reason in the module header.
+ */
+export function buildForkPlan(
+  plan: ForkReplayPlan,
+  ctx: {
+    chainId: number;
+    vaultAddress: string;
+    assetAddress: string;
+    adapterByMarketId: Readonly<Record<string, string>>;
+    configurationDigest: string;
+    totalAssetsBase: bigint;
+    prestateBlock: number;
+    nowSeconds: number;
+    expirySeconds: number;
+    maxLossBps: number;
+  },
+): {
+  header: PlanDraft['header'];
+  merkleRoot: string;
+  actions: Array<{
+    planId: bigint;
+    index: number;
+    kind: number;
+    adapter: string;
+    amount: bigint;
+    minOut: bigint;
+    dataHash: string;
+    proof: string[];
+  }>;
+} | null {
+  if (plan.actions.length === 0) return null;
+  if (plan.decisionHash === ethers.ZeroHash) {
+    throw new Error(`plan ${plan.policyId}@${plan.tier}: zero decisionHash — submitPlan reverts InvalidPlan`);
+  }
+
+  const resolve = (marketId: string): string => {
+    const addr = ctx.adapterByMarketId[marketId] ?? ctx.adapterByMarketId[marketId.toLowerCase()];
+    if (addr === undefined) {
+      throw new Error(
+        `no fork adapter registered for market '${marketId}'; adapterByMarketId covers ` +
+          `[${Object.keys(ctx.adapterByMarketId).join(', ')}]`,
+      );
+    }
+    return addr;
+  };
+
+  const drafts = [...plan.actions]
+    .sort((a, b) => (a.marketId < b.marketId ? -1 : a.marketId > b.marketId ? 1 : 0))
+    .map((a) => ({
+      kind: a.kind === 'divest' ? ActionKind.Divest : ActionKind.Deploy,
+      adapter: resolve(a.marketId),
+      amountBase: a.amountBase,
+      minOutBase: (a.amountBase * BigInt(10_000 - ctx.maxLossBps)) / 10_000n,
+    }))
+    .filter((a) => a.amountBase > 0n);
+  if (drafts.length === 0) return null;
+
+  // Divests first: the vault refuses a Deploy once a Divest is pending.
+  const ordered = [
+    ...drafts.filter((a) => a.kind === ActionKind.Divest),
+    ...drafts.filter((a) => a.kind !== ActionKind.Divest),
+  ];
+
+  const planId = BigInt(plan.decisionHash) & ((1n << 255n) - 1n);
+  if (planId === 0n) throw new Error('planId derived from decisionHash is zero');
+
+  const turnover = ordered.reduce((sum, a) => sum + a.amountBase, 0n);
+  const maxRecognizedLoss = (turnover * BigInt(ctx.maxLossBps)) / 10_000n;
+  const minFinalAssets =
+    ctx.totalAssetsBase > maxRecognizedLoss ? ctx.totalAssetsBase - maxRecognizedLoss : 0n;
+
+  const header: PlanDraft['header'] = {
+    planId,
+    policyVersion: 1n,
+    createdAt: BigInt(ctx.nowSeconds),
+    expiresAt: BigInt(ctx.nowSeconds + ctx.expirySeconds),
+    actionCount: BigInt(ordered.length),
+    snapshotBlockNumber: BigInt(ctx.prestateBlock),
+    // Non-zero and bound to the replayed origin: submitPlan rejects zero.
+    snapshotHash: ethers.keccak256(
+      ethers.toUtf8Bytes(`${plan.policyId}|${plan.tier}|${plan.originIndex}|${ctx.prestateBlock}`),
+    ),
+    decisionHash: plan.decisionHash,
+    configurationDigest: ctx.configurationDigest,
+    reserve: plan.reserveBase ?? 0n,
+    minFinalAssets,
+    maxRecognizedLoss,
+    turnoverLimit: turnover,
+  };
+
+  const domain = planDomain(ctx.chainId, ctx.vaultAddress, ctx.assetAddress, header);
+  const leaves = ordered.map((a, index) =>
+    hashPlanAction(domain, {
+      planId,
+      index,
+      kind: a.kind,
+      adapter: a.adapter,
+      amountBase: a.amountBase,
+      minOutBase: a.minOutBase,
+      dataHash: ethers.ZeroHash,
+    }),
+  );
+  const levels = merkleLevels(leaves);
+
+  return {
+    header,
+    merkleRoot: levels[levels.length - 1]![0]!,
+    actions: ordered.map((a, index) => ({
+      planId,
+      index,
+      kind: a.kind,
+      adapter: a.adapter,
+      amount: a.amountBase,
+      minOut: a.minOutBase,
+      dataHash: ethers.ZeroHash,
+      proof: proofFor(levels, index),
+    })),
+  };
+}
+
+/**
+ * Replay each (policy, tier)'s proposal against the pinned prestate.
+ *
+ * One `ForkReplayResult` per input plan, in input order. A plan that reverts
+ * on chain is `executed: false` with the revert reason in `detail`; it is
+ * never dropped, because a dropped result is an absent one and the §11.5
+ * check reads absence as failure by design.
+ */
+export async function runForkReplays(
+  plans: readonly ForkReplayPlan[],
+  opts: ForkReplayOptions,
+): Promise<ForkReplayResult[]> {
+  const maxLossBps = opts.maxLossBps ?? 100;
+  const expirySeconds = opts.planExpirySeconds ?? 3_600;
+  const gasLimit = opts.gasLimit ?? 3_000_000n;
+
+  // `cacheTimeout: -1` disables ethers' internal per-call cache. Without it
+  // `latest` is resolved from a block number ethers refreshes only on its
+  // polling interval, so against an automining Anvil every transaction after
+  // the first is signed with a stale (already used) nonce and comes back as
+  // NONCE_EXPIRED — which would be misrecorded as the chain refusing the
+  // policy's plan.
+  const provider = new JsonRpcProvider(opts.rpcUrl, undefined, { cacheTimeout: -1 });
+  provider.pollingInterval = 100;
+  try {
+    const wallet = new Wallet(opts.allocatorPrivateKey, provider);
+    // NonceManager, not the bare wallet: ethers caches `eth_getTransactionCount`
+    // briefly, and against an automining Anvil (where a submit and its actions
+    // land inside that window) the second transaction re-uses the first's
+    // nonce and fails with "nonce has already been used" — which would be
+    // recorded as the POLICY's plan being refused by the chain.
+    const signer = new ethers.NonceManager(wallet);
+    const vault = new Contract(opts.vaultAddress, VAULT_ABI, signer);
+    const assetAddress = (await vault.asset!()) as string;
+    const asset = new Contract(assetAddress, ERC20_ABI, provider);
+    const network = await provider.getNetwork();
+    const chainId = Number(network.chainId);
+    const adapters = [...new Set(Object.values(opts.adapterByMarketId))];
+
+    const head = await provider.getBlockNumber();
+    if (head !== opts.prestateBlock) {
+      throw new Error(
+        `prestate pin mismatch: opts.prestateBlock=${opts.prestateBlock} but the fork head is ` +
+          `${head}. The pin must name the state the replays are restored to.`,
+      );
+    }
+    if (!((await vault.hasRole!(await vault.ALLOCATOR_ROLE!(), wallet.address)) as boolean)) {
+      throw new Error(`${wallet.address} does not hold ALLOCATOR_ROLE on ${opts.vaultAddress}`);
+    }
+
+    const pinned = await readPrestate(provider, vault, asset, adapters);
+    const pinnedDigest = fingerprintDigest(pinned);
+
+    let snapshotId = (await provider.send('evm_snapshot', [])) as string;
+    const results: ForkReplayResult[] = [];
+
+    for (const plan of plans) {
+      const label = `${plan.policyId}@${plan.tier}`;
+      // §11.1: THE SAME pinned prestate, before EVERY candidate policy.
+      const reverted = (await provider.send('evm_revert', [snapshotId])) as boolean;
+      snapshotId = (await provider.send('evm_snapshot', [])) as string;
+      // evm_revert rolls the account nonce back too; the local counter must
+      // follow or every plan after the first is signed with a used nonce.
+      signer.reset();
+      const restored = await readPrestate(provider, vault, asset, adapters);
+      const restoredDigest = fingerprintDigest(restored);
+      if (!reverted || restoredDigest !== pinnedDigest) {
+        results.push({
+          policyId: plan.policyId,
+          tier: plan.tier,
+          prestateBlock: opts.prestateBlock,
+          executed: false,
+          detail:
+            `prestate was NOT restored before this policy (pinned ${pinnedDigest}, ` +
+            `observed ${restoredDigest} at block ${restored.blockNumber})`,
+        });
+        continue;
+      }
+
       try {
-        const probe = new JsonRpcProvider(url);
-        await probe.getBlockNumber();
-        probe.destroy();
-        this.provider = new JsonRpcProvider(url);
-        return url;
-      } catch {
-        attempts++;
-        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        const digest = (await vault.currentConfigurationDigest!()) as string;
+        const block = await provider.getBlock('latest');
+        const built = buildForkPlan(plan, {
+          chainId,
+          vaultAddress: opts.vaultAddress,
+          assetAddress,
+          adapterByMarketId: opts.adapterByMarketId,
+          configurationDigest: digest,
+          totalAssetsBase: restored.totalAssetsBase,
+          prestateBlock: opts.prestateBlock,
+          nowSeconds: block?.timestamp ?? Math.floor(Date.now() / 1000),
+          expirySeconds,
+          maxLossBps,
+        });
+
+        if (built === null) {
+          // A HOLD. Truthfully executable — there is nothing to execute — and
+          // said so in the detail rather than reported as a plan that ran.
+          results.push({
+            policyId: plan.policyId,
+            tier: plan.tier,
+            prestateBlock: opts.prestateBlock,
+            executed: true,
+            detail: `HOLD at origin ${plan.originIndex}: the policy proposed no moves, so there is no plan to execute`,
+          });
+          continue;
+        }
+
+        const submit = await vault.submitPlan!(built.header, built.merkleRoot, { gasLimit });
+        const submitReceipt = await submit.wait();
+        if (submitReceipt?.status !== 1) throw new Error('submitPlan receipt status != 1');
+
+        let gasUsed = submitReceipt.gasUsed as bigint;
+        for (const action of built.actions) {
+          const tx = await vault.executeNextActionWithProof!(
+            action.proof,
+            {
+              planId: action.planId,
+              index: action.index,
+              kind: action.kind,
+              adapter: action.adapter,
+              amount: action.amount,
+              minOut: action.minOut,
+              dataHash: action.dataHash,
+            },
+            { gasLimit },
+          );
+          const receipt = await tx.wait();
+          if (receipt?.status !== 1) {
+            throw new Error(`action ${action.index} receipt status != 1`);
+          }
+          gasUsed += receipt.gasUsed as bigint;
+        }
+
+        // The plan is CLEARED on completion; a still-active plan means the
+        // vault did not accept the whole sequence.
+        const stillActive = (await vault.activePlanId!()) as string;
+        if (stillActive !== ethers.ZeroHash) {
+          throw new Error(`plan ${built.header.planId} still active after all actions executed`);
+        }
+
+        const after = await readPrestate(provider, vault, asset, adapters);
+        const moved = Object.keys(after.strategyAssets)
+          .filter((a) => after.strategyAssets[a] !== restored.strategyAssets[a])
+          .map((a) => `${a}:+${after.strategyAssets[a]! - restored.strategyAssets[a]!}`)
+          .join(',');
+
+        results.push({
+          policyId: plan.policyId,
+          tier: plan.tier,
+          prestateBlock: opts.prestateBlock,
+          executed: true,
+          detail:
+            `origin ${plan.originIndex}: ${built.actions.length} action(s) executed on the fork from ` +
+            `pinned prestate ${pinnedDigest}; gas ${gasUsed}; strategyAssets ${moved.length > 0 ? moved : 'unchanged'}`,
+        });
+      } catch (error) {
+        results.push({
+          policyId: plan.policyId,
+          tier: plan.tier,
+          prestateBlock: opts.prestateBlock,
+          executed: false,
+          detail: `${label} reverted on the fork: ${error instanceof Error ? error.message : String(error)}`,
+        });
       }
     }
-    throw new Error('Failed to start Anvil fork after 30 attempts');
+
+    // Leave the chain on the pinned prestate rather than on the last policy's
+    // outcome — the next caller's pin is this one's postcondition.
+    await provider.send('evm_revert', [snapshotId]);
+    return results;
+  } finally {
+    provider.destroy();
+  }
+}
+
+/**
+ * Resolve `ForkReplayOptions` from the environment, or `null` when the
+ * environment does not describe a fork.
+ *
+ * `null` is NOT a soft pass: a caller that gets `null` must supply no
+ * `forkResults` at all, so §11.5's completeness check reports NOT PRODUCED
+ * and blocks. The environment can enable the evidence; it can never waive the
+ * requirement.
+ *
+ *   SRCLA_FORK_REPLAY_RPC_URL        http://127.0.0.1:8545
+ *   SRCLA_FORK_REPLAY_VAULT_ADDRESS  the deployed NavyVaultSRCLA
+ *   SRCLA_FORK_REPLAY_ALLOCATOR_KEY  a key holding ALLOCATOR_ROLE on it
+ *   SRCLA_FORK_REPLAY_ADAPTERS       compound=0x..,aave=0x..,moonwell=0x..
+ *   SRCLA_FORK_REPLAY_BLOCK          optional; defaults to the fork head
+ */
+export async function forkReplayOptionsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ForkReplayOptions | null> {
+  const rpcUrl = env['SRCLA_FORK_REPLAY_RPC_URL'];
+  const vaultAddress = env['SRCLA_FORK_REPLAY_VAULT_ADDRESS'];
+  const allocatorPrivateKey = env['SRCLA_FORK_REPLAY_ALLOCATOR_KEY'];
+  const adapterSpec = env['SRCLA_FORK_REPLAY_ADAPTERS'];
+  if (
+    rpcUrl === undefined ||
+    vaultAddress === undefined ||
+    allocatorPrivateKey === undefined ||
+    adapterSpec === undefined
+  ) {
+    return null;
   }
 
-  /**
-   * Take a snapshot of current vault state on the fork.
-   */
-  async takeSnapshot(config: ForkConfig): Promise<ForkSnapshot> {
-    if (!this.provider) throw new Error('Fork not started — call startFork() first');
-
-    const vault = new Contract(config.vaultAddress, VAULT_ABI, this.provider);
-
-    const block = await this.provider.getBlock('latest');
-    const blockNumber = block?.number ?? 0;
-
-    // ethers v6 Contract: dynamic function access returns ContractFunction.
-    // Cast to () => Promise<bigint> for type safety.
-    const totalAssets = BigInt(await (vault['totalAssets'] as () => Promise<bigint>)());
-    const idleBase = BigInt(await (vault['idle'] as () => Promise<bigint>)());
-    const sharePrice = BigInt(
-      await (vault['convertToAssets'] as (arg: bigint) => Promise<bigint>)(
-        ethers.parseUnits('1', 18),
-      ),
-    );
-
-    const adapterBalances = new Map<string, bigint>();
-    for (const addr of config.adapterAddresses) {
-      const balance = BigInt(
-        await (vault['adapterBalances'] as (arg: string) => Promise<bigint>)(addr),
+  const adapterByMarketId: Record<string, string> = {};
+  for (const entry of adapterSpec.split(',')) {
+    const [marketId, address] = entry.split('=');
+    if (marketId === undefined || address === undefined || address.length === 0) {
+      throw new Error(
+        `SRCLA_FORK_REPLAY_ADAPTERS entry '${entry}' is not 'marketId=0xaddress'`,
       );
-      adapterBalances.set(addr, balance);
     }
-
-    return {
-      blockNumber,
-      totalAssets,
-      idleBase,
-      adapterBalances,
-      sharePrice,
-      timestamp: new Date(),
-    };
+    adapterByMarketId[marketId.trim()] = address.trim();
   }
 
-  /**
-   * Stop the Anvil process and release the provider.
-   */
-  async stopFork(): Promise<void> {
-    if (this.provider) {
-      this.provider.destroy();
-      this.provider = null;
+  const pinned = env['SRCLA_FORK_REPLAY_BLOCK'];
+  let prestateBlock: number;
+  if (pinned !== undefined) {
+    prestateBlock = Number(pinned);
+    if (!Number.isInteger(prestateBlock)) {
+      throw new Error(`SRCLA_FORK_REPLAY_BLOCK '${pinned}' is not an integer block number`);
     }
-    if (this.anvilProcess) {
-      this.anvilProcess.kill('SIGTERM');
-      this.anvilProcess = null;
+  } else {
+    const probe = new JsonRpcProvider(rpcUrl);
+    try {
+      prestateBlock = await probe.getBlockNumber();
+    } finally {
+      probe.destroy();
     }
   }
 
-  /**
-   * Compute annualised net APY from a sequence of snapshots after cost deduction.
-   * Assumes one snapshot per day for the years calculation.
-   */
-  netApy(snapshots: ForkSnapshot[], costs: bigint): number {
-    if (snapshots.length < 2) return 0;
-    const start = snapshots[0]!;
-    const end = snapshots[snapshots.length - 1]!;
-    const startValue = Number(start.totalAssets);
-    const endValue = Number(end.totalAssets) - Number(costs);
-    if (startValue === 0) return 0;
-    const totalReturn = (endValue - startValue) / startValue;
-    const years = snapshots.length / 365;
-    if (years <= 0) return 0;
-    return Math.pow(1 + totalReturn, 1 / years) - 1;
-  }
+  return { rpcUrl, vaultAddress, allocatorPrivateKey, adapterByMarketId, prestateBlock };
 }
