@@ -14,6 +14,10 @@ import {
   type DisplayedOrigin,
   type ExitOrigin,
 } from './sustainability-metrics.js';
+// Type-only from the kernel's side is not possible here: the registered exit
+// bound is a VALUE, and it decides censoring. `sustainability.ts` imports
+// `harness.ts` for types only, which tsc erases, so there is no runtime cycle.
+import { REGISTERED_MAX_EXIT_ORIGINS } from '../kernel/sustainability.js';
 import type { EvaluationDataset, TimeOrderedSnapshot } from '../dataset.js';
 import type { VaultState } from './state.js';
 
@@ -132,11 +136,24 @@ export interface ReplayResult {
   /**
    * Origins needed to redeem 100% of NAV starting from the run's WORST
    * coverage origin, executing only same-transaction exits. `null` means the
-   * vault never fully exits inside the window — a measured failure, not a
-   * missing measurement.
+   * vault did not fully exit inside the window; `timeToFullExitCensored`
+   * below says whether that is a measured incapacity or a window that ran
+   * out before the registered bound could be tested.
+   *
+   * PROXY, disclosed: the worst-COVERAGE origin need not be the worst
+   * EXIT-TIME origin. It is the moment the redeemability claim is about, and
+   * it is the same origin S2 is graded at, but it is not a search over every
+   * possible stress onset.
    */
   timeToFullExitOrigins: number | null;
-  /** Per venue, the time-weighted share of that venue the vault itself was. */
+  /**
+   * True when the exit did not complete only because the observation window
+   * ended first (fewer than the registered bound's worth of origins remained
+   * after the stress origin). Right-censoring is a MISSING measurement, not
+   * a failure — see `sustainability-metrics.ts`.
+   */
+  timeToFullExitCensored: boolean;
+  /** Per venue, the LARGEST share of that venue the vault itself was. */
   venueStressContribution: Record<string, number>;
   /** Deployed-weighted advertised APY minus `realizedNetApy`. */
   displayedVsRealizedGapApy: number;
@@ -400,6 +417,10 @@ export function runReplay(config: ReplayConfig): ReplayResult {
 
   const successful = withdrawalOutcomes.filter((w) => w.success).length;
   const realizedNetApy = annualizedSharePriceGrowth(snapshots);
+  const exitTime = timeToFullExit(exitSeries, {
+    startIndex: worstCoverageIndex,
+    boundOrigins: REGISTERED_MAX_EXIT_ORIGINS,
+  });
 
   return {
     policyId: evaluationId,
@@ -416,7 +437,8 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     coverageDistribution: coverageDistribution(coverageSeries),
     // Graded from the run's WORST coverage origin: the moment the vault was
     // least able to pay is the only moment a redeemability claim is about.
-    timeToFullExitOrigins: timeToFullExit(exitSeries, { startIndex: worstCoverageIndex }),
+    timeToFullExitOrigins: exitTime.origins,
+    timeToFullExitCensored: exitTime.censored,
     venueStressContribution: venueStressContribution(venueShareSeries),
     displayedVsRealizedGapApy: displayedVsRealizedGap(displayedSeries, realizedNetApy),
     policyViolations,

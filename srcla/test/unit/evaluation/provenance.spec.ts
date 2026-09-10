@@ -162,6 +162,7 @@ function row(policyId: string, tier: bigint, apy: number): PolicyRunResult {
       hurdleBlocks: {},
       // §11.5 sustainability metrics — not under test here, so neutral values.
       timeToFullExitOrigins: 0,
+      timeToFullExitCensored: false,
       venueStressContribution: {},
       displayedVsRealizedGapApy: 0,
       policyViolations: 0,

@@ -68,6 +68,7 @@ function run(policyId: string, tier: bigint, minStressed: number): PolicyRunResu
       coverageDistribution: { min: minStressed, p05: minStressed, median: minStressed },
       // §11.5 sustainability metrics — not under test here, so neutral values.
       timeToFullExitOrigins: 0,
+      timeToFullExitCensored: false,
       venueStressContribution: {},
       displayedVsRealizedGapApy: 0,
       policyViolations: 0,

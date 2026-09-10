@@ -28,6 +28,7 @@ function run(opts: {
   minStressedLiquidCoverage?: number;
   withdrawalSuccessRate?: number | null;
   exitOrigins?: number | null;
+  exitCensored?: boolean;
   venueStressShare?: number;
   policyViolations?: number;
 }): PolicyRunResult {
@@ -43,6 +44,7 @@ function run(opts: {
       withdrawalSuccessRate: opts.withdrawalSuccessRate === undefined ? 1 : opts.withdrawalSuccessRate,
       capitalAtWorkFraction: opts.capitalAtWorkFraction ?? 0.9,
       timeToFullExitOrigins: opts.exitOrigins === undefined ? 3 : opts.exitOrigins,
+      timeToFullExitCensored: opts.exitCensored ?? false,
       venueStressContribution: { 'compound-usdc': opts.venueStressShare ?? 0.05 },
       displayedVsRealizedGapApy: 0.01,
       policyViolations: opts.policyViolations ?? 0,
@@ -112,6 +114,17 @@ describe('P25: sustainability must be demonstrated while deployed', () => {
     );
     expect(v.sustainable).toBe(false);
     expect(v.breach).toMatch(/S1/);
+  });
+
+  it('a RIGHT-CENSORED exit is NOT DEMONSTRATED, not a breach', () => {
+    // The era ended before the bound could be tested. Publishing that as a
+    // BREACH would convict a vault that would have exited fine.
+    const v = sustainabilityAtTier(
+      run({ capitalAtWorkFraction: 0.92, exitOrigins: null, exitCensored: true }),
+    );
+    expect(v.s1).toBeNull();
+    expect(v.sustainable).toBeNull();
+    expect(v.breach).toMatch(/right-censored/);
   });
 
   it('a run that NEVER fully exits fails S1 — absence of an exit is not a zero-length exit', () => {

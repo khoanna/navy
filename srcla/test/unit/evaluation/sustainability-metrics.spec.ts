@@ -17,20 +17,45 @@ describe('timeToFullExit', () => {
     exitCapacityBase: exitable,
   });
 
+  const BOUND = 24;
+
   it('is 0 when the whole vault is exitable at the stress origin itself', () => {
     const series = [origin(100n * M, 40n * M, 60n * M)];
-    expect(timeToFullExit(series, { startIndex: 0 })).toBe(0);
+    expect(timeToFullExit(series, { startIndex: 0, boundOrigins: BOUND })).toEqual({
+      origins: 0,
+      censored: false,
+    });
   });
 
   it('counts the origins a drip-fed exit needs', () => {
     const series = Array.from({ length: 10 }, () => origin(100n * M, 0n, 25n * M));
     // 25% per origin: origins 0..3 raise 100%.
-    expect(timeToFullExit(series, { startIndex: 0 })).toBe(3);
+    expect(timeToFullExit(series, { startIndex: 0, boundOrigins: BOUND }).origins).toBe(3);
   });
 
-  it('is null when the vault never fully exits inside the window', () => {
+  // The distinction that keeps a spurious BREACH out of the report: the bound
+  // was fully observable and capacity still never sufficed.
+  it('is a MEASURED failure when the bound was observable and capacity never sufficed', () => {
+    // 60 origins observable (well past the 24-origin bound) raising 1% each:
+    // the bound was fully testable and the vault still cannot get out.
+    const series = Array.from({ length: 60 }, () => origin(100n * M, 0n, 1n * M));
+    expect(timeToFullExit(series, { startIndex: 0, boundOrigins: BOUND })).toEqual({
+      origins: null,
+      censored: false,
+    });
+  });
+
+  it('is RIGHT-CENSORED when the window ended before the bound could be tested', () => {
     const series = Array.from({ length: 5 }, () => origin(100n * M, 0n, 1n * M));
-    expect(timeToFullExit(series, { startIndex: 0 })).toBeNull();
+    expect(timeToFullExit(series, { startIndex: 0, boundOrigins: BOUND })).toEqual({
+      origins: null,
+      censored: true,
+    });
+  });
+
+  it('is censored when the stress origin sits at the very end of the era', () => {
+    const series = Array.from({ length: 100 }, () => origin(100n * M, 0n, 1n * M));
+    expect(timeToFullExit(series, { startIndex: 98, boundOrigins: BOUND }).censored).toBe(true);
   });
 
   it('measures from the stress origin, not from the start of the run', () => {
@@ -39,20 +64,27 @@ describe('timeToFullExit', () => {
       origin(100n * M, 0n, 10n * M), // stress begins here
       ...Array.from({ length: 20 }, () => origin(100n * M, 0n, 10n * M)),
     ];
-    expect(timeToFullExit(series, { startIndex: 0 })).toBe(0);
-    expect(timeToFullExit(series, { startIndex: 1 })).toBe(9);
+    expect(timeToFullExit(series, { startIndex: 0, boundOrigins: BOUND }).origins).toBe(0);
+    expect(timeToFullExit(series, { startIndex: 1, boundOrigins: BOUND }).origins).toBe(9);
   });
 
-  it('is null past the end of the series rather than 0', () => {
-    expect(timeToFullExit([], { startIndex: 0 })).toBeNull();
-    expect(timeToFullExit([origin(1n, 1n, 0n)], { startIndex: 5 })).toBeNull();
+  it('is censored, not failed, past the end of the series', () => {
+    expect(timeToFullExit([], { startIndex: 0, boundOrigins: BOUND })).toEqual({
+      origins: null,
+      censored: true,
+    });
+    expect(
+      timeToFullExit([origin(1n, 1n, 0n)], { startIndex: 5, boundOrigins: BOUND }).censored,
+    ).toBe(true);
   });
 });
 
 describe('venueStressContribution', () => {
-  it('time-weights over EVERY origin, not only the ones the venue was held', () => {
-    const out = venueStressContribution([{ a: 0.4 }, {}, {}, {}]);
-    expect(out['a']).toBeCloseTo(0.1);
+  // The reason it is a max: an average over every origin dilutes a moment of
+  // dominance into a number that clears the threshold.
+  it('takes the MAXIMUM over origins, so a brief dominance is not diluted', () => {
+    const out = venueStressContribution([{ a: 1.0 }, {}, {}, {}, {}, {}, {}, {}, {}, {}]);
+    expect(out['a']).toBeCloseTo(1.0); // a mean would report 0.10 and clear 0.25
   });
 
   it('reports each venue separately', () => {
@@ -60,12 +92,13 @@ describe('venueStressContribution', () => {
       { a: 0.2, b: 0.6 },
       { a: 0.4, b: 0.4 },
     ]);
-    expect(out['a']).toBeCloseTo(0.3);
-    expect(out['b']).toBeCloseTo(0.5);
+    expect(out['a']).toBeCloseTo(0.4);
+    expect(out['b']).toBeCloseTo(0.6);
   });
 
-  it('is empty for an empty series rather than asserting a zero share', () => {
+  it('omits a venue the vault never held rather than asserting a zero share', () => {
     expect(venueStressContribution([])).toEqual({});
+    expect(venueStressContribution([{ a: 0.1 }])).toEqual({ a: 0.1 });
   });
 });
 

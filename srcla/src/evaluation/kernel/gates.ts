@@ -358,24 +358,51 @@ export function evaluateRegisteredRelease(
   //    an undifferentiated "unsustainable".
   // =========================================================================
 
-  // S1a — an UNMEASURED withdrawal rate (null: no redemption attempted)
-  // fails; the previous replay returned a hardcoded 1.0 here, which let a
-  // zero-cash policy clear a liquidity gate it was never subjected to.
-  const unmeasured = out.results.filter((r) => r.replay.withdrawalSuccessRate === null);
-  const failedWithdrawals = out.results.filter(
+  // S1a — the withdrawal rate. Two rules, both of which this check got wrong
+  // before:
+  //
+  //   * SCOPE (P20). It GATES on SRCLA's own runs only. Ranging over
+  //     `out.results` recorded a BASELINE's failed redemption as SRCLA's
+  //     failure — the identical misattribution the stressed-coverage check
+  //     was rescoped to end, sitting under a comment saying this section was
+  //     scoped to SRCLA. A comparator's breach is reported with the same
+  //     `reported (not gating):` prefix and carried into the counterexample
+  //     table, never blocking.
+  //   * THREE-VALUED. An UNMEASURED rate (null: no redemption attempted) is
+  //     NOT DEMONSTRATED, not FAILED — the same reading `sustainabilityAtTier`
+  //     gives the identical fact, so the report cannot print two verdicts for
+  //     one measurement. It still blocks: `null` never rolls up into a pass.
+  //     What must never come back is the hardcoded 1.0 that let a zero-cash
+  //     policy clear a liquidity gate it was never subjected to.
+  const unmeasured = srclaResults.filter((r) => r.replay.withdrawalSuccessRate === null);
+  const failedWithdrawals = srclaResults.filter(
     (r) => r.replay.withdrawalSuccessRate !== null && r.replay.withdrawalSuccessRate < minWithdrawalSuccess,
   );
+  const reportedWithdrawals = otherResults.filter(
+    (r) => r.replay.withdrawalSuccessRate === null || r.replay.withdrawalSuccessRate < minWithdrawalSuccess,
+  );
+  const reportedWithdrawalDetail =
+    reportedWithdrawals.length > 0
+      ? ` reported (not gating): ${reportedWithdrawals
+          .map((r) =>
+            r.replay.withdrawalSuccessRate === null
+              ? `${label(r)} not measured`
+              : `${label(r)} ${(r.replay.withdrawalSuccessRate * 100).toFixed(1)}%`,
+          )
+          .join(', ')}`
+      : '';
   checks.push(
     check(
       'Safety: withdrawal success measured and met',
-      unmeasured.length === 0 && failedWithdrawals.length === 0,
-      unmeasured.length > 0
-        ? `not measured for ${unmeasured.map(label).join(', ')}: no redemption was attempted`
-        : failedWithdrawals.length > 0
-          ? failedWithdrawals
-              .map((r) => `${label(r)} ${(r.replay.withdrawalSuccessRate! * 100).toFixed(1)}%`)
-              .join(', ')
-          : `>= ${(minWithdrawalSuccess * 100).toFixed(0)}% across ${out.results.length} runs`,
+      failedWithdrawals.length > 0 ? false : unmeasured.length > 0 ? null : true,
+      (failedWithdrawals.length > 0
+        ? failedWithdrawals
+            .map((r) => `${label(r)} ${(r.replay.withdrawalSuccessRate! * 100).toFixed(1)}%`)
+            .join(', ')
+        : unmeasured.length > 0
+          ? `NOT DEMONSTRATED for ${unmeasured.map(label).join(', ')}: no redemption was attempted`
+          : `>= ${(minWithdrawalSuccess * 100).toFixed(0)}% across ${srclaResults.length} SRCLA runs`) +
+        reportedWithdrawalDetail,
     ),
   );
 
@@ -410,7 +437,7 @@ export function evaluateRegisteredRelease(
       'Sustainability S3: capacity discipline',
       sustainability,
       (v) => v.s3,
-      `no venue share above ${REGISTERED_MAX_VENUE_STRESS_SHARE}, time-weighted`,
+      `no venue share above ${REGISTERED_MAX_VENUE_STRESS_SHARE} at any origin`,
     ),
   );
 

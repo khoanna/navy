@@ -70,6 +70,7 @@ function run(
     inert?: boolean;
     capitalAtWork?: number;
     exitOrigins?: number | null;
+    exitCensored?: boolean;
     venueShare?: number;
     policyViolations?: number;
   } = {},
@@ -110,6 +111,7 @@ function run(
       hurdleBlocks: {},
       // §11.5 sustainability metrics — neutral unless a test asks otherwise.
       timeToFullExitOrigins: opts.exitOrigins === undefined ? 0 : opts.exitOrigins,
+      timeToFullExitCensored: opts.exitCensored ?? false,
       venueStressContribution: { 'compound-usdc': opts.venueShare ?? 0.05 },
       displayedVsRealizedGapApy: 0,
       policyViolations: opts.policyViolations ?? 0,
@@ -186,6 +188,7 @@ function runResult(
       inertVsSrcla: boolean;
       capitalAtWork: number;
       exitOrigins: number | null;
+      exitCensored: boolean;
       venueShare: number;
     }>
   >,
@@ -199,6 +202,7 @@ function runResult(
       ...(o.inertVsSrcla !== undefined ? { inert: o.inertVsSrcla } : {}),
       ...(o.capitalAtWork !== undefined ? { capitalAtWork: o.capitalAtWork } : {}),
       ...(o.exitOrigins !== undefined ? { exitOrigins: o.exitOrigins } : {}),
+      ...(o.exitCensored !== undefined ? { exitCensored: o.exitCensored } : {}),
       ...(o.venueShare !== undefined ? { venueShare: o.venueShare } : {}),
     };
   }).map((r) => {
@@ -290,7 +294,10 @@ describe('evaluateRegisteredRelease: completeness', () => {
 
 describe('evaluateRegisteredRelease: safety', () => {
   // NEW-14: `withdrawalSuccessRate` was hardcoded to 1 because no redemption
-  // was ever executed, and the >= 0.99 gate passed on it.
+  // was ever executed, and the >= 0.99 gate passed on it. It must still
+  // BLOCK — as NOT DEMONSTRATED, the same reading `sustainabilityAtTier`
+  // gives the identical fact, so the report cannot print two verdicts for one
+  // measurement.
   it('BLOCKS when the withdrawal success rate was never measured', () => {
     const results = completeResults((id, tier) =>
       id === 'srcla' && tier === 100_000_000_000n ? { withdrawalSuccessRate: null } : {},
@@ -303,8 +310,40 @@ describe('evaluateRegisteredRelease: safety', () => {
 
     expect(gate.pass).toBe(false);
     const c = named(gate, 'Safety: withdrawal success measured and met');
-    expect(c.passed).toBe(false);
+    expect(c.passed).toBeNull();
+    expect(c.detail).toContain('NOT DEMONSTRATED');
     expect(c.detail).toContain('no redemption was attempted');
+  });
+
+  // P20, the same misattribution the coverage check was rescoped to end: a
+  // BASELINE that cannot fill a redemption is not SRCLA's failure. The paper
+  // records B1 breaching at all four tiers on one era, so this fires on the
+  // registered run.
+  it('does NOT fail on a BASELINE\'s failed redemption, but reports it', () => {
+    const results = completeResults((id) => (id === 'b1' ? { withdrawalSuccessRate: 0.5 } : {}));
+    const gate = evaluateRegisteredRelease(evaluation({ results }), {
+      forkResults: completeForkResults(),
+      minPairedObservations: 20,
+      bootstrapIterations: 200,
+    });
+
+    const c = named(gate, 'Safety: withdrawal success measured and met');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toMatch(/reported \(not gating\): .*b1/);
+  });
+
+  it('reports a baseline\'s UNMEASURED rate without blocking on it', () => {
+    const results = completeResults((id) => (id === 'b1' ? { withdrawalSuccessRate: null } : {}));
+    const gate = evaluateRegisteredRelease(evaluation({ results }), {
+      forkResults: completeForkResults(),
+      minPairedObservations: 20,
+      bootstrapIterations: 200,
+    });
+
+    const c = named(gate, 'Safety: withdrawal success measured and met');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toContain('b1');
+    expect(c.detail).toContain('not measured');
   });
 
   it('BLOCKS when a measured withdrawal rate falls below the threshold', () => {
@@ -667,6 +706,14 @@ describe('§11.5: sustainability first, yield second', () => {
     expect(gate.scaleInvariant).toBeNull();
     expect(gate.pass).toBe(false);
     expect(gate.sustainability.every((v) => v.sustainable === null)).toBe(true);
+  });
+
+  it('a RIGHT-CENSORED exit is NOT DEMONSTRATED, not a published breach', () => {
+    const out = runResult({ srcla: { exitOrigins: null, exitCensored: true } });
+    const gate = runRegisteredGate(out, { ...gateOpts, forkResults: completeForkResults() });
+    const c = named(gate, 'Sustainability S1: complete exit within the registered bound');
+    expect(c.passed).toBeNull();
+    expect(gate.pass).toBe(false);
   });
 
   it('a run that never fully exits FAILS S1 even at perfect coverage', () => {

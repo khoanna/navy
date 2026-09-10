@@ -23,7 +23,7 @@ import {
   REGISTERED_DEMONSTRATION_FLOOR,
   type SustainabilityVerdict,
 } from '../kernel/sustainability.js';
-import type { RegisteredEvaluationResult } from '../kernel/harness.js';
+import type { PolicyRunResult, RegisteredEvaluationResult } from '../kernel/harness.js';
 import { REGISTERED_ABLATIONS } from '../kernel/registry.js';
 
 export interface RunSummary {
@@ -303,6 +303,31 @@ function gateTable(gate: RegisteredGateResult): string {
   return ['| Verdict | Check | Detail |', '|---|---|---|', ...rows].join('\n');
 }
 
+/**
+ * §11.4's three P28 measurements, one cell each. They are reported PER POLICY
+ * PER TIER — not only inside a failing check's prose, which is where they
+ * lived when the criteria were first wired and which left SRCLA's own rows
+ * silent about all three.
+ */
+function exitCell(r: PolicyRunResult): string {
+  const origins = r.replay.timeToFullExitOrigins;
+  if (origins !== null && origins !== undefined) return `${origins}`;
+  return r.replay.timeToFullExitCensored ? '**censored**' : '**NEVER**';
+}
+
+function maxVenueShareCell(r: PolicyRunResult): string {
+  const shares: number[] = Object.values(r.replay.venueStressContribution ?? {});
+  if (shares.length === 0) return '—';
+  const worst = Math.max(...shares);
+  const venue = Object.entries(r.replay.venueStressContribution).find(([, v]) => v === worst)?.[0];
+  return `${pct(worst, 1)} (\`${venue ?? '?'}\`)`;
+}
+
+function gapCell(r: PolicyRunResult): string {
+  const gap = r.replay.displayedVsRealizedGapApy;
+  return gap === undefined ? '—' : pct(gap);
+}
+
 function resultsTable(out: RegisteredEvaluationResult): string {
   const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((a, b) =>
     BigInt(a) < BigInt(b) ? -1 : 1,
@@ -318,14 +343,16 @@ function resultsTable(out: RegisteredEvaluationResult): string {
           `${r.replay.withdrawalSuccessRate === null ? '**not measured**' : pct(r.replay.withdrawalSuccessRate, 1)} | ` +
           `${pct(r.replay.coverageDistribution.min, 3)} | ${pct(r.replay.coverageDistribution.p05, 3)} | ` +
           `${pct(r.replay.coverageDistribution.median, 3)} | ` +
+          `${exitCell(r)} | ${maxVenueShareCell(r)} | ${gapCell(r)} | ` +
           `${r.inertVsSrcla ? '**INERT**' : '—'} |`,
       );
     sections.push(
       `#### Tier ${usdc(BigInt(tier))} USDC\n\n` +
         [
           '| Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | ' +
-            'Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Ablation |',
-          '|---|---|---|---|---|---|---|---|---|---|---|',
+            'Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | ' +
+            'Full exit (origins, lower bound) | Max venue share | Displayed − realized | Ablation |',
+          '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
           ...rows,
         ].join('\n'),
     );
@@ -680,18 +707,11 @@ export function renderReport(params: ReportParams): string {
         `Reproduce with \`pnpm run evaluation:verify\`.`,
     );
     out.push('');
-    out.push(
-      '`stressedLiquidCoverage` is measured every origin; the §11.5 gate tests only the ' +
-        '**minimum** over the whole run, so one market-wide dry hour scores identically to ' +
-        'chronic illiquidity. The p05 and median columns below distinguish the two — neither ' +
-        'is what the gate tests.',
-    );
-    out.push('');
-    out.push(resultsTable(run.evaluation));
-    out.push('');
-    // §11.5's order: sustainability is the PRIMARY criterion and is reported
-    // BEFORE any yield comparison, because yield is only scored among
-    // policies that are themselves sustainable.
+    // §11.5's order, and it is the argument: sustainability is the PRIMARY
+    // criterion, so it is reported BEFORE the per-policy yield table and
+    // before any comparison. A reader who meets the league table first reads
+    // the study as a yield contest, which is the framing P24 exists to
+    // invert.
     out.push('### Sustainability — the primary release criterion (§11.5)');
     out.push('');
     out.push(sustainabilityTable(run.gate));
@@ -699,6 +719,28 @@ export function renderReport(params: ReportParams): string {
     out.push('### The price of unsustainability (§11.5 part 3)');
     out.push('');
     out.push(counterexampleTable(run.gate));
+    out.push('');
+    out.push('### Per-policy results');
+    out.push('');
+    out.push(
+      '`stressedLiquidCoverage` is measured every origin; the §11.5 gate tests only the ' +
+        '**minimum** over the whole run, so one market-wide dry hour scores identically to ' +
+        'chronic illiquidity. The p05 and median columns below distinguish the two — neither ' +
+        'is what the gate tests.',
+    );
+    out.push('');
+    out.push(
+      '§11.4\'s three sustainability measurements are reported per policy per tier in the same ' +
+        'table. **Full exit** is the origins needed to redeem 100% of NAV from the run\'s worst ' +
+        'coverage origin, executing only same-transaction exits — a LOWER BOUND, because each ' +
+        'origin\'s capacity is read from a replay in which the vault did not exit, and marked ' +
+        '`censored` where the era ended before the bound could be tested (a missing measurement, ' +
+        'not a failure). **Max venue share** is the largest fraction of a venue the vault itself ' +
+        'was, at any origin. **Displayed − realized** is the deployed-weighted advertised rate ' +
+        'minus what the vault actually kept.',
+    );
+    out.push('');
+    out.push(resultsTable(run.evaluation));
     out.push('');
     out.push('### SRCLA against each deployable baseline');
     out.push('');

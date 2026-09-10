@@ -287,6 +287,12 @@ async function main(): Promise<void> {
         blockedReasons: gate.blockedReasons,
         checks: gate.checks,
         comparisons: gate.comparisons,
+        // §11.5's PRIMARY criterion, machine-readable rather than only as
+        // prose inside the check details.
+        sustainability: gate.sustainability,
+        comparatorSustainability: gate.comparatorSustainability,
+        scaleInvariant: gate.scaleInvariant,
+        excludedComparators: gate.excludedComparators,
       },
       provenance: {
         codeCommit: record.codeCommit,

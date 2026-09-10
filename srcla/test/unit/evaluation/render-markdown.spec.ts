@@ -26,6 +26,10 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
           withdrawalSuccessRate: 1,
           minStressedLiquidCoverage: 1,
           coverageDistribution: { min: 1, p05: 1, median: 1 },
+          timeToFullExitOrigins: 4,
+          timeToFullExitCensored: false,
+          venueStressContribution: { 'compound-v3-usdc': 0.12 },
+          displayedVsRealizedGapApy: 0.0123,
           withdrawals: [],
           snapshots: [],
         },
@@ -42,6 +46,10 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
           withdrawalSuccessRate: null,
           minStressedLiquidCoverage: 1,
           coverageDistribution: { min: 1, p05: 1, median: 1 },
+          timeToFullExitOrigins: 4,
+          timeToFullExitCensored: false,
+          venueStressContribution: { 'compound-v3-usdc': 0.12 },
+          displayedVsRealizedGapApy: 0.0123,
           withdrawals: [],
           snapshots: [],
         },
@@ -63,6 +71,10 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
           withdrawalSuccessRate: 1,
           minStressedLiquidCoverage: 1,
           coverageDistribution: { min: 1, p05: 1, median: 1 },
+          timeToFullExitOrigins: 4,
+          timeToFullExitCensored: false,
+          venueStressContribution: { 'compound-v3-usdc': 0.12 },
+          displayedVsRealizedGapApy: 0.0123,
           withdrawals: [],
           snapshots: [],
         },
@@ -582,11 +594,29 @@ describe('renderReport — §11.5 sustainability sections', () => {
     } as unknown as Parameters<typeof renderReport>[0];
   };
 
-  it('reports sustainability BEFORE the yield comparison', () => {
+  it('reports sustainability BEFORE the per-policy table and the yield comparison', () => {
     const md = renderReport(withVerdicts({ sustainability: [verdict({})], scaleInvariant: true }));
     expect(md.indexOf('Sustainability — the primary release criterion')).toBeLessThan(
+      md.indexOf('### Per-policy results'),
+    );
+    expect(md.indexOf('The price of unsustainability')).toBeLessThan(
+      md.indexOf('### Per-policy results'),
+    );
+    expect(md.indexOf('### Per-policy results')).toBeLessThan(
       md.indexOf('SRCLA against each deployable baseline'),
     );
+  });
+
+  // §11.4 requires all three P28 measurements per policy per tier — not only
+  // inside a failing check's prose.
+  it('reports the three P28 measurements per policy per tier, with the exit caveat', () => {
+    const md = renderReport(withVerdicts({ sustainability: [verdict({})], scaleInvariant: true }));
+    expect(md).toContain('Full exit (origins, lower bound)');
+    expect(md).toContain('Max venue share');
+    expect(md).toContain('Displayed − realized');
+    expect(md).toMatch(/LOWER BOUND/);
+    expect(md).toContain('12.0% (`compound-v3-usdc`)');
+    expect(md).toContain('1.230%');
   });
 
   it('prints NOT DEMONSTRATED as itself, never as a pass', () => {

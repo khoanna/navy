@@ -314,12 +314,31 @@ function serialisableRun(run: RunSummary): Record<string, unknown> {
       withdrawalSuccessRate: r.replay.withdrawalSuccessRate,
       minStressedLiquidCoverage: r.replay.minStressedLiquidCoverage,
       inertVsSrcla: r.inertVsSrcla,
+      // §11.4's deployment and P28 sustainability measurements, per policy
+      // per tier. Without these the machine-readable half of the deliverable
+      // knows the PRIMARY release criterion only through prose inside the
+      // check detail strings.
+      capitalAtWorkFraction: r.replay.capitalAtWorkFraction,
+      deploymentLatencyOrigins: r.replay.deploymentLatencyOrigins,
+      timeToFullExitOrigins: r.replay.timeToFullExitOrigins,
+      timeToFullExitCensored: r.replay.timeToFullExitCensored,
+      venueStressContribution: r.replay.venueStressContribution,
+      displayedVsRealizedGapApy: r.replay.displayedVsRealizedGapApy,
+      policyViolations: r.replay.policyViolations,
     })),
     releaseGate: {
       pass: run.gate.pass,
       blockedReasons: run.gate.blockedReasons,
       checks: run.gate.checks,
       comparisons: run.gate.comparisons,
+      // §11.5's PRIMARY criterion, in full: the per-tier verdicts, the same
+      // verdicts computed for every comparator (the counterexample table),
+      // P26's scale-invariance roll-up and every comparator excluded from the
+      // yield comparison with its reason.
+      sustainability: run.gate.sustainability,
+      comparatorSustainability: run.gate.comparatorSustainability,
+      scaleInvariant: run.gate.scaleInvariant,
+      excludedComparators: run.gate.excludedComparators,
     },
   };
 }

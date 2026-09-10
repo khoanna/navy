@@ -32,7 +32,7 @@ import type { PolicyRunResult } from './harness.js';
 export const REGISTERED_DEMONSTRATION_FLOOR = 0.8;
 /** Origins a complete redemption may take before S1 fails. REGISTERED. */
 export const REGISTERED_MAX_EXIT_ORIGINS = 24;
-/** Share of a venue the vault may itself account for, time-weighted. REGISTERED. */
+/** Largest share of a venue the vault may itself account for, at any origin. REGISTERED. */
 export const REGISTERED_MAX_VENUE_STRESS_SHARE = 0.25;
 /** §11.4's fraction of attempted redemptions that must fill. REGISTERED. */
 export const REGISTERED_MIN_WITHDRAWAL_SUCCESS = 0.99;
@@ -46,7 +46,7 @@ export interface SustainabilityVerdict {
   s1: boolean | null;
   /** S2 stressed liquid coverage at §11.4's worst demand level. */
   s2: boolean | null;
-  /** S3 capacity discipline: the vault is not itself the venue's depth. */
+  /** S3 capacity discipline: at no origin is the vault itself the venue's depth. */
   s3: boolean | null;
   /** S4 operational continuity: no policy violation over the run. */
   s4: boolean | null;
@@ -102,14 +102,21 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   //   * `withdrawalSuccessRate === null` means no redemption was ever
   //     attempted. That is an absent measurement, so S1 is `null`, not a
   //     flattering pass — the exact shape of the old hardcoded 1.0.
-  //   * `timeToFullExitOrigins === null` means the vault NEVER fully exits
-  //     within the observed window. That is a MEASURED failure, so S1 is
-  //     `false`. Reading it as "0 origins" (the absent-reads-as-success
-  //     shape) would score the worst possible run as the best possible one.
+  //   * `timeToFullExitOrigins === null` means the vault did not fully exit
+  //     within the observed window, and `timeToFullExitCensored` splits that
+  //     in two. RIGHT-CENSORED (the era ended before the registered bound
+  //     could be tested) is a missing measurement -> `null`. Not censored
+  //     (the bound was fully observable and capacity never sufficed) is a
+  //     MEASURED failure -> `false`. Reading either as "0 origins" (the
+  //     absent-reads-as-success shape) would score the worst possible run as
+  //     the best possible one; reading the censored case as a failure would
+  //     publish a BREACH for a vault that would have exited fine.
   const wr = r.withdrawalSuccessRate;
   const exitOrigins = r.timeToFullExitOrigins;
+  const exitCensored = r.timeToFullExitCensored ?? false;
+  const exitUnmeasured = exitOrigins === undefined || (exitOrigins === null && exitCensored);
   const s1: boolean | null =
-    wr === null || exitOrigins === undefined
+    wr === null || exitUnmeasured
       ? null
       : wr >= REGISTERED_MIN_WITHDRAWAL_SUCCESS &&
         exitOrigins !== null &&
@@ -119,8 +126,11 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   // re-declared so the two cannot drift apart.
   const s2 = r.minStressedLiquidCoverage >= REGISTERED_COVERAGE_FLOOR;
 
-  // S3 — capacity discipline. Empty contribution map means the vault held
-  // nothing anywhere, which cannot happen above the demonstration floor.
+  // S3 — capacity discipline, graded on the MAXIMUM share over origins: the
+  // constraint is instantaneous (see `venueStressContribution`), and it is
+  // graded the same way S2 and the exit time are, on the worst moment rather
+  // than on an average that dilutes it. An empty contribution map means the
+  // vault held nothing anywhere, which cannot happen above the floor.
   const shares = Object.values(r.venueStressContribution ?? {});
   const worstShare = shares.length === 0 ? 0 : Math.max(...shares);
   const s3 = worstShare <= REGISTERED_MAX_VENUE_STRESS_SHARE;
@@ -132,7 +142,7 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
   if (s1 === false) {
     failed.push(
       `S1 redeemability (withdrawals ${((wr ?? 0) * 100).toFixed(1)}%, full exit ` +
-        `${exitOrigins === null ? 'NEVER' : `${exitOrigins} origins`} vs ` +
+        `${exitOrigins === null || exitOrigins === undefined ? 'NEVER (capacity never sufficed)' : `${exitOrigins} origins`} vs ` +
         `${REGISTERED_MAX_EXIT_ORIGINS})`,
     );
   }
@@ -160,7 +170,11 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
       failed.length > 0
         ? failed.join('; ')
         : unmeasured
-          ? 'NOT DEMONSTRATED: S1 was not measured — no redemption was attempted'
+          ? `NOT DEMONSTRATED: S1 was not measured — ${
+              wr === null
+                ? 'no redemption was attempted'
+                : 'the observation window ended before a complete exit could be tested (right-censored)'
+            }`
           : null,
   };
 }

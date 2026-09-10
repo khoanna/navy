@@ -31,14 +31,33 @@ export interface ExitOrigin {
 }
 
 /**
+ * The exit measurement, with its censoring made explicit.
+ *
+ * `origins` is the number of origins a complete redemption needed, or `null`
+ * when it did not complete inside the observed window. `censored` says WHY it
+ * did not: `true` means the window ran out before the registered bound could
+ * even be tested (the worst-coverage origin sat near the era boundary), which
+ * is a MISSING measurement; `false` means the bound was fully testable and
+ * capacity never sufficed, which is a MEASURED failure. Collapsing the two
+ * would publish a spurious BREACH for a vault that would have exited fine.
+ */
+export interface ExitTimeResult {
+  origins: number | null;
+  censored: boolean;
+}
+
+/**
  * Origins required to redeem 100% of NAV, executing only same-transaction
  * exits the venues could actually honour, starting from `stress.startIndex`.
  *
- * `0` means the whole vault was exitable at the stress origin itself. `null`
- * means the series ran out before the vault was fully out — i.e. the vault
- * NEVER fully exits within the observed window. `null` is a MEASURED
- * failure, not a missing measurement, and callers must not read it as "no
- * constraint": `sustainabilityAtTier` fails S1 on it.
+ * `origins: 0` means the whole vault was exitable at the stress origin
+ * itself. `origins: null` means it never completed inside the window — see
+ * `censored` above for the distinction the caller must respect.
+ *
+ * `boundOrigins` is the registered bound the verdict will be graded against,
+ * and is used ONLY to decide censoring: if fewer than that many origins
+ * remain after the stress origin, a non-completion says nothing about
+ * whether the bound was met.
  *
  * BIAS, declared: the per-origin capacities come from a replay in which the
  * vault did NOT exit, so each origin's capacity is an over-estimate of what
@@ -50,51 +69,57 @@ export interface ExitOrigin {
  */
 export function timeToFullExit(
   series: readonly ExitOrigin[],
-  stress: { startIndex: number },
-): number | null {
+  stress: { startIndex: number; boundOrigins: number },
+): ExitTimeResult {
   const start = Math.max(0, Math.min(stress.startIndex, series.length));
   const first = series[start];
-  if (first === undefined) return null;
+  // No origin to start from at all: nothing was measured, not a failure.
+  if (first === undefined) return { origins: null, censored: true };
 
   const owed = first.navBase;
-  if (owed <= 0n) return 0;
+  if (owed <= 0n) return { origins: 0, censored: false };
 
   // Idle is payable immediately, at the stress origin itself.
   let raised = first.idleBase;
   for (let i = start; i < series.length; i++) {
     raised += series[i]!.exitCapacityBase;
-    if (raised >= owed) return i - start;
+    if (raised >= owed) return { origins: i - start, censored: false };
   }
-  return null;
+  // Did not complete. RIGHT-CENSORED when the window was too short for the
+  // registered bound to have been tested at all.
+  const observable = series.length - 1 - start;
+  return { origins: null, censored: observable < stress.boundOrigins };
 }
 
 /**
- * Per venue, the share of that venue the vault itself accounts for,
- * time-weighted over the run.
+ * Per venue, the LARGEST share of that venue the vault itself accounted for
+ * over the run.
  *
- * `share_v(t) = vaultBalance_v(t) / venueTotalSupplied_v(t)`, averaged over
- * EVERY origin in the series (an origin where the vault holds nothing there
- * contributes 0, which is the point: a policy that is briefly enormous in a
- * thin venue and otherwise absent has a small time-weighted share, and the
- * criterion is about sustained capacity, not a single hour).
+ * `share_v(t) = vaultBalance_v(t) / venueTotalSupplied_v(t)`, MAXIMISED over
+ * origins.
  *
- * This is the "am I the market?" measurement. A vault that is a quarter of a
- * venue cannot exit that venue without moving it, so its own displayed yield
- * there is not a yield it can realize at size — §11.5's capacity-discipline
- * criterion is exactly this.
+ * Max, not mean, and deliberately so. §11.5's S3 is an INSTANTANEOUS
+ * constraint — the vault's own deposits must not push a venue past its
+ * registered utilization ceiling — and the failure it guards against
+ * (creating the congestion you then have to exit through) happens at a
+ * moment, not on average. A mean over every origin also divides by the
+ * origins where the vault held nothing there, so a position that is 100% of
+ * a thin venue for a tenth of the run would score 0.10 and clear a 0.25
+ * threshold. The rest of this file grades the same way: S2 on the minimum
+ * coverage, exit time from the worst origin.
+ *
+ * A venue the vault never held does not appear at all — an absent key is
+ * "never touched it", which is not the same statement as a measured 0.
  */
 export function venueStressContribution(
   series: ReadonlyArray<Readonly<Record<string, number>>>,
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  if (series.length === 0) return out;
   for (const origin of series) {
     for (const [marketId, share] of Object.entries(origin)) {
-      out[marketId] = (out[marketId] ?? 0) + share;
+      const seen = out[marketId];
+      if (seen === undefined || share > seen) out[marketId] = share;
     }
-  }
-  for (const marketId of Object.keys(out)) {
-    out[marketId] = out[marketId]! / series.length;
   }
   return out;
 }
