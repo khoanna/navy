@@ -557,8 +557,8 @@ describe('evaluateRegisteredRelease: statistical criterion', () => {
 });
 
 describe('evaluateRegisteredRelease: §11.1 fork replay', () => {
-  // The fork replay is unimplemented. It must be VISIBLE as NOT PRODUCED,
-  // never quietly skipped.
+  // Absence must stay failure: with no replay supplied the check is NOT
+  // PRODUCED and blocks, never quietly skipped.
   it('reports NOT PRODUCED and BLOCKS when no fork replay was supplied', () => {
     const gate = evaluateRegisteredRelease(evaluation(), { minPairedObservations: 20, bootstrapIterations: 200 });
 
@@ -593,6 +593,43 @@ describe('evaluateRegisteredRelease: §11.1 fork replay', () => {
     const c = named(gate, '§11.1 pinned-prestate fork replay');
     expect(c.passed).toBe(false);
     expect(c.detail).toContain('CapExceeded');
+  });
+
+  // A HOLD is `executed: true` with NO chain interaction. It must never be
+  // counted as an execution, or a policy shape that reported no proposal at
+  // all would self-certify the whole gate.
+  it('counts HOLDs separately from executions in what it claims', () => {
+    const fork = completeForkResults();
+    fork[0]!.held = true;
+
+    const c = named(
+      evaluateRegisteredRelease(evaluation(), {
+        forkResults: fork,
+        minPairedObservations: 20,
+        bootstrapIterations: 200,
+      }),
+      '§11.1 pinned-prestate fork replay',
+    );
+    expect(c.passed).toBe(true);
+    expect(c.detail).toContain(`${fork.length - 1} of ${fork.length}`);
+    expect(c.detail).toContain('1 proposed nothing at any origin (HOLD');
+  });
+
+  // The check's detail is the sentence a reader quotes. It must state the
+  // scope of the partial, not a bare count that reads as a full §11.1 pass.
+  it('states what was NOT replayed alongside what was', () => {
+    const c = named(
+      evaluateRegisteredRelease(evaluation(), {
+        forkResults: completeForkResults(),
+        minPairedObservations: 20,
+        bootstrapIterations: 200,
+      }),
+      '§11.1 pinned-prestate fork replay',
+    );
+    expect(c.detail).toContain('FIRST proposed rebalance');
+    expect(c.detail).toContain('verified-restored pinned prestate');
+    expect(c.detail).toContain('NOT claimed');
+    expect(c.detail).toContain('single vault NAV');
   });
 });
 

@@ -919,10 +919,15 @@ export function renderReport(params: ReportParams): string {
   const forkProduced = forkChecks.length > 0 && forkChecks.every((c) => c.passed === true);
   out.push(
     forkProduced
-      ? '- **§11.1\'s pinned-prestate fork replay covers ONE origin per (policy, tier)** — the ' +
-          'first origin at which each policy proposed a move — not every origin of the era. It ' +
-          'shows the chain accepts each policy\'s proposal from the pinned prestate; it does not ' +
-          're-derive the era\'s returns on chain.'
+      ? '- **§11.1\'s pinned-prestate fork replay is an honest PARTIAL.** What was shown: each ' +
+          'registered (policy, tier)\'s FIRST proposed rebalance was submitted and executed ' +
+          'against the deployed vault on a Base fork, from a pinned prestate verified restored ' +
+          'before every candidate. What was NOT shown: the era\'s remaining origins and its ' +
+          'returns were not replayed on chain; all four tiers were replayed against a SINGLE ' +
+          'vault NAV, so `capBps`, `minIdleBps` and the reserve were evaluated at that NAV ' +
+          'rather than at each tier\'s scale; and the pinned prestate is all-idle, which is why ' +
+          'the first proposal is the origin selected — a later origin would contain divests ' +
+          'that no unfunded prestate could execute.'
       : '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
           '`src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base ' +
           'fork with the vault deployed; this run supplied none, so the gate reports NOT ' +

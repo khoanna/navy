@@ -5,7 +5,7 @@
  * in `test/integration/fork-replay.spec.ts`.
  */
 import { ethers } from 'ethers';
-import { buildForkPlan, type ForkReplayPlan } from '../../../src/evaluation/fork-runner.js';
+import { buildForkPlan, isChainRefusal, type ForkReplayPlan } from '../../../src/evaluation/fork-runner.js';
 import { ActionKind, hashPlanAction, planDomain } from '../../../src/policy/steps/plan.js';
 
 const ADAPTERS = {
@@ -123,5 +123,30 @@ describe('buildForkPlan', () => {
         CTX,
       ),
     ).toThrow(/zero decisionHash/);
+  });
+});
+
+/**
+ * A gate that says "the chain refused this allocation" must only say that
+ * when the chain did. Everything else — an unmapped venue, a transport
+ * failure, a nonce-class client bug — blocks too, but as infrastructure.
+ */
+describe('isChainRefusal', () => {
+  it('is true for an EVM revert', () => {
+    expect(isChainRefusal(Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' }))).toBe(true);
+  });
+
+  it('is true for a receipt mined with status 0', () => {
+    expect(isChainRefusal(Object.assign(new Error('mined'), { receipt: { status: 0 } }))).toBe(true);
+  });
+
+  it('is false for a nonce fault — the class that was already misattributed once', () => {
+    expect(isChainRefusal(Object.assign(new Error('nonce has already been used'), { code: 'NONCE_EXPIRED' }))).toBe(false);
+  });
+
+  it('is false for a transport failure and for a plain config error', () => {
+    expect(isChainRefusal(Object.assign(new Error('could not connect'), { code: 'NETWORK_ERROR' }))).toBe(false);
+    expect(isChainRefusal(new Error("no fork adapter registered for market 'euler'"))).toBe(false);
+    expect(isChainRefusal('not an error at all')).toBe(false);
   });
 });

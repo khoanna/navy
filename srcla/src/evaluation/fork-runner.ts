@@ -143,6 +143,33 @@ async function readPrestate(
 }
 
 /**
+ * A chain REFUSAL is the vault (or a venue) rejecting the plan: an EVM revert,
+ * or a receipt mined with `status === 0`. Everything else — an unmapped
+ * `marketId`, a transport or RPC failure, a nonce-class client bug, a gas-limit
+ * problem — never established anything about the allocation and MUST NOT be
+ * reported as the chain refusing it.
+ *
+ * Both outcomes are `executed: false` and both block. What differs is the
+ * sentence a reader will quote out of the gate.
+ */
+export function isChainRefusal(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (code === 'CALL_EXCEPTION') {
+    // A CALL_EXCEPTION with a receipt is a mined, reverted transaction; one
+    // without is a failed eth_call/estimateGas, which is still the node
+    // executing the transaction and rejecting it.
+    return true;
+  }
+  const receipt = (error as { receipt?: { status?: number | null } }).receipt;
+  if (receipt !== undefined && receipt !== null && receipt.status === 0) return true;
+  return false;
+}
+
+/** Marks a failure that never reached — or never got a verdict from — the chain. */
+class ForkInfrastructureError extends Error {}
+
+/**
  * Assemble the on-chain plan for one proposal. Mirrors
  * `policy/steps/plan.ts#buildPlan`'s encoding exactly — divests before
  * deploys (`_enforceDivestBeforeDeploy`), the same header tuple, the same
@@ -348,20 +375,31 @@ export async function runForkReplays(
       }
 
       try {
-        const digest = (await vault.currentConfigurationDigest!()) as string;
-        const block = await provider.getBlock('latest');
-        const built = buildForkPlan(plan, {
-          chainId,
-          vaultAddress: opts.vaultAddress,
-          assetAddress,
-          adapterByMarketId: opts.adapterByMarketId,
-          configurationDigest: digest,
-          totalAssetsBase: restored.totalAssetsBase,
-          prestateBlock: opts.prestateBlock,
-          nowSeconds: block?.timestamp ?? Math.floor(Date.now() / 1000),
-          expirySeconds,
-          maxLossBps,
-        });
+        // PREPARATION. Nothing here touches the chain's verdict on the
+        // allocation: a failure is an infrastructure or configuration fault
+        // (an unmapped marketId, an RPC that would not answer) and is
+        // labelled as one, never as the chain refusing the policy.
+        let built: ReturnType<typeof buildForkPlan>;
+        try {
+          const digest = (await vault.currentConfigurationDigest!()) as string;
+          const block = await provider.getBlock('latest');
+          built = buildForkPlan(plan, {
+            chainId,
+            vaultAddress: opts.vaultAddress,
+            assetAddress,
+            adapterByMarketId: opts.adapterByMarketId,
+            configurationDigest: digest,
+            totalAssetsBase: restored.totalAssetsBase,
+            prestateBlock: opts.prestateBlock,
+            nowSeconds: block?.timestamp ?? Math.floor(Date.now() / 1000),
+            expirySeconds,
+            maxLossBps,
+          });
+        } catch (error) {
+          throw new ForkInfrastructureError(
+            `could not build the plan: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
 
         if (built === null) {
           // A HOLD. Truthfully executable — there is nothing to execute — and
@@ -371,14 +409,20 @@ export async function runForkReplays(
             tier: plan.tier,
             prestateBlock: opts.prestateBlock,
             executed: true,
-            detail: `HOLD at origin ${plan.originIndex}: the policy proposed no moves, so there is no plan to execute`,
+            held: true,
+            detail: `HOLD at origin ${plan.originIndex}: the policy proposed no moves, so there is no plan to execute (NO chain interaction)`,
           });
           continue;
         }
 
         const submit = await vault.submitPlan!(built.header, built.merkleRoot, { gasLimit });
         const submitReceipt = await submit.wait();
-        if (submitReceipt?.status !== 1) throw new Error('submitPlan receipt status != 1');
+        if (submitReceipt?.status !== 1) {
+          // A mined receipt with status 0 IS the chain refusing the plan.
+          throw Object.assign(new Error('submitPlan was mined with status 0'), {
+            receipt: { status: 0 },
+          });
+        }
 
         let gasUsed = submitReceipt.gasUsed as bigint;
         for (const action of built.actions) {
@@ -397,7 +441,10 @@ export async function runForkReplays(
           );
           const receipt = await tx.wait();
           if (receipt?.status !== 1) {
-            throw new Error(`action ${action.index} receipt status != 1`);
+            throw Object.assign(
+              new Error(`action ${action.index} was mined with status 0`),
+              { receipt: { status: 0 } },
+            );
           }
           gasUsed += receipt.gasUsed as bigint;
         }
@@ -406,7 +453,13 @@ export async function runForkReplays(
         // vault did not accept the whole sequence.
         const stillActive = (await vault.activePlanId!()) as string;
         if (stillActive !== ethers.ZeroHash) {
-          throw new Error(`plan ${built.header.planId} still active after all actions executed`);
+          throw Object.assign(
+            new Error(
+              `plan ${built.header.planId} is still active after every action executed — the ` +
+                'vault did not accept the whole sequence',
+            ),
+            { receipt: { status: 0 } },
+          );
         }
 
         const after = await readPrestate(provider, vault, asset, adapters);
@@ -420,17 +473,23 @@ export async function runForkReplays(
           tier: plan.tier,
           prestateBlock: opts.prestateBlock,
           executed: true,
+          held: false,
           detail:
             `origin ${plan.originIndex}: ${built.actions.length} action(s) executed on the fork from ` +
             `pinned prestate ${pinnedDigest}; gas ${gasUsed}; strategyAssets ${moved.length > 0 ? moved : 'unchanged'}`,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         results.push({
           policyId: plan.policyId,
           tier: plan.tier,
           prestateBlock: opts.prestateBlock,
           executed: false,
-          detail: `${label} reverted on the fork: ${error instanceof Error ? error.message : String(error)}`,
+          detail:
+            error instanceof ForkInfrastructureError || !isChainRefusal(error)
+              ? `${label} NOT REPLAYED (infrastructure/configuration, NOT a chain verdict on the ` +
+                `allocation): ${message}`
+              : `${label} REFUSED BY THE CHAIN: the vault reverted the plan: ${message}`,
         });
       }
     }

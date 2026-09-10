@@ -211,6 +211,17 @@ export interface ForkReplayResult {
   prestateBlock: number;
   /** Whether every action the policy proposed executed on the fork. */
   executed: boolean;
+  /**
+   * True when the policy proposed NOTHING at the replayed origin, so there
+   * was no plan and NO chain interaction at all.
+   *
+   * A HOLD is `executed: true` — the chain trivially accepts doing nothing —
+   * but it is not evidence that any allocation was accepted, so the check
+   * counts holds separately rather than letting a run of holds read as a run
+   * of executions. A future policy shape that never reported a proposal would
+   * otherwise self-certify.
+   */
+  held?: boolean;
   detail: string;
 }
 
@@ -471,6 +482,40 @@ export function skillWindow(
  *      not a comparator; it is a counterexample, and its return is the
  *      measured price of the thing the study says is not free.
  */
+/**
+ * What the fork check is entitled to claim, stated in full because this is the
+ * sentence a reader quotes.
+ *
+ * It is an honest PARTIAL of §11.1, and the three limits are named rather
+ * than left to the module headers:
+ *   - ONE ORIGIN per (policy, tier) — each policy's FIRST proposed rebalance.
+ *     The era's remaining origins and its realized returns were NOT replayed
+ *     on chain.
+ *   - ONE PRESTATE for every tier. `capBps`, `minIdleBps` and the reserve are
+ *     therefore evaluated against the fork vault's NAV, not against the tier's,
+ *     so a small-tier plan can clear caps it would not clear at its own scale.
+ *   - The pinned prestate is ALL IDLE, so only deploy-only proposals are
+ *     replayable; that is exactly why the FIRST proposal is the one selected,
+ *     and a later origin could not be substituted without funding the adapters
+ *     into the prestate first.
+ */
+function forkClaim(fork: readonly ForkReplayResult[]): string {
+  const holds = fork.filter((f) => f.held === true).length;
+  const executed = fork.length - holds;
+  return (
+    `${executed} of ${fork.length} registered (policy, tier) runs had their FIRST proposed ` +
+    `rebalance submitted and executed against the deployed vault on a Base fork, from a ` +
+    `verified-restored pinned prestate` +
+    (holds > 0
+      ? `; ${holds} proposed nothing at any origin (HOLD — no chain interaction, so no ` +
+        `allocation was demonstrated for them)`
+      : '') +
+    `. NOT claimed: the era's remaining origins and its returns were not replayed on chain, ` +
+    `and all tiers were replayed against a single vault NAV, so cap and reserve limits were ` +
+    `evaluated at that NAV rather than at each tier's.`
+  );
+}
+
 export function evaluateRegisteredRelease(
   out: RegisteredEvaluationResult,
   opts: RegisteredGateOptions = {},
@@ -599,7 +644,7 @@ export function evaluateRegisteredRelease(
           ? `no fork replay for: ${[...required].sort().join(', ')}`
           : notExecuted.length > 0
             ? `did not execute on fork: ${notExecuted.map((f) => `${f.policyId}@${f.tier} (${f.detail})`).join(', ')}`
-            : `${fork.length} fork replays executed`,
+            : forkClaim(fork),
       ),
     );
   }

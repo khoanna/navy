@@ -56,6 +56,27 @@ const USDC_WHALE = A_USDC;
 
 const ARTIFACT_ROOT = resolve(process.cwd(), '../contract/out');
 
+/** The minimum vault NAV this suite tops the vault up to (1,000,000 USDC). */
+const MIN_NAV = 1_000_000_000_000n;
+
+/**
+ * Candidate leg sizes are FRACTIONS OF THE PRESTATE NAV, never absolute
+ * amounts.
+ *
+ * With absolute amounts the evidence decays silently: re-running against a
+ * fork whose vault has already been funded leaves so much idle that the
+ * second candidate's deploy succeeds whether or not the prestate was
+ * restored, and the suite stays green while demonstrating nothing. As
+ * fractions, the binding inequality (45% deployed leaves 55% idle, and the
+ * second candidate asks for 70%) holds at every NAV — and it is asserted
+ * below rather than trusted.
+ *
+ * 70% also stays inside the 80%-of-NAV `capBps` the adapters are registered
+ * with, and leaves far more than `minIdleBps`' 0.5%.
+ */
+const SRCLA_LEG_BPS = { compound: 2_000n, aave: 1_000n, moonwell: 1_500n } as const;
+const B2_LEG_BPS = 7_000n;
+
 const VAULT_ABI = [
   'function asset() view returns (address)',
   'function totalAssets() view returns (uint256)',
@@ -150,16 +171,25 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
       }
     }
 
-    // Fund the vault so a deploy action has idle to move. A direct transfer
-    // (rather than `deposit`) is deliberate: this replay exercises the
-    // ALLOCATOR path, not share accounting.
-    await provider.send('anvil_impersonateAccount', [USDC_WHALE]);
-    await provider.send('anvil_setBalance', [USDC_WHALE, '0xde0b6b3a7640000']);
-    const whale = await provider.getSigner(USDC_WHALE);
-    const usdc = new Contract(USDC, ERC20_ABI, whale);
-    const fundTx = await usdc.transfer!(VAULT_ADDRESS, 1_000_000_000_000n); // 1,000,000 USDC
-    await fundTx.wait();
-    await provider.send('anvil_stopImpersonatingAccount', [USDC_WHALE]);
+    // Fund the vault UP TO a floor, never BY a fixed increment, and size
+    // every candidate leg as a fraction of the resulting NAV (see
+    // SRCLA_LEG_BPS). A flat top-up plus absolute leg sizes is what silently
+    // destroys this suite's evidence on a fork that has been funded before.
+    //
+    // A direct transfer (rather than `deposit`) is deliberate: this replay
+    // exercises the ALLOCATOR path, not share accounting.
+    const held = (await new Contract(USDC, ERC20_ABI, provider).balanceOf!(
+      VAULT_ADDRESS,
+    )) as bigint;
+    if (held < MIN_NAV) {
+      await provider.send('anvil_impersonateAccount', [USDC_WHALE]);
+      await provider.send('anvil_setBalance', [USDC_WHALE, '0xde0b6b3a7640000']);
+      const whale = await provider.getSigner(USDC_WHALE);
+      const usdc = new Contract(USDC, ERC20_ABI, whale);
+      const fundTx = await usdc.transfer!(VAULT_ADDRESS, MIN_NAV - held);
+      await fundTx.wait();
+      await provider.send('anvil_stopImpersonatingAccount', [USDC_WHALE]);
+    }
 
     const allocatorRole = (await vault.ALLOCATOR_ROLE!()) as string;
     if (!((await vault.hasRole!(allocatorRole, admin.address)) as boolean)) {
@@ -176,6 +206,14 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
 
   it('replays a policy\'s proposed actions from the pinned prestate and executes them', async () => {
     const tier = 1_000_000_000_000n;
+    // Sized against the ACTUAL prestate NAV — see SRCLA_LEG_BPS.
+    const nav = (await new Contract(USDC, ERC20_ABI, provider).balanceOf!(
+      VAULT_ADDRESS,
+    )) as bigint;
+    const leg = (bps: bigint): bigint => (nav * bps) / 10_000n;
+    const srclaTotal =
+      leg(SRCLA_LEG_BPS.compound) + leg(SRCLA_LEG_BPS.aave) + leg(SRCLA_LEG_BPS.moonwell);
+    const b2Leg = leg(B2_LEG_BPS);
     // One policy's proposal at one origin: a three-venue deployment.
     const srcla: ForkReplayPlan = {
       policyId: 'srcla',
@@ -183,9 +221,9 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
       originIndex: 0,
       decisionHash: ethers.keccak256(ethers.toUtf8Bytes('fork-replay-test|srcla')),
       actions: [
-        { kind: 'deploy', marketId: 'compound', amountBase: 200_000_000_000n },
-        { kind: 'deploy', marketId: 'aave', amountBase: 150_000_000_000n },
-        { kind: 'deploy', marketId: 'moonwell', amountBase: 100_000_000_000n },
+        { kind: 'deploy', marketId: 'compound', amountBase: leg(SRCLA_LEG_BPS.compound) },
+        { kind: 'deploy', marketId: 'aave', amountBase: leg(SRCLA_LEG_BPS.aave) },
+        { kind: 'deploy', marketId: 'moonwell', amountBase: leg(SRCLA_LEG_BPS.moonwell) },
       ],
     };
     // A SECOND candidate policy, so the "same pinned prestate before each
@@ -197,10 +235,18 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
       tier,
       originIndex: 0,
       decisionHash: ethers.keccak256(ethers.toUtf8Bytes('fork-replay-test|b2')),
-      // 700,000 USDC: more than the ~550,000 idle srcla's run would have
-      // left, and inside the adapter's 80%-of-NAV cap.
-      actions: [{ kind: 'deploy', marketId: 'compound', amountBase: 700_000_000_000n }],
+      // More than the idle srcla's run would have left, and inside the
+      // adapter's 80%-of-NAV cap. See the precondition assertion below.
+      actions: [{ kind: 'deploy', marketId: 'compound', amountBase: b2Leg }],
     };
+
+    // THE PRECONDITION THE EVIDENCE RESTS ON, asserted rather than assumed:
+    // b2's leg must be unaffordable out of the idle srcla's run would leave
+    // behind, or b2 succeeding says nothing about the prestate having been
+    // restored. (`minIdleBps` also requires 0.5% of NAV to stay idle, so the
+    // margin is larger still.)
+    expect(nav).toBeGreaterThanOrEqual(MIN_NAV);
+    expect(nav - srclaTotal).toBeLessThan(b2Leg);
 
     const results = await runForkReplays([srcla, b2], {
       rpcUrl: RPC_URL,
@@ -222,9 +268,9 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
       expect(r.executed).toBe(true);
       expect(r.prestateBlock).toBe(prestateBlock);
     }
-    // b2's 700,000 USDC deploy is larger than the idle srcla's run would have
-    // left behind, so it executing at all is the evidence the prestate was
-    // restored between the two candidates.
+    // b2's deploy is larger than the idle srcla's run would have left behind
+    // (asserted above), so it executing at all is the evidence the prestate
+    // was restored between the two candidates.
     expect(results[1]!.detail).toContain('executed on the fork from pinned prestate');
 
     // And the chain is left on the pin, not on the last policy's outcome.
@@ -254,6 +300,32 @@ describeFork('§11.1 pinned-prestate fork replay', () => {
     );
     expect(results).toHaveLength(1);
     expect(results[0]!.executed).toBe(false);
-    expect(results[0]!.detail).toContain('reverted on the fork');
+    expect(results[0]!.detail).toContain('REFUSED BY THE CHAIN');
+  }, 600_000);
+
+  it('labels a configuration fault as infrastructure, not as the chain refusing it', async () => {
+    const results = await runForkReplays(
+      [
+        {
+          policyId: 'unmapped',
+          tier: 10_000_000_000n,
+          originIndex: 0,
+          decisionHash: ethers.keccak256(ethers.toUtf8Bytes('fork-replay-test|unmapped')),
+          // No adapter is registered for this venue: the failure never reaches
+          // the chain and must not be reported as the chain refusing it.
+          actions: [{ kind: 'deploy', marketId: 'euler', amountBase: 1_000n }],
+        },
+      ],
+      {
+        rpcUrl: RPC_URL,
+        prestateBlock,
+        vaultAddress: VAULT_ADDRESS,
+        allocatorPrivateKey: ADMIN_KEY,
+        adapterByMarketId,
+      },
+    );
+    expect(results[0]!.executed).toBe(false);
+    expect(results[0]!.detail).toContain('NOT REPLAYED (infrastructure/configuration');
+    expect(results[0]!.detail).not.toContain('REFUSED BY THE CHAIN');
   }, 600_000);
 });
