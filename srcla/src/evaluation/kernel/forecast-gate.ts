@@ -71,7 +71,9 @@ import {
   MIN_SELECTION_MARGIN,
   meanForecast,
   registeredGrid,
+  residualsFor,
   type ForecastMethod,
+  type ResidualObservations,
 } from '../../forecast/grid-sweep.js';
 
 import { computeArtifactHash } from '../../policy/artifact.js';
@@ -357,7 +359,46 @@ export function alignedResiduals(
   minObservations: number,
 ): Map<string, AlignedResidual[]> | null {
   const resolved = resolveSweepMethod(method);
-  if (resolved === null || resolved === 'state-space') return null;
+  if (resolved === null) return null;
+
+  // 'state-space' does not go through `meanForecast`: it forecasts
+  // utilization and maps it through the venue's own IRM, using per-origin
+  // state. This function used to return `null` for it rather than
+  // reimplement that path -- two implementations of one forecast being a
+  // worse defect than an unscored gate -- which left nine of the gate's ten
+  // measured checks NOT PRODUCED for the registered artifact, i.e. the
+  // forecast could not be validated at all.
+  //
+  // It is now scored through the SINGLE implementation. `residualsFor`
+  // dispatches to the same `stateSpaceResidualsFor` the grid sweep fits
+  // with, and its optional collector returns each residual tagged with the
+  // origin it belongs to -- which is the only thing this function needed
+  // that a bare `bigint[]` could not carry. No forecast logic is duplicated
+  // here.
+  if (resolved === 'state-space') {
+    const collected: ResidualObservations = {};
+    residualsFor(
+      // `coverageTarget` is part of a GridPoint but is not read when
+      // computing residuals -- the quantile it targets is solved afterwards,
+      // from these residuals. Supplied only to satisfy the shape.
+      { method: resolved, methodParams, horizonSeconds, coverageTarget: 0.95 } as never,
+      labels,
+      minObservations,
+      collected,
+    );
+    const out = new Map<string, AlignedResidual[]>();
+    for (const [marketId, obs] of Object.entries(collected)) {
+      if (obs.length === 0) continue;
+      out.set(
+        marketId,
+        obs.map((o) => ({ originSeconds: o.originSeconds, residualWad: o.residualWad })),
+      );
+    }
+    // An empty map is NOT the same as "scored every venue at zero residuals":
+    // it means the state path refused every label (no IRM, history gaps), and
+    // that must stay NOT PRODUCED rather than become a vacuous pass.
+    return out.size === 0 ? null : out;
+  }
 
   const byMarket = new Map<string, CompletedLabel[]>();
   for (const l of labels) {

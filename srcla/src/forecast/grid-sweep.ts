@@ -333,6 +333,9 @@ function minMax(xs: readonly bigint[]): { min: bigint; max: bigint } {
  * existing return shape, and every caller of it, is untouched.
  */
 export interface ResidualObservation {
+  /** The origin this residual belongs to. Christoffersen's independence test
+   *  thins to non-overlapping windows and cannot do so without it. */
+  originSeconds: number;
   /** realized - forecast, WAD over the horizon. */
   residualWad: bigint;
   /** The forecast itself, WAD over the horizon. Never negative in practice. */
@@ -478,6 +481,7 @@ function stateSpaceResidualsFor(
       if (collect !== undefined) {
         const list = collect[marketId] ?? [];
         list.push({
+          originSeconds: target.originSeconds,
           residualWad,
           forecastWad: muWad,
           utilizationWad: originUtilizationOf(target),
@@ -923,6 +927,7 @@ export function residualsFor(
       if (collect !== undefined) {
         const list = collect[marketId] ?? [];
         list.push({
+          originSeconds: labelSeries[i]!.originSeconds,
           residualWad,
           forecastWad: mu,
           utilizationWad: originUtilizationOf(labelSeries[i]!),
