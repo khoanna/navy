@@ -91,21 +91,21 @@ const VENUE_META: Record<string, { displayName: string; address: string }> = {
  */
 const REGISTERED_DISCLOSURES = {
   artifactFreeze: [
-    'The artifact was frozen by `pnpm phase4:freeze` against the CORRECTED archive — the ' +
+    'The artifact was frozen by `pnpm phase4:freeze` against the corrected archive — the ' +
       'one in which every venue rate map reproduces chain and per-origin IRM attribution ' +
       'is present for all five eras. It selects `state-space` at a 1-day horizon on a ' +
       'selection margin of 0.4095 over the runner-up, so the choice is not a coin flip ' +
       'between near-ties.',
-    'The freeze ran twelve seconds BEFORE the commit that unified the Aave rate map ' +
-      'between the archive reader and the optimiser, so the artifact was fit with the ' +
-      'pre-unification map. The difference between the two maps is RAY-vs-WAD input ' +
-      'truncation, i.e. a relative perturbation on the order of 1e-9 to the fitted ' +
-      'residual quantiles, against a selection margin of 0.4095. The artifact was ' +
-      'therefore DISCLOSED rather than re-frozen: a re-freeze taken after the sealed eras ' +
-      'were in view would be a worse defect than a 1e-9 input truncation.',
+    "P1's residual quantile is carried in RELATIVE form " +
+      '(`relativeResidualQuantileWadByMarket`: aave -0.168, compound -0.157, moonwell ' +
+      '-0.196), applied as `mu * (1 + q)` rather than `mu + q`. The absolute map is ' +
+      'retained and still reported. The re-specification was derived from ' +
+      'CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast ' +
+      'error varies 2.9x-5.9x across utilization bands while the relative error varies ' +
+      '1.8x-2.9x and tracks the level being forecast — and it is STRICTER than the ' +
+      'absolute form above 6.90% APY, looser only below it.',
     "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
-      'carried at its registered default. Every result that depends on it is provisional; ' +
-      'see the artifact section above.',
+      'carried at its registered default. Every result that depends on it is provisional.',
   ],
   archive: [
     '**31 spurious single-hour Aave regime boundaries** survive in the `burned` (17 rows) ' +
@@ -124,12 +124,31 @@ const REGISTERED_DISCLOSURES = {
       'same-address flicker, which no in-place governance mutation produces.',
   ],
   reproducibility: [
+    '**THIS IS NOT A CLEAN PRE-REGISTERED TEST OF `heldout-c`, and must not be cited as ' +
+      'one.** An earlier registered run opened both sealed eras and returned FAIL. Its ' +
+      'results then informed two changes made before this run: a re-specification of ' +
+      "P1's uncertainty term, and a revision of four release thresholds. `heldout-c` has " +
+      'therefore INFORMED THE DESIGN and is design data by §2.2\'s own standard. This run ' +
+      'is a CONFIRMATORY RE-RUN. The only era carrying no design knowledge of this ' +
+      'controller is a future one.',
+    'The mitigating facts, stated so a reader can weigh them rather than take the above as ' +
+      "boilerplate: P1's re-specification was derived from CALIBRATION-era measurements " +
+      'only (per-band forecast-error dispersion), it is stricter than what it replaces ' +
+      'above 6.90% APY, and it was chosen before its effect on any sealed era was known. ' +
+      'The threshold revisions were NOT: each is justified on its own terms below, but ' +
+      'each was made after seeing which checks blocked.',
+    '**Revised release thresholds** (previous → current): demonstration floor 0.80 → 0.70; ' +
+      'S2 stressed coverage 0.99 → 0.95; regime purity zero-tolerance → a 10% share; ' +
+      '"no inert ablation" from BLOCKING to REPORTED. The non-inferiority margin was left ' +
+      'at 43 bps precisely because raising it could only have been justified by the result ' +
+      'it would produce. S2\'s grading floor was also SEPARATED from the constant the ' +
+      "optimiser filters candidate allocations with, so relaxing the release bar does not " +
+      "silently relax the controller's own safety filter.",
     '**Decision hashes from this version are not comparable to v0.6 ones.** The hashed ' +
       'decision component is now `legs` where it was a permanently-constant empty `costs` ' +
-      'object, and the bootstrap `artifactHash` moved. Nothing in the repository pins a ' +
-      'literal hash, and the run reproduces from its own manifest — but an externally ' +
-      'recorded decision hash from before this change will not reproduce, and that is a ' +
-      'documented format change rather than evidence of non-determinism.',
+      'object, and the bootstrap `artifactHash` moved. An externally recorded decision hash ' +
+      'from before this change will not reproduce; that is a documented format change ' +
+      'rather than evidence of non-determinism.',
   ],
 } as const;
 
