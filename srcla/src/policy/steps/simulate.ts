@@ -5,6 +5,7 @@ import {
 } from '../../protocols/simulation/index.js';
 import { SECONDS_PER_YEAR } from '../../protocols/math.js';
 import type {
+  AaveSimulatorConfig,
   CompoundSimulatorConfig,
   MarketState,
   MoonwellSimulatorConfig,
@@ -35,8 +36,9 @@ import type { DecisionInput, MarketObservation, RateCurve } from '../types.js';
  * `postDepositRate` reaches us it is already sitting on the WAD-annualized
  * scale. Re-annualizing it again here would push an already-annualized
  * number out by another `SECONDS_PER_YEAR` and produce nonsense. Aave's
- * simulator returns an annualized WAD rate directly. So only Compound needs
- * the conversion below.
+ * simulator returns an annualized WAD SUPPLY rate directly (as of the
+ * 2026-09-10 fix it applies the borrow -> supply conversion internally; see
+ * `aave-simulator.ts`). So only Compound needs the conversion below.
  */
 const PER_SECOND_PROTOCOLS: ReadonlySet<ProtocolId> = new Set<ProtocolId>(['compound']);
 
@@ -45,25 +47,65 @@ function toAnnualizedRateWad(protocol: ProtocolId, rateWad: bigint): bigint {
 }
 
 /**
- * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
- * interest-rate strategy, not a hardcoded default. `m.irmParams` is that
- * seam: when present, it overrides the kinked-linear model's four core
- * fields (baseRate/kink/slopeLow/slopeHigh — §6.4's Compound III kinked
- * supply curve and §6.5's Moonwell jump-rate model share this shape). It is
- * NOT populated from chain yet — the collector that reads live IRM params
- * off each venue's rate strategy contract is a later task, so every market
- * currently falls back to `DefaultConfigs`.
+ * Markets already warned about falling back to a placeholder configuration.
  *
- * `irmParams`'s shape does not fit Aave: §6.3's Aave V3 strategy is a
- * piecewise-quadratic model (baseRate/variableRateSlope1/variableRateSlope2/
- * optimalUtilization/maxUtilization), structurally different from the
- * kinked-linear shape `irmParams` carries. Silently dropping an override
- * that does not apply is exactly the failure mode this task already hit
- * twice (an un-annualized Compound rate, then Moonwell's clamp comparing
- * mismatched scales) — both produced plausible-looking numbers with no
- * error. So an Aave market that supplies `irmParams` is a caller/config
- * error, not something to ignore: this throws rather than silently falling
- * back to `DefaultConfigs.aave`.
+ * Log-only and deduplicated per market id: `simulateCurves` runs once per
+ * decision origin, and a registered replay has ~10k of them, so an
+ * un-deduplicated warning would be 10k identical lines nobody reads. This
+ * set is the ONLY module state here and it can never reach a returned value
+ * or a decision hash, so `simulateCurves`'s purity/determinism contract is
+ * intact: the same input still produces the same curves.
+ */
+const warnedPlaceholderConfig = new Set<string>();
+
+function warnPlaceholderConfig(marketId: string, protocol: ProtocolId, detail: string): void {
+  const key = `${protocol}:${marketId}`;
+  if (warnedPlaceholderConfig.has(key)) return;
+  warnedPlaceholderConfig.add(key);
+  console.warn(
+    `[simulateCurves] PLACEHOLDER RATE MODEL: market '${marketId}' (${protocol}) carries no ` +
+      `live on-chain IRM reading, so its post-deposit curve is simulated from ` +
+      `DefaultConfigs.${protocol}, which is NOT the live parameter set. ${detail} ` +
+      `Warned once per market per process.`
+  );
+}
+
+/** Test seam: reset the one-shot warning dedupe. Not used by production code. */
+export function __resetPlaceholderConfigWarnings(): void {
+  warnedPlaceholderConfig.clear();
+}
+
+/**
+ * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
+ * interest-rate strategy, not a hardcoded default. Two seams carry that,
+ * one per model shape:
+ *
+ *   - `m.irmParams` — the KINKED-LINEAR shape (baseRate/kink/slopeLow/
+ *     slopeHigh), shared by §6.4's Compound III kinked supply curve and
+ *     §6.5's Moonwell jump-rate model.
+ *   - `m.aaveIrmParams` — §6.3's Aave V3
+ *     `DefaultReserveInterestRateStrategy` shape (baseRate/slope1/slope2/
+ *     optimalUtilization/maxUtilization) PLUS the reserve factor, which is a
+ *     multiplicative term in Aave's borrow -> supply conversion.
+ *
+ * FIX 2026-09-10. There used to be no Aave seam at all: this function
+ * returned `DefaultConfigs.aave` unconditionally, and threw if an Aave
+ * market supplied `irmParams`. The archive has carried a per-origin chain
+ * reading of Aave's real parameters all along, so the shipped controller was
+ * simulating Base USDC with placeholders — slope1 4% / slope2 60% / optimal
+ * 80% / max 95% against a live 4.7% / 10% / 90% / 100% — and discarding the
+ * truth it already held. `aaveIrmParams` is that missing seam.
+ *
+ * The `irmParams`-on-Aave throw REMAINS, and is still right: a
+ * Compound-shaped override on an Aave market is a caller/config error, and
+ * silently dropping an override that does not apply is exactly the failure
+ * mode this subsystem has hit repeatedly (an un-annualized Compound rate,
+ * Moonwell's clamp comparing mismatched scales, and now Aave's squared
+ * curve) — all of which produced plausible-looking numbers with no error.
+ *
+ * A missing reading is NEVER a silent substitution either: falling back to
+ * `DefaultConfigs` emits a one-shot per-market warning naming the venue, so
+ * a replay or a live cycle that is running on placeholders says so.
  */
 function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorConfig {
   if (protocol === 'aave') {
@@ -71,15 +113,41 @@ function resolveConfig(m: MarketObservation, protocol: ProtocolId): SimulatorCon
       throw new Error(
         `simulateCurves: market '${m.marketId}' is protocol 'aave' but supplied irmParams. ` +
           `Aave's rate model (paper §6.3) takes a structurally different parameter shape ` +
-          `(variableRateSlope1/variableRateSlope2/optimalUtilization/maxUtilization) than the ` +
-          `kinked-linear irmParams (baseRate/kink/slopeLow/slopeHigh) this seam carries — a ` +
-          `Compound-shaped override is not applicable to Aave. Remove irmParams for this market, ` +
-          `or do not set it until an Aave-shaped override is supported.`
+          `(variableRateSlope1/variableRateSlope2/optimalUtilization/maxUtilization/` +
+          `reserveFactorBps) than the kinked-linear irmParams (baseRate/kink/slopeLow/` +
+          `slopeHigh) this seam carries — a Compound-shaped override is not applicable to ` +
+          `Aave. Use aaveIrmParams for an Aave market.`
       );
     }
-    return DefaultConfigs.aave;
+    const p = m.aaveIrmParams;
+    if (!p) {
+      warnPlaceholderConfig(
+        m.marketId,
+        protocol,
+        `Live Base USDC is (base 0, slope1 4.7%, slope2 10%, optimal 90%, max 100%, ` +
+          `reserveFactor 10%) against the placeholder's (0, 4%, 60%, 80%, 95%, 10%); ` +
+          `populate MarketObservation.aaveIrmParams from the origin's snapshot.`
+      );
+      return DefaultConfigs.aave;
+    }
+    const aave: AaveSimulatorConfig = {
+      baseRate: p.baseRateWad,
+      variableRateSlope1: p.variableRateSlope1Wad,
+      variableRateSlope2: p.variableRateSlope2Wad,
+      optimalUtilization: p.optimalUtilizationRay,
+      maxUtilization: p.maxUtilizationRay,
+      reserveFactorBps: p.reserveFactorBps,
+    };
+    return aave;
   }
   if (!m.irmParams) {
+    warnPlaceholderConfig(
+      m.marketId,
+      protocol,
+      `DefaultConfigs.${protocol}'s slopeLow/slopeHigh are explicitly documented ` +
+        `PLACEHOLDERS (see protocols/simulation/types.ts), not a chain reading; ` +
+        `populate MarketObservation.irmParams from the origin's snapshot.`
+    );
     return DefaultConfigs[protocol];
   }
   const { baseRateWad, kinkRay, slopeLowWad, slopeHighWad } = m.irmParams;

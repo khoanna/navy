@@ -29,6 +29,23 @@ export interface MarketSnapshot {
   irmKinkRay?: bigint;
   irmSlopeLowWad?: bigint;
   irmSlopeHighWad?: bigint;
+  /**
+   * Aave V3's own two rate-model bounds, mirroring
+   * `prisma/schema.prisma`'s `irmOptimalUtilizationRay`/
+   * `irmMaxUtilizationRay` columns. Aave-only by construction: the archive
+   * writes them from `DefaultReserveInterestRateStrategy`
+   * (`collector/archive/calls.ts`), and Compound/Moonwell rows carry NULL.
+   *
+   * Aave's remaining coefficients ride in the kinked-linear fields above
+   * under a documented aliasing the backfill collector established:
+   * `irmBaseRateWad` = base variable borrow rate, `irmKinkRay` = the optimal
+   * usage ratio (identical to `irmOptimalUtilizationRay`),
+   * `irmSlopeLowWad` = variableRateSlope1, `irmSlopeHighWad` =
+   * variableRateSlope2. `evaluation/kernel/decision-input.ts` un-aliases
+   * them into `MarketObservation.aaveIrmParams`.
+   */
+  irmOptimalUtilizationRay?: bigint;
+  irmMaxUtilizationRay?: bigint;
   /** Rate-model reserve cut, bps. Distinct from Aave's own `aaveReserveFactorBps`. */
   reserveFactorBps?: number;
 }

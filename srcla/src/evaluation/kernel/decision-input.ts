@@ -181,6 +181,41 @@ export function buildDecisionInput(
       absoluteCapBase: cfg.absoluteCapBase,
       maxLossBps: cfg.maxLossBps,
       dependencyGroupIds: cfg.dependencyGroupIds,
+      // §6.3's LIVE Aave rate strategy, read at THIS origin's own block by
+      // the archive backfill — not `DEFAULT_AAVE_CONFIG`. Before 2026-09-10
+      // `policy/steps/simulate.ts#resolveConfig` had no Aave-shaped seam and
+      // discarded this reading outright, simulating Base USDC's curve from
+      // placeholders (slope1 4% / slope2 60% / optimal 80%) against a real
+      // 4.7% / 10% / 90%.
+      //
+      // The un-aliasing here mirrors what the collector wrote: for Aave rows
+      // `irmKinkRay` IS the optimal usage ratio and `irmSlopeLow/HighWad`
+      // ARE variableRateSlope1/2 (see domain/snapshots.ts). Gated on the
+      // Aave-only bounds being present as well, so a Compound/Moonwell row —
+      // which carries the kinked-linear fields but NULL bounds — can never
+      // be misread as an Aave reading.
+      //
+      // ALL-OR-NOTHING: any missing field leaves `aaveIrmParams` undefined,
+      // and `resolveConfig` then falls back to the placeholder AND warns.
+      // Never half-populated, never defaulted field by field.
+      ...(protocolOf(m.marketId) === 'aave' &&
+      m.irmBaseRateWad !== undefined &&
+      m.irmSlopeLowWad !== undefined &&
+      m.irmSlopeHighWad !== undefined &&
+      m.irmOptimalUtilizationRay !== undefined &&
+      m.irmMaxUtilizationRay !== undefined &&
+      m.reserveFactorBps !== undefined
+        ? {
+            aaveIrmParams: {
+              baseRateWad: m.irmBaseRateWad,
+              variableRateSlope1Wad: m.irmSlopeLowWad,
+              variableRateSlope2Wad: m.irmSlopeHighWad,
+              optimalUtilizationRay: m.irmOptimalUtilizationRay,
+              maxUtilizationRay: m.irmMaxUtilizationRay,
+              reserveFactorBps: m.reserveFactorBps,
+            },
+          }
+        : {}),
     };
   });
 

@@ -2,15 +2,49 @@
  * Aave V3 Interest Rate Simulator
  *
  * Implements post-deposit interest rate simulation for Aave V3 protocol.
- * Aave V3 uses a piecewise interest rate model with an optimal utilization
- * point that minimizes rate volatility for both suppliers and borrowers.
+ * Aave V3 uses a piecewise interest rate model with an optimal usage ratio
+ * that minimizes rate volatility for both suppliers and borrowers.
  *
- * Rate Model (per §6.3 - exact mirror of DefaultReserveInterestRateStrategy):
- *   Below optimal: rate = baseRate + variableRateSlope1 * (util / optimalUtilization)^2
- *   Above optimal: rate = baseRate + variableRateSlope1 + variableRateSlope2 * excessRatio^2
+ * TWO RATES, NEVER CONFLATE THEM. Aave's rate strategy computes a BORROW
+ * rate; suppliers earn a SUPPLY rate derived from it. Every function below
+ * says in its name and its docstring which one it returns, because the
+ * ambiguity between them was the root of a live controller defect (see
+ * below).
+ *
+ * BORROW rate (§6.3 - exact mirror of DefaultReserveInterestRateStrategy,
+ * which is LINEAR in the excess usage ratio on both sides of optimal):
+ *   Below optimal: borrow = baseRate + slope1 * (u / optimalUtilization)
+ *   Above optimal: borrow = baseRate + slope1 + slope2 * (u - optimal) / (1 - optimal)
+ *
+ * SUPPLY rate (what a depositor earns, and what `SimulatedRate` carries):
+ *   supply = borrow * u * (1 - reserveFactor)
+ *
+ * FIX 2026-09-10 (Aave rate-map defect). This module previously (i) SQUARED
+ * both usage ratios, asserting a quadratic curve Aave does not have, and
+ * (ii) returned the BORROW rate from a function whose docstring promised
+ * "Annualized supply rate", which `simulateRate` then assigned verbatim to
+ * `postDepositRate` and `policy/steps/simulate.ts` wrote straight into
+ * `RateCurve.points`. Both were settled against chain, not argued:
+ *
+ *   Base mainnet Aave V3 Pool 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5,
+ *   USDC reserve, rate strategy 0x86AB1C62A8bf868E1b3E1ab87d587Aba6fbCbDC5,
+ *   at block 51,105,787 (optimal 0.9 RAY, base 0, slope1 4.7%, slope2 10%,
+ *   reserveFactor 10%; virtual balance 20,359,084,142,184, variable debt
+ *   163,435,422,956,531 -> u = 0.8892290936):
+ *
+ *     linear borrow                4.6437519333%   vs currentVariableBorrowRate 4.6437518613%
+ *     squared borrow (the old code) 4.5881770250%   off by 0.0556 pp
+ *     linear * u * (1 - rf)        3.7164233903%   vs currentLiquidityRate      3.7164226508%
+ *
+ *   Pinned as a golden vector in
+ *   `test/unit/protocols/aave-simulator.spec.ts`. Measured across the 10,632
+ *   Aave calibration-era origins in the srcla archive, using each origin's
+ *   own chain-read parameters, the linear+conversion map scores 0.210 pp MAE
+ *   against the stored `supplyRateE18` where the old squared, unconverted
+ *   form scored 1.716 pp (mean stored rate 6.13 pp).
  *
  * Utilization Formula:
- *   utilization = borrows / (cash + borrows - depositAmount)
+ *   utilization = borrows / (cash + borrows)
  *
  * @module protocols/simulation
  */
@@ -32,7 +66,8 @@ import {
  * into an Aave V3 market. The simulator uses the protocol's mathematical model
  * to calculate post-deposit rates based on the new utilization ratio.
  *
- * This is an exact mirror of DefaultReserveInterestRateStrategy from Aave V3.
+ * This is an exact mirror of DefaultReserveInterestRateStrategy from Aave V3,
+ * plus the protocol's borrow -> supply conversion.
  *
  * @example
  * ```typescript
@@ -59,48 +94,91 @@ export class AaveV3Simulator implements ISimulator {
   }
 
   /**
-   * Calculate Aave V3 supply rate from utilization.
+   * Calculate Aave V3's **BORROW** rate from utilization.
    *
-   * Exact formula per §6.3 (mirrors DefaultReserveInterestRateStrategy):
-   *   Below optimal: rate = baseRate + variableRateSlope1 * (util / optimalUtilization)^2
-   *   Above optimal: rate = baseRate + variableRateSlope1 + variableRateSlope2 * excessRatio^2
+   * RETURNS A BORROW RATE, NOT A SUPPLY RATE. Nothing that wants "the rate
+   * the vault earns" may use this directly — use
+   * `calculateRateFromUtilization` (or `simulateRate`), which applies the
+   * protocol's borrow -> supply conversion on top.
+   *
+   * Exact formula per §6.3 (mirrors DefaultReserveInterestRateStrategy).
+   * LINEAR in the usage ratio on both sides of optimal — Aave V3 does NOT
+   * square either ratio; see the module comment for the chain measurement:
+   *   Below optimal: borrow = baseRate + slope1 * (util / optimalUtilization)
+   *   Above optimal: borrow = baseRate + slope1 + slope2 * (util - optimal) / (1 - optimal)
    *
    * @param util - Utilization ratio (RAY)
    * @param config - Aave V3 configuration parameters
-   * @returns Annualized supply rate (WAD)
+   * @returns Annualized BORROW rate (WAD)
    */
-  calculateRateFromUtilization(util: bigint, config: AaveSimulatorConfig): bigint {
+  calculateBorrowRateFromUtilization(util: bigint, config: AaveSimulatorConfig): bigint {
     const { baseRate, variableRateSlope1, variableRateSlope2, optimalUtilization, maxUtilization } = config;
 
-    // If at or above max utilization, rate is undefined/capped
+    // If at or above max utilization, the borrow rate is capped at its
+    // value at 100% usage (baseRate + slope1 + slope2).
     if (util >= maxUtilization) {
-      // At max, return the rate at max (baseRate + slope1 + slope2)
       return baseRate + variableRateSlope1 + variableRateSlope2;
     }
 
-    // Piecewise rate calculation
     if (util <= optimalUtilization) {
-      // Below optimal: rate = baseRate + slope1 * (util / optimalUtilization)^2
+      // Below optimal: borrow = baseRate + slope1 * (util / optimalUtilization)
       if (optimalUtilization === 0n) return baseRate;
-      const utilRatio = (util * RAY) / optimalUtilization;
-      const utilRatioSquared = (utilRatio * utilRatio) / RAY;
-      return baseRate + (variableRateSlope1 * utilRatioSquared) / RAY;
-    } else {
-      // Above optimal: rate = baseRate + slope1 + slope2 * excessRatio^2
-      const excessUtil = util - optimalUtilization;
-      const excessCapacity = RAY - optimalUtilization;
-
-      if (excessCapacity === 0n) {
-        // Edge case: optimal is 100%
-        return baseRate + variableRateSlope1 + variableRateSlope2;
-      }
-
-      // Calculate excessRatio^2 = ((util - optimal) / (1 - optimal))^2
-      const excessRatio = (excessUtil * RAY) / excessCapacity;
-      const excessRatioSquared = (excessRatio * excessRatio) / RAY;
-
-      return baseRate + variableRateSlope1 + (variableRateSlope2 * excessRatioSquared) / RAY;
+      return baseRate + (variableRateSlope1 * util) / optimalUtilization;
     }
+
+    // Above optimal: borrow = baseRate + slope1 + slope2 * excessRatio
+    const excessUtil = util - optimalUtilization;
+    const excessCapacity = RAY - optimalUtilization;
+
+    if (excessCapacity === 0n) {
+      // Edge case: optimal is 100%
+      return baseRate + variableRateSlope1 + variableRateSlope2;
+    }
+
+    const excessRatio = (excessUtil * RAY) / excessCapacity;
+    return baseRate + variableRateSlope1 + (variableRateSlope2 * excessRatio) / RAY;
+  }
+
+  /**
+   * Convert an Aave V3 **BORROW** rate into the **SUPPLY** rate suppliers
+   * actually earn at that utilization.
+   *
+   *   supply = borrow * u * (1 - reserveFactor)
+   *
+   * Both terms matter and neither is optional: borrow interest is paid only
+   * on the borrowed fraction `u` of the pool but shared across the whole
+   * pool, and the protocol keeps `reserveFactor` of it. Omitting them (the
+   * pre-2026-09-10 behaviour) overstates the rate by `1 / (u * (1 - rf))` —
+   * at Base USDC's live state that is a factor of 1.25 even before the
+   * curve-shape error.
+   *
+   * @param borrowRate - Annualized BORROW rate (WAD)
+   * @param util - Utilization ratio (RAY)
+   * @param reserveFactorBps - Protocol reserve cut, bps
+   * @returns Annualized SUPPLY rate (WAD)
+   */
+  borrowToSupplyRate(borrowRate: bigint, util: bigint, reserveFactorBps: number): bigint {
+    const afterUtil = (borrowRate * util) / RAY;
+    return (afterUtil * BigInt(10_000 - reserveFactorBps)) / 10_000n;
+  }
+
+  /**
+   * Calculate Aave V3's **SUPPLY** rate from utilization.
+   *
+   * This is the quantity `SimulatedRate.preDepositRate`/`postDepositRate`
+   * are documented to carry, the quantity `MarketSnapshot.supplyRateE18`
+   * stores, and the quantity `policy/steps/simulate.ts` writes into
+   * `RateCurve.points`. It is the borrow curve
+   * (`calculateBorrowRateFromUtilization`) run through
+   * `borrowToSupplyRate`.
+   *
+   * @param util - Utilization ratio (RAY)
+   * @param config - Aave V3 configuration parameters
+   * @returns Annualized SUPPLY rate (WAD)
+   */
+  calculateRateFromUtilization(util: bigint, config: AaveSimulatorConfig): bigint {
+    const borrowRate = this.calculateBorrowRateFromUtilization(util, config);
+    return this.borrowToSupplyRate(borrowRate, util, config.reserveFactorBps);
   }
 
   /**
@@ -136,8 +214,10 @@ export class AaveV3Simulator implements ISimulator {
   /**
    * Simulate post-deposit interest rate.
    *
-   * Calculates the new utilization and resulting supply rate after
-   * a hypothetical deposit of `depositAmount` USDC.
+   * Calculates the new utilization and resulting SUPPLY rate after
+   * a hypothetical deposit of `depositAmount` USDC. `postDepositRate` is a
+   * supply rate (borrow curve * u * (1 - reserveFactor)), never a borrow
+   * rate.
    *
    * @param state - Current market state
    * @param depositAmount - Amount to deposit (USDC base units)

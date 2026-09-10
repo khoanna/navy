@@ -1,4 +1,5 @@
-import { simulateCurves, rateAt } from '../../../src/policy/steps/simulate.js';
+import { simulateCurves, rateAt, __resetPlaceholderConfigWarnings } from '../../../src/policy/steps/simulate.js';
+import { jest } from '@jest/globals';
 import type { DecisionInput, MarketObservation } from '../../../src/policy/types.js';
 
 const WAD = 10n ** 18n;
@@ -155,9 +156,14 @@ describe('simulateCurves — curve continuity across protocols (unit-mismatch gu
     };
   }
 
-  // DEFAULT_AAVE_CONFIG at exactly optimalUtilization (80%) is an exact 4%:
-  // baseRate(0) + variableRateSlope1(4%) * (util/optimal)^2 = 0 + 4% * 1 = 4%.
-  const aaveMarket = marketFor('aave', 'aave', (WAD * 4n) / 100n);
+  // DEFAULT_AAVE_CONFIG at exactly optimalUtilization (80%) gives a BORROW
+  // rate of exactly 4% -- baseRate(0) + variableRateSlope1(4%) * (util/optimal)
+  // = 4% -- and a SUPPLY rate of 4% * 0.8 * (1 - 10% reserveFactor) = 2.88%.
+  // The 2026-09-10 Aave fix is what makes those two different numbers: the
+  // simulator used to return the borrow rate here (and to square the ratio,
+  // which happens to be a no-op at exactly optimal). This fixture's declared
+  // `supplyRateWad` is the SUPPLY rate, because that is what the field means.
+  const aaveMarket = marketFor('aave', 'aave', (WAD * 288n) / 10_000n);
   // DEFAULT_COMPOUND_CONFIG / DEFAULT_MOONWELL_CONFIG at 80% utilization
   // (= kink): baseRate(3%) + slopeLow(6.25%) * 0.8 = 3% + 5% = 8%. Value
   // below is the simulator's own zero-deposit output at this fixture's
@@ -327,9 +333,133 @@ describe('simulateCurves — Aave rejects irmParams instead of silently ignoring
     const [c] = simulateCurves(input([market]), ['aave-market'], QUANTUM, 5);
     expect(c!.marketId).toBe('aave-market');
     expect(c!.points.length).toBe(5);
-    expect(c!.points[0]).toBe((WAD * 4n) / 100n);
+    // 2.88%, not 4%: DEFAULT_AAVE_CONFIG at this fixture's 80% utilization
+    // (= its optimalUtilization) gives a BORROW rate of 4%, and the supply
+    // rate suppliers earn is 4% * u(0.8) * (1 - reserveFactor(10%)) = 2.88%.
+    // Before the 2026-09-10 Aave fix this asserted 4% -- the borrow rate
+    // written straight into RateCurve.points as if it were a supply rate.
+    expect(c!.points[0]).toBe((WAD * 288n) / 10_000n);
     for (let i = 1; i < c!.points.length; i++) {
       expect(c!.points[i]! <= c!.points[i - 1]!).toBe(true);
+    }
+  });
+});
+
+/**
+ * Aave live-parameter seam (`aaveIrmParams`) — the 2026-09-10 fix (c).
+ *
+ * `resolveConfig` used to return `DefaultConfigs.aave` unconditionally, so
+ * every live Aave reading the archive already carried was discarded and Base
+ * USDC's curve was simulated from placeholders. These cases pin that the
+ * seam exists, is actually read, and reproduces the protocol — and that the
+ * placeholder fallback is now audible rather than silent.
+ */
+describe('simulateCurves — Aave uses the live on-chain rate strategy', () => {
+  // Base mainnet Aave V3 USDC at fork block 51,105,787. Same chain-read
+  // vector as test/unit/protocols/aave-simulator.spec.ts, which carries the
+  // full provenance; `currentLiquidityRate` there was 3.7164226508%.
+  const LIVE_BASE_USDC = {
+    baseRateWad: 0n,
+    variableRateSlope1Wad: (47n * WAD) / 1000n, // 4.7%
+    variableRateSlope2Wad: (10n * WAD) / 100n, // 10%
+    optimalUtilizationRay: (9n * RAY) / 10n, // 90%
+    maxUtilizationRay: RAY, // 100%
+    reserveFactorBps: 1000, // 10%
+  };
+  const VIRTUAL_BALANCE = 20_359_084_142_184n;
+  const VARIABLE_DEBT = 163_435_422_956_531n;
+
+  function liveAaveMarket(
+    aaveIrmParams?: MarketObservation['aaveIrmParams']
+  ): MarketObservation {
+    const base: MarketObservation = {
+      marketId: 'aave-v3-usdc', adapter: '0xa', protocol: 'aave',
+      cash: VIRTUAL_BALANCE, borrows: VARIABLE_DEBT, reserves: 0n,
+      supplyRateWad: 37_164_226_507_869_988n, utilizationWad: (WAD * 8892n) / 10_000n,
+      positionBase: 0n, maxDeployableBase: 10n ** 15n, maxWithdrawableBase: VIRTUAL_BALANCE,
+      configDigest: '0xd', regimeId: 'r1', paused: false,
+      capBps: 10_000, absoluteCapBase: 10n ** 15n, maxLossBps: 50, dependencyGroupIds: [],
+    };
+    return aaveIrmParams ? { ...base, aaveIrmParams } : base;
+  }
+
+  beforeEach(() => __resetPlaceholderConfigWarnings());
+
+  it('points[0] reproduces the chain-reported currentLiquidityRate', () => {
+    const [c] = simulateCurves(
+      input([liveAaveMarket(LIVE_BASE_USDC)]), ['aave-v3-usdc'], 1_000_000_000_000n, 3
+    );
+    // The simulator's own value at this state; the chain's stored
+    // currentLiquidityRate is 37164226507869988, 2.0e-7 relative away
+    // (the stored rate is written at the last updateInterestRates, while the
+    // balances have accrued since).
+    expect(c!.points[0]).toBe(37_164_233_902_739_004n);
+    const chain = 37_164_226_507_869_988n;
+    const diff = c!.points[0]! - chain;
+    expect((diff * 1_000_000n) / chain).toBe(0n); // within 1 part per million
+  });
+
+  it('discarding the live parameters overstates this market 6.6x, even with the curve fixed', () => {
+    // The ISOLATED harm of fix (c). Both curves below run the corrected
+    // linear+conversion formula; the only difference is whether the live
+    // reading reaches it. Without it, DEFAULT_AAVE_CONFIG's placeholders
+    // (slope1 4% / slope2 60% / optimal 80% / max 95%) put u = 0.8892 above
+    // an 80% optimal that the real market has at 90%, and onto a 60% slope
+    // the real market has at 10% -- 24.62% against a true 3.72%.
+    //
+    // NOT the composite 4.29x quoted in the fix report: that figure is the
+    // SHIPPED pre-fix path, where the squared curve and the missing
+    // conversion partly cancelled this overstatement (15.94% rather than
+    // 24.62%). Pinned here so a silent regression to the placeholders is
+    // visible on its own terms.
+    const [live] = simulateCurves(
+      input([liveAaveMarket(LIVE_BASE_USDC)]), ['aave-v3-usdc'], 1_000_000_000_000n, 2
+    );
+    const [placeholder] = simulateCurves(
+      input([liveAaveMarket()]), ['aave-v3-usdc'], 1_000_000_000_000n, 2
+    );
+    expect(placeholder!.points[0]).toBe(246_244_033_643_250_492n); // 24.62%
+    const ratioBps = (placeholder!.points[0]! * 10_000n) / live!.points[0]!;
+    expect(ratioBps).toBe(66_258n); // 6.6258x
+  });
+
+  it('two different aaveIrmParams on the same market yield materially different curves', () => {
+    const steep = { ...LIVE_BASE_USDC, variableRateSlope1Wad: (20n * WAD) / 100n };
+    const [flatC] = simulateCurves(
+      input([liveAaveMarket(LIVE_BASE_USDC)]), ['aave-v3-usdc'], 1_000_000_000_000n, 2
+    );
+    const [steepC] = simulateCurves(
+      input([liveAaveMarket(steep)]), ['aave-v3-usdc'], 1_000_000_000_000n, 2
+    );
+    // slope1 20% vs 4.7% -> the whole curve scales by 20/4.7 ~= 4.26x.
+    expect(steepC!.points[0]! > flatC!.points[0]! * 4n).toBe(true);
+  });
+
+  it('falling back to the placeholder configuration WARNS, naming the market', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      simulateCurves(input([liveAaveMarket()]), ['aave-v3-usdc'], 1_000_000_000_000n, 2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const msg = String(warn.mock.calls[0]![0]);
+      expect(msg).toContain('aave-v3-usdc');
+      expect(msg).toContain('PLACEHOLDER RATE MODEL');
+      // Deduplicated: a replay runs this once per origin, ~10k times.
+      simulateCurves(input([liveAaveMarket()]), ['aave-v3-usdc'], 1_000_000_000_000n, 2);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does NOT warn when the live parameters are present', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      simulateCurves(
+        input([liveAaveMarket(LIVE_BASE_USDC)]), ['aave-v3-usdc'], 1_000_000_000_000n, 2
+      );
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
     }
   });
 });

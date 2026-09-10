@@ -18,36 +18,55 @@ import { WAD, RAY } from '../math.js';
 /**
  * Configuration for Aave V3 interest rate simulation.
  *
- * Aave V3 uses a piecewise interest rate model with an optimal utilization
- * point. Below optimal utilization, rates increase quadratically from baseRate.
- * Above optimal, rates grow at a steeper slope.
+ * Aave V3's `DefaultReserveInterestRateStrategy` is a piecewise-LINEAR
+ * BORROW curve in the (excess) usage ratio, with an optimal usage point
+ * where the slope changes. It is NOT quadratic — see
+ * `aave-simulator.ts#calculateBorrowRateFromUtilization` for the chain
+ * measurement that settled this.
  *
- * Rate formula (per §6.3 - exact DefaultReserveInterestRateStrategy):
- *   - If u <= optimalUtilization: rate = baseRate + slope1 * (u/optimal)^2
- *   - If u > optimalUtilization: rate = baseRate + slope1 + slope2 * excessRatio^2
+ * BORROW rate (§6.3, mirrors DefaultReserveInterestRateStrategy):
+ *   - If u <= optimalUtilization: borrow = baseRate + slope1 * (u / optimal)
+ *   - If u >  optimalUtilization: borrow = baseRate + slope1
+ *                                        + slope2 * (u - optimal) / (1 - optimal)
+ *
+ * SUPPLY rate (what the vault actually earns, and the only rate any consumer
+ * of `SimulatedRate.postDepositRate` wants):
+ *   supply = borrow * u * (1 - reserveFactor)
  *
  * @example
  * ```typescript
+ * // Live Base mainnet USDC parameters (Aave V3 Pool
+ * // 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5, rate strategy
+ * // 0x86AB1C62A8bf868E1b3E1ab87d587Aba6fbCbDC5), read at block 51,105,787:
  * const config: AaveSimulatorConfig = {
- *   baseRate: 0n,                          // 0% base rate
- *   variableRateSlope1: 4n * WAD / 100n,   // 4% slope below optimal
- *   variableRateSlope2: 60n * WAD / 100n,  // 60% slope above optimal
- *   optimalUtilization: 8n * RAY / 10n,   // 80% optimal utilization
- *   maxUtilization: 95n * RAY / 100n,      // 95% max to avoid insolvency
+ *   baseRate: 0n,                            // 0% base rate
+ *   variableRateSlope1: 47n * WAD / 1000n,   // 4.7% slope below optimal
+ *   variableRateSlope2: 10n * WAD / 100n,    // 10% slope above optimal
+ *   optimalUtilization: 9n * RAY / 10n,      // 90% optimal usage ratio
+ *   maxUtilization: RAY,                     // 100%
+ *   reserveFactorBps: 1000,                  // 10% of borrow interest to the treasury
  * };
  * ```
  */
 export interface AaveSimulatorConfig {
-  /** Base interest rate at 0% utilization (WAD, e.g., 0 = 0%) */
+  /** Base BORROW rate at 0% utilization (WAD, e.g., 0 = 0%) */
   baseRate: bigint;
-  /** First slope for rate increase below optimal utilization (WAD) */
+  /** First BORROW slope, below optimal utilization (WAD) */
   variableRateSlope1: bigint;
-  /** Second slope for rate increase above optimal utilization (WAD) */
+  /** Second BORROW slope, above optimal utilization (WAD) */
   variableRateSlope2: bigint;
-  /** Optimal utilization point (RAY, e.g., 8e17 = 80%) */
+  /** Optimal usage ratio (RAY, e.g., 9e26 = 90%) */
   optimalUtilization: bigint;
-  /** Maximum safe utilization (RAY, e.g., 95e16 = 95%) */
+  /** Maximum safe utilization (RAY, e.g., 1e27 = 100%) */
   maxUtilization: bigint;
+  /**
+   * Reserve factor, bps — the share of BORROW interest the protocol keeps
+   * instead of paying to suppliers. REQUIRED, not optional: it is a
+   * multiplicative term in the borrow -> supply conversion, and an absent
+   * value silently reading as 0 would overstate the supply rate by exactly
+   * this factor. Base USDC is 1000 (10%).
+   */
+  reserveFactorBps: number;
 }
 
 /**
@@ -231,12 +250,31 @@ export type SimulatorConfig =
  * Default Aave V3 simulation configuration.
  * Based on typical Base Aave V3 deployment parameters (DefaultReserveInterestRateStrategy).
  */
+/**
+ * PLACEHOLDER Aave V3 configuration — a LAST RESORT, not the live model.
+ *
+ * These five numbers do NOT match Base mainnet USDC, and the divergence is
+ * large: live is (base 0, slope1 4.7%, slope2 10%, optimal 90%, max 100%,
+ * reserveFactor 10%) against the (0, 4%, 60%, 80%, 95%) below. The real
+ * per-origin parameters are carried by `MarketObservation.aaveIrmParams` and
+ * are what `policy/steps/simulate.ts#resolveConfig` uses whenever they are
+ * present; falling back here emits a one-shot warning per market rather than
+ * substituting silently.
+ *
+ * Retained only so hand-built fixtures and synthetic datasets — which carry
+ * no chain reading at all — still produce a curve of the right SHAPE.
+ */
 export const DEFAULT_AAVE_CONFIG: AaveSimulatorConfig = {
   baseRate: 0n,                           // 0% base rate
   variableRateSlope1: 4n * WAD / 100n,    // 4% slope below optimal
   variableRateSlope2: 60n * WAD / 100n,   // 60% slope above optimal
   optimalUtilization: 8n * RAY / 10n,     // 80% optimal
   maxUtilization: 95n * RAY / 100n,       // 95% max
+  // Base USDC's real reserve factor, the one field here that IS the live
+  // value — the borrow -> supply conversion has no meaningful "shape-only"
+  // placeholder, and 0 would assert "suppliers keep all borrow interest",
+  // which is true of no Aave market.
+  reserveFactorBps: 1000,                 // 10%
 };
 
 /**

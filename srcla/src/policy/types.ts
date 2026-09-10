@@ -43,19 +43,58 @@ export interface MarketObservation {
   maxLossBps: number;
   dependencyGroupIds: string[];
   /**
-   * Live on-chain IRM parameters. Falls back to DefaultConfigs when absent.
+   * Live on-chain IRM parameters, KINKED-LINEAR SHAPE (Compound III /
+   * Moonwell). Falls back to DefaultConfigs when absent.
    *
    * Paper §6.3-6.5 requires simulation to mirror the LIVE registered
    * interest-rate strategy, not a hardcoded default — this is that seam.
-   * Shape matches the kinked-linear model (Compound/Moonwell); Aave's
-   * quadratic model has no equivalent field here and always uses
-   * DefaultConfigs.aave regardless of this value.
+   * Aave's `DefaultReserveInterestRateStrategy` takes a structurally
+   * different parameter set and has its OWN field, `aaveIrmParams`; supplying
+   * this one on an Aave market is a caller error and
+   * `policy/steps/simulate.ts#resolveConfig` throws on it rather than
+   * silently dropping an override that does not apply.
    *
-   * NOT YET POPULATED from chain — the collector that reads live IRM params
-   * off each venue's rate strategy contract is a later task. Until then this
-   * is always undefined and every market falls back to DefaultConfigs.
+   * NOT populated on the LIVE runtime driver path
+   * (`runtime/decision-driver.ts`) — the collector that reads live IRM params
+   * off each venue's rate strategy contract via the Navy adapters is still a
+   * later task. It IS populated on the offline evaluation path
+   * (`evaluation/kernel/decision-input.ts`), whose archive rows carry a
+   * per-origin chain reading.
    */
   irmParams?: { baseRateWad: bigint; kinkRay: bigint; slopeLowWad: bigint; slopeHighWad: bigint };
+  /**
+   * Live on-chain IRM parameters, AAVE V3 SHAPE — the per-origin reading of
+   * `DefaultReserveInterestRateStrategy` plus the reserve's own reserve
+   * factor, which is a multiplicative term in Aave's borrow -> supply
+   * conversion and therefore part of its rate model, not decoration.
+   *
+   * Exists because Aave's model is NOT the kinked-linear `irmParams` shape:
+   * it has an optimal usage ratio rather than a kink, two BORROW slopes
+   * rather than supply slopes, a max-utilization bound, and the reserve cut.
+   * Before 2026-09-10 there was no Aave-shaped seam at all, so `resolveConfig`
+   * discarded every live Aave reading and simulated Base USDC with
+   * `DEFAULT_AAVE_CONFIG`'s placeholders (slope1 4% / slope2 60% / optimal
+   * 80% against a real 4.7% / 10% / 90%) — see `resolveConfig`.
+   *
+   * Absent means "no chain reading for this origin": `resolveConfig` then
+   * falls back to `DEFAULT_AAVE_CONFIG` and WARNS, once per market. It is
+   * never half-populated — every field comes from the same origin's snapshot
+   * or the whole object is omitted.
+   */
+  aaveIrmParams?: {
+    /** Base BORROW rate at 0 utilization, WAD annualized. */
+    baseRateWad: bigint;
+    /** First BORROW slope, below the optimal usage ratio, WAD annualized. */
+    variableRateSlope1Wad: bigint;
+    /** Second BORROW slope, above the optimal usage ratio, WAD annualized. */
+    variableRateSlope2Wad: bigint;
+    /** Optimal usage ratio, RAY. */
+    optimalUtilizationRay: bigint;
+    /** Maximum usage ratio the curve is defined to, RAY. */
+    maxUtilizationRay: bigint;
+    /** Protocol's cut of borrow interest, bps. */
+    reserveFactorBps: number;
+  };
 }
 
 /** A completed, availability-lagged training observation. */

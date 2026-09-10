@@ -125,6 +125,16 @@ export async function loadDataset(
             irmSlopeHighWad: BigInt(s.irmSlopeHighWad),
           }
         : {}),
+      // Aave V3's two extra bounds. Same all-or-nothing rule as the
+      // kinked-linear block above: a partially-resolved reading is omitted
+      // rather than half-populated, so `decision-input.ts` can treat the
+      // presence of the SET as the signal that a live Aave reading exists.
+      ...(s.irmOptimalUtilizationRay !== null && s.irmMaxUtilizationRay !== null
+        ? {
+            irmOptimalUtilizationRay: BigInt(s.irmOptimalUtilizationRay),
+            irmMaxUtilizationRay: BigInt(s.irmMaxUtilizationRay),
+          }
+        : {}),
       ...(resolveReserveFactorBps(s.marketId, s.reserveFactorBps) !== undefined
         ? { reserveFactorBps: resolveReserveFactorBps(s.marketId, s.reserveFactorBps)! }
         : {}),
