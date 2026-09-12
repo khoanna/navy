@@ -35,13 +35,11 @@ import {
   type NonInferiorityResult,
   type PairedTestResult,
 } from '../metrics/significance.js';
-import {
-  REGISTERED_COVERAGE_FLOOR,
-  REGISTERED_STRESS_DEMAND_BPS,
-} from '../../policy/steps/coverage.js';
+import { REGISTERED_STRESS_DEMAND_BPS } from '../../policy/steps/coverage.js';
 import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from './harness.js';
 import { REGISTERED_ABLATIONS, REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
 import {
+  REGISTERED_S2_COVERAGE_FLOOR,
   qualifiesAsComparator,
   scaleInvariant,
   sustainabilityAtTier,
@@ -525,7 +523,13 @@ export function evaluateRegisteredRelease(
   // The floor the OPTIMISER enforces, imported rather than re-declared:
   // `src/policy/steps/coverage.ts` exists precisely to stop the optimiser and
   // the grader from carrying two copies of this number that can drift apart.
-  const minStressed = opts.minStressedLiquidCoverage ?? REGISTERED_COVERAGE_FLOOR;
+  // The RELEASE floor, not the optimiser's eligibility constant. These were
+  // separated because relaxing the release bar must not silently relax the
+  // controller's own candidate filter (see REGISTERED_S2_COVERAGE_FLOOR);
+  // this check is a release grade, so it grades against the release floor.
+  // Left on the eligibility constant it failed a run at 0.963 -- above the
+  // 0.95 bar the very next check applied.
+  const minStressed = opts.minStressedLiquidCoverage ?? REGISTERED_S2_COVERAGE_FLOOR;
   const alpha = opts.significanceLevel ?? 0.05;
 
   const checks: RegisteredGateCheck[] = [];

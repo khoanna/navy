@@ -12,6 +12,23 @@ import {
 } from '../../../src/evaluation/kernel/forecast-gate.js';
 import { computeArtifactHash } from '../../../src/policy/artifact.js';
 import { MIN_SELECTION_MARGIN, registeredGrid } from '../../../src/forecast/grid-sweep.js';
+import { REGISTERED_ERAS, testableHorizons, type EraTag } from '../../../src/evaluation/eras.js';
+import { REGISTERED_HORIZONS_SECONDS } from '../../../src/policy/registered.js';
+
+/**
+ * The REGISTERED grid is the full grid minus horizons this gate cannot test:
+ * Christoffersen runs on non-overlapping windows, so a horizon too long for a
+ * sealed era leaves too few to test. The sweep and the gate must agree on
+ * this, which is the divergence the grid check exists to catch.
+ */
+const testableGridSize = (): number => {
+  const admissible = testableHorizons(
+    [...REGISTERED_HORIZONS_SECONDS],
+    MIN_EXCEEDANCE_OBSERVATIONS,
+    (Object.keys(REGISTERED_ERAS) as EraTag[]).filter((e) => REGISTERED_ERAS[e].sealed),
+  );
+  return registeredGrid().filter((p) => admissible.includes(p.horizonSeconds)).length;
+};
 import type { RegisteredGateCheck } from '../../../src/evaluation/kernel/gates.js';
 import type { CompletedLabel, PolicyArtifact, ResidualPanel } from '../../../src/policy/types.js';
 
@@ -98,8 +115,8 @@ function panel(): ResidualPanel {
 
 function registration(over: Partial<ArtifactRegistration> = {}): ArtifactRegistration {
   return {
-    gridPoints: registeredGrid().length,
-    scorablePoints: registeredGrid().length,
+    gridPoints: testableGridSize(),
+    scorablePoints: testableGridSize(),
     selectionMargin: MIN_SELECTION_MARGIN * 10,
     ...over,
   };
@@ -297,7 +314,7 @@ describe('the measured label checks', () => {
 describe('the registered-grid check', () => {
   it('FAILS when the sweep scored fewer points than the registered grid', () => {
     const g = runForecastGate(goodArtifact(), labels(), {
-      registration: registration({ scorablePoints: registeredGrid().length - 1 }),
+      registration: registration({ scorablePoints: testableGridSize() - 1 }),
     });
     expect(find(g, 'Registered grid points').passed).toBe(false);
   });
@@ -305,7 +322,7 @@ describe('the registered-grid check', () => {
   it('counts the registered grid rather than a hardcoded number', () => {
     const g = runForecastGate(goodArtifact(), labels(), { registration: registration() });
     expect(find(g, 'Registered grid points').detail).toContain(
-      `registered grid ${registeredGrid().length}`,
+      `registered grid ${testableGridSize()}`,
     );
   });
 });

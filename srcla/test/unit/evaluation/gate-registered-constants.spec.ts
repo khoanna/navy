@@ -25,8 +25,12 @@ import {
   type RegisteredEvaluationResult,
 } from '../../../src/evaluation/kernel/harness.js';
 import { REGISTERED_POLICIES, SRCLA_POLICY } from '../../../src/evaluation/kernel/registry.js';
+import { REGISTERED_S2_COVERAGE_FLOOR } from '../../../src/evaluation/kernel/sustainability.js';
 import {
   REGISTERED_COVERAGE_FLOOR,
+  // The check under test is a release grade, so it sources the RELEASE
+  // floor -- deliberately a different constant from the optimiser's
+  // eligibility filter above. See REGISTERED_S2_COVERAGE_FLOOR.
   REGISTERED_STRESS_DEMAND_BPS,
 } from '../../../src/policy/steps/coverage.js';
 import type { PolicyArtifact } from '../../../src/policy/types.js';
@@ -109,14 +113,14 @@ const stressedCheck = (r: ReturnType<typeof evaluateRegisteredRelease>) =>
   r.checks.find((c) => c.name === 'Safety: stressed liquid coverage')!;
 
 describe('§11.5 gate sources its coverage floor from the policy registration', () => {
-  it('accepts a run sitting exactly ON REGISTERED_COVERAGE_FLOOR', () => {
-    const out = evaluateRegisteredRelease(evaluation({ coverage: REGISTERED_COVERAGE_FLOOR }));
+  it('accepts a run sitting exactly ON REGISTERED_S2_COVERAGE_FLOOR', () => {
+    const out = evaluateRegisteredRelease(evaluation({ coverage: REGISTERED_S2_COVERAGE_FLOOR }));
     expect(stressedCheck(out).passed).toBe(true);
-    expect(stressedCheck(out).detail).toContain(String(REGISTERED_COVERAGE_FLOOR));
+    expect(stressedCheck(out).detail).toContain(String(REGISTERED_S2_COVERAGE_FLOOR));
   });
 
-  it('blocks a run one ulp-ish below REGISTERED_COVERAGE_FLOOR', () => {
-    const justBelow = REGISTERED_COVERAGE_FLOOR - 1e-6;
+  it('blocks a run one ulp-ish below REGISTERED_S2_COVERAGE_FLOOR', () => {
+    const justBelow = REGISTERED_S2_COVERAGE_FLOOR - 1e-6;
     const out = evaluateRegisteredRelease(evaluation({ coverage: justBelow }));
     expect(stressedCheck(out).passed).toBe(false);
     expect(out.pass).toBe(false);

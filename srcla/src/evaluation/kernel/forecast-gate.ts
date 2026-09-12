@@ -76,6 +76,8 @@ import {
   type ResidualObservations,
 } from '../../forecast/grid-sweep.js';
 
+import { REGISTERED_ERAS, testableHorizons, type EraTag } from '../eras.js';
+import { REGISTERED_HORIZONS_SECONDS } from '../../policy/registered.js';
 import { computeArtifactHash } from '../../policy/artifact.js';
 import type { CompletedLabel, PolicyArtifact } from '../../policy/types.js';
 import type { RegisteredGateCheck } from './gates.js';
@@ -819,7 +821,21 @@ export function runForecastGate(
 ): ForecastGateResult {
   const alpha = opts.significanceLevel ?? REGISTERED_CALIBRATION_ALPHA;
   const tolerance = opts.coverageTolerance ?? REGISTERED_COVERAGE_TOLERANCE;
-  const expectedGridPoints = opts.expectedGridPoints ?? registeredGrid().length;
+  // The registered grid is the grid MINUS horizons this gate cannot test.
+  // `testableHorizons` drops a horizon that leaves fewer than
+  // MIN_EXCEEDANCE_OBSERVATIONS non-overlapping windows on a sealed era,
+  // because Christoffersen cannot run on it at all. The sweep applies the
+  // same rule, and both must agree on what "the registered grid" IS or this
+  // check reports a deliberate, disclosed narrowing as a grid that shrank
+  // silently -- which is what it fired on when only the sweep knew the rule.
+  const admissibleHorizons = testableHorizons(
+    [...REGISTERED_HORIZONS_SECONDS],
+    MIN_EXCEEDANCE_OBSERVATIONS,
+    (Object.keys(REGISTERED_ERAS) as EraTag[]).filter((e) => REGISTERED_ERAS[e].sealed),
+  );
+  const expectedGridPoints =
+    opts.expectedGridPoints ??
+    registeredGrid().filter((p) => admissibleHorizons.includes(p.horizonSeconds)).length;
 
   const residuals = alignedResiduals(
     artifact.method,
