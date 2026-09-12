@@ -47,7 +47,21 @@ import { resolve as resolvePath } from 'path';
 import { PrismaClient } from '@prisma/client';
 import { loadEra } from '../src/evaluation/dataset.js';
 import { parseArtifact } from '../src/policy/artifact.js';
-import { REGISTERED_ERAS, eraBounds, eraFor } from '../src/evaluation/eras.js';
+import {
+  REGISTERED_ERAS,
+  eraBounds,
+  eraFor,
+  testableHorizons,
+  type EraTag,
+} from '../src/evaluation/eras.js';
+import { MIN_EXCEEDANCE_OBSERVATIONS } from '../src/evaluation/kernel/forecast-gate.js';
+import { REGISTERED_HORIZONS_SECONDS } from '../src/policy/registered.js';
+
+/** The eras §11.5 will grade this artifact on. A horizon must be testable on
+ *  every one of them, not merely on the longest. */
+const SEALED_ERAS: EraTag[] = (Object.keys(REGISTERED_ERAS) as EraTag[]).filter(
+  (e) => REGISTERED_ERAS[e].sealed,
+);
 import {
   buildDecisionInput,
   deriveCompletedLabels,
@@ -377,7 +391,31 @@ async function main(): Promise<void> {
     }
     console.log(`[freeze] ${allLabels.length} completed labels across 3 horizons`);
 
-    const grid = registeredGrid();
+    // §11.5's forecast gate tests independence on NON-OVERLAPPING horizon
+    // windows, so a horizon too long for the sealed eras cannot be tested at
+    // all. Filtering it out of the grid is a RAISE: a candidate whose
+    // calibration cannot be falsified on the registered data has not earned a
+    // release, however well it scores on §7.3's loss. See `testableHorizons`.
+    const admissible = testableHorizons(
+      [...REGISTERED_HORIZONS_SECONDS],
+      MIN_EXCEEDANCE_OBSERVATIONS,
+      SEALED_ERAS,
+    );
+    const grid = registeredGrid().filter((p) => admissible.includes(p.horizonSeconds));
+    const dropped = registeredGrid().length - grid.length;
+    console.error(
+      `[freeze] horizon testability: ${admissible.map((h) => `${h / 86_400}d`).join(', ')} ` +
+        `admissible of ${REGISTERED_HORIZONS_SECONDS.map((h) => `${h / 86_400}d`).join(', ')} ` +
+        `(${dropped} of ${registeredGrid().length} grid points dropped: a horizon leaving ` +
+        `< ${MIN_EXCEEDANCE_OBSERVATIONS} non-overlapping windows on a sealed era cannot be tested)`,
+    );
+    if (grid.length === 0) {
+      throw new Error(
+        'no registered horizon is testable on the sealed eras: every candidate would ship ' +
+          'a calibration §11.5 cannot falsify. Collect a longer held-out era rather than ' +
+          'relaxing MIN_EXCEEDANCE_OBSERVATIONS.',
+      );
+    }
     console.log(`[freeze] sweeping ${grid.length} registered grid points...`);
     const rows: SweepRow[] = sweep(allLabels, grid, minObservations);
     console.log(`[freeze] ${rows.length} points scorable`);

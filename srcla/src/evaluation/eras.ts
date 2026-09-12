@@ -228,3 +228,46 @@ export const REGISTERED_WINDOW = Object.freeze({
   startSeconds: REGISTERED_ERAS.calibration.startSeconds,
   endSecondsSentinel: OPEN_ENDED,
 });
+
+/**
+ * Horizons whose calibration can actually be TESTED on the sealed eras.
+ *
+ * §11.5's forecast gate tests independence (Christoffersen) on NON-OVERLAPPING
+ * horizon windows, because overlapping residuals are serially dependent by
+ * construction and running the test on them would reject clustering the
+ * overlap put there. Thinning an era of length `T` to non-overlapping windows
+ * of length `H` leaves `T/H` observations, so a long horizon on a short era
+ * leaves too few to test at all.
+ *
+ * Measured on the registered eras: at H=14d, `heldout-c` (86d) thinned to 9
+ * windows and `heldout-b` (17d) to 4, against a 30-observation minimum, so
+ * BOTH eras reported Christoffersen NOT PRODUCED for every venue. Regime
+ * purity degrades the same way for the same reason -- a 14x longer label
+ * window straddles roughly 14x more governance changes, measured at 33.4%
+ * against 5.2% at H=1d.
+ *
+ * THIS RULE RAISES THE BAR; it does not lower one. A candidate whose
+ * calibration cannot be falsified on the data the study registered has not
+ * earned a release, however well it scores on the selection loss. §7.3's loss
+ * rewards a long horizon (better signal-to-noise, less turnover) and §11.5's
+ * gate requires a short one; nothing in the paper reconciled them, and this is
+ * that reconciliation, resolved in favour of testability.
+ *
+ * THE COST IS REAL AND MUST BE DISCLOSED: on the current eras this admits
+ * ONE horizon, so P18's co-selection of the horizon with the movement rule is
+ * vacuous for this release. That is a limitation of the DATASET -- the sealed
+ * eras are too short to validate a longer horizon -- not a finding about the
+ * forecast. A longer `heldout-b` re-admits the longer horizons on its own.
+ */
+export function testableHorizons(
+  horizons: readonly number[],
+  minWindows: number,
+  eras: readonly EraTag[],
+): number[] {
+  const spans = eras.map((e) => {
+    const b = eraBounds(e);
+    return (Date.parse(b.end) - Date.parse(b.start)) / 1000;
+  });
+  if (spans.length === 0) return [...horizons];
+  return horizons.filter((h) => spans.every((span) => Math.floor(span / h) >= minWindows));
+}

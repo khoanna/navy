@@ -123,9 +123,21 @@ contract DeployAndFund is Script {
             _recoveryGrace: 3600
         });
 
-        _vault.registerAdapter(info.aave, 4000, 100, "Aave V3 Base USDC");
-        _vault.registerAdapter(info.compound, 4000, 100, "Compound III Base USDC");
-        _vault.registerAdapter(info.moonwell, 2000, 100, "Moonwell Base USDC");
+        // THE REGISTERED CONFIGURATION, matching `run-phase4.ts#harnessConfig`
+        // exactly: capBps 5000, maxLossBps 50, minIdleBps 500.
+        //
+        // §11.1's fork replay exists to ask whether the chain would have
+        // ACCEPTED the allocation the policy proposed. It can only answer that
+        // if the vault enforces the same limits the policy optimised under.
+        // These were 4000/4000/2000 while the harness used 5000 everywhere, so
+        // the vault refused allocations that were legal under the registered
+        // configuration and the run recorded a configuration mismatch as an
+        // allocation the chain rejected. Measured: with per-tier vaults but
+        // mismatched caps, only 14 of 64 plans reached the chain.
+        _vault.registerAdapter(info.aave, 5000, 50, "Aave V3 Base USDC");
+        _vault.registerAdapter(info.compound, 5000, 50, "Compound III Base USDC");
+        _vault.registerAdapter(info.moonwell, 5000, 50, "Moonwell Base USDC");
+        _vault.setMinIdleBps(500);
         _vault.setRewardExecutor(address(rewardExecutor));
         _vault.setRewardAccountant(address(accountant));
         accountant.setVault(address(_vault));
