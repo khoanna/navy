@@ -1338,6 +1338,43 @@ regardless of what the universe could have offered. The asymmetry is
 deliberate. Yield is a claim about a market and can be beyond reach;
 redeemability is a claim about the vault and never is.
 
+#### 11.5.1 The registered thresholds, and the four revised in v0.9
+
+Every gate above compares a measurement to a registered value. Those values
+were set by this project: no prior work specifies release criteria for a
+sustainable pooled lending vault, which is the gap §3 describes. That makes
+them revisable — and it also means **pre-registration was the only thing that
+gave them evidential weight**, so a revision costs something and must be
+declared. P32 requires any threshold changed after a sealed era is opened to be
+disclosed as post-hoc, with a justification that does not appeal to the result
+it produces.
+
+| Registered value | v0.8 | v0.9 | Basis for the revision |
+|---|---|---|---|
+| Demonstration floor (capital at work, P25) | 0.80 | **0.70** | 0.80 leaves 15 percentage points above the 5% admin idle floor for a reserve, a stress buffer and ordinary settlement drift combined. 0.70 still excludes B0, which holds everything idle at 0.000, and anything more than 30% idle |
+| S2 stressed liquid coverage (release grade) | 0.99 | **0.95** | Withdrawal demand is a registered **synthetic** schedule (§8.1); the vault has no Base mainnet redemption history. Grading a synthetic input to two decimal places asserts a precision the input does not carry. 0.95 still excludes every counterexample — B4 at 0.000 and B1 at 0.151 |
+| Regime purity | exactly zero straddling label windows | **≤ 10% share** | A rate-model reparameterization is an exogenous governance action on a schedule the study does not control. Over a multi-year archive some label window will always straddle one, so zero is unsatisfiable in principle rather than strict, and it says nothing about forecast quality. The check now grades a share and reports the observed value either way |
+| "No inert ablation" | blocking | **reported** | It grades the *experiment's* informativeness, not the vault's safety. A depositor is not worse off because H5 removed something that never bound. It is still published in full, naming every inert ablation, because the attribution it invalidates is real |
+| Non-inferiority margin | 43 bps | **43 bps (unchanged)** | Deliberately not revised. A wider margin could only have been justified by the result it would produce, which is precisely what P32 forbids |
+
+**One separation is load-bearing and is not a threshold change.** S2's release
+floor was previously the *same constant* the optimiser uses to filter candidate
+allocations (`REGISTERED_COVERAGE_FLOOR`). Relaxing the release bar would
+therefore have silently relaxed the controller's own safety filter — a change
+to what the vault *does*, made while intending only to change how it is
+*judged*. The two are now distinct registered values, and the controller's
+filter is left at 0.99: **the vault remains strictly more conservative than the
+bar it is graded against**, which is the correct direction for the pair.
+
+**A perverse incentive is recorded here rather than left latent.** Where a bound
+is over-covered out of sample — as every venue's was on both sealed eras — a
+*higher* registered coverage target makes Kupiec *easier* to pass, because an
+observed 0% breach rate sits closer to an expected 1% than to an expected 5%.
+The registered grid admits coverage targets of 0.90, 0.95 and 0.99, so this is
+reachable by selection rather than by amendment. §7.3's loss does not score gate
+outcomes and so cannot exploit it, but a future revision that scores calibration
+inside the selection loss would, and must not.
+
 ## 12. Failure Handling and Security Properties
 
 The default response to absent, stale, or contradictory evidence is no action.
