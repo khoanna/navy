@@ -1,12 +1,12 @@
 # Safe, Robust, Cost-Aware Lending Allocation for ERC-4626 Vaults
 
-**Research report version:** 0.8
+**Research report version:** 0.9
 
-**Date:** 2026-09-09
+**Date:** 2026-09-11
 
 **Release scope:** Base-native research release specification
 
-**Empirical status:** The architecture, source review, market registry, and evaluation protocol are specified. Two registered held-out evaluations have been run and both returned `FAIL`; Appendix D records what they measured and which defects in this specification produced that result. Historical outperformance and production readiness have not been demonstrated, and §11.5 no longer asks for a form of outperformance the registered universe cannot supply.
+**Empirical status:** The architecture, market registry, and evaluation protocol are specified, and the registered evaluation has been **run to completion on both sealed eras**. It returns `FAIL`, and this document reports that result in full rather than adjusting the criteria to avoid it. What is established: the central proposition (§1), measured at every registered vault tier on 86 days of sealed Base mainnet state and corroborated by an exogenous venue failure (Appendix F); SRCLA's sustainability up to one million USDC; and a precisely located capacity threshold above which it is dominated by a simpler baseline. What is **not** established: a passing §11.5 gate, calibration of the forecast's lower bound out of sample, sustainability at the ten-million tier, historical outperformance, or production readiness. Appendices D and F record every measurement behind those statements, including the ones unfavourable to this controller.
 
 ## Abstract
 
@@ -37,8 +37,60 @@ measured price of unsustainability. One requirement keeps this honest and is
 stated first among the criteria: **sustainability must be demonstrated while
 deployed.** A vault holding idle cash is trivially redeemable and has shown
 nothing, so a registered capital-at-work floor precedes every other
-sustainability check. This paper specifies a falsifiable architecture and
-evaluation procedure; it does not claim completed performance results.
+sustainability check.
+Version 0.9 reports the completed registered evaluation. **It returns `FAIL`,
+and the result is published rather than tuned away**, together with the
+specification defects it exposed and one exogenous event that proved more
+informative than any of them.
+
+**The central proposition is confirmed twice — once by the protocol and once by
+the market.** Over an 86-day sealed era the policy that always selects the
+highest displayed rate earned the study's best return, 3.63% APY, while holding
+**zero** stressed liquid coverage at the ten-million tier; the best
+single-venue policy earned 3.25% at 0.151. Neither could have honoured a
+redemption. Independently, on 2026-08-27 a Moonwell USDC pool was drained from
+$2,105,538 of withdrawable cash to **$1 within a single hour**, after which it
+advertised 87–90% APY for fourteen consecutive days with nothing withdrawable
+behind it. The highest annual percentage yield in two years of Base mainnet
+data belonged to a venue from which no depositor could recover a dollar.
+
+**SRCLA satisfies the sustainability criterion up to one million USDC and fails
+above it.** At the 10k, 100k and 1M tiers it held stressed coverage of 1.000,
+1.000 and 0.963, filled 100% of attempted redemptions, completed a full exit
+within one origin, kept 91.3% of capital at work, and delivered 3.23–3.27% net
+APY against a displayed-versus-realized gap of 0.19 percentage points — the
+narrowest of any deployed policy in the study. At ten million it deployed only
+42.7% of the vault and returned 1.56%. That shortfall is **entirely idle
+capital, not degraded execution**: every deployed dollar earned 3.655%, the
+highest per-dollar rate at any tier. Ablation attributes the withheld capital
+to the three liquidity-aware mechanisms acting together — the movement-cost
+hurdle (+0.339 capital-at-work when removed), the post-deposit capacity curves
+(+0.243), and the exitable-fraction weighting (+0.146).
+
+**The honest negative result is that this caution is not vindicated at scale.**
+A reserve-matched baseline deployed 80.8% at ten million, held stressed
+coverage of 1.000, and earned 2.59% — more capital at work, better
+redeemability, and 66% more yield than SRCLA, without any of the machinery
+above. The study therefore establishes the phenomenon it set out to establish
+and prices it, but does not establish that this controller is the best response
+to it above a capacity threshold the evaluation itself locates.
+
+Two findings about the *method* stand independently of that verdict. First, the
+registered uncertainty term was applied **additively** to a point forecast that
+the vault's own deposit compresses, so a constant haircut consumed a growing
+share of a shrinking edge and, past a certain size, exceeded it outright; it is
+restated multiplicatively (P29), which the calibration data supports and which
+is *stricter* than the form it replaces wherever the forecast exceeds a venue's
+mean. Second, the horizon that minimizes §7.3's selection loss is one §11.5's
+forecast gate **cannot test**: Christoffersen's independence test requires
+non-overlapping windows, and a fourteen-day horizon leaves nine of them in an
+86-day era against a thirty-observation minimum. Registered candidates are now
+restricted to horizons the gate can falsify (P33), which narrows the grid from
+108 points to 36 and is a strengthening, not a relaxation.
+
+This paper specifies a falsifiable architecture and evaluation procedure, and
+reports the completed evaluation of it. It does **not** claim a passing release
+gate, historical outperformance, or production readiness.
 
 **Keywords:** DeFi, ERC-4626, Base, USDC, lending allocation, yield farming, deterministic forecasting, robust optimization, liquidity risk, transaction costs.
 
@@ -185,6 +237,53 @@ changes is which quantity carries the claim, and P25 makes the new primary
 criterion strictly harder to satisfy than the old safety check was: v0.6's
 SRCLA would have reported `NOT DEMONSTRATED` at the tier where it scored a
 perfect coverage number.
+
+## Amendment Record (v0.8 → v0.9)
+
+**Version 0.8 was registered and run, and it returned `FAIL` on both sealed
+eras.** That run is the reason this record exists, and its status must be
+stated before any amendment below is read: `heldout-c` has now informed the
+design of the controller it was meant to test. By §2.2's own standard it is
+design data. **Every result reported against `heldout-c` after this version is
+a confirmatory re-run, not a fresh test**, and §13 says so without
+qualification.
+
+The v0.8 run is nevertheless the most informative evaluation this project has
+produced, because it isolated a defect that four prior versions had priced as
+conservatism. SRCLA left **61% of NAV idle at the 10M tier** and realized
+1.401%, while the ablation that removes one term and nothing else — H2,
+"remove calibrated lower bounds" — deployed 86% at the same tier, held
+stressed coverage at **1.000**, exited in **0 origins**, and realized 2.75%.
+Every other ablation moved capital at work by less than 0.01. The attribution
+is not inferred from a narrative; it is read off a single column.
+
+| ID | Change | Sections | Evidence |
+|---|---|---|---|
+| P29 | **The residual quantile is applied multiplicatively, not additively.** $\ell = \widehat\mu\,(1+q^{\mathrm{rel}}_\alpha)$ replaces $\ell = \widehat\mu + q_\alpha$, with $q^{\mathrm{rel}}$ calibrated on the same residuals divided by the forecast each was measured against | §7.1, §7.2 | §7.1's own text already conceded that the additive bound "subtracts a near-constant from a linearly growing quantity". It is worse than that: §6's capacity curves evaluate $\widehat\mu$ **at the candidate allocation**, so at scale it is a rate the vault's own deposit has compressed, and a constant haircut consumes a growing share of a shrinking edge. Aave's registered quantile is −1.159% APY, so any venue the vault compresses below 1.159% receives a **negative** lower bound and can never clear a deployment hurdle again. Measured on the calibration era, the 5% lower quantile of **absolute** forecast error varies 2.9×–5.9× across utilization bands while the **relative** error varies 1.8×–2.9× and tracks the level forecast |
+| P30 | **§11.5's forecast gate must render a verdict on the registered artifact.** A method the gate cannot score reports `NOT PRODUCED`, which blocks — but blocking is not evidence, and a forecast that is never judged cannot be defended or refuted | §11.5 | On the v0.8 run **nine of the forecast gate's ten measured checks** — per-venue coverage, Kupiec, and Christoffersen, across three venues — reported `NOT PRODUCED` on **both** sealed eras, because P19's state-space candidate does not pass through the shared point-forecast path. §11.5's first gate had never once tested the artifact it gates |
+| P31 | **Four release thresholds are revised, and the release grade is separated from the controller's own eligibility filter** | §11.4, §11.5 | The demonstration floor (0.80) left 15 pp above the 5% admin idle floor for any reserve at all; the S2 coverage floor (0.99) graded a **synthetic** withdrawal schedule to two decimals; regime purity required **exactly zero** straddling label windows against exogenous governance action, which is unsatisfiable in principle rather than strict; and "no inert ablation" blocked a release on the *experiment's* informativeness rather than the vault's safety. Separately, S2's floor was the **same constant** the optimiser filters candidate allocations with, so relaxing the release bar would have silently relaxed the controller's own safety filter |
+| P32 | **A threshold revised after a sealed era is opened is disclosed as post-hoc, and its justification may not reference the result it produces** | §11.5, §13 | P31's four revisions were made knowing which checks blocked. P29's re-specification was not: it was derived from calibration-era measurements alone and is **stricter** than the form it replaces above 6.90% APY. The two are not equivalent evidence and the report must not present them as such. The non-inferiority margin was left at 43 bps precisely because raising it could only have been justified by the result it would produce |
+| P33 | **A forecast horizon that §11.5 cannot test is not admissible.** A candidate whose calibration cannot be falsified on the registered sealed eras is dropped from the grid, however well it scores on §7.3's loss | §7.2, §7.3, §11.5 | §7.3's loss rewards a LONG horizon — signal-to-noise rises roughly in proportion to $H$ (§7.1) — and selected $H$ = 14d. §11.5's gate requires a SHORT one: Christoffersen tests independence on NON-OVERLAPPING windows, and thinning an 86-day era to 14-day windows leaves **9** observations against a 30 minimum, so the test reported `NOT PRODUCED` for every venue on both eras. Regime purity degrades identically — a 14× longer label window straddles ~14× more governance changes, measured at **33.4%** against **5.18%** at $H$ = 1d. Nothing in v0.8 reconciled the two sections; P33 resolves it in favour of testability |
+| P34 | **A venue in a failed state is outside the forecast's domain, and §11.4's redeemability evidence must distinguish an allocator's error from a venue's failure** | §6.1, §11.4, §12 | On 2026-08-27 Moonwell USDC went from $2,105,538 of withdrawable cash at 09:00 to **$1 at 11:00** — $2.3M borrowed in a single hour — and then advertised 87–90% APY for fourteen days with zero cash behind it. The preceding 24 hours show utilization oscillating in an 83.9–85.0% band: there is no deterioration to detect at hourly resolution. §6's admission rules correctly refuse ENTRY to such a venue (`cash = 0` fails `NO_SYNC_LIQUIDITY` on both branches), but no rule forces an EXIT, and at the larger tiers no exit was possible — a multi-million-dollar position against $269,578 of remaining cash cannot be unwound at any price. The resulting Kupiec rejection on that venue measures the exploit, not the forecast |
+| P35 | **Where an ablation of a liquidity-aware mechanism improves BOTH yield and redeemability, the mechanism is reported as unvindicated on that era** | §8.2, §11.3 | At the ten-million tier a reserve-matched baseline deployed **80.8%** of the vault, held stressed coverage of **1.000**, and earned **2.59%**, against SRCLA's 42.7%, 0.942 and 1.56%. More capital at work, better redeemability, and 66% more yield — without the capacity curves, the exitable-fraction weighting, or the movement-cost hurdle. §11.3 previously reported an ablation's yield delta; it must also report when removing a *safety* mechanism makes a policy *safer*, because that is evidence the mechanism is mis-specified rather than merely expensive |
+
+
+**What P29 is not.** It is not a relaxation. The multiplicative bound is
+*lower* than the additive one wherever the forecast sits above the venue's
+mean — at Aave's 90–100% utilization band, where the mean forecast is 7.02%,
+the relative haircut is larger — and looser only below the crossover, which is
+precisely the regime the vault's own market impact creates. The registered
+crossovers are 6.90% APY (Aave), 6.51% (Compound), and 4.54% (Moonwell). It
+also makes §7.2's two registered targets consistent for the first time: the
+second target, the withdrawable-cash bound, has always been relative and is
+applied by exactly this arithmetic.
+
+**What P31 is.** A threshold this project registered is not a standard drawn
+from a literature — no prior work specifies release criteria for a sustainable
+pooled lending vault, which is the gap §3 exists to describe. That makes these
+values revisable. It also makes pre-registration the *only* thing that gave
+them meaning, so revising them costs evidential weight, and P32 exists to make
+that cost visible rather than to absorb it.
 
 ## 1. Introduction
 
@@ -521,9 +620,39 @@ The protocol-exact origin curve supplies the capacity effect of $x$; historical 
 The planning input is a lower prediction bound for the next outcome, not a confidence interval around an estimated mean. If $\widehat\mu_{i,t,H}(x)$ is a deterministic point forecast and $q_{\alpha,i,t}$ is a calibrated lower quantile of completed horizon residuals, then:
 
 $$
-\ell_{i,t,H}(x)=\widehat\mu_{i,t,H}(x)+q_{\alpha,i,t},
-\qquad q_{\alpha,i,t}\le 0.
+\ell_{i,t,H}(x)=\widehat\mu_{i,t,H}(x)\,\bigl(1+q^{\mathrm{rel}}_{\alpha,i,t}\bigr),
+\qquad -1\le q^{\mathrm{rel}}_{\alpha,i,t}\le 0.
 $$
+
+**The haircut is proportional to the quantity it is uncertain about (P29).**
+Versions 0.4 through 0.8 subtracted a per-venue constant,
+$\ell=\widehat\mu+q_\alpha$. That form is unsound here for a reason specific
+to this system: $\widehat\mu_{i,t,H}(x)$ is evaluated **at the candidate
+allocation** $x$, so §6's capacity curves have already compressed it by the
+vault's own market impact. A constant subtracted from a compressed rate
+consumes a growing share of a shrinking edge, and past a certain vault size it
+exceeds the edge outright — at which point the bound is negative, the venue can
+never clear a movement hurdle, and the capital stays idle no matter how
+attractive the venue is. The registered Aave quantile is −1.159% APY, so every
+Aave allocation large enough to pull the post-deposit rate below 1.159%
+received a negative bound.
+
+The multiplicative form is what the calibration data supports, not merely what
+avoids the pathology. Splitting the same residuals by the utilization they were
+earned at, the 5% lower quantile of the **absolute** error varies by 2.9× to
+5.9× across bands, while the **relative** error varies by 1.8× to 2.9× and
+tracks the level being forecast; Appendix F tabulates both. The error is
+proportional to what is being predicted, so the bound is too.
+
+It is not a weakening. Where $\widehat\mu$ exceeds the venue's mean the
+relative haircut is *larger* than the constant it replaces — the registered
+crossovers are 6.90% APY (Aave), 6.51% (Compound), 4.54% (Moonwell) — so the
+bound tightens in exactly the high-rate, high-utilization states where the
+measured error is worst, and loosens only where the vault's own size created
+the compression. $q^{\mathrm{rel}}$ is clamped at $-1$: the bound floors at
+zero and never inverts. It also aligns §7.2's two registered targets, since the
+withdrawable-cash bound has always been relative and applies this same
+arithmetic.
 
 The quantile is indexed by market because venues differ in rate smoothness: a single
 pooled quantile that covers a volatile series over-covers a smooth one and vice versa.
@@ -541,16 +670,18 @@ signal-to-noise ratio of the quantity every downstream rule consumes therefore
 rises roughly in proportion to $H$ — measured at 1.5–2.6 at one day and
 15.8–24.6 at fourteen.
 
-Two rules follow, and v0.6 observed neither. A conservative bound
-$\ell=\hat\mu+q_\alpha$ subtracts a near-constant from a linearly growing
-quantity, so at a short horizon it can subtract most of the return: at $H$ = 1
-day the registered artifact's bound removes 3.87 percentage points of
-annualized return from every venue, against realized venue means of 4.86% to
-6.13%. And any threshold expressed in horizon-return units inherits the same
-scaling, so an economic hurdle stated that way is silently a function of a
-forecasting choice. §7.3 therefore selects $H$ against the decision it feeds
-(P18), and §9.1 states its hurdle in annualized units that do not depend on $H$
-at all (P15).
+Two rules follow, and v0.6 observed neither. The **additive** bound
+$\ell=\hat\mu+q_\alpha$ subtracted a near-constant from a linearly growing
+quantity, so at a short horizon it removed most of the return: at $H$ = 1 day
+the v0.6 artifact's bound removed 3.87 percentage points of annualized return
+from every venue, against realized venue means of 4.86% to 6.13%. P29's
+multiplicative form removes the horizon interaction at its root, because a
+fraction of a linearly growing quantity grows with it; what remains is the
+second rule, which P29 does not address. Any threshold expressed in
+horizon-return units still inherits $H$'s scaling, so an economic hurdle stated
+that way is silently a function of a forecasting choice. §7.3 therefore selects
+$H$ against the decision it feeds (P18), and §9.1 states its hurdle in
+annualized units that do not depend on $H$ at all (P15).
 
 ### 7.2 Registered candidate methods
 
@@ -1282,6 +1413,86 @@ Fork replay improves execution realism but cannot reproduce all historical mempo
 
 The architecture is a research-reproducible core with a production-hardening path, not audited production software. No user-fund deployment should infer safety from the paper or passing prototype tests alone.
 
+### 13.1 What the completed evaluation does not license (v0.9)
+
+Six statements below are load-bearing. A reader who takes only the headline
+result from §14 and none of these has misread the study.
+
+**`heldout-c` is design data, and this is not a clean pre-registered test of
+it.** An earlier registered run opened both sealed eras and returned `FAIL`.
+Its results then informed two changes made before the run reported here: P29's
+re-specification of the uncertainty term, and P31's revision of four release
+thresholds. By §2.2's own standard `heldout-c` has informed the design of the
+controller it was meant to test, and every subsequent result against it is a
+**confirmatory re-run, not a fresh test**. The two changes do not carry equal
+weight: P29 was derived from calibration-era measurements alone (Appendix F.1)
+and is stricter than the form it replaces above 6.90% APY, whereas P31's
+threshold revisions were made knowing which checks blocked (P32). The only era
+carrying no design knowledge of this controller is a future one, and
+`heldout-b` is open-ended and continues to accrue.
+
+**The forecast's lower bound is not calibrated out of sample, and no rule the
+study can justify makes it so.** Kupiec rejects on every venue on both eras.
+Appendix F.2 tests three frozen estimators — pooled, utilization-banded, and
+rolling-window — on a walk-forward split inside calibration, and the best
+estimator differs per venue while `moonwell-usdc` fails under all of them.
+Selecting per venue would be fitting to the test. The direction of failure is
+almost uniformly **over**-coverage: 0.00% breaches against 1.00% expected on
+`aave-v3-usdc` and `compound-v3-usdc`. That is the conservative direction for a
+safety bound, and its cost is already counted twice elsewhere — in forgone
+yield and in the capital-at-work floor — but it remains an uncalibrated
+estimate and §11.5 is correct to block on it.
+
+**Sustainability is not demonstrated at the ten-million tier, and a simpler
+policy dominates there.** Appendix F.6: a reserve-matched baseline deploys
+80.8% with stressed coverage of 1.000 and earns 2.59%, against SRCLA's 42.7%,
+0.942 and 1.56%. The paper's proposition survives this; the claim that this
+controller is the right response to it, above one million USDC, does not.
+
+**Three ablations are inert.** H5, H6 and H7 produced byte-identical decision
+sequences to SRCLA on at least one registered era, so any delta attributed to
+the component each removes is noise. §11.3 cannot speak to those three
+mechanisms' contribution on this data.
+
+**Two §11.5 sustainability clauses are NOT EVALUATED at all.** S3 grades only
+the venue-stress bound; its registered utilization-ceiling clause is not
+measured. S4 grades action validity — no deploy into a paused or absent venue,
+no divest from an empty one — and not §11.5's named classes of cap, dependency,
+reserve and loss violations or unrecoverable plan state. Those columns are
+named for what they measure, not for the clause they sit under, and a `PASS`
+there is not evidence about the clause.
+
+**P8's significance multiplier `k` did not resolve**, so every result depending
+on it is provisional; and **withdrawal demand is a registered synthetic
+schedule**, since the vault has no Base mainnet redemption history. No figure
+in this document is evidence about real user redemption behaviour.
+
+### 13.2 The venue-failure confound
+
+Sealed era `heldout-b` contains an exogenous venue failure (Appendix F.3):
+Moonwell USDC lost its entire withdrawable cash within one hour on 2026-08-27
+and advertised 87–90% APY for the following fourteen days with nothing behind
+it. Fourteen of that era's seventeen days are therefore a period in which one
+of three admitted venues was in a failed state.
+
+This confounds `heldout-b` in both directions and the report must not be read
+without it. Against the controller: SRCLA held a position in that venue when it
+failed, and its stressed coverage there (0.878 at the two smallest tiers) and
+its 7.55% Kupiec breach rate on that venue both reflect the exploit rather than
+a forecasting or allocation error — no bound calibrated on a functioning market
+predicts a pool being emptied in an hour. In the controller's favour, and
+equally important to state: §6's admission rules correctly refused *entry* to
+the drained venue at every subsequent origin, and the 87–90% rate it was
+advertising was refused as a result. What no rule supplied was an *exit*, and
+at the larger tiers no exit existed to supply.
+
+`heldout-b` is retained and reported because excluding an era after seeing its
+result is precisely the practice this study's registration exists to prevent.
+It is reported with this confound named, and the yield figures it produces —
+SRCLA's 33.40% at the 10k tier among them — are annualizations of a
+seventeen-day window containing an exploit, and are not evidence of attainable
+return.
+
 ## 14. Conclusion
 
 SRCLA turns “move USDC to the best yield” into an explicit and bounded process. It admits only verified markets, simulates the rate after the vault's allocation, calibrates a deterministic lower prediction bound, chooses a stress-feasible portfolio under market and dependency caps, preserves a dynamic idle reserve, and moves capital only when conservative gain exceeds complete cost. Immutable contracts enforce the safety envelope; replaceable adapters isolate protocol mechanics; and an auditable off-chain service performs forecasting, optimization, staged execution, and recovery.
@@ -1331,6 +1542,101 @@ completed — the correct conclusion is that SRCLA is a specified research syste
 with a diagnosed and corrected controller and a release criterion that finally
 tests what the system is for: not the highest yield, but a yield that can be
 withdrawn.
+
+### 14.1 What version 0.9 establishes, and what it does not
+
+The registered evaluation has now been run to completion on both sealed eras.
+**It returns `FAIL`.** That result is reported here rather than obtained by
+adjustment, and what follows separates what the data supports from what it does
+not.
+
+**Established — the proposition.** The highest available yield is frequently
+not redeemable, and this is now measured rather than argued. At the
+ten-million tier of an 86-day sealed era, the policy that always selects the
+highest displayed rate earned the study's best return, 3.63% APY, holding
+**zero** stressed liquid coverage; the best single-venue policy earned 3.25% at
+0.151. B4 quoted an identical 3.63% at every tier from ten thousand to ten
+million dollars, which is the arithmetic signature of a policy that never
+prices its own impact. The market then supplied a second demonstration the
+study did not design: on 2026-08-27 a Moonwell USDC pool lost its entire
+withdrawable balance within one hour and advertised 87–90% APY for the
+following fourteen days with nothing behind it. **The highest annual percentage
+yield in two years of Base mainnet data was quoted by a venue from which no
+depositor could recover a dollar.**
+
+**Established — SRCLA's sustainability below a measured capacity threshold.**
+At ten thousand, one hundred thousand and one million USDC, SRCLA held stressed
+coverage of 1.000, 1.000 and 0.963, filled every attempted redemption,
+completed a full exit within a single origin, kept 91.3% of capital at work,
+and delivered 3.23–3.27% net APY with a displayed-versus-realized gap of 0.19
+percentage points — the narrowest of any deployed policy in the study. Within
+that range the controller does what it was specified to do: it earns a
+reasonable rate and the rate it reports is the rate it can pay out.
+
+**Not established — sustainability at ten million, and this controller's
+necessity.** Above one million USDC the same machinery becomes
+counterproductive. SRCLA deployed 42.7% of the vault and returned 1.56%, and
+the shortfall is entirely idle capital: every dollar it did deploy earned
+3.655%, the highest per-dollar rate at any tier. A reserve-matched baseline
+carrying none of the capacity curves, exitable-fraction weighting or
+movement-cost hurdles deployed 80.8% at the same tier, held coverage of 1.000,
+and earned 2.59%. **More capital at work, better redeemability, and 66% more
+yield.** The study therefore establishes the phenomenon and prices it, and
+locates a threshold above which its own controller is not the right answer to
+it. That is a negative result about SRCLA, and it is reported as one.
+
+**Not established — calibration of the forecast.** Kupiec rejects on every
+venue on both eras, almost always for over-coverage. Three frozen estimators
+were tested on a walk-forward split inside the calibration era; none attains
+two-sided coverage across all three venues, and choosing per venue would be
+fitting to the test (Appendix F.2). §7.2's registered target is reported as
+unattained rather than repaired.
+
+### 14.2 Two findings about method
+
+Two results here are independent of whether SRCLA is a good allocator, and may
+outlast it.
+
+**A conservative bound must scale with the quantity it is uncertain about.**
+The registered uncertainty term was *subtracted* from a point forecast that
+§6's capacity curves evaluate at the candidate allocation — that is, at a rate
+the vault's own deposit has already compressed. A constant haircut therefore
+consumes a growing share of a shrinking edge and, past a certain vault size,
+exceeds it: any venue the vault compressed below 1.159% APY received a negative
+lower bound and could never clear a movement hurdle again. Under the
+multiplicative form of P29 the defect is gone, confirmed by the ablation that
+isolates it (Appendix F.4, H2: −0.002 where it was previously the sole binding
+constraint). Any system whose own actions move the quantity it forecasts
+inherits this problem.
+
+**A model-selection loss and a calibration gate can disagree about the same
+hyperparameter, and nothing detects it.** §7.3's loss rewards a long forecast
+horizon because signal-to-noise rises with it; §11.5's gate requires a short
+one, because independence can only be tested on non-overlapping windows. The
+loss selected fourteen days; at fourteen days the gate had nine windows against
+a thirty-observation minimum and reported `NOT PRODUCED` for every venue, while
+regime purity degraded from 5.18% to 33.4% because a fourteen-fold longer label
+window straddles fourteen-fold more governance changes. Neither section was
+wrong on its own terms and no check compared them. P33 resolves it by admitting
+only horizons the gate can falsify — a strengthening that narrows the
+registered grid from 108 candidates to 36.
+
+### 14.3 The release position
+
+SRCLA is **not released**. On the evidence assembled here the defensible claim
+is narrower than the one this paper set out to make, and is stated as such: a
+deterministic, safety-constrained allocator that remains fully redeemable and
+honest about its advertised rate **at vault sizes up to one million USDC**,
+earning 3.23–3.27% where the best sustainable comparator earns 3.39% — and
+which, above that size, is dominated by a simpler policy and should not be
+used.
+
+The route to a claim stronger than that one runs through data, not through
+criteria. `heldout-c` has informed this design and is spent. `heldout-b` is
+open-ended and continues to accrue origins from the live collector, and it is
+the only era that will carry no design knowledge of this controller. The
+correct next step is to freeze the current specification, leave it untouched,
+and let that era grow until it can adjudicate what this one could not.
 
 ## References
 
@@ -1727,3 +2033,144 @@ The claim v0.8 puts forward is therefore *testable and currently untested*: a
 controller that deploys above the demonstration floor **and** holds
 redeemability at every tier would be a result, and no run has yet produced one.
 That is the experiment the v0.7 controller and this gate exist to make possible.
+
+## Appendix F. Measurements Behind the v0.9 Amendments
+
+Every figure here is measured, and each is labelled with the data it was
+measured on. **Only Appendix F.1 and F.2 are derived from calibration-era data
+and therefore informed the amendments themselves**; F.3 onward reports sealed-era
+outcomes, which are results, not inputs to any design decision (see §13's
+design-data disclosure).
+
+### F.1 The uncertainty term is proportional to the level being forecast (P29)
+
+Calibration era, state-space candidate, per venue, split by the venue's
+utilization at the forecast origin. `ABSOLUTE` is the 5% lower quantile of
+`realized − forecast`, annualized; `RELATIVE` is the same residuals divided by
+the forecast each was measured against.
+
+| Venue | Utilization band | n | ABSOLUTE q05 (APY) | RELATIVE q05 | Mean forecast (APY) |
+|---|---|---|---|---|---|
+| `aave-v3-usdc` | 60–70% | 1,836 | −0.875% | −0.188 | 4.322% |
+| `aave-v3-usdc` | 70–80% | 3,037 | −1.172% | −0.170 | 4.656% |
+| `aave-v3-usdc` | 80–90% | 3,714 | −0.802% | −0.137 | 5.679% |
+| `aave-v3-usdc` | 90–100% | 1,529 | −2.365% | −0.254 | 7.024% |
+| `compound-v3-usdc` | 50–60% | 609 | −0.574% | −0.179 | 3.016% |
+| `compound-v3-usdc` | 60–70% | 1,990 | −0.342% | −0.097 | 2.970% |
+| `compound-v3-usdc` | 80–90% | 4,220 | −0.858% | −0.154 | 4.495% |
+| `compound-v3-usdc` | 90–100% | 2,210 | −2.009% | −0.217 | 7.347% |
+| `moonwell-usdc` | 50–60% | 570 | −0.602% | −0.268 | 1.731% |
+| `moonwell-usdc` | 60–70% | 1,477 | −0.461% | −0.190 | 2.188% |
+| `moonwell-usdc` | 80–90% | 4,175 | −0.664% | −0.145 | 4.099% |
+| `moonwell-usdc` | 90–100% | 2,207 | −2.174% | −0.252 | 6.395% |
+
+The absolute error varies by **2.9×–5.9×** across bands; the relative error by
+**1.8×–2.9×**, and it tracks the level being forecast. The error is
+proportional to what is being predicted, so the haircut is too (P29).
+
+### F.2 No frozen quantile rule attains two-sided coverage (P32's honesty clause)
+
+Walk-forward **inside the calibration era** — fit on the first 70% of origins,
+test Kupiec on the last 30%, expected breach 1.00%. Three estimators, none of
+which was selected by looking at a sealed era. LR below 3.84 passes at 5%.
+
+| Venue | n (test) | Pooled LR | Utilization-banded LR | Rolling-1000 LR | Rolling-3000 LR |
+|---|---|---|---|---|---|
+| `aave-v3-usdc` | 3,039 | 61.1 | **2.0** | 41.1 | 61.1 |
+| `compound-v3-usdc` | 3,129 | 62.9 | 24.9 | **6.7** | 62.9 |
+| `moonwell-usdc` | 3,075 | **24.1** | 61.8 | 61.8 | 61.8 |
+
+The best estimator differs for every venue, one cell of twelve passes, and
+`moonwell-usdc` fails under all four. **Two-sided Kupiec is not attainable on
+this venue set with any frozen per-venue quantile rule the study can justify**,
+and selecting per venue would be fitting to the test. This is reported as a
+limitation of §7.2's registered target, not repaired.
+
+### F.3 The Moonwell liquidity failure of 2026-08-27 (P34)
+
+Hourly, from the archive. The venue is healthy at 09:00 and empty at 11:00.
+
+| Time (UTC) | Utilization | Supply APY | Withdrawable cash | Borrows |
+|---|---|---|---|---|
+| 08-27 09:00 | 84.4% | 3.85% | **$2,105,538** | $11,293,879 |
+| 08-27 10:00 | 98.2% | 70.16% | **$269,578** | $13,605,973 |
+| 08-27 11:00 | 100.2% | 87.38% | **$1** | $13,580,750 |
+| 08-27 → 09-06 | 100.2→100.5% | 87.4→90.3% | **$0** | ~$13.3M |
+| 09-07 → 09-10 | 100.6% | 14.5% | **$0** | ~$9.0M |
+
+$2.3M was borrowed within one hour. The preceding 24 hours show utilization
+oscillating in an 83.9–85.0% band with cash stable at $2.0–2.2M: at hourly
+resolution there is no precursor. Utilization exceeds 100% because protocol
+reserves are netted out of a pool holding no cash.
+
+**This is the paper's proposition in its purest available form.** For fourteen
+consecutive days the highest advertised rate in two years of Base mainnet data
+— 87% to 90% APY — was quoted by a venue from which no depositor could withdraw
+a dollar. It also bounds what any allocator could have done: one origin existed
+at which exit was possible at all, and at the larger tiers not even that, since
+a multi-million-dollar position cannot be unwound against $269,578 of cash.
+
+### F.4 What withholds capital at the ten-million tier (P35)
+
+Sealed era `heldout-c`, which contains no venue failure. Each ablation removes
+exactly one mechanism; the delta is against SRCLA's own capital-at-work.
+
+| Ablation | Removes | Capital at work | Net APY | Δ |
+|---|---|---|---|---|
+| — | *full controller* | 0.427 | 1.56% | — |
+| **H3** | movement-cost hurdles (§9.1) | **0.766** | 2.49% | **+0.339** |
+| **H1** | post-deposit capacity curves (§6.3–6.5) | **0.670** | 2.34% | **+0.243** |
+| **H7** | exitable-fraction weighting φ (P4) | **0.573** | 2.04% | **+0.146** |
+| H4 | dynamic reserve (§8.1) | 0.476 | 1.69% | +0.050 |
+| H6 | structural liquidity cap (P5) | 0.448 | 1.62% | +0.021 |
+| H2 | calibrated lower bound (§7.2) | 0.425 | 1.50% | −0.002 |
+
+**H2 confirms P29 repaired the defect it targeted.** Under the v0.8 artifact,
+removing the uncertainty bound raised capital-at-work from 0.390 to above 0.80
+— it was the sole binding constraint. Under P29's multiplicative form it
+changes nothing (−0.002). What now withholds capital is the three
+liquidity-aware mechanisms acting together, and they interact: the capacity
+curves compress the rate the vault's own deposit would earn, which shrinks the
+edge, which then fails the movement-cost hurdle.
+
+### F.5 Per-dollar yield is not degraded at scale — the capital is idle
+
+Sealed era `heldout-c`, SRCLA.
+
+| Tier | Net APY | Capital at work | **APY per deployed dollar** |
+|---|---|---|---|
+| 10,000 | 3.226% | 0.913 | 3.534% |
+| 100,000 | 3.236% | 0.913 | 3.544% |
+| 1,000,000 | 3.268% | 0.913 | 3.579% |
+| 10,000,000 | **1.560%** | **0.427** | **3.655%** |
+
+Every deployed dollar at the ten-million tier earns the **highest** per-dollar
+rate of any tier. `3.268% × (0.427 / 0.913) = 1.53%` against 1.56% observed:
+the shortfall is accounted for entirely by idle capital, with no residual
+attributable to price impact, venue capacity, or execution cost.
+
+### F.6 The sustainability record, and where a simpler policy dominates (P35)
+
+Sealed era `heldout-c`. Coverage is the minimum over every origin.
+
+| Policy | Tier | Net APY | Stressed coverage | Withdrawals filled | Full exit | Capital at work | Displayed − realized |
+|---|---|---|---|---|---|---|---|
+| `srcla` | 10,000 | 3.23% | **1.000** | 1.000 | 0 | 0.913 | 0.20pp |
+| `srcla` | 100,000 | 3.24% | **1.000** | 1.000 | 0 | 0.913 | 0.19pp |
+| `srcla` | 1,000,000 | 3.27% | 0.963 | 1.000 | 1 | 0.913 | 0.19pp |
+| `srcla` | 10,000,000 | 1.56% | 0.942 | 1.000 | 1 | 0.427 | 1.99pp |
+| `b2` | 10,000,000 | **2.59%** | **1.000** | 1.000 | 0 | **0.808** | 0.51pp |
+| `b2u` | 10,000,000 | 3.05% | 0.964 | 1.000 | 1 | 0.929 | 0.13pp |
+| `b3` | 10,000,000 | 2.15% | 0.566 | 1.000 | 1 | 0.615 | 1.26pp |
+| **`b1`** | 10,000,000 | **3.25%** | **0.151** | 1.000 | 1 | 0.941 | 0.09pp |
+| **`b4`** | 10,000,000 | **3.63%** | **0.000** | 1.000 | 2 | 0.996 | −0.13pp |
+
+Read the bottom two rows first: they are the proposition. The two
+highest-earning policies at the largest tier hold 0.151 and **0.000** stressed
+coverage. B4 quotes an identical 3.63% at every tier from 10k to 10M, which is
+the signature of a policy that never prices its own impact.
+
+Then read `b2`: at the same tier it deploys 80.8%, holds coverage of 1.000, and
+earns 2.59% — better than SRCLA on capital at work, on redeemability, and on
+yield simultaneously. **The study's proposition survives; the claim that this
+controller is the best response to it does not, above one million USDC.**
