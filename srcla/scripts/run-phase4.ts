@@ -51,6 +51,8 @@ import {
 import { NOT_OBSERVED, type HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { buildRunRecord, manifestConfigForRun } from '../src/evaluation/kernel/provenance.js';
 import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
+import { FIGURE_TIERS, PLOTTED, reportFigures } from '../src/evaluation/report/charts.js';
+import { REGISTERED_S2_COVERAGE_FLOOR } from '../src/evaluation/kernel/sustainability.js';
 import { forkReplayOptionsFromEnv } from '../src/evaluation/fork-runner.js';
 import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gate.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
@@ -529,6 +531,39 @@ async function runEra(
     { snapshots: dataset.snapshots, withdrawals: dataset.withdrawals ?? [] },
   );
   const record = buildRunRecord({ codeCommit: commit, manifest, evaluation });
+
+  // Figures. Written next to the report and referenced relatively, so the
+  // markdown, the SVGs and any LaTeX/Word import all resolve the same paths.
+  // FIGURE-ONLY sweep at a denser set of vault sizes. §11.1's four registered
+  // tiers are unchanged and remain the only ones any gate is scored on; this
+  // exists because four points across three decades cannot locate a capacity
+  // limit that lives entirely inside the 1M-10M step. Only the plotted
+  // policies are run, and every Nth origin, because a capacity curve is about
+  // the level rather than the fine time structure -- disclosed in the caption.
+  const figureStride = Number(arg('figure-stride') ?? 3);
+  const figureDataset = {
+    ...dataset,
+    snapshots: dataset.snapshots.filter((_, i) => i % figureStride === 0),
+  };
+  console.error(
+    `    figure sweep: ${FIGURE_TIERS.length} vault sizes x ${PLOTTED.length} policies ` +
+      `on every ${figureStride}${figureStride === 3 ? 'rd' : 'th'} origin ` +
+      `(${figureDataset.snapshots.length} of ${dataset.snapshots.length})`,
+  );
+  const figureEval = runRegisteredEvaluation({
+    dataset: figureDataset,
+    config,
+    artifact,
+    tiers: FIGURE_TIERS,
+    policyIds: PLOTTED,
+    decideOpts: DEFAULT_DECIDE_OPTS,
+    calibrationFraction: CALIBRATION_FRACTION,
+    warmupSnapshots,
+    registration,
+  });
+  const figures = reportFigures(era, figureEval, REGISTERED_S2_COVERAGE_FLOOR, figureStride);
+  for (const f of figures) writeFileSync(join(outDir, f.filename), f.svg);
+  console.error(`    figures: ${figures.map((f) => f.filename).join(', ')}`);
   const universeLiquidity = worstTotalCashLiquidity(dataset);
   console.error(
     `    worst-case venue universe: $${(universeLiquidity.worstTotalCashBase / 1_000_000n).toString()} ` +
@@ -613,6 +648,7 @@ async function runEra(
       evaluation,
       gate,
       datasetOrigins: dataset.snapshots.length,
+      figures: figures.map((f) => ({ filename: f.filename, caption: f.caption })),
       // Carried onto the run summary so `serialisableRun` can put §11.1 in
       // the JSON as data. `undefined` here IS the NOT PRODUCED case.
       forkResults,

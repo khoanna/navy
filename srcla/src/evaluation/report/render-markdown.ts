@@ -54,6 +54,13 @@ export interface RunSummary {
    * through a prose string inside a check detail.
    */
   forkResults?: readonly ForkReplayResult[] | undefined;
+  /**
+   * Figure files written alongside the report for this era, referenced by
+   * relative path. Emitted as separate `.svg` rather than inline markup
+   * because inline SVG is stripped by GitHub and by several editor previews,
+   * and a figure that silently vanishes is worse than none.
+   */
+  figures?: readonly { filename: string; caption: string }[];
 }
 
 /** One row of the DERIVED (measured) per-era coverage table — distinct from
@@ -1125,6 +1132,23 @@ export function renderReport(params: ReportParams): string {
     // before any comparison. A reader who meets the league table first reads
     // the study as a yield contest, which is the framing P24 exists to
     // invert.
+    if (run.figures !== undefined && run.figures.length > 0) {
+      out.push('### Figures');
+      out.push('');
+      out.push(
+        'Vault size is on a logarithmic axis in all three: the registered tiers span ' +
+          'three decades, and a linear axis compresses 10k, 100k and 1M into the first ' +
+          'tenth of the width — which is exactly the range where the controller behaves ' +
+          'well.',
+      );
+      out.push('');
+      for (const f of run.figures) {
+        out.push(`![${f.filename}](${f.filename})`);
+        out.push('');
+        out.push(f.caption);
+        out.push('');
+      }
+    }
     out.push('### Sustainability — the primary release criterion (§11.5)');
     out.push('');
     out.push(sustainabilityTable(run.gate));
