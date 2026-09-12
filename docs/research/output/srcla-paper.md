@@ -59,8 +59,13 @@ above it.** At the 10k, 100k and 1M tiers it held stressed coverage of 1.000,
 1.000 and 0.963, filled 100% of attempted redemptions, completed a full exit
 within one origin, kept 91.3% of capital at work, and delivered 3.23–3.27% net
 APY against a displayed-versus-realized gap of 0.19 percentage points — the
-narrowest of any deployed policy in the study. At ten million it deployed only
-42.7% of the vault and returned 1.56%. That shortfall is **entirely idle
+narrowest of any deployed policy in the study, and **every plan it proposed was
+accepted by the deployed vault on a Base fork** (63 of 64 §11.1 replays reached
+the chain; the one refusal is B4's, rejected by the vault's own cap guardrail).
+At ten million it deployed only 42.7% of the vault and returned 1.56% — a tier
+the study's own §11.5 reports `CAPACITY_INFEASIBLE`, since its registered
+stress scenario demands $5,000,000 of liquid capacity from a venue universe
+holding $3,617,388 at its worst. That shortfall is **entirely idle
 capital, not degraded execution**: every deployed dollar earned 3.655%, the
 highest per-dollar rate at any tier. Ablation attributes the withheld capital
 to the three liquidity-aware mechanisms acting together — the movement-cost
@@ -1622,6 +1627,23 @@ yield.** The study therefore establishes the phenomenon and prices it, and
 locates a threshold above which its own controller is not the right answer to
 it. That is a negative result about SRCLA, and it is reported as one.
 
+**Established — every allocation SRCLA proposed was accepted by the chain.**
+§11.1's pinned-prestate replay submitted each registered (policy, tier)'s first
+proposed rebalance to the deployed `NavyVaultSRCLA` on a Base fork, against a
+vault deployed at that tier's own scale and carrying the registered
+configuration. 63 of 64 plans reached the chain and **not one SRCLA plan was
+refused**. The single refusal is B4's — the highest-yielding baseline — whose
+plan the vault's own `capBps` guardrail rejects. The on-chain layer accepted
+everything this controller proposed and refused the policy that earns most.
+
+**Established — the largest registered tier exceeds the market.** §11.5's
+safety check reports `CAPACITY_INFEASIBLE` at ten million on `heldout-c`: the
+registered stress scenario demands $5,000,000 of synchronously liquid capacity
+against a venue universe holding $3,617,388 at its worst observed origin. P12
+anticipated this case and it has now occurred. No allocator satisfies that tier
+on this universe, which qualifies — though it does not excuse — the
+demonstration failure at that size.
+
 **Not established — calibration of the forecast.** Kupiec rejects on every
 venue on both eras, almost always for over-coverage. Three frozen estimators
 were tested on a walk-forward split inside the calibration era; none attains
@@ -1664,9 +1686,12 @@ SRCLA is **not released**. On the evidence assembled here the defensible claim
 is narrower than the one this paper set out to make, and is stated as such: a
 deterministic, safety-constrained allocator that remains fully redeemable and
 honest about its advertised rate **at vault sizes up to one million USDC**,
-earning 3.23–3.27% where the best sustainable comparator earns 3.39% — and
-which, above that size, is dominated by a simpler policy and should not be
-used.
+earning 3.23–3.27% where the best sustainable comparator earns 3.39%.
+Appendix F.7's sixteen-point sweep places the boundary more precisely than the
+registered tiers can: capital at work holds at 0.908–0.914 and coverage at or
+above 0.961 through **two million** dollars, degrades sharply at three million
+(coverage 0.961 → 0.664 in one step), and is overtaken by a reserve-matched
+baseline at four million. Above that size SRCLA should not be used.
 
 The route to a claim stronger than that one runs through data, not through
 criteria. `heldout-c` has informed this design and is spent. `heldout-b` is
@@ -2211,3 +2236,68 @@ Then read `b2`: at the same tier it deploys 80.8%, holds coverage of 1.000, and
 earns 2.59% — better than SRCLA on capital at work, on redeemability, and on
 yield simultaneously. **The study's proposition survives; the claim that this
 controller is the best response to it does not, above one million USDC.**
+
+### F.7 The capacity curve — where SRCLA stops working, and where every policy does
+
+Sealed era `heldout-c`, sixteen vault sizes. **These are the FIGURE sweep's
+numbers, not the registered ones**: they are computed on every third origin and
+therefore differ slightly from the four registered tiers scored in §11.5 (for
+example 3.48% against the registered 3.226% at ten thousand). The registered
+figures are authoritative for every gate; this curve is diagnostic, and exists
+because four tiers across three decades cannot show *where* a limit falls.
+
+| Vault | SRCLA net APY | SRCLA capital at work | SRCLA coverage | B2 net APY | **B4 net APY** | **B4 coverage** |
+|---|---|---|---|---|---|---|
+| $10,000 | 3.48% | 0.913 | 1.000 | 3.27% | **3.72%** | 1.000 |
+| $25,000 | 3.48% | 0.913 | 1.000 | 3.28% | **3.72%** | 1.000 |
+| $50,000 | 3.48% | 0.913 | 1.000 | 3.29% | **3.72%** | 1.000 |
+| $100,000 | 3.49% | 0.913 | 1.000 | 3.29% | **3.72%** | 1.000 |
+| $250,000 | 3.49% | 0.913 | 1.000 | 3.29% | **3.72%** | 1.000 |
+| $500,000 | 3.49% | 0.913 | 1.000 | 3.29% | **3.72%** | 1.000 |
+| $750,000 | 3.49% | 0.914 | 0.979 | 3.28% | **3.72%** | 1.000 |
+| $1,000,000 | 3.49% | 0.914 | 0.999 | 3.27% | **3.72%** | 1.000 |
+| $1,500,000 | 3.46% | 0.908 | 0.979 | 3.24% | **3.72%** | 1.000 |
+| $2,000,000 | 3.46% | 0.909 | 0.961 | 3.19% | **3.72%** | 1.000 |
+| $3,000,000 | 3.31% | 0.879 | **0.664** | 3.17% | **3.72%** | 0.790 |
+| $4,000,000 | 2.99% | 0.804 | **0.599** | 3.03% | **3.72%** | 0.380 |
+| $5,000,000 | 2.52% | 0.674 | **0.638** | 3.00% | **3.72%** | **0.019** |
+| $6,500,000 | 2.06% | 0.546 | 0.718 | 2.91% | **3.72%** | **0.000** |
+| $8,000,000 | 1.81% | 0.475 | 1.000 | 2.80% | **3.72%** | **0.000** |
+| $10,000,000 | 1.44% | 0.380 | 0.986 | 2.62% | **3.72%** | **0.000** |
+
+Four things are visible here that the four registered tiers cannot show.
+
+**B4 reports an identical 3.72% at every vault size from ten thousand to ten
+million dollars.** A policy whose advertised return does not move across a
+thousand-fold change in the capital deployed is a policy that never prices its
+own market impact. Its coverage over the same range goes 1.000 → 0.790 → 0.380
+→ 0.019 → 0.000. **The number a depositor would read stays constant while the
+thing it describes ceases to exist.** This single row is the paper's
+proposition, and it needed the dense grid to become visible.
+
+**SRCLA's safe range ends at about two million dollars on this venue
+universe.** Through $2M it holds capital at work at 0.908–0.914 with coverage
+at or above 0.961 and yield within 3 basis points of its small-vault rate. The
+degradation begins at $3M and is not gradual in coverage: 0.961 → **0.664** in
+one step.
+
+**The interval from three to six and a half million is the controller's worst
+region, and this is not flattering to it.** Coverage there is 0.599–0.718,
+*below* B4's 0.790 at $3M. The vault is deployed enough to be exposed and holds
+too little cash to cover a stressed redemption. Above $8M coverage recovers to
+1.000 only because capital at work has fallen to 0.475 — the vault becomes
+redeemable by ceasing to be invested, which is exactly the degenerate state
+P25's demonstration floor exists to refuse.
+
+**B2 overtakes SRCLA at four million dollars** (3.03% against 2.99%) and leads
+by 1.18 percentage points at ten million. The crossover is a measured quantity,
+not an asymptotic claim, and it is the empirical form of §14's release position.
+
+**The registered stress demand at the largest tier exceeds the market.** §11.5's
+safety check reports `CAPACITY_INFEASIBLE` at ten million on this era: the tier
+requires $5,000,000 of stressed-liquid capacity against a venue universe holding
+**$3,617,388** at its worst observed origin (2026-04-19T23:00). P12 anticipated
+exactly this. No allocator can satisfy that tier on this universe, and SRCLA's
+withdrawal at that size is in part a correct response to a scenario the market
+cannot support — which is a finding about the registered tier set as much as
+about the controller.
