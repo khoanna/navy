@@ -593,6 +593,10 @@ async function runEra(
   );
 
   const config = harnessConfig(gas, artifact);
+  // `--policies` is for DIAGNOSTIC runs only (e.g. reproducing one fork
+  // refusal). A restricted run is incomplete, and §11.5's completeness checks
+  // block it, so it can never stand in for a registered result.
+  const policyIds = arg('policies')?.split(',').map((p) => p.trim());
   const evaluation = runRegisteredEvaluation({
     dataset,
     config,
@@ -602,6 +606,7 @@ async function runEra(
     calibrationFraction: CALIBRATION_FRACTION,
     warmupSnapshots,
     registration,
+    ...(policyIds === undefined ? {} : { policyIds }),
   });
 
   const manifest = signManifest(
