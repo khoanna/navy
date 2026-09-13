@@ -23,6 +23,11 @@ phase4-run.log
 # output; commit deae8408's message records its go/no-go result.
 /evaluation-sweep-p36-*.json
 
+# P37 C6's calibration-era sweep (scripts/sweep-calibration-gap.ts). The full
+# per-origin weight series is large and re-derivable; the decision it supports
+# is committed as config/c6-calibration-gap-decision.json.
+/evaluation-sweep-c6-*.json
+
 # The retired evaluation-v2 harness that produced every report before
 # phase4:run (see CLAUDE.md). Kept locally, never tracked.
 /quarantine/evaluation-v2/

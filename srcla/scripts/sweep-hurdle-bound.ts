@@ -26,9 +26,8 @@ import { REGISTERED_ERAS } from '../src/evaluation/eras.js';
 import { loadRegisteredArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import { runRegisteredEvaluation } from '../src/evaluation/kernel/harness.js';
-import type { HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { FIGURE_TIERS } from '../src/evaluation/report/charts.js';
-import type { PolicyArtifact } from '../src/policy/types.js';
+import { arg, harnessConfig } from './lib/sweep-harness.js';
 
 const WINDOW_DAYS = 90;
 const STRIDE = 3;
@@ -44,24 +43,6 @@ interface SweepRow {
   fullExitOrigins: number | null;
   rebalances: number;
   hurdleBlocks: Record<string, number>;
-}
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
-
-/** Mirrors scripts/run-phase4.ts#harnessConfig exactly — keep the two in step. */
-function harnessConfig(gas: HarnessConfig['gas'], artifact: PolicyArtifact): HarnessConfig {
-  return {
-    vault: { adminReserveBase: 0n, minIdleBps: 500, configurationDigest: '0x' + '00'.repeat(32) },
-    markets: {},
-    defaultMarket: { capBps: 5_000, absoluteCapBase: 10n ** 15n, maxLossBps: 50, dependencyGroupIds: [] },
-    dependencyGroups: [],
-    gas,
-    horizonSeconds: artifact.horizonSeconds,
-    availabilityLagSeconds: artifact.availabilityLagSeconds,
-  };
 }
 
 async function sweep(label: string, policyIds: string[]): Promise<void> {
