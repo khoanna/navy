@@ -12,6 +12,13 @@ import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
 import {VaultGuardrails} from "./VaultGuardrails.sol";
 
 /// @notice Deploys tier vaults with USDC funding in one script
+/// @dev The §11.1 fork bench: every tier vault carries `run-phase4.ts#harnessConfig`'s registered
+///      values, and `fork-runner.ts#runForkReplays` refuses to replay on one that does not.
+///      Run without a terminal it needs `--disable-code-size-limit --non-interactive`:
+///        forge script script/DeployAndFund.s.sol --fork-url http://127.0.0.1:8545 --broadcast \
+///          --disable-code-size-limit --non-interactive
+///      Without them forge's own simulation stops at EIP-170 (the vault is over 24,576 bytes)
+///      and deploys NOTHING, yet still prints every address.
 contract DeployAndFund is Script {
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant AAVE_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
@@ -23,6 +30,8 @@ contract DeployAndFund is Script {
     address constant SWAP_ROUTER = 0x2626664C2603336E57b271C5c0b26F42121e30D0;
     address constant FACTORY = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
     address constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
+    /// @dev `run-phase4.ts#harnessConfig.defaultMarket.absoluteCapBase`, in USDC base units.
+    uint256 constant HARNESS_ABSOLUTE_CAP_BASE = 1e15;
 
     function run() external {
         uint256 deployerPk = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
@@ -151,6 +160,26 @@ contract DeployAndFund is Script {
         ordered[1] = info.compound;
         ordered[2] = info.moonwell;
         VaultGuardrails.applyTo(_vault, ordered);
+
+        // §11.1 verifies plans against the REGISTERED harness
+        // (`harnessConfig.vault.adminReserveBase = 0n`), so the bench vault carries
+        // an adminReserve of 0. VaultGuardrails' $1,000 adminReserve is a
+        // production guardrail, kept in DeployBaseSystem.s.sol. Left at $1,000
+        // here it bound at the 10k tier over the registered 500 bps floor ($500),
+        // and B4's plan reverted InsufficientIdle()
+        // (contract/audit/b4-fork-refusal-root-cause.md).
+        _vault.setAdminReserve(0);
+
+        // Same rule for the per-adapter absolute cap: registerAdapter leaves it at
+        // type(uint256).max, the harness registers
+        // `harnessConfig.defaultMarket.absoluteCapBase = 10n ** 15n`. It binds at
+        // no registered tier (10M x 5000 bps = 5e12 base units), but the runner
+        // compares registered values exactly. capBps, maxLossBps and applyTo's
+        // liquidity floor are read back and preserved.
+        for (uint256 i = 0; i < ordered.length; i++) {
+            (uint16 capBps,, uint16 maxLossBps,,, uint16 liquidityFloorBps,) = _vault.adapters(ordered[i]);
+            _vault.setAdapterRisk(ordered[i], capBps, HARNESS_ABSOLUTE_CAP_BASE, maxLossBps, liquidityFloorBps);
+        }
 
         _vault.grantRole(_vault.ADMIN_ROLE(), deployer);
         _vault.grantRole(_vault.ALLOCATOR_ROLE(), deployer);
