@@ -55,6 +55,7 @@ import type { BaselineAction } from '../replay/replay.js';
 import {
   forkDecisionHash,
   runForkReplays,
+  type ForkBenchVaultConfig,
   type ForkReplayOptions,
   type ForkReplayPlan,
 } from '../fork-runner.js';
@@ -799,7 +800,10 @@ export function runRegisteredEvaluation(
  */
 export async function runRegisteredForkReplays(
   out: RegisteredEvaluationResult,
-  opts: ForkReplayOptions,
+  // `registeredBench` is REQUIRED here: a registered replay on a vault that
+  // does not carry the registered harness values tests a different
+  // experiment, so the caller may not skip the check by omission.
+  opts: ForkReplayOptions & { registeredBench: ForkBenchVaultConfig },
 ): Promise<ForkReplayResult[]> {
   const plans: ForkReplayPlan[] = out.results.map((r) => {
     const proposal = r.firstProposal;

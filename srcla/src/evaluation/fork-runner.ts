@@ -47,6 +47,7 @@
 import { ethers, JsonRpcProvider, Contract, Wallet } from 'ethers';
 import { merkleLevels, planDomain, hashPlanAction, proofFor, ActionKind } from '../policy/steps/plan.js';
 import type { ForkReplayResult } from './kernel/gates.js';
+import type { HarnessConfig } from './kernel/decision-input.js';
 import type { PlanDraft } from '../policy/types.js';
 
 /** One proposed move, in the shape `replay/replay.ts` emits. */
@@ -134,6 +135,26 @@ export interface ForkReplayOptions {
   planExpirySeconds?: number;
   /** Gas limit for plan transactions. */
   gasLimit?: bigint;
+  /**
+   * The REGISTERED harness values every tier vault must carry
+   * (`registeredForkBench` over the `HarnessConfig` the evaluation ran on).
+   *
+   * WHY THIS EXISTS. The vault verifies a plan against ITS OWN `adminReserve`,
+   * `minIdleBps` and per-adapter limits, while the policy sized the plan
+   * against the harness's. When they differ the replay tests a different
+   * experiment. Measured: `harnessConfig` registers `adminReserveBase: 0n`, the
+   * tier vaults carried VaultGuardrails' $1,000 `adminReserve`, and B4's 10k
+   * plan reverted `InsufficientIdle()` -- recorded as the chain refusing B4's
+   * allocation (contract/audit/b4-fork-refusal-root-cause.md).
+   *
+   * When supplied, each tier vault is read before the first snapshot, and every
+   * (policy, tier) on a vault that does not carry these values is NOT PRODUCED:
+   * no plan is submitted, and the result is neither an execution nor a chain
+   * refusal. `kernel/harness.ts#runRegisteredForkReplays` requires it. Only a
+   * caller replaying a vault that makes no claim to the registered
+   * configuration (the fork-replay integration test's own vault) omits it.
+   */
+  registeredBench?: ForkBenchVaultConfig;
 }
 
 const VAULT_ABI = [
@@ -141,6 +162,12 @@ const VAULT_ABI = [
   'function totalAssets() view returns (uint256)',
   'function strategyAssets(address) view returns (uint256)',
   'function registeredAdapters(address) view returns (bool)',
+  'function adminReserve() view returns (uint256)',
+  'function minIdleBps() view returns (uint256)',
+  // NavyVaultSRCLA.sol:156 `mapping(address => AdapterConfig) public adapters`:
+  // the getter returns the struct's seven value fields in declaration order
+  // (`AdapterState` is an enum, so uint8).
+  'function adapters(address) view returns (uint16 capBps, uint256 absoluteCap, uint16 maxLossBps, uint8 state, uint256 lastSyncIdleBase, uint16 liquidityFloorBps, uint256 accountingCap)',
   'function currentConfigurationDigest() view returns (bytes32)',
   'function activePlanId() view returns (bytes32)',
   'function activePlanNextActionIndex() view returns (uint64)',
@@ -214,6 +241,105 @@ export function isChainRefusal(error: unknown): boolean {
 
 /** Marks a failure that never reached — or never got a verdict from — the chain. */
 class ForkInfrastructureError extends Error {}
+
+/**
+ * The vault values a plan is verified against, as the harness registers them
+ * or as a tier vault carries them. `adapters` is keyed by marketId.
+ */
+export interface ForkBenchVaultConfig {
+  adminReserveBase: bigint;
+  minIdleBps: number;
+  adapters: Readonly<Record<string, { capBps: number; absoluteCapBase: bigint; maxLossBps: number }>>;
+}
+
+/**
+ * Every field on which a tier vault (`onChain`) differs from the registered
+ * harness (`registered`), one human-readable entry each; empty when aligned.
+ *
+ * Pure, and exact: a registered value is a registered value, so a limit that
+ * happens not to bind at one tier is still reported. An adapter on one side
+ * only is reported by name rather than compared against zeros.
+ */
+export function forkBenchMismatches(
+  onChain: ForkBenchVaultConfig,
+  registered: ForkBenchVaultConfig,
+): string[] {
+  const out: string[] = [];
+  if (onChain.adminReserveBase !== registered.adminReserveBase) {
+    out.push(`adminReserve: on-chain ${onChain.adminReserveBase}, registered ${registered.adminReserveBase}`);
+  }
+  if (onChain.minIdleBps !== registered.minIdleBps) {
+    out.push(`minIdleBps: on-chain ${onChain.minIdleBps}, registered ${registered.minIdleBps}`);
+  }
+  const marketIds = [
+    ...new Set([...Object.keys(onChain.adapters), ...Object.keys(registered.adapters)]),
+  ].sort();
+  for (const marketId of marketIds) {
+    const chain = onChain.adapters[marketId];
+    const reg = registered.adapters[marketId];
+    if (chain === undefined) {
+      out.push(`adapter ${marketId}: registered by the harness but not registered on the vault`);
+      continue;
+    }
+    if (reg === undefined) {
+      out.push(`adapter ${marketId}: on the vault but not registered by the harness`);
+      continue;
+    }
+    if (chain.capBps !== reg.capBps) {
+      out.push(`${marketId} capBps: on-chain ${chain.capBps}, registered ${reg.capBps}`);
+    }
+    if (chain.absoluteCapBase !== reg.absoluteCapBase) {
+      out.push(`${marketId} absoluteCap: on-chain ${chain.absoluteCapBase}, registered ${reg.absoluteCapBase}`);
+    }
+    if (chain.maxLossBps !== reg.maxLossBps) {
+      out.push(`${marketId} maxLossBps: on-chain ${chain.maxLossBps}, registered ${reg.maxLossBps}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The registered bench for `marketIds`, resolved exactly as
+ * `kernel/decision-input.ts` resolves a market: its own entry in
+ * `config.markets`, else `config.defaultMarket`.
+ */
+export function registeredForkBench(
+  config: Pick<HarnessConfig, 'vault' | 'markets' | 'defaultMarket'>,
+  marketIds: readonly string[],
+): ForkBenchVaultConfig {
+  const adapters: Record<string, { capBps: number; absoluteCapBase: bigint; maxLossBps: number }> = {};
+  for (const marketId of marketIds) {
+    const m = config.markets[marketId] ?? config.defaultMarket;
+    adapters[marketId] = { capBps: m.capBps, absoluteCapBase: m.absoluteCapBase, maxLossBps: m.maxLossBps };
+  }
+  return {
+    adminReserveBase: config.vault.adminReserveBase,
+    minIdleBps: config.vault.minIdleBps,
+    adapters,
+  };
+}
+
+/** What a tier vault on the fork actually carries, for `forkBenchMismatches`. */
+async function readForkBench(
+  vault: Contract,
+  adapterByMarketId: Readonly<Record<string, string>>,
+): Promise<ForkBenchVaultConfig> {
+  const adminReserveBase = (await vault.adminReserve!()) as bigint;
+  const minIdleBps = Number((await vault.minIdleBps!()) as bigint);
+  const adapters: Record<string, { capBps: number; absoluteCapBase: bigint; maxLossBps: number }> = {};
+  for (const [marketId, address] of Object.entries(adapterByMarketId)) {
+    // An address the vault never registered is absent from the bench, not an
+    // adapter with zero limits.
+    if (!((await vault.registeredAdapters!(address)) as boolean)) continue;
+    const cfg = await vault.adapters!(address);
+    adapters[marketId] = {
+      capBps: Number(cfg.capBps),
+      absoluteCapBase: cfg.absoluteCap as bigint,
+      maxLossBps: Number(cfg.maxLossBps),
+    };
+  }
+  return { adminReserveBase, minIdleBps, adapters };
+}
 
 /**
  * Assemble the on-chain plan for one proposal. Mirrors
@@ -387,6 +513,8 @@ export async function runForkReplays(
       adapterByMarketId: Readonly<Record<string, string>>;
       adapters: string[];
       pinnedDigest: string;
+      /** `forkBenchMismatches` against `opts.registeredBench`; empty when aligned or unchecked. */
+      benchMismatches: readonly string[];
     }
     const contexts = new Map<string, TierContext>();
     const contextFor = async (tier: bigint): Promise<TierContext> => {
@@ -404,6 +532,12 @@ export async function runForkReplays(
         throw new Error(`${wallet.address} does not hold ALLOCATOR_ROLE on ${vaultAddress}`);
       }
       const pinned = await readPrestate(provider, vault, asset, adapters);
+      // Read at the untouched prestate, like the fingerprint: these are the
+      // values every plan for this tier would be verified against.
+      const benchMismatches =
+        opts.registeredBench === undefined
+          ? []
+          : forkBenchMismatches(await readForkBench(vault, adapterByMarketId), opts.registeredBench);
       const ctx: TierContext = {
         vaultAddress,
         vault,
@@ -412,6 +546,7 @@ export async function runForkReplays(
         adapterByMarketId,
         adapters,
         pinnedDigest: fingerprintDigest(pinned),
+        benchMismatches,
       };
       contexts.set(key, ctx);
       return ctx;
@@ -436,6 +571,25 @@ export async function runForkReplays(
       // §11.1: THE SAME pinned prestate, before EVERY candidate policy.
       const tierCtx = await contextFor(plan.tier);
       const { vault, asset, assetAddress, adapters, pinnedDigest } = tierCtx;
+      // THE BENCH GUARD, before anything is submitted. A tier vault that does
+      // not carry the registered harness values verifies the plan against
+      // limits the policy never optimised under, so whatever the chain said
+      // would be a verdict on the bench, not on the allocation. NOT PRODUCED:
+      // no plan is submitted, and the result is neither an execution nor a
+      // chain refusal. Nothing touched the chain, so the snapshot stays valid.
+      if (tierCtx.benchMismatches.length > 0) {
+        results.push({
+          policyId: plan.policyId,
+          tier: plan.tier,
+          prestateBlock: opts.prestateBlock,
+          executed: false,
+          detail:
+            `fork bench does not carry the registered harness values: ` +
+            `${tierCtx.benchMismatches.join('; ')}. ${label} NOT PRODUCED: no plan was submitted ` +
+            `to ${tierCtx.vaultAddress}, so this is not a chain verdict on the allocation`,
+        });
+        continue;
+      }
       // `evm_revert` restores the WHOLE chain, so one snapshot serves every
       // tier; only the fingerprint being compared is per-tier.
       const reverted = (await provider.send('evm_revert', [snapshotId])) as boolean;

@@ -65,7 +65,7 @@ import {
   venueFailureWarning,
 } from '../src/evaluation/report/charts.js';
 import { REGISTERED_S2_COVERAGE_FLOOR } from '../src/evaluation/kernel/sustainability.js';
-import { forkReplayOptionsFromEnv } from '../src/evaluation/fork-runner.js';
+import { forkReplayOptionsFromEnv, registeredForkBench } from '../src/evaluation/fork-runner.js';
 import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gate.js';
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 import {
@@ -709,8 +709,18 @@ async function runEra(
   // passed and the completeness check reports NOT PRODUCED and blocks. There
   // is deliberately no default that lets the gate pass without the evidence.
   const forkOpts = await forkReplayOptionsFromEnv();
+  // The bench is checked against the SAME `config` the evaluation ran on, over
+  // the markets its dataset holds: a tier vault that does not carry those values
+  // is NOT PRODUCED rather than replayed.
   const forkResults =
-    forkOpts === null ? undefined : await runRegisteredForkReplays(evaluation, forkOpts);
+    forkOpts === null
+      ? undefined
+      : await runRegisteredForkReplays(evaluation, {
+          ...forkOpts,
+          registeredBench: registeredForkBench(config, [
+            ...new Set(dataset.snapshots.flatMap((o) => o.snapshots.map((m) => m.marketId))),
+          ]),
+        });
   console.error(
     forkResults === undefined
       ? '    §11.1 fork replay: NOT PRODUCED (set SRCLA_FORK_REPLAY_RPC_URL / ' +
