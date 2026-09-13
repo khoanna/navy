@@ -4,8 +4,8 @@
 **Scope:** `contract/src/NavyVaultSRCLA.sol`, `contract/src/interfaces/IVaultEvents.sol`,
 `contract/script/DeployBaseSystem.s.sol`, `contract/script/VerifyBaseSystem.s.sol`,
 `contract/script/ReleaseScope.sol`
-**Spec:** `docs/superpowers/specs/2026-09-13-srcla-p37-release-gates-design.md` (G5, "Contract — deposit cap")
-**Plan:** `docs/superpowers/plans/2026-09-13-srcla-p37-track3-deposit-cap.md`
+**Spec:** the P37 release-gates design (G5, "Contract — deposit cap") — a local-only design document, not in the repository
+**Plan:** the Track 3 deposit-cap implementation plan — a local-only design document, not in the repository
 **Audit status:** `audit/AUDIT-REPORT.md` describes pre-Phase-2 bytecode and
 `audit/2026-09-07-phase2-changes.md` the Phase 2 delta. This file is the P37 delta on top of both.
 
