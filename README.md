@@ -171,8 +171,8 @@ To run one srcla test file:
 NODE_OPTIONS='--experimental-vm-modules' pnpm exec jest --runInBand test/unit/evaluation/charts.spec.ts
 ```
 
-`test/unit/evaluation/paper-amendments.spec.ts` checks the paper, which is not in this repository, so it fails in
-a fresh clone.
+`test/unit/evaluation/paper-amendments.spec.ts` checks the paper, which is not in this repository, so it is
+skipped in a fresh clone.
 
 ---
 

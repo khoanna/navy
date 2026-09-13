@@ -1,11 +1,14 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-const paper = readFileSync(
-  join(process.cwd(), '../docs/research/output/srcla-paper.md'), 'utf8',
-);
+// docs/ is untracked, so a fresh clone (and CI) has no paper to check. Skip
+// rather than fail there; a skipped suite reports nothing and never passes.
+const PAPER_PATH = join(process.cwd(), '../docs/research/output/srcla-paper.md');
+const HAS_PAPER = existsSync(PAPER_PATH);
+const describePaper = HAS_PAPER ? describe : describe.skip;
+const paper = HAS_PAPER ? readFileSync(PAPER_PATH, 'utf8') : '';
 
-describe('paper v0.10', () => {
+describePaper('paper v0.10', () => {
   it('declares version 0.10', () => {
     expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.10/);
   });
@@ -38,7 +41,7 @@ describe('paper v0.10', () => {
   });
 });
 
-describe('paper v0.8 -> v0.10 amendments', () => {
+describePaper('paper v0.8 -> v0.10 amendments', () => {
   it('carries amendment records for v0.6 -> v0.7 and v0.7 -> v0.8', () => {
     expect(paper).toContain('Amendment Record (v0.6 → v0.7)');
     expect(paper).toContain('Amendment Record (v0.7 → v0.8)');

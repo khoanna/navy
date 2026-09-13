@@ -83,5 +83,5 @@ Audited — see [`audit/AUDIT-REPORT.md`](audit/AUDIT-REPORT.md), the per-area f
 `audit/2026-09-07-phase2-changes.md`. The audit documents also cover the `NavyPayments` gateway, which was
 removed from this repository on 2026-09-13 (it survives in git history).
 
-**Mainnet gates** (see `../docs/PRODUCTION.md`): independent audit, owner → multisig/timelock, KMS/HSM key
-custody, monitoring, and a bug bounty.
+**Mainnet gates:** independent audit, owner → multisig/timelock, KMS/HSM key custody, monitoring, and a bug
+bounty.

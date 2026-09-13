@@ -41,8 +41,9 @@ From the final security review of the contracts (branch `feat/navy-vault-rebalan
 
 ## Base SRCLA vault — deployment package
 
-**Not yet deployed.** The deployment package is ready; production deployment requires the gates in
-`../docs/PRODUCTION.md` and a redeploy against the Phase 2 bytecode (see the top of this file).
+**Not yet deployed.** The deployment package is ready; production deployment requires the mainnet gates
+(independent audit, owner → multisig/timelock, KMS/HSM key custody, monitoring, a bug bounty) and a redeploy
+against the Phase 2 bytecode (see the top of this file).
 
 ### Deployment artifacts
 
