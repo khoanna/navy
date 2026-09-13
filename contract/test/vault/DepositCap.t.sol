@@ -77,7 +77,11 @@ contract DepositCapTest is Test {
         _deposit(alice, 400_000e6);
 
         assertEq(vault.maxDeposit(bob), 600_000e6, "room is the cap minus totalAssets");
-        assertEq(vault.maxMint(bob), vault.convertToShares(600_000e6), "maxMint is the room in shares, rounded down");
+        // alice's deposit was the vault's first, so its exchange rate is
+        // exactly 1e6 shares per asset unit (the 6-decimal offset with no
+        // rounding at an empty vault): convertToShares(600_000e6) here is
+        // exactly 600_000e12, not an approximation.
+        assertEq(vault.maxMint(bob), 600_000e12, "maxMint is the room in shares, rounded down");
     }
 
     function test_depositUpToTheCapSucceedsAndOneMoreUnitReverts() public {
@@ -134,6 +138,7 @@ contract DepositCapTest is Test {
         vm.prank(admin);
         vault.setDepositCap(100_000e6);
         assertEq(vault.maxDeposit(bob), 0, "a cap below NAV admits nothing");
+        assertEq(vault.maxMint(bob), 0, "nor does it admit any mint");
 
         vm.prank(alice);
         uint256 assetsOut = vault.redeem(shares / 10, alice, alice);
@@ -209,5 +214,215 @@ contract DepositCapTest is Test {
             vm.stopPrank();
             assertLe(vault.totalAssets(), cap, "a mint of maxMint shares stays within the cap");
         }
+    }
+
+    function test_zeroCapClosesDepositsAndMints() public {
+        uint256 shares = _deposit(alice, 500_000e6);
+
+        vm.prank(admin);
+        vault.setDepositCap(0);
+
+        assertEq(vault.maxDeposit(bob), 0, "a zero cap admits no deposit");
+        assertEq(vault.maxMint(bob), 0, "nor any mint");
+
+        vm.startPrank(bob);
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, bob, 1, 0));
+        vault.deposit(1, bob);
+
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, bob, 1, 0));
+        vault.mint(1, bob);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        uint256 assetsOut = vault.redeem(shares, alice, alice);
+        assertEq(assetsOut, 500_000e6, "a zero cap never blocks a holder's full redemption");
+    }
+
+    function test_capReturnsZeroWhenSyncIsUnauthorised() public {
+        vm.prank(admin);
+        vault.setDepositCap(CAP);
+
+        DepositCapMockAccountant accountant = new DepositCapMockAccountant();
+        accountant.setVault(stranger); // not the vault: syncForShareAction is unauthorised
+        vm.prank(admin);
+        vault.setRewardAccountant(address(accountant));
+
+        assertEq(vault.maxDeposit(bob), 0, "an unauthorised accountant blocks deposits even under a live cap");
+        assertEq(vault.maxMint(bob), 0, "and mints");
+    }
+
+    function test_capReturnsZeroWhenCacheIsStale() public {
+        vm.prank(admin);
+        vault.setDepositCap(CAP);
+
+        DepositCapMockAccountant accountant = new DepositCapMockAccountant();
+        accountant.setVault(address(vault));
+        accountant.setIssuanceReady(false);
+        vm.prank(admin);
+        vault.setRewardAccountant(address(accountant));
+
+        assertEq(vault.maxDeposit(bob), 0, "a stale material cache blocks deposits even under a live cap");
+        assertEq(vault.maxMint(bob), 0, "and mints");
+    }
+
+    /// @notice P37 fix-round Important 1: maxDeposit/maxMint read the vault's
+    ///         CACHED NAV, exactly like previewMint/maxWithdraw. deposit()/
+    ///         mint() re-sync every adapter first, so the cap they enforce is
+    ///         always checked against the freshly-synced NAV - only the
+    ///         advisory view can overstate the room, by whatever adapter
+    ///         interest accrued since the last sync.
+    function test_staleAdapterCacheOverstatesRoomButTheCapHolds() public {
+        uint256 v = 400_000e6;
+        uint256 delta = 50_000e6;
+
+        DepositCapMockAdapter adapterMock = new DepositCapMockAdapter(address(vault), address(usdc), v);
+        vm.prank(admin);
+        vault.registerAdapter(address(adapterMock), 10_000, 10_000, "mock");
+        vm.prank(admin);
+        vault.setDepositCap(CAP);
+
+        // Registration's tolerant sync (NavyVaultSRCLA.sol's registerAdapter)
+        // caches the adapter's value at registration time: V.
+        assertEq(vault.totalAssets(), v, "the cached NAV after registration is V");
+
+        uint256 staleRoom = CAP - v; // 1_000_000e6 - 400_000e6 = 600_000e6
+        uint256 syncedRoom = CAP - (v + delta); // 1_000_000e6 - 450_000e6 = 550_000e6
+
+        // Raise the adapter's live value WITHOUT a vault sync: the cache is
+        // now stale by delta.
+        adapterMock.setReported(v + delta);
+
+        // (i) the view reads the cached NAV, so it still advertises the
+        // stale room.
+        assertEq(vault.maxDeposit(bob), staleRoom, "(i) maxDeposit reads the stale cached NAV");
+
+        usdc.mint(bob, staleRoom);
+        vm.startPrank(bob);
+        usdc.approve(address(vault), staleRoom);
+        // (ii) deposit() re-syncs every adapter (updating the cache to
+        // v + delta) BEFORE OpenZeppelin's maxDeposit check, so the check
+        // runs against the freshly-synced, smaller room and rejects the
+        // stale one.
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, bob, staleRoom, syncedRoom));
+        vault.deposit(staleRoom, bob);
+        vm.stopPrank();
+
+        // (iii) the synced room succeeds - the cap itself held.
+        vm.prank(bob);
+        vault.deposit(syncedRoom, bob);
+
+        // (iv) the vault is now exactly at its cap.
+        assertEq(vault.totalAssets(), CAP, "the synced deposit fills the cap exactly");
+        assertEq(vault.maxDeposit(bob), 0, "(iv) the cap holds against the now-synced NAV");
+    }
+}
+
+/// @dev Minimal strategy adapter whose accrued value can be raised without
+///      the vault knowing until the next sync (registration, deposit, mint,
+///      or an allocator action). Mirrors the shape of RRAdapter in
+///      AllocatorRewardRefresh.t.sol and InvariantMockAdapter in
+///      NavyVaultInvariant.t.sol.
+contract DepositCapMockAdapter {
+    address internal immutable vaultAddress;
+    address internal immutable assetAddress;
+    uint256 public reported;
+
+    constructor(address vault_, address asset_, uint256 reported_) {
+        vaultAddress = vault_;
+        assetAddress = asset_;
+        reported = reported_;
+    }
+
+    function setReported(uint256 value) external {
+        reported = value;
+    }
+
+    function vault() external view returns (address) {
+        return vaultAddress;
+    }
+
+    function asset() external view returns (address) {
+        return assetAddress;
+    }
+
+    function totalAssets() external view returns (uint256) {
+        return reported;
+    }
+
+    function sync() external view returns (uint256) {
+        return reported;
+    }
+
+    function maxWithdrawable() external view returns (uint256) {
+        return reported;
+    }
+
+    function maxDeployable() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function configurationDigest() external view returns (bytes32) {
+        return keccak256(abi.encode(vaultAddress, assetAddress));
+    }
+
+    function rewardTokens() external pure returns (address[] memory) {
+        return new address[](0);
+    }
+
+    function claimableReward(address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function claimReward(address, uint256, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function deposit(uint256 assets) external returns (uint256) {
+        reported += assets;
+        return assets;
+    }
+
+    function withdraw(uint256 assets) external returns (uint256) {
+        uint256 sent = assets > reported ? reported : assets;
+        reported -= sent;
+        return sent;
+    }
+}
+
+/// @dev Minimal reward accountant mock, following the pattern of
+///      MockRewardAccountant in VaultHarvest.t.sol: no AccessControl, so its
+///      setters need no role, and it models the two states the vault's
+///      maxDeposit/maxMint gate on ahead of the cap - an unauthorised `vault`
+///      pointer and a not-ready issuance cache.
+contract DepositCapMockAccountant {
+    address public vault;
+    bool internal issuanceReady_ = true;
+
+    function setVault(address vault_) external {
+        vault = vault_;
+    }
+
+    function setIssuanceReady(bool ready) external {
+        issuanceReady_ = ready;
+    }
+
+    function cachedRewardAssets() external pure returns (uint256) {
+        return 0;
+    }
+
+    function issuanceReady() external view returns (bool) {
+        return issuanceReady_;
+    }
+
+    function configurationDigest() external pure returns (bytes32) {
+        return keccak256("deposit-cap-mock-accountant");
+    }
+
+    function recognizedRewardAssets() external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function syncForShareAction(bool) external pure returns (uint256) {
+        return 0;
     }
 }
