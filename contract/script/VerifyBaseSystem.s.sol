@@ -14,8 +14,8 @@ import {MAINNET_DEPOSIT_CAP_BASE} from "./ReleaseScope.sol";
 /// @notice Verifies Base deployment conformance without mutating state.
 /// @dev This script reads state and reverts on any mismatch - safe to run against mainnet.
 ///      Usage: forge script script/VerifyBaseSystem.s.sol --fork-url $BASE_RPC_URL
-///             --sig "run(address,address,address,address,address,address)" \
-///             <vault> <aave> <compound> <moonwell> <rewards> <admin>
+///             --sig "run(address,address,address,address,address,address,address)" \
+///             <vault> <aave> <compound> <moonwell> <rewards> <admin> <allocator>
 contract VerifyBaseSystem is Script {
     // === Constants ===
 

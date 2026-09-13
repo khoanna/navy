@@ -57,7 +57,8 @@ and `AnvilE2ETest.s.sol`. Confirm on the deployed vault:
 `DeployAndFund.s.sol`, `AnvilE2ETest.s.sol` and `DeployNavyVaultSRCLA.s.sol` leave the
 cap at its default `type(uint256).max` (uncapped): §11.1's 10M tier vault must accept
 10M. Changing it later is `vault.setDepositCap(newCap)` as `ADMIN_ROLE`; a cap at or
-below NAV closes deposits and mints, never withdrawals.
+below NAV closes deposits and mints, never withdrawals. To remove the cap, set exactly
+`type(uint256).max`; never a near-max finite value, which makes `maxMint`/`mint` revert.
 
 ## Required, as `BASE_ADMIN`
 
