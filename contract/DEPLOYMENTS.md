@@ -79,6 +79,13 @@ against the Phase 2 bytecode (see the top of this file).
 - **Allocator** (keeper bot): gets `ONLY ALLOCATOR_ROLE`
 - Admin and allocator MUST be different addresses
 
+### Deposit cap (P37)
+
+`DeployBaseSystem.s.sol` sets `depositCap = MAINNET_DEPOSIT_CAP_BASE` from `script/ReleaseScope.sol`
+($1,000,000, `1_000_000e6`); `VerifyBaseSystem.s.sol` checks it. Deposits and mints stop at the cap;
+withdrawals never do. The §11.1 tier vaults from `DeployAndFund.s.sol` stay uncapped. This is a bytecode
+change after the audit — see `audit/2026-09-13-p37-deposit-cap-changes.md`.
+
 ### Adapter allocation weights
 
 | Adapter | Target Weight | Max Slippage |
@@ -96,8 +103,8 @@ COMP and WELL routes are configured but inactive:
 ### Test results
 
 ```
-DeployBaseSystemTest:    27 passed
-VerifyBaseSystemTest:    13 passed (USDC decimals check requires forked mainnet)
+DeployBaseSystemTest:    30 passed
+VerifyBaseSystemTest:    16 passed (USDC decimals check requires forked mainnet)
 BaseDeploymentAcceptanceTest: 6 tests (requires running Anvil fork)
 ```
 

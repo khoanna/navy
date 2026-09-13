@@ -52,9 +52,13 @@ simulation pass. Fund accounts with `cast rpc anvil_impersonateAccount` + `cast 
 
 ## Admin operations
 
-`NavyVaultSRCLA` (owner): `setAdapterRisk`, `setAdapterState`, `setAdminReserve`, `setMinIdleBps`,
-`setMaxSynchronousLossBps`, `setDependencyGroup`, `setRewardAccountant`, `setRewardExecutor`,
-`setRewardTokenRoute`. Ownership transfer is two-step (the recipient must call `acceptOwnership`).
+`NavyVaultSRCLA` (`ADMIN_ROLE`): `setAdapterRisk`, `setAdapterState`, `setAdminReserve`, `setMinIdleBps`,
+`setMaxSynchronousLossBps`, `setDependencyGroup`, `setDepositCap`, `setRewardAccountant`, `setRewardExecutor`,
+`setRewardTokenRoute`, `registerAdapter`, `setWithdrawalOrder`, `pause`, `unpause`. Roles are OpenZeppelin
+`AccessControl`; `DEFAULT_ADMIN_ROLE` grants and revokes them. There is no `Ownable` owner.
+
+`setDepositCap` (P37): the most `totalAssets()` deposits and mints may reach. Default `type(uint256).max`
+(uncapped); `DeployBaseSystem.s.sol` sets $1,000,000, from `script/ReleaseScope.sol`. It never bounds withdrawals.
 
 The **allocator** role is deliberately narrow: it can only move funds *between allowlisted adapters*, never to
 an EOA, and every move is bounded by `capBps` / `minIdleBps` / `maxLossBps` on-chain. That allocator is the

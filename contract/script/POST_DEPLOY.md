@@ -48,6 +48,17 @@ and `AnvilE2ETest.s.sol`. Confirm on the deployed vault:
    by `test_aDustSheddingVenueThatIsLastWithLiquidityStillRevertsTheRedemption`. Fixing it
    needs an absolute dust allowance on the vault, not a different bps value.
 
+### Set only by `DeployBaseSystem.s.sol` (verify, do not re-set)
+
+| Check | Value | Why |
+|---|---|---|
+| `depositCap()` | `1000000000000` ($1,000,000) | P37 release scope. The value lives in `script/ReleaseScope.sol` (`MAINNET_DEPOSIT_CAP_BASE`). `maxDeposit`/`maxMint` report the room below it; deposits and mints above it revert `ERC4626ExceededMaxDeposit`/`ERC4626ExceededMaxMint`. Withdrawals are never bounded, and accrued yield may carry NAV past the cap. `VerifyBaseSystem.s.sol` fails with `Mismatch("Vault deposit cap")` if it differs. |
+
+`DeployAndFund.s.sol`, `AnvilE2ETest.s.sol` and `DeployNavyVaultSRCLA.s.sol` leave the
+cap at its default `type(uint256).max` (uncapped): §11.1's 10M tier vault must accept
+10M. Changing it later is `vault.setDepositCap(newCap)` as `ADMIN_ROLE`; a cap at or
+below NAV closes deposits and mints, never withdrawals.
+
 ## Required, as `BASE_ADMIN`
 
 1. **`accountant.setUsdcUsdFeed(<Base USDC/USD Chainlink feed>)`**
