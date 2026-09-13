@@ -122,7 +122,7 @@ pnpm prisma:push                  # after schema.prisma changes — Prisma **5**
 
 **srcla Database:** Separate Postgres on port 5433, via `srcla/docker-compose.yml` (added in Phase 4; `be/docker-compose.yml` only serves `be`'s `navy` DB on 5432). `DATABASE_URL=postgresql://user:password@localhost:5433/srcla`. Run `pnpm prisma:push` after schema changes.
 
-**SRCLA Paper & evaluation.** Algorithm spec: `docs/research/output/srcla-paper.md` — **v0.5**, carrying an Amendment Record (P1–P8) and a burned-window declaration; both are binding spec, not proposals. Defines baselines B0–B5 (incl. B2u), ablations **H1–H7**, and two release gates (forecast calibration + policy outperformance). Evaluation report: `SRCLA-REPORT.md` (+ `SRCLA-REPORT.json`). Run a live eval against the fork: `cd srcla && source .env.anvil && npx tsx scripts/run-live-evaluation.ts` (results land in `srcla/evaluation-results-live-*.json`); `scripts/show-live-apys.ts` prints the venue APYs the fork is currently reporting.
+**SRCLA Paper & evaluation.** Algorithm spec: `docs/research/output/srcla-paper.md` — **v0.9**, carrying Amendment Records P1–P35 and a burned-window declaration; both are binding spec, not proposals. The registered evaluation has been RUN on both sealed eras and returns `FAIL` (published, not tuned away); §13 and Appendix F of the paper hold the results and the disclosures. Defines baselines B0–B5 (incl. B2u), ablations **H1–H7**, and two release gates (forecast calibration + policy outperformance). Evaluation report: `SRCLA-REPORT.md` (+ `SRCLA-REPORT.json`). Run a live eval against the fork: `cd srcla && source .env.anvil && npx tsx scripts/run-live-evaluation.ts` (results land in `srcla/evaluation-results-live-*.json`); `scripts/show-live-apys.ts` prints the venue APYs the fork is currently reporting.
 
 > Point-in-time numbers (Sharpe, per-venue APY, fork block) are **not** kept here — they go stale on every re-fork. Read them from the newest `srcla/evaluation-results-live-*.json` or re-run the eval.
 
@@ -149,16 +149,25 @@ waiting.
 
 | Era | Window | Days | Role |
 |---|---|---|---|
-| `calibration` | 2024-09-01 → 2025-08-31 | 365 | the ONLY data anything may be fit on |
-| `heldout-a` | 2025-09-01 → 2026-05-25 | 267 | **sealed**, primary — statistical power |
+| `calibration` | 2024-03-15 → 2025-05-31 | 443 | the ONLY data anything may be fit on |
+| `burned-a` | 2025-06-01 → 2026-02-28 | 273 | former held-out A; burned while diagnosing v0.5. Reported by nothing |
+| `heldout-c` | 2026-03-01 → 2026-05-25 | 86 | **sealed** — the era with statistical power |
 | `burned` | 2026-05-26 → 2026-08-23 | 90 | §4.1 design data; in NEITHER era |
-| `heldout-b` | 2026-08-24 → present | 16+ | **sealed**, secondary — temporal purity |
+| `heldout-b` | 2026-08-24 → present | open | **sealed**, open-ended — temporal purity, low power |
 
-Two deviations are deliberate and must stay disclosed in any report: §4.1's letter
-puts the burned window inside calibration, and here it is in neither (including it
-would place fitting data *after* held-out A and invert walk-forward order); and
-held-out A *precedes* the burned window, so it carries a design-knowledge caveat
-that held-out B does not. **Both eras are reported; neither alone is sufficient.**
+**There is no `heldout-a`** — it was renamed `burned-a` when v0.5's diagnosis read
+its aggregates. Read the windows from `eras.ts`, never from memory.
+
+Two deviations stay disclosed in any report: §4.1's letter puts the burned window
+inside calibration and here it is in neither (including it would place fitting data
+*after* `heldout-c` and invert walk-forward order); and `heldout-c` *precedes* the
+burned window, so it carries a design-knowledge caveat `heldout-b` does not.
+**Both sealed eras are reported; neither alone is sufficient.**
+
+⚠️ **`heldout-c` is DESIGN DATA as of v0.9.** The first registered run opened it,
+returned `FAIL`, and its results then informed P29 and P31. Any further result
+against it is a CONFIRMATORY RE-RUN, not a fresh test. `heldout-b` grows with the
+live collector and is the only era that will carry no design knowledge.
 
 ### Running the experiment
 
@@ -166,10 +175,37 @@ that held-out B does not. **Both eras are reported; neither alone is sufficient.
 cd srcla && docker compose up -d                       # Postgres on :5433 (new)
 DATABASE_URL=… pnpm prisma:push
 DATABASE_URL=… pnpm backfill:history                   # ~45 min, resumable, 0 gaps
-DATABASE_URL=… pnpm phase4:freeze                      # -> config/registered-artifact.json
-DATABASE_URL=… pnpm phase4:run                         # both held-out eras + SRCLA-REPORT.{md,json}
-DATABASE_URL=… pnpm evaluation:verify evaluation-heldout-a.json
+DATABASE_URL=… pnpm phase4:freeze                      # ~10 min -> config/registered-artifact.json
+DATABASE_URL=… pnpm phase4:run                         # ~3-4 HOURS (see below)
+DATABASE_URL=… pnpm evaluation:verify evaluation-heldout-c.json
 ```
+
+**`phase4:run` is a LONG, SILENT job.** It prints an era header, then nothing for
+hours while it replays 16 policies x 4 tiers x ~2,000 origins, then the gates. To
+tell a working run from a hung one, check the worker's accumulated **CPU time**, not
+stdout — and note `pgrep -f` matches its own shell and the `sh -c` wrapper, both of
+which show 0% CPU, so it reports RUNNING for things that are dead:
+
+```bash
+ps -eo pid,etime,time,%cpu,args --sort=-%cpu | grep run-phase4 | head -2
+```
+
+**§11.1's fork replay needs a fork AND four per-tier vaults**, or it reports NOT
+PRODUCED and the gate blocks. `submitPlan` verifies `capBps`/`minIdleBps`/reserve
+against the VAULT'S OWN NAV, so every registered tier needs a vault deployed at that
+scale carrying `harnessConfig`'s registered values (capBps 5000, maxLossBps 50,
+minIdleBps 500) — `DeployAndFund.s.sol` does this. Then:
+
+```bash
+export SRCLA_FORK_REPLAY_RPC_URL=http://127.0.0.1:8545
+export SRCLA_FORK_REPLAY_VAULT_ADDRESS=0x…       # fallback vault
+export SRCLA_FORK_REPLAY_ALLOCATOR_KEY=0x…       # holds ALLOCATOR_ROLE
+export SRCLA_FORK_REPLAY_ADAPTERS=compound-v3-usdc=0x…,aave-v3-usdc=0x…,moonwell-usdc=0x…
+export SRCLA_FORK_REPLAY_TIER_VAULTS="10000000000=0xVault|compound-v3-usdc=0x…,…;…"
+```
+
+Tier keys are USDC **base units**. A tier the variable does not name falls back to
+the single vault and carries the disclosed one-NAV caveat.
 
 `pnpm digests:rewrite` repairs persisted `configDigest`s in place if the format
 changes; it re-derives from columns already stored and fetches no blocks.
@@ -190,6 +226,19 @@ changes; it re-derives from columns already stored and fetches no blocks.
   placeholders assert an 80% kink and a 6.25% low slope; Compound's real values are
   **90%** and **~3.60%**. Compound's rate is computed per-second and annualized
   afterwards, reproducing `Comet.getSupplyRate` exactly.
+- **`vm.prank`/`vm.startPrank` funding in a deploy script SILENTLY FAILS under
+  `--broadcast`.** The cheat applies to the simulation pass only; the broadcast pass
+  replays against the real chain where the prank never happened, so every transfer
+  reverts with "transfer amount exceeds balance" AFTER the contracts are deployed.
+  Fund the deployer out of band (`cast rpc anvil_impersonateAccount` on a whale, then
+  `cast send`) and have the script `require` the balance instead.
+- **`SRCLA-REPORT.md` and `SRCLA-FIG*.svg` are GENERATED** by `phase4:run` from
+  `src/evaluation/report/`. Hand-edits are erased on the next run — change the
+  renderer, not the file. Note this also means a renderer edit does NOT affect a run
+  already in flight: Node has loaded the module, so the change needs a fresh run.
+- **`test/unit/chain/chain.spec.ts` makes live RPC calls inside the unit suite** and
+  fails intermittently on timeouts, especially under concurrent load. It passes on
+  re-run. Treat a lone `chain.spec` failure as flake, not regression.
 - **Gas and oracle inputs are MEASURED per origin** (`ChainCostSnapshot` +
   `src/evaluation/gas-series.ts`), not the five constants `harnessConfig` used to
   assert. The series refuses to extrapolate backwards and carries a digest, because
@@ -203,11 +252,19 @@ changes; it re-derives from columns already stored and fetches no blocks.
 
 ### Still open
 
-1. **§11.1's pinned-prestate fork replay is unwired.** `src/evaluation/fork-runner.ts`
-   is the scaffold and nothing calls it, so the §11.5 gate reports it `NOT PRODUCED`
-   and **blocks**. Expect the registered run to `FAIL` on that check alone. That is
-   the designed behaviour — a reproducible `FAIL` is an acceptable outcome and
-   §11.5 forbids retuning against held-out data to avoid one.
+1. **§11.1's fork replay is WIRED and executing** — 63 of 64 plans reach the chain,
+   and **no SRCLA plan is refused**. The one refusal is B4's, rejected by the vault's
+   own `capBps` guardrail. It still reports `NOT PRODUCED` and blocks if the
+   `SRCLA_FORK_REPLAY_*` env is absent; that is designed, and a reproducible `FAIL`
+   is an acceptable outcome §11.5 forbids retuning to avoid.
+1b. **The run returns `FAIL` on both sealed eras, for three remaining causes**, none
+   of which is a code defect: Kupiec rejects the forecast's lower bound for
+   OVER-coverage on every venue (0.00% breaches against 1.00% expected); the
+   demonstration floor fails at the 10M tier (capital at work 0.427); and
+   non-inferiority fails against B2 at 10M. §11.5's safety check separately reports
+   `CAPACITY_INFEASIBLE` at 10M — the registered stress scenario wants $5M of liquid
+   capacity from a venue universe holding $3.6M at its worst. Do not "fix" these by
+   moving a threshold.
 2. **Withdrawals are a registered schedule, not observed.** The Navy vault has no
    Base mainnet history, so §8.1's `W_H` has no real series. Its cadence is now in
    SECONDS: counted in snapshots it silently meant "every 7 hours" on hourly
