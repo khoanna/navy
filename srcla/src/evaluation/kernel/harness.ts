@@ -182,6 +182,12 @@ export interface RegisteredEvaluationResult {
    * Producing it as part of the run makes forgetting it impossible.
    */
   forecastGate: ForecastGateResult;
+  /**
+   * The same forecast gate under Amendment P37 (G1 + G2). Post-hoc on
+   * `heldout-c` and `heldout-b`; the release verdict's forecast half on
+   * `heldout-d`. `forecastGate` above stays the registered v0.10 gate.
+   */
+  forecastGateP37?: ForecastGateResult;
 }
 
 export interface RegisteredEvaluationOptions {
@@ -752,6 +758,10 @@ export function runRegisteredEvaluation(
     missingTiers: REGISTERED_TIERS.filter((t) => !seenTiers.has(t.toString())),
     forecastGate: runForecastGate(artifact, labels, {
       registration: options.registration,
+    }),
+    forecastGateP37: runForecastGate(artifact, labels, {
+      registration: options.registration,
+      amendment: 'p37',
     }),
   };
 }

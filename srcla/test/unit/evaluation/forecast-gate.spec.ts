@@ -492,3 +492,79 @@ describe('P37 (G2): one-sided coverage tests', () => {
     expect(independenceTest([true])).toBeNull();
   });
 });
+
+describe('P37 (G1): the forecast domain excludes dry label windows (P34)', () => {
+  const DRY = 'moonwell-usdc';
+  /** Label index of an origin in the `labels()` fixture. */
+  const indexOf = (l: CompletedLabel): number => (l.originSeconds - 1_700_000_000) / CADENCE;
+  /**
+   * `DRY` is at zero cash for every label window that touches origins
+   * [600, 700): windows starting in [576, 700). Its realized returns collapse
+   * on [600, 700), so the rolling forecast breaches there.
+   */
+  function dryLabels(): CompletedLabel[] {
+    return labels({
+      wobble: (i, marketId) =>
+        marketId === DRY && i >= 600 && i < 700
+          ? -(10n ** 17n)
+          : BigInt((mix(i + 977 * (MARKETS.indexOf(marketId) + 1)) % 2001) - 1000) * 10n ** 12n,
+    }).map((l) =>
+      l.marketId === DRY && indexOf(l) >= 576 && indexOf(l) < 700
+        ? { ...l, realizedMinCashBase: 0n }
+        : l,
+    );
+  }
+
+  it('v0.10 grades the dry window and fails that venue\'s coverage', () => {
+    const g = runForecastGate(goodArtifact(), dryLabels(), { registration: registration() });
+    expect(find(g, `Per-venue coverage — ${DRY}`).passed).toBe(false);
+  });
+
+  it('P37 excludes every residual whose window saw zero cash, and says how many', () => {
+    const g = runForecastGate(goodArtifact(), dryLabels(), {
+      registration: registration(),
+      amendment: 'p37',
+    });
+    const c = find(g, `Per-venue coverage, P34 domain — ${DRY}`);
+    expect(c.passed).toBe(true);
+    expect(c.detail).toContain('P34 domain: 124 residual(s) excluded');
+  });
+
+  it('an all-dry venue reports NOT EVALUATED and blocks — never a pass', () => {
+    const ls = labels().map((l) => (l.marketId === DRY ? { ...l, realizedMinCashBase: 0n } : l));
+    const g = runForecastGate(goodArtifact(), ls, { registration: registration(), amendment: 'p37' });
+    const c = find(g, `Per-venue coverage, P34 domain — ${DRY}`);
+    expect(c.passed).toBeNull();
+    expect(c.detail).toMatch(/^NOT EVALUATED/);
+    expect(g.pass).toBe(false);
+  });
+});
+
+describe('P37 (G2) inside the gate', () => {
+  it('does not reject a floor for being too safe', () => {
+    // `artifact()` places every quantile below every residual: zero breaches.
+    const p37 = runForecastGate(artifact(), labels(), { registration: registration(), amendment: 'p37' });
+    expect(find(p37, 'Kupiec unconditional coverage, one-sided — aave-v3-usdc').passed).toBe(true);
+    expect(find(p37, 'Kupiec unconditional coverage, one-sided — aave-v3-usdc').detail).toContain(
+      'two-sided p',
+    );
+    const v010 = runForecastGate(artifact(), labels(), { registration: registration() });
+    expect(find(v010, 'Kupiec unconditional coverage — aave-v3-usdc').passed).toBe(false);
+  });
+
+  it('gates Christoffersen on independence and reports LR_cc', () => {
+    const g = runForecastGate(goodArtifact(), labels(), { registration: registration(), amendment: 'p37' });
+    const c = find(g, 'Christoffersen independence — aave-v3-usdc');
+    expect(c.detail).toMatch(/^LR_ind /);
+    expect(c.detail).toContain('LR_cc');
+  });
+
+  it('leaves the default (v0.10) gate byte-identical', () => {
+    const implicit = runForecastGate(goodArtifact(), labels(), { registration: registration() });
+    const explicit = runForecastGate(goodArtifact(), labels(), {
+      registration: registration(),
+      amendment: 'v0.10',
+    });
+    expect(explicit).toEqual(implicit);
+  });
+});

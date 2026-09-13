@@ -80,7 +80,7 @@ import { REGISTERED_ERAS, testableHorizons, type EraTag } from '../eras.js';
 import { REGISTERED_HORIZONS_SECONDS } from '../../policy/registered.js';
 import { computeArtifactHash } from '../../policy/artifact.js';
 import type { CompletedLabel, PolicyArtifact } from '../../policy/types.js';
-import type { RegisteredGateCheck } from './gates.js';
+import type { GateAmendment, RegisteredGateCheck } from './gates.js';
 
 /**
  * How far BELOW the registered coverage target an out-of-sample achieved
@@ -174,6 +174,14 @@ export interface ForecastGateOptions {
   expectedGridPoints?: number;
   /** Coverage tolerance; exposed so a sensitivity run can restate it. */
   coverageTolerance?: number;
+  /**
+   * `'v0.10'` (default): the registered gate exactly as run. `'p37'`: G1 — a
+   * residual whose label window saw its venue at zero withdrawable cash is
+   * outside the forecast's domain (P34) and is not scored; G2 — Kupiec tests
+   * only a breach rate ABOVE target, and Christoffersen gates its
+   * independence half.
+   */
+  amendment?: GateAmendment;
 }
 
 const check = (
@@ -474,12 +482,58 @@ function keyCount(map: Record<string, unknown> | undefined | null): number {
 
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 
+/** Check names, saying what each check measures under the amendment in force. */
+function coverageCheckNames(
+  marketId: string,
+  p37: boolean,
+): { coverage: string; kupiec: string; christoffersen: string } {
+  return p37
+    ? {
+        coverage: `Per-venue coverage, P34 domain — ${marketId}`,
+        kupiec: `Kupiec unconditional coverage, one-sided — ${marketId}`,
+        christoffersen: `Christoffersen independence — ${marketId}`,
+      }
+    : {
+        coverage: `Per-venue coverage — ${marketId}`,
+        kupiec: `Kupiec unconditional coverage — ${marketId}`,
+        christoffersen: `Christoffersen conditional coverage — ${marketId}`,
+      };
+}
+
+/**
+ * P37 (G1, P34): origins whose label window saw `marketId` at zero withdrawable
+ * cash. `deriveCompletedLabels` sets `realizedMinCashBase` to the minimum
+ * `cashBase` over `[origin, origin + H]`, so a zero there is exactly "some
+ * origin inside the window had `cashBase === 0n`" — the quantity admission
+ * tests.
+ */
+export function dryLabelOrigins(
+  labels: readonly CompletedLabel[],
+  marketId: string,
+  horizonSeconds: number,
+): Set<number> {
+  const out = new Set<number>();
+  for (const l of labels) {
+    if (
+      l.marketId === marketId &&
+      l.horizonSeconds === horizonSeconds &&
+      l.realizedMinCashBase === 0n
+    ) {
+      out.add(l.originSeconds);
+    }
+  }
+  return out;
+}
+
 function coverageChecks(
   artifact: PolicyArtifact,
   residualsByMarket: Map<string, AlignedResidual[]> | null,
   alpha: number,
   tolerance: number,
+  amendment: GateAmendment,
+  labels: readonly CompletedLabel[],
 ): { checks: RegisteredGateCheck[]; venues: VenueCalibration[] } {
+  const p37 = amendment === 'p37';
   const registeredMarkets = Object.keys(artifact.residualQuantileWadByMarket ?? {}).sort();
   const target = artifact.coverageTarget;
   const expectedRate = 1 - target;
@@ -493,9 +547,10 @@ function coverageChecks(
       'state, and an unrecognised name has no candidate at all. No proxy is substituted; ' +
       'the gate blocks.';
     for (const marketId of registeredMarkets) {
-      checks.push(check(`Per-venue coverage — ${marketId}`, null, why));
-      checks.push(check(`Kupiec unconditional coverage — ${marketId}`, null, why));
-      checks.push(check(`Christoffersen conditional coverage — ${marketId}`, null, why));
+      const names = coverageCheckNames(marketId, p37);
+      checks.push(check(names.coverage, null, why));
+      checks.push(check(names.kupiec, null, why));
+      checks.push(check(names.christoffersen, null, why));
     }
     return { checks, venues };
   }
@@ -513,29 +568,43 @@ function coverageChecks(
   }
 
   for (const marketId of registeredMarkets) {
+    const names = coverageCheckNames(marketId, p37);
     const q = artifact.residualQuantileWadByMarket[marketId]!;
-    const rows = residualsByMarket.get(marketId) ?? [];
+    const scored = residualsByMarket.get(marketId) ?? [];
+    // P37 (G1, P34): a residual whose label window saw this venue at zero
+    // withdrawable cash measures the venue's failure, not the forecast.
+    const dry = p37 ? dryLabelOrigins(labels, marketId, artifact.horizonSeconds) : new Set<number>();
+    const rows = p37 ? scored.filter((r) => !dry.has(r.originSeconds)) : scored;
+    const excludedRows = scored.length - rows.length;
+    const excludedBreaches = scored.filter((r) => dry.has(r.originSeconds) && r.residualWad < q).length;
+    const domainNote = p37
+      ? `; P34 domain: ${excludedRows} residual(s) excluded, ${excludedBreaches} of them breaches`
+      : '';
+
     if (rows.length === 0) {
       const why =
-        `NOT PRODUCED: no scored residual for ${marketId} on the labels supplied ` +
-        `(warm-up ${artifact.minObservations} observations, H=${artifact.horizonSeconds}s)`;
-      checks.push(check(`Per-venue coverage — ${marketId}`, null, why));
-      checks.push(check(`Kupiec unconditional coverage — ${marketId}`, null, why));
-      checks.push(check(`Christoffersen conditional coverage — ${marketId}`, null, why));
+        p37 && scored.length > 0
+          ? `NOT EVALUATED: all ${scored.length} residuals for ${marketId} fall in label windows ` +
+            'that saw the venue at zero withdrawable cash (P34), so nothing inside the ' +
+            "forecast's domain was scored"
+          : `NOT PRODUCED: no scored residual for ${marketId} on the labels supplied ` +
+            `(warm-up ${artifact.minObservations} observations, H=${artifact.horizonSeconds}s)`;
+      checks.push(check(names.coverage, null, why));
+      checks.push(check(names.kupiec, null, why));
+      checks.push(check(names.christoffersen, null, why));
       continue;
     }
 
     const breaches = rows.filter((r) => r.residualWad < q);
     const achieved = (rows.length - breaches.length) / rows.length;
-    const kupiec = rows.length >= MIN_EXCEEDANCE_OBSERVATIONS
-      ? kupiecTest(breaches.length, rows.length, expectedRate)
+    const enough = rows.length >= MIN_EXCEEDANCE_OBSERVATIONS;
+    const kupiec = enough
+      ? kupiecTest(breaches.length, rows.length, expectedRate, p37 ? 'above' : 'two-sided')
       : null;
     const thinned = thinToNonOverlapping(rows, artifact.horizonSeconds);
+    const thinnedStream = thinned.map((r) => r.residualWad < q);
     const christoffersen = thinned.length >= MIN_EXCEEDANCE_OBSERVATIONS
-      ? christoffersenTest(
-          thinned.map((r) => r.residualWad < q),
-          expectedRate,
-        )
+      ? christoffersenTest(thinnedStream, expectedRate)
       : null;
 
     venues.push({
@@ -549,17 +618,57 @@ function coverageChecks(
 
     checks.push(
       check(
-        `Per-venue coverage — ${marketId}`,
+        names.coverage,
         achieved >= target - tolerance,
         `achieved ${pct(achieved)} against target ${pct(target)} (tolerance ` +
           `${(tolerance * 100).toFixed(2)}pp, floor ${pct(target - tolerance)}) on ` +
-          `${rows.length} out-of-sample residuals, q=${(Number(q) / Number(WAD)).toExponential(4)}`,
+          `${rows.length} out-of-sample residuals, q=${(Number(q) / Number(WAD)).toExponential(4)}` +
+          domainNote,
       ),
     );
 
+    if (p37) {
+      const twoSided = enough ? kupiecTest(breaches.length, rows.length, expectedRate) : null;
+      checks.push(
+        check(
+          names.kupiec,
+          kupiec === null ? null : kupiec.pValue >= alpha,
+          kupiec === null || twoSided === null
+            ? `NOT PRODUCED: ${rows.length} residuals is below the ${MIN_EXCEEDANCE_OBSERVATIONS} ` +
+              'the LR test needs to have any power' + domainNote
+            : `LR_uc ${kupiec.lr.toFixed(4)}, one-sided p ${kupiec.pValue.toFixed(4)} ` +
+              `${kupiec.pValue >= alpha ? '>=' : '<'} ${alpha} — breach rate ` +
+              `${pct(breaches.length / rows.length)} against expected ${pct(expectedRate)}; ` +
+              `two-sided p ${twoSided.pValue.toFixed(4)} reported, not gated` + domainNote,
+        ),
+      );
+      const independence = thinned.length >= MIN_EXCEEDANCE_OBSERVATIONS
+        ? independenceTest(thinnedStream)
+        : null;
+      checks.push(
+        check(
+          names.christoffersen,
+          independence === null ? null : independence.pValue >= alpha,
+          independence === null
+            ? `NOT PRODUCED: thinning ${rows.length} overlapping residuals to non-overlapping ` +
+              `H=${artifact.horizonSeconds}s windows left ` +
+              `${thinned.length} < ${MIN_EXCEEDANCE_OBSERVATIONS} observations` + domainNote
+            : `LR_ind ${independence.lrInd.toFixed(4)}, p ${independence.pValue.toFixed(4)} ` +
+              `${independence.pValue >= alpha ? '>=' : '<'} ${alpha} on ` +
+              `${independence.observations} non-overlapping windows` +
+              (christoffersen === null
+                ? ''
+                : `; LR_cc ${christoffersen.lrCc.toFixed(4)} reported, not gated (its ` +
+                  'unconditional half is the two-sided statistic P37 replaces)') +
+              domainNote,
+        ),
+      );
+      continue;
+    }
+
     checks.push(
       check(
-        `Kupiec unconditional coverage — ${marketId}`,
+        names.kupiec,
         kupiec === null ? null : kupiec.pValue >= alpha,
         kupiec === null
           ? `NOT PRODUCED: ${rows.length} residuals is below the ${MIN_EXCEEDANCE_OBSERVATIONS} ` +
@@ -572,7 +681,7 @@ function coverageChecks(
 
     checks.push(
       check(
-        `Christoffersen conditional coverage — ${marketId}`,
+        names.christoffersen,
         christoffersen === null ? null : christoffersen.pValue >= alpha,
         christoffersen === null
           ? `NOT PRODUCED: thinning ${rows.length} overlapping residuals to non-overlapping ` +
@@ -875,7 +984,14 @@ export function runForecastGate(
     artifact.minObservations,
   );
 
-  const { checks: coverage, venues } = coverageChecks(artifact, residuals, alpha, tolerance);
+  const { checks: coverage, venues } = coverageChecks(
+    artifact,
+    residuals,
+    alpha,
+    tolerance,
+    opts.amendment ?? 'v0.10',
+    labels,
+  );
   const checks: RegisteredGateCheck[] = [
     ...coverage,
     labelCompletenessCheck(artifact, labels),

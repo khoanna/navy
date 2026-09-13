@@ -50,6 +50,13 @@ import {
   type SustainabilityVerdict,
 } from './sustainability.js';
 
+/**
+ * The specification a gate grades against. `'v0.10'` is the registered gate
+ * exactly as run; `'p37'` is Amendment P37 (paper v0.11): G1–G5. Every gate
+ * defaults to `'v0.10'`, and under it must return exactly what it always did.
+ */
+export type GateAmendment = 'v0.10' | 'p37';
+
 export interface RegisteredGateCheck {
   name: string;
   /**
