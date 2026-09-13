@@ -3,3 +3,5 @@ cache/
 broadcast/
 .env
 e2e-actors.env
+# Fork measurements for the retired srcla/quarantine/evaluation-v2 harness
+/test/fork/SrclaEvaluationFork.t.sol

@@ -19,6 +19,14 @@ evaluation-results.json
 evaluation-heldout-*.json
 phase4-run.log
 
+# P36's calibration-era validation sweep (scripts/sweep-hurdle-bound.ts). Local
+# output; commit deae8408's message records its go/no-go result.
+/evaluation-sweep-p36-*.json
+
+# The retired evaluation-v2 harness that produced every report before
+# phase4:run (see CLAUDE.md). Kept locally, never tracked.
+/quarantine/evaluation-v2/
+
 # Scored-grid sidecars from `pnpm phase4:freeze` (see scripts/freeze-artifact.ts).
 #
 # DELIBERATE (P18/M2): the REGISTERED artifact's sidecar is COMMITTED as
