@@ -46,7 +46,7 @@ forge script script/DeployNavyVaultSRCLA.s.sol --fork-url http://127.0.0.1:8545 
 **Running locally** — order matters, each step depends on the one above:
 
 1. **Anvil fork of Base mainnet:** `anvil --fork-url https://mainnet.base.org --code-size-limit 100000` (`:8545`). This *is* the chain for local dev.
-2. **Deploy + configure:** `cd contract && forge script script/DeployNavyVaultSRCLA.s.sol --fork-url http://127.0.0.1:8545 --broadcast`, or `DeployAndFund.s.sol` for funded multi-tier vaults with the three adapters registered. Other entry points: `DeployBaseSystem.s.sol` (full Base package), `VerifyBaseSystem.s.sol` (read-only conformance check of a deployment), `RunBaseAcceptance.s.sol`, `WriteDeploymentManifest.s.sol`, `AnvilE2ETest.s.sol`, `ConfigureAnvil.s.sol` (tops up a vault — reads `VAULT_ADDRESS` from the env), `FundVaultAnvil.s.sol`. Deploy scripts apply the paper's on-chain guardrails via `script/VaultGuardrails.sol`; the required post-deploy step is in `script/POST_DEPLOY.md`. Older docs name deploy scripts that no longer exist (`Deploy.s.sol`, `DeployVaultAnvil.s.sol`, the deleted `NavyVaultSimple` stub's four scripts) — `ls contract/script` is the real set. Then **write the new addresses into `srcla/.env.anvil`** (and `srcla/.env`) — they change on every redeploy.
+2. **Deploy + configure:** `cd contract && forge script script/DeployNavyVaultSRCLA.s.sol --fork-url http://127.0.0.1:8545 --broadcast`, or `DeployAndFund.s.sol` for funded multi-tier vaults with the three adapters registered — it overrides each tier vault's `adminReserve` to 0 and each adapter's `absoluteCap` to 1e15 to match the registered §11.1 harness, so its vaults lack the $1,000 production floor (`DeployBaseSystem.s.sol` keeps it). Other entry points: `DeployBaseSystem.s.sol` (full Base package), `VerifyBaseSystem.s.sol` (read-only conformance check of a deployment), `RunBaseAcceptance.s.sol`, `WriteDeploymentManifest.s.sol`, `AnvilE2ETest.s.sol`, `ConfigureAnvil.s.sol` (tops up a vault — reads `VAULT_ADDRESS` from the env), `FundVaultAnvil.s.sol`. Deploy scripts apply the paper's on-chain guardrails via `script/VaultGuardrails.sol`; the required post-deploy step is in `script/POST_DEPLOY.md`. Older docs name deploy scripts that no longer exist (`Deploy.s.sol`, `DeployVaultAnvil.s.sol`, the deleted `NavyVaultSimple` stub's four scripts) — `ls contract/script` is the real set. Then **write the new addresses into `srcla/.env.anvil`** (and `srcla/.env`) — they change on every redeploy.
 3. **Postgres 16:** `cd srcla && docker compose up -d` gives `srcla` on **:5433** (`DATABASE_URL=postgresql://user:password@localhost:5433/srcla`), then `pnpm prisma:push`.
 4. `cd srcla && pnpm dev` — public API on `:3100`, operator listener on `127.0.0.1:3101`.
 
@@ -73,7 +73,7 @@ forge script script/DeployNavyVaultSRCLA.s.sol --fork-url http://127.0.0.1:8545 
 - **`docs/` is in `.gitignore` and untracked (commit `18595bbf`, 2026-09-13).** Its specs, plans, research and the paper live only on the local disk; versions from before then are in git history (`git show deae8408:docs/<path>`). In a fresh clone `srcla/test/unit/evaluation/paper-amendments.spec.ts` finds no `../docs/research/output/srcla-paper.md` and **skips** — its pass means something only on a machine that has the paper. Do not link `docs/` from tracked files, and gate any new test that reads it the same way.
 - **Production gates + accepted pre-production risks:** `docs/PRODUCTION.md` (local-only) — independent audit, owner → multisig/timelock, KMS/HSM key custody. New work: branch off `main`.
 
-**SRCLA Paper & evaluation.** Algorithm spec: `docs/research/output/srcla-paper.md` — **v0.10**, carrying Amendment Records P1–P36 and three burned-window declarations; both are binding spec, not proposals. The registered evaluation has been RUN on both sealed eras and returns `FAIL` (published, not tuned away); §13 and Appendix F of the paper hold the results and the disclosures. Defines baselines B0–B5 (incl. B2u), ablations **H1–H7**, and two release gates (forecast calibration + policy outperformance). Evaluation report: `report/SRCLA-REPORT.md` (+ `SRCLA-REPORT.json` at the root). The registered evaluation is `pnpm phase4:run` (both eras + report) or `pnpm evaluation:run --era` (one era). **Two scripts look like evaluations and are not:** `srcla/scripts/run-live-evaluation.ts` is a hard-coded illustration (fixed market numbers; it never reads the fork), and `pnpm evaluation:full` (`run-evaluation-full.ts`) uses hard-coded rates and printed `Date.now()` as its "content hash" (`src/evaluation/kernel/provenance.ts`). `scripts/show-live-apys.ts` prints the venue APYs the fork is currently reporting.
+**SRCLA Paper & evaluation.** Algorithm spec: `docs/research/output/srcla-paper.md` — **v0.11**, carrying Amendment Records P1–P37 and four burned-window declarations; both are binding spec, not proposals. The registered evaluation has been RUN on both sealed eras and returns `FAIL` (published, not tuned away); §13 and Appendix F of the paper hold the results and the disclosures. Defines baselines B0–B5 (incl. B2u), ablations **H1–H7**, and two release gates (forecast calibration + policy outperformance). Evaluation report: `report/SRCLA-REPORT.md` (+ `SRCLA-REPORT.json` at the root). The registered evaluation is `pnpm phase4:run` (both eras + report) or `pnpm evaluation:run --era` (one era). **Two scripts look like evaluations and are not:** `srcla/scripts/run-live-evaluation.ts` is a hard-coded illustration (fixed market numbers; it never reads the fork), and `pnpm evaluation:full` (`run-evaluation-full.ts`) uses hard-coded rates and printed `Date.now()` as its "content hash" (`src/evaluation/kernel/provenance.ts`). `scripts/show-live-apys.ts` prints the venue APYs the fork is currently reporting.
 
 > Point-in-time numbers (APYs, capital at work, gate results) are **not** kept here — they go stale on every run. Read them from `report/SRCLA-REPORT.md` / `SRCLA-REPORT.json` or re-run the evaluation.
 
@@ -102,7 +102,8 @@ Base archive state for all three venues reads back to the deployment floor (bloc
 | `burned-a` | 2025-06-01 → 2026-02-28 | 273 | former held-out A; burned while diagnosing v0.5. Reported by nothing |
 | `heldout-c` | 2026-03-01 → 2026-05-25 | 86 | **sealed** — the era with statistical power |
 | `burned` | 2026-05-26 → 2026-08-23 | 90 | §4.1 design data; in NEITHER era |
-| `heldout-b` | 2026-08-24 → present | open | **sealed**, open-ended — temporal purity, low power |
+| `heldout-b` | 2026-08-24 → `P37_FREEZE_SECONDS` | closed by P37 | **sealed**; design data for P37 (fourth burned-window declaration) |
+| `heldout-d` | `P37_FREEZE_SECONDS` + 1s → present | open | **sealed** — P37's release era; graded only at ≥ 2,064 origins with zero gaps |
 
 **There is no `heldout-a`** — it was renamed `burned-a` when v0.5's diagnosis read
 its aggregates. Read the windows from `eras.ts`, never from memory.
@@ -111,12 +112,16 @@ Two deviations stay disclosed in any report: §4.1's letter puts the burned wind
 inside calibration and here it is in neither (including it would place fitting data
 *after* `heldout-c` and invert walk-forward order); and `heldout-c` *precedes* the
 burned window, so it carries a design-knowledge caveat `heldout-b` does not.
-**Both sealed eras are reported; neither alone is sufficient.**
+**All three sealed eras are reported; only `heldout-d` decides release.**
 
-⚠️ **`heldout-c` is DESIGN DATA as of v0.9.** The first registered run opened it,
-returned `FAIL`, and its results then informed P29 and P31. Any further result
-against it is a CONFIRMATORY RE-RUN, not a fresh test. `heldout-b` grows with the
-live collector and is the only era that will carry no design knowledge.
+⚠️ **`heldout-c` is DESIGN DATA as of v0.9, and `heldout-b` is DESIGN DATA as of
+v0.11 (P37).** The first registered run opened `heldout-c`, returned `FAIL`, and its
+results then informed P29 and P31. P37 closed `heldout-b` at `P37_FREEZE_SECONDS`
+after reading its per-venue and per-policy results to design G1, G3 and G5 (the fourth
+burned-window declaration). Any further result against either is a CONFIRMATORY
+RE-RUN, not a fresh test. `heldout-d` grows with the live collector and is the only
+era that will carry no design knowledge; it alone decides release, once it holds 2,064
+origins with zero gaps.
 
 ### Running the experiment
 
@@ -214,6 +219,14 @@ changes; it re-derives from columns already stored and fetches no blocks.
   artifact without it (the live bootstrap one). Before P36 the hurdles kept the
   additive haircut after P29 moved the objective, which idled much of the 10M tier's
   capital. `disable.uncertainty` (H2, B3) removes the haircut in the hurdles too.
+- **P37 is opt-in; the defaults are the registered v0.10 gates.** `runForecastGate`,
+  `sustainabilityAtTier` and `evaluateRegisteredRelease` apply P37 only when passed
+  `amendment: 'p37'`; without it they must stay byte-identical, because the report prints
+  the registered verdict beside the P37 one and `threeVerdicts` decides all three. P37
+  moves no threshold value. `P37_FREEZE_SECONDS` must stay ≥ 2026-09-23T00:00:00Z: a
+  closed `heldout-b` under 30 days makes the 1-day horizon untestable and the forecast
+  gate's grid check fails. There is no new non-gating check — out-of-scope tiers go
+  through `RegisteredGateResult.outOfScopeSustainability`.
 
 ### Still open
 
@@ -224,11 +237,15 @@ changes; it re-derives from columns already stored and fetches no blocks.
    `VaultGuardrails`' $1,000 `adminReserve`, so its third deploy reverted
    `InsufficientIdle()`. `DeployAndFund.s.sol` now gives the bench vaults the registered
    `adminReserve` (0, and the registered `absoluteCap`), and `runForkReplays` refuses to
-   replay on a tier vault that does not carry the registered harness values — those
-   results are NOT PRODUCED, never a chain refusal (`contract/audit/b4-fork-refusal-root-cause.md`,
-   *Resolution*). It still reports `NOT PRODUCED`
-   and blocks if the `SRCLA_FORK_REPLAY_*` env is absent; that is designed, and a
-   reproducible `FAIL` is an acceptable outcome §11.5 forbids retuning to avoid.
+   replay on a tier vault that does not carry the registered harness values — that
+   individual plan is marked not executed, never a chain refusal
+   (`contract/audit/b4-fork-refusal-root-cause.md`, *Resolution*). At the §11.1 gate
+   itself, a mismatched bench for a required (policy, tier) reads FAILED (`false`), not
+   NOT PRODUCED: the detail is `did not execute on fork: {policy}@{tier} (fork bench
+   does not carry the registered harness values: …)`, and it blocks. The gate reports
+   `NOT PRODUCED` (`null`) only when the `SRCLA_FORK_REPLAY_*` env is absent entirely, so
+   no fork replay was attempted at all; that is designed, and a reproducible `FAIL` is an
+   acceptable outcome §11.5 forbids retuning to avoid.
 1b. **The v0.10 re-run returns `FAIL` on both sealed eras**, and none of the causes
    is a code defect (numbers: `SRCLA-REPORT.md`). Both eras: Kupiec rejects the
    forecast's lower bound — for OVER-coverage on every venue except Moonwell on
@@ -239,7 +256,9 @@ changes; it re-derives from columns already stored and fetches no blocks.
    10k/100k, S1/S3/S4 (NOT DEMONSTRATED at 10M) and scale invariance.
    `gates.ts` attaches `CAPACITY_INFEASIBLE` only to SRCLA runs below the coverage
    floor, so its absence says nothing about the stress arithmetic. Do not "fix" these
-   by moving a threshold.
+   by moving a threshold. Paper v0.11's P37 re-grades both eras post-hoc under G1–G5 and
+   moves the release decision onto the sealed `heldout-d`; the registered verdict above
+   is unchanged.
 2. **Withdrawals are a registered schedule, not observed.** The Navy vault has no
    Base mainnet history, so §8.1's `W_H` has no real series. Its cadence is now in
    SECONDS: counted in snapshots it silently meant "every 7 hours" on hourly
@@ -255,6 +274,12 @@ changes; it re-derives from columns already stored and fetches no blocks.
    Base, so §9.2–9.4 contributes a measured zero. The contract side is tested
    (`contract/test/reward/`); srcla's `rewards/` + `policy/harvest.ts` are not
    wired into the service (see *Off the live path*).
+6. **The fork replay's harness limitation is disclosed, not fixed.** `VaultReplay.addYield`
+   (`srcla/src/evaluation/replay/erc4626.ts`) credits accrued yield to `totalAssets`
+   only, never to venue balances, so every policy's registered capital at work is
+   overstated and its stressed coverage understated; dates from `7990d6b5` and was
+   previously undocumented. P37 does not correct it (paper §13.3) — correcting it
+   changes registered numbers and needs its own amendment.
 
 Open decisions that are the paper owner's, not the code's: the burned-window
 placement above, the B0–B5 switch mapping (implemented from a reading of §11.2),
