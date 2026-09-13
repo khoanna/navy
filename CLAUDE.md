@@ -121,7 +121,8 @@ v0.11 (P37).** The first registered run opened `heldout-c`, returned `FAIL`, and
 results then informed P29 and P31. P37 closed `heldout-b` at `P37_FREEZE_SECONDS`
 after reading its per-venue and per-policy results to design G1, G3 and G5 (the fourth
 burned-window declaration). Any further result against either is a CONFIRMATORY
-RE-RUN, not a fresh test. `heldout-d` grows with the live collector and is the only
+RE-RUN, not a fresh test. `heldout-d` grows as origins are backfilled (`pnpm
+backfill:history`; R30 refuses live-collector rows in a sealed era) and is the only
 era that will carry no design knowledge; it alone decides release, once it holds 2,064
 origins with zero gaps.
 
@@ -229,6 +230,12 @@ changes; it re-derives from columns already stored and fetches no blocks.
   closed `heldout-b` under 30 days makes the 1-day horizon untestable and the forecast
   gate's grid check fails. There is no new non-gating check — out-of-scope tiers go
   through `RegisteredGateResult.outOfScopeSustainability`.
+- **`run-phase4`'s exit code tracks only the registered v0.10 gates** (`scripts/run-phase4.ts:967`)
+  — a passing release verdict can still exit 1, and that is deliberate, not a bug to
+  "fix" by widening the exit check. The release decision itself is `verdicts.release.status`
+  in `SRCLA-REPORT.json` (`threeVerdicts` in `src/evaluation/report/render-markdown.ts`), and
+  grading `heldout-d` needs `pnpm backfill:history` to have written its rows first (R30
+  refuses live-collector rows in any sealed era).
 
 ### Still open
 
