@@ -1060,4 +1060,80 @@ describe('P37: the amended policy gate (G3, G4, G5)', () => {
     });
     expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(false);
   });
+
+  it('G3: untrapped coverage below the floor stays blocking even with a dry-venue position', () => {
+    const gate = evaluateRegisteredRelease(
+      withTrappedPosition(evaluation(), TEN_K, { untrapped: 0.5 }),
+      { ...p37, forkResults: completeForkResults() },
+    );
+    expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(false);
+  });
+
+  it('G3: a VENUE FAILURE does not block S2, and the coverage detail does not claim it met the floor', () => {
+    const gate = evaluateRegisteredRelease(withTrappedPosition(evaluation(), TEN_K), {
+      ...p37,
+      forkResults: completeForkResults(),
+    });
+    const verdict = gate.sustainability.find((v) => v.tier === TEN_K.toString())!;
+    expect(verdict.s2).toBe(true);
+    const coverage = named(gate, 'Safety: stressed liquid coverage');
+    // 3 SRCLA runs at the release tiers; one (10k) is the venue-failure run, so
+    // only 2 actually met the floor — the published count must say so, not 3.
+    expect(coverage.detail).toMatch(/>= 0\.95 across 2 SRCLA runs/);
+    expect(coverage.detail).not.toMatch(/across 3 SRCLA runs/);
+  });
+
+  it('G4: an empty fork result list fails the P37 fork check', () => {
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: [] });
+    expect(named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)').passed).toBe(false);
+  });
+
+  it('G4: a fork list missing SRCLA@100000000000 fails the P37 fork check', () => {
+    const fork = completeForkResults().filter(
+      (f) => !(f.policyId === SRCLA_POLICY.id && f.tier === REGISTERED_TIERS[1]),
+    );
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: fork });
+    expect(named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)').passed).toBe(false);
+  });
+
+  it('G4: a refused SRCLA@10M plan is labelled outside the release scope, not as a baseline', () => {
+    const fork = completeForkResults();
+    const tenM = fork.find((f) => f.policyId === SRCLA_POLICY.id && f.tier === TEN_M)!;
+    tenM.executed = false;
+    tenM.detail = 'REFUSED BY THE CHAIN';
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: fork });
+    const c = named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toMatch(/outside the release scope[^]*srcla@10000000000000/);
+    expect(c.detail).not.toMatch(/baseline plans not executed[^]*srcla@10000000000000/);
+  });
+
+  it('G4: a fork list missing the SRCLA@10M replay is reported outside the release scope', () => {
+    const fork = completeForkResults().filter((f) => !(f.policyId === SRCLA_POLICY.id && f.tier === TEN_M));
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: fork });
+    const c = named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toMatch(/outside the release scope[^]*srcla@10000000000000/);
+  });
+
+  it('G4: forkResults undefined under P37 still uses the P37 check name, with passed null', () => {
+    const gate = evaluateRegisteredRelease(evaluation(), p37);
+    const c = named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)');
+    expect(c.passed).toBeNull();
+  });
+
+  it('G5: P37 comparisons, skill windows and demonstration exclude the 10M tier; v0.10 on the same input includes it', () => {
+    const out = evaluation();
+    const p37Gate = evaluateRegisteredRelease(out, { ...p37, forkResults: completeForkResults() });
+    const v010Gate = evaluateRegisteredRelease(out, { ...gateOpts, forkResults: completeForkResults() });
+
+    expect(p37Gate.comparisons.some((c) => c.tier === TEN_M.toString())).toBe(false);
+    expect(v010Gate.comparisons.some((c) => c.tier === TEN_M.toString())).toBe(true);
+
+    expect(p37Gate.skillWindows.map((w) => w.tier)).not.toContain(TEN_M.toString());
+    expect(v010Gate.skillWindows.map((w) => w.tier)).toContain(TEN_M.toString());
+
+    expect(p37Gate.sustainability.map((s) => s.tier)).not.toContain(TEN_M.toString());
+    expect(v010Gate.sustainability.map((s) => s.tier)).toContain(TEN_M.toString());
+  });
 });

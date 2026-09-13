@@ -544,25 +544,51 @@ function forkClaim(fork: readonly ForkReplayResult[]): string {
 }
 
 /**
+ * How a fork-replay result OUTSIDE `inForkScope` should be described in the
+ * detail string, for `forkReplayCheck`.
+ *
+ * Fix round 1, finding 2: under P37 an out-of-scope entry is not always a
+ * baseline — SRCLA's OWN 10M replay is out of scope too (G5), and G5 says 10M
+ * results are "reported as outside the release scope", not folded into the
+ * baseline label. `releaseScopeKeys` names every (policy, tier) that should
+ * be reported this way EVEN IF ABSENT from `fork` entirely, so a missing
+ * SRCLA@10M replay is surfaced rather than silently unreported.
+ */
+interface OutOfForkScopeReporting {
+  /** Every (policy, tier) key that reports as "outside the release scope" — present or not. */
+  releaseScopeKeys: readonly string[];
+  /** True for an out-of-scope fork result that belongs to `releaseScopeKeys`' policy. */
+  isReleaseScope: (f: ForkReplayResult) => boolean;
+}
+
+const NO_OUT_OF_SCOPE_REPORTING: OutOfForkScopeReporting = {
+  releaseScopeKeys: [],
+  isReleaseScope: () => false,
+};
+
+/**
  * §11.1's pinned-prestate fork-replay check, scoped by which (policy, tier)
  * runs are IN SCOPE for it.
  *
  * Under v0.10 the caller passes `requiredKeys = requiredRuns()` (every
- * registered (policy, tier)) and `inForkScope = () => true`, which admits
- * every fork result — exactly the check that has always shipped, byte for
- * byte. Under P37 (G4) the caller narrows both to SRCLA's plans at the
+ * registered (policy, tier)), `inForkScope = () => true` (admits every fork
+ * result), and no `outOfScope` reporting — exactly the check that has always
+ * shipped, byte for byte, since there is never anything out of scope to
+ * report. Under P37 (G4) the caller narrows both to SRCLA's plans at the
  * release tiers: §11.1 asks whether the chain accepts SRCLA's allocation, so
  * a refused BASELINE plan — like `b4@10000000000`'s — is published in the
- * detail rather than blocking.
+ * detail rather than blocking, and SRCLA's own out-of-scope (10M) outcome is
+ * labelled outside the release scope rather than as a baseline (G5).
  */
 function forkReplayCheck(
   fork: readonly ForkReplayResult[],
   name: string,
   requiredKeys: readonly string[],
   inForkScope: (f: ForkReplayResult) => boolean,
+  outOfScope: OutOfForkScopeReporting = NO_OUT_OF_SCOPE_REPORTING,
 ): RegisteredGateCheck {
   const scoped = fork.filter(inForkScope);
-  const outOfScope = fork.filter((f) => !inForkScope(f));
+  const outOfScopeEntries = fork.filter((f) => !inForkScope(f));
 
   const required = new Set(requiredKeys);
   for (const f of scoped) required.delete(`${f.policyId}@${f.tier}`);
@@ -583,15 +609,35 @@ function forkReplayCheck(
   const srclaExecutions = srclaFork.filter((f) => f.held !== true);
   const noSrclaExecution = srclaExecutions.length === 0;
 
-  // P37 (G4): a plan OUT of scope (a baseline, under P37) that the chain
-  // refused is published here, never gating.
-  const outOfScopeRefusals = outOfScope.filter((f) => !f.executed);
-  const reportedDetail =
-    outOfScopeRefusals.length > 0
-      ? ` reported (not gating): baseline plans not executed: ${outOfScopeRefusals
-          .map((f) => `${f.policyId}@${f.tier} (${f.detail})`)
-          .join('; ')}`
-      : '';
+  // Fix round 1, finding 2: split what is out of scope into SRCLA's own
+  // out-of-release-scope outcomes (G5 — "reported as outside the release
+  // scope") and true baseline plans (G4's original wording), and surface a
+  // MISSING release-scope replay (e.g. no SRCLA@10M entry at all) the same
+  // way a refused one is surfaced, rather than letting it vanish silently.
+  const releaseScopeOut = outOfScopeEntries.filter(outOfScope.isReleaseScope);
+  const baselineOut = outOfScopeEntries.filter((f) => !outOfScope.isReleaseScope(f));
+  const releaseScopePresent = new Set(releaseScopeOut.map((f) => `${f.policyId}@${f.tier}`));
+  const releaseScopeRefusals = releaseScopeOut.filter((f) => !f.executed);
+  const releaseScopeMissing = outOfScope.releaseScopeKeys.filter((k) => !releaseScopePresent.has(k));
+  const baselineRefusals = baselineOut.filter((f) => !f.executed);
+
+  const reportedParts: string[] = [];
+  if (releaseScopeRefusals.length > 0 || releaseScopeMissing.length > 0) {
+    reportedParts.push(
+      `reported (not gating), outside the release scope: ${[
+        ...releaseScopeRefusals.map((f) => `${f.policyId}@${f.tier} (${f.detail})`),
+        ...releaseScopeMissing.map((k) => `${k} (no fork replay)`),
+      ].join('; ')}`,
+    );
+  }
+  if (baselineRefusals.length > 0) {
+    reportedParts.push(
+      `reported (not gating): baseline plans not executed: ${baselineRefusals
+        .map((f) => `${f.policyId}@${f.tier} (${f.detail})`)
+        .join('; ')}`,
+    );
+  }
+  const reportedDetail = reportedParts.length > 0 ? ` ${reportedParts.join(' ')}` : '';
 
   return check(
     name,
@@ -734,11 +780,18 @@ export function evaluateRegisteredRelease(
   // replay this reports NOT PRODUCED and blocks, because a run that did not
   // replay has not shown its allocation is one the chain would accept.
   // Skipping it silently is how a paper requirement gets quietly dropped.
+  //
+  // Fix round 1, finding 3: the NOT PRODUCED (fork undefined) branch must use
+  // the SAME name the produced branch uses under this amendment, or a lookup
+  // by the P37 name misses it entirely when no fork was supplied.
+  const forkCheckName = p37
+    ? '§11.1 pinned-prestate fork replay (SRCLA plans, P37)'
+    : '§11.1 pinned-prestate fork replay';
   const fork = opts.forkResults;
   if (fork === undefined) {
     checks.push(
       check(
-        '§11.1 pinned-prestate fork replay',
+        forkCheckName,
         null,
         'NOT PRODUCED: no fork replay was supplied. Produce one with ' +
           'src/evaluation/fork-runner.ts#runForkReplays (via ' +
@@ -749,17 +802,26 @@ export function evaluateRegisteredRelease(
   } else if (p37) {
     // P37 (G4): §11.1 asks whether the chain accepts SRCLA's allocation, so
     // only SRCLA's own replays at the release tiers gate here. Every baseline
-    // plan the chain did not execute is still published in the detail.
+    // plan the chain did not execute is still published in the detail, and
+    // SRCLA's own out-of-scope (10M) outcome is labelled outside the release
+    // scope rather than folded into the baseline label (G5, fix round 1
+    // finding 2).
     checks.push(
       forkReplayCheck(
         fork,
-        '§11.1 pinned-prestate fork replay (SRCLA plans, P37)',
+        forkCheckName,
         RELEASE_TIERS.map((t) => `${SRCLA_POLICY.id}@${t}`),
         (f) => f.policyId === SRCLA_POLICY.id && RELEASE_TIERS.includes(f.tier),
+        {
+          releaseScopeKeys: REGISTERED_TIERS.filter((t) => !RELEASE_TIERS.includes(t)).map(
+            (t) => `${SRCLA_POLICY.id}@${t}`,
+          ),
+          isReleaseScope: (f) => f.policyId === SRCLA_POLICY.id,
+        },
       ),
     );
   } else {
-    checks.push(forkReplayCheck(fork, '§11.1 pinned-prestate fork replay', requiredRuns(), () => true));
+    checks.push(forkReplayCheck(fork, forkCheckName, requiredRuns(), () => true));
   }
 
   // =========================================================================
@@ -837,9 +899,12 @@ export function evaluateRegisteredRelease(
     (r) => r.replay.minStressedLiquidCoverage < minStressed && !venueFailures.has(r),
   );
   const reportedOnly = otherResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  // Fix round 1, finding 1: `totalRuns` must count only the runs that
+  // actually met the floor. Under v0.10 `venueFailures.size` is always 0, so
+  // this is `srclaResults.length`, unchanged.
   const coverageCheck = stressedLiquidCoverageCheck(
     squeezed,
-    srclaResults.length,
+    srclaResults.length - venueFailures.size,
     minStressed,
     opts.universeLiquidity,
     reportedOnly,
