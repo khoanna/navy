@@ -488,6 +488,10 @@ describe('annualizedSharePriceGrowth', () => {
     totalReturn: 0,
     idleBase: 0n,
     stressedLiquidCoverage: 1,
+    holdingsBaseByMarket: {},
+    executedDeployBaseByMarket: {},
+    dryMarketIds: [],
+    untrappedStressedLiquidCoverage: 1,
   });
 
   it('annualizes share-price growth over the real elapsed time', () => {
@@ -500,5 +504,58 @@ describe('annualizedSharePriceGrowth', () => {
   it('is 0 for a series with fewer than two points', () => {
     expect(annualizedSharePriceGrowth([])).toBe(0);
     expect(annualizedSharePriceGrowth([s(0, WAD)])).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P37 (G3): what the S2 attribution reads, recorded per origin
+// ---------------------------------------------------------------------------
+
+describe('P37 per-origin measurements (G3)', () => {
+  it('records holdings, and the deploy at the origin it executed at', () => {
+    const ds = dataset(3, (_d, t) => [marketSnapshot('aa', t), marketSnapshot('bb', t)]);
+    const once: PolicyFn = (state, snap) =>
+      snap.index === 0 ? [{ kind: 'deploy', adapter: 'aa', amount: state.idleBase }] : [];
+    const r = runReplay({
+      dataset: ds,
+      evaluationId: 'e',
+      startDate: ds.snapshots[0]!.timestamp,
+      endDate: ds.snapshots[2]!.timestamp,
+      tier: TIER,
+      policy: once,
+    });
+    expect(r.snapshots[0]!.executedDeployBaseByMarket['aa']).toBeGreaterThan(0n);
+    expect(r.snapshots[1]!.executedDeployBaseByMarket).toEqual({});
+    expect(r.snapshots[1]!.holdingsBaseByMarket['aa']).toBeGreaterThan(0n);
+    expect(r.snapshots[1]!.holdingsBaseByMarket['bb']).toBeUndefined();
+  });
+
+  it('names a zero-cash venue dry and computes coverage on the untrapped part', () => {
+    const ds = dataset(2, (d, t) => [
+      marketSnapshot('aa', t, d === 1 ? { cashBase: 0n } : {}),
+      marketSnapshot('bb', t),
+    ]);
+    const split: PolicyFn = (_state, snap) =>
+      snap.index === 0
+        ? [
+            { kind: 'deploy', adapter: 'aa', amount: (TIER * 3n) / 4n },
+            { kind: 'deploy', adapter: 'bb', amount: TIER / 4n },
+          ]
+        : [];
+    const r = runReplay({
+      dataset: ds,
+      evaluationId: 'e',
+      startDate: ds.snapshots[0]!.timestamp,
+      endDate: ds.snapshots[1]!.timestamp,
+      tier: TIER,
+      policy: split,
+    });
+    const healthy = r.snapshots[0]!;
+    const dry = r.snapshots[1]!;
+    expect(healthy.dryMarketIds).toEqual([]);
+    expect(healthy.untrappedStressedLiquidCoverage).toBe(healthy.stressedLiquidCoverage);
+    expect(dry.dryMarketIds).toEqual(['aa']);
+    expect(dry.stressedLiquidCoverage).toBeLessThan(1);
+    expect(dry.untrappedStressedLiquidCoverage).toBeGreaterThan(dry.stressedLiquidCoverage);
   });
 });

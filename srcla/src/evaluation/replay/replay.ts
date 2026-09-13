@@ -90,6 +90,26 @@ export interface ReplaySnapshot {
    * constraint: it never changes the replay's state.
    */
   stressedLiquidCoverage: number;
+  /**
+   * P37 (G3) — the vault's balance in each venue after this origin's actions
+   * and redemptions, keyed by marketId; only positive balances appear.
+   * MEASUREMENT ONLY: nothing on the policy path reads it.
+   */
+  holdingsBaseByMarket: Readonly<Record<string, bigint>>;
+  /**
+   * P37 (G3) — base units deployed into each venue by actions EXECUTED at this
+   * origin (after the replay's idle clip). `{}` means no deploy executed.
+   */
+  executedDeployBaseByMarket: Readonly<Record<string, bigint>>;
+  /** P37 (G3) — venues whose own withdrawable cash (`cashBase`) is exactly 0 here. Sorted. */
+  dryMarketIds: readonly string[];
+  /**
+   * P37 (G3) — `stressedLiquidCoverage` on the UNTRAPPED part of the vault:
+   * holdings in `dryMarketIds` removed from both the holdings and the NAV the
+   * stress demand is sized on. Equal to `stressedLiquidCoverage` when no held
+   * venue is dry.
+   */
+  untrappedStressedLiquidCoverage: number;
 }
 
 export interface ReplayResult {
@@ -324,6 +344,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     }
 
     // Execute actions
+    const executedDeployBaseByMarket: Record<string, bigint> = {};
     for (const action of actions) {
       const state = vault.getState();
       if (action.kind === 'deploy') {
@@ -333,6 +354,8 @@ export function runReplay(config: ReplayConfig): ReplayResult {
         charge(modelExecution({ ...action, amount, gasPriceWei, ethUsdE8 }, state).totalCostBase);
         totalTurnover += amount;
         vault.deploy(action.adapter, amount);
+        executedDeployBaseByMarket[action.adapter] =
+          (executedDeployBaseByMarket[action.adapter] ?? 0n) + amount;
       } else {
         if (action.amount <= 0n) continue;
         charge(modelExecution({ ...action, gasPriceWei, ethUsdE8 }, state).totalCostBase);
@@ -374,6 +397,22 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       venueCashByMarket: new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase])),
       totalAssetsBase: vault.getState().totalAssets,
     }).worst;
+    // P37 (G3): what S2 attribution needs, read from the SAME state as `coverage`.
+    const dryMarketIds = snapshot.snapshots
+      .filter((m) => m.cashBase === 0n)
+      .map((m) => m.marketId)
+      .sort();
+    const holdingsBaseByMarket: Record<string, bigint> = {};
+    for (const [marketId, balance] of vault.getState().strategyBalances) {
+      if (balance > 0n) holdingsBaseByMarket[marketId] = balance;
+    }
+    const untrappedStressedLiquidCoverage = untrappedStressedCoverage({
+      holdings: vault.getState().strategyBalances,
+      idleBase: vault.getState().idleBase,
+      totalAssetsBase: vault.getState().totalAssets,
+      venueCashByMarket: new Map(snapshot.snapshots.map((m) => [m.marketId, m.cashBase])),
+      dryMarketIds,
+    });
     if (coverage < minStressedLiquidCoverage) {
       minStressedLiquidCoverage = coverage;
       worstCoverageIndex = i;
@@ -412,6 +451,10 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       totalReturn,
       idleBase: vault.getState().idleBase,
       stressedLiquidCoverage: coverage,
+      holdingsBaseByMarket,
+      executedDeployBaseByMarket,
+      dryMarketIds,
+      untrappedStressedLiquidCoverage,
     });
   }
 
@@ -443,6 +486,38 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     displayedVsRealizedGapApy: displayedVsRealizedGap(displayedSeries, realizedNetApy),
     policyViolations,
   };
+}
+
+/**
+ * P37 (G3): stressed coverage on the part of the vault NOT trapped in a dry
+ * venue. The same `stressedCoverage` arithmetic, with every dry venue's holding
+ * removed from the holdings and from the NAV the demand is sized on — so a
+ * shortfall that remains here is one the allocator could have avoided.
+ */
+export function untrappedStressedCoverage(args: {
+  holdings: ReadonlyMap<string, bigint>;
+  idleBase: bigint;
+  totalAssetsBase: bigint;
+  venueCashByMarket: ReadonlyMap<string, bigint>;
+  dryMarketIds: readonly string[];
+}): number {
+  const dry = new Set(args.dryMarketIds);
+  let trapped = 0n;
+  const holdings = new Map<string, bigint>();
+  for (const [marketId, balance] of args.holdings) {
+    if (dry.has(marketId)) {
+      if (balance > 0n) trapped += balance;
+    } else {
+      holdings.set(marketId, balance);
+    }
+  }
+  const totalAssetsBase = args.totalAssetsBase > trapped ? args.totalAssetsBase - trapped : 0n;
+  return stressedCoverage({
+    holdings,
+    idleBase: args.idleBase,
+    venueCashByMarket: args.venueCashByMarket,
+    totalAssetsBase,
+  }).worst;
 }
 
 /**

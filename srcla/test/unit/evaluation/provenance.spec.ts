@@ -169,7 +169,7 @@ function row(policyId: string, tier: bigint, apy: number): PolicyRunResult {
       displayedVsRealizedGapApy: 0,
       policyViolations: 0,
     },
-  } as PolicyRunResult;
+  } as unknown as PolicyRunResult;
 }
 
 function evaluation(overrides: Partial<RegisteredEvaluationResult> = {}): RegisteredEvaluationResult {

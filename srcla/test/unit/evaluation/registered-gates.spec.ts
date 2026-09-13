@@ -118,7 +118,7 @@ function run(
       displayedVsRealizedGapApy: 0,
       policyViolations: opts.policyViolations ?? 0,
     },
-  } as PolicyRunResult;
+  } as unknown as PolicyRunResult;
 }
 
 /** A COMPLETE run: every registered policy at every registered tier. */
