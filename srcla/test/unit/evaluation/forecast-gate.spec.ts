@@ -3,6 +3,7 @@ import {
   alignedResiduals,
   chiSquareUpperTail,
   christoffersenTest,
+  independenceTest,
   kupiecTest,
   resolveSweepMethod,
   runForecastGate,
@@ -455,5 +456,39 @@ describe('aligned residuals', () => {
       horizonSeconds: 604_800 as CompletedLabel['horizonSeconds'],
     }));
     expect(alignedResiduals('rolling', {}, ls, HORIZON, WARMUP)!.size).toBe(0);
+  });
+});
+
+describe('P37 (G2): one-sided coverage tests', () => {
+  it('cannot reject a lower bound for breaching LESS often than expected', () => {
+    const oneSided = kupiecTest(0, 2_290, 0.01, 'above')!;
+    expect(oneSided.pValue).toBe(1);
+    // The two-sided statistic on the same stream still rejects, and stays
+    // available as a reported diagnostic.
+    expect(kupiecTest(0, 2_290, 0.01)!.pValue).toBeLessThan(0.05);
+  });
+
+  it('halves the two-sided tail when the breach rate is above expected', () => {
+    const twoSided = kupiecTest(15, 1_000, 0.01)!;
+    const oneSided = kupiecTest(15, 1_000, 0.01, 'above')!;
+    expect(oneSided.lr).toBe(twoSided.lr);
+    expect(oneSided.pValue).toBeCloseTo(twoSided.pValue / 2, 12);
+  });
+
+  it('the independence test rejects clustered breaches at an on-target rate', () => {
+    const stream = Array.from({ length: 100 }, (_, i) => i >= 20 && i < 30);
+    const t = independenceTest(stream)!;
+    expect(t.lrInd).toBeGreaterThan(5);
+    expect(t.pValue).toBeLessThan(0.05);
+  });
+
+  it('the independence test does not reject evenly spaced breaches', () => {
+    const stream = Array.from({ length: 100 }, (_, i) => i % 10 === 0);
+    expect(independenceTest(stream)!.pValue).toBeGreaterThan(0.05);
+  });
+
+  it('the independence test returns null on a degenerate stream', () => {
+    expect(independenceTest([])).toBeNull();
+    expect(independenceTest([true])).toBeNull();
   });
 });

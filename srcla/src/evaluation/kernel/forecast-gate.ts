@@ -219,10 +219,14 @@ function xlog(n: number, p: number): number {
  * H0: the exceedance rate equals `expectedRate`. Returns `null` when the
  * statistic is undefined (no observations) — never a fabricated p-value.
  */
+/** The alternative a Kupiec test rejects toward. */
+export type KupiecDirection = 'two-sided' | 'above';
+
 export function kupiecTest(
   exceedances: number,
   observations: number,
   expectedRate: number,
+  direction: KupiecDirection = 'two-sided',
 ): { lr: number; pValue: number } | null {
   if (observations <= 0) return null;
   const x = exceedances;
@@ -232,6 +236,13 @@ export function kupiecTest(
   const logL0 = xlog(n - x, 1 - p) + xlog(x, p);
   const logL1 = xlog(n - x, 1 - pHat) + xlog(x, pHat);
   const lr = Math.max(0, -2 * (logL0 - logL1));
+  // P37 (G2): a LOWER bound fails only for breaching too often. Against the
+  // one-sided alternative "breach rate above expected" the 1-dof tail halves
+  // when the observed rate is above target, and a rate at or below target
+  // cannot reject at all — a safety floor is not failed for being safe.
+  if (direction === 'above') {
+    return { lr, pValue: pHat > p ? chiSquareUpperTail(lr, 1) / 2 : 1 };
+  }
   return { lr, pValue: chiSquareUpperTail(lr, 1) };
 }
 
@@ -253,12 +264,33 @@ export function christoffersenTest(
   if (n < 2) return null;
   const uc = kupiecTest(stream.filter((b) => b).length, n, expectedRate);
   if (uc === null) return null;
+  const lrInd = independenceLr(stream);
+  const lrCc = uc.lr + lrInd;
+  return { lrCc, lrInd, pValue: chiSquareUpperTail(lrCc, 2), observations: n };
+}
 
+/**
+ * P37 (G2): the INDEPENDENCE half of Christoffersen alone — `LR_ind` against
+ * chi-square(1). `christoffersenTest` adds it to the two-sided unconditional
+ * statistic that G2 replaces; this is the part that asks whether breaches
+ * cluster, which a one-sided rate test cannot see. Same thinned stream.
+ */
+export function independenceTest(
+  stream: readonly boolean[],
+): { lrInd: number; pValue: number; observations: number } | null {
+  const n = stream.length;
+  if (n < 2) return null;
+  const lrInd = independenceLr(stream);
+  return { lrInd, pValue: chiSquareUpperTail(lrInd, 1), observations: n };
+}
+
+/** First-order Markov independence LR over an exceedance indicator stream (n >= 2). */
+function independenceLr(stream: readonly boolean[]): number {
   let n00 = 0;
   let n01 = 0;
   let n10 = 0;
   let n11 = 0;
-  for (let i = 1; i < n; i++) {
+  for (let i = 1; i < stream.length; i++) {
     const prev = stream[i - 1]!;
     const cur = stream[i]!;
     if (!prev && !cur) n00 += 1;
@@ -273,9 +305,7 @@ export function christoffersenTest(
   const logL0 = xlog(n00 + n10, 1 - pooled) + xlog(n01 + n11, pooled);
   const logL1 =
     xlog(n00, 1 - p01) + xlog(n01, p01) + xlog(n10, 1 - p11) + xlog(n11, p11);
-  const lrInd = Math.max(0, -2 * (logL0 - logL1));
-  const lrCc = uc.lr + lrInd;
-  return { lrCc, lrInd, pValue: chiSquareUpperTail(lrCc, 2), observations: n };
+  return Math.max(0, -2 * (logL0 - logL1));
 }
 
 /**
