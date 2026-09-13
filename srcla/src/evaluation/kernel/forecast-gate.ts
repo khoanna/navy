@@ -482,6 +482,49 @@ function keyCount(map: Record<string, unknown> | undefined | null): number {
 
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 
+/**
+ * Builds one likelihood-ratio-test check. `passed` is `null` — never a pass —
+ * when `result` is `null` (too few observations for the test to have any
+ * power), and `result.pValue >= alpha` otherwise. This is the ONE place the
+ * pass expression and the "too few observations" detail text exist: every LR
+ * check in this file (v0.10's two-sided Kupiec and full Christoffersen, P37's
+ * one-sided Kupiec and its standalone independence test) builds its check
+ * through this function rather than repeating either.
+ */
+function lrCheck(
+  name: string,
+  result: { pValue: number } | null,
+  alpha: number,
+  notProducedDetail: string,
+  producedDetail: string,
+): RegisteredGateCheck {
+  return check(name, result === null ? null : result.pValue >= alpha, result === null ? notProducedDetail : producedDetail);
+}
+
+/** Shared "too few observations for the LR test" detail, with an optional P34-domain suffix. */
+function notEnoughForLr(observations: number, suffix = ''): string {
+  return (
+    `NOT PRODUCED: ${observations} residuals is below the ${MIN_EXCEEDANCE_OBSERVATIONS} ` +
+    'the LR test needs to have any power' +
+    suffix
+  );
+}
+
+/** Shared "thinning left too few non-overlapping windows" detail, with an optional P34-domain suffix. */
+function notEnoughThinned(
+  observations: number,
+  horizonSeconds: number,
+  thinnedCount: number,
+  suffix = '',
+): string {
+  return (
+    `NOT PRODUCED: thinning ${observations} overlapping residuals to non-overlapping ` +
+    `H=${horizonSeconds}s windows left ` +
+    `${thinnedCount} < ${MIN_EXCEEDANCE_OBSERVATIONS} observations` +
+    suffix
+  );
+}
+
 /** Check names, saying what each check measures under the amendment in force. */
 function coverageCheckNames(
   marketId: string,
@@ -584,9 +627,9 @@ function coverageChecks(
     if (rows.length === 0) {
       const why =
         p37 && scored.length > 0
-          ? `NOT EVALUATED: all ${scored.length} residuals for ${marketId} fall in label windows ` +
-            'that saw the venue at zero withdrawable cash (P34), so nothing inside the ' +
-            "forecast's domain was scored"
+          ? `NOT EVALUATED: all ${scored.length} residuals for ${marketId} (${excludedBreaches} of ` +
+            'them breaches) fall in label windows that saw the venue at zero withdrawable cash ' +
+            "(P34), so nothing inside the forecast's domain was scored"
           : `NOT PRODUCED: no scored residual for ${marketId} on the labels supplied ` +
             `(warm-up ${artifact.minObservations} observations, H=${artifact.horizonSeconds}s)`;
       checks.push(check(names.coverage, null, why));
@@ -628,14 +671,17 @@ function coverageChecks(
     );
 
     if (p37) {
+      // `twoSided` is null exactly when `kupiec` is, since both gate on the
+      // same `enough` predicate — reported as a diagnostic, never gated.
       const twoSided = enough ? kupiecTest(breaches.length, rows.length, expectedRate) : null;
       checks.push(
-        check(
+        lrCheck(
           names.kupiec,
-          kupiec === null ? null : kupiec.pValue >= alpha,
+          kupiec,
+          alpha,
+          notEnoughForLr(rows.length, domainNote),
           kupiec === null || twoSided === null
-            ? `NOT PRODUCED: ${rows.length} residuals is below the ${MIN_EXCEEDANCE_OBSERVATIONS} ` +
-              'the LR test needs to have any power' + domainNote
+            ? ''
             : `LR_uc ${kupiec.lr.toFixed(4)}, one-sided p ${kupiec.pValue.toFixed(4)} ` +
               `${kupiec.pValue >= alpha ? '>=' : '<'} ${alpha} — breach rate ` +
               `${pct(breaches.length / rows.length)} against expected ${pct(expectedRate)}; ` +
@@ -646,13 +692,13 @@ function coverageChecks(
         ? independenceTest(thinnedStream)
         : null;
       checks.push(
-        check(
+        lrCheck(
           names.christoffersen,
-          independence === null ? null : independence.pValue >= alpha,
+          independence,
+          alpha,
+          notEnoughThinned(rows.length, artifact.horizonSeconds, thinned.length, domainNote),
           independence === null
-            ? `NOT PRODUCED: thinning ${rows.length} overlapping residuals to non-overlapping ` +
-              `H=${artifact.horizonSeconds}s windows left ` +
-              `${thinned.length} < ${MIN_EXCEEDANCE_OBSERVATIONS} observations` + domainNote
+            ? ''
             : `LR_ind ${independence.lrInd.toFixed(4)}, p ${independence.pValue.toFixed(4)} ` +
               `${independence.pValue >= alpha ? '>=' : '<'} ${alpha} on ` +
               `${independence.observations} non-overlapping windows` +
@@ -667,12 +713,13 @@ function coverageChecks(
     }
 
     checks.push(
-      check(
+      lrCheck(
         names.kupiec,
-        kupiec === null ? null : kupiec.pValue >= alpha,
+        kupiec,
+        alpha,
+        notEnoughForLr(rows.length),
         kupiec === null
-          ? `NOT PRODUCED: ${rows.length} residuals is below the ${MIN_EXCEEDANCE_OBSERVATIONS} ` +
-            'the LR test needs to have any power'
+          ? ''
           : `LR_uc ${kupiec.lr.toFixed(4)}, p ${kupiec.pValue.toFixed(4)} ` +
             `${kupiec.pValue >= alpha ? '>=' : '<'} ${alpha} — breach rate ` +
             `${pct(breaches.length / rows.length)} against expected ${pct(expectedRate)}`,
@@ -680,13 +727,13 @@ function coverageChecks(
     );
 
     checks.push(
-      check(
+      lrCheck(
         names.christoffersen,
-        christoffersen === null ? null : christoffersen.pValue >= alpha,
+        christoffersen,
+        alpha,
+        notEnoughThinned(rows.length, artifact.horizonSeconds, thinned.length),
         christoffersen === null
-          ? `NOT PRODUCED: thinning ${rows.length} overlapping residuals to non-overlapping ` +
-            `H=${artifact.horizonSeconds}s windows left ` +
-            `${thinned.length} < ${MIN_EXCEEDANCE_OBSERVATIONS} observations`
+          ? ''
           : `LR_cc ${christoffersen.lrCc.toFixed(4)} (LR_ind ` +
             `${christoffersen.lrInd.toFixed(4)}), p ${christoffersen.pValue.toFixed(4)} ` +
             `${christoffersen.pValue >= alpha ? '>=' : '<'} ${alpha} on ` +

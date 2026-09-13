@@ -536,6 +536,9 @@ describe('P37 (G1): the forecast domain excludes dry label windows (P34)', () =>
     const c = find(g, `Per-venue coverage, P34 domain — ${DRY}`);
     expect(c.passed).toBeNull();
     expect(c.detail).toMatch(/^NOT EVALUATED/);
+    // G1: the detail reports the breaches among the excluded rows too, not
+    // just their count.
+    expect(c.detail).toMatch(/\(\d+ of them breaches\)/);
     expect(g.pass).toBe(false);
   });
 });
