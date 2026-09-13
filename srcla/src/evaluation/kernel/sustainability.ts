@@ -20,6 +20,8 @@
  * DEMONSTRATED / not produced. `null` NEVER rolls up into a pass.
  */
 import type { PolicyRunResult } from './harness.js';
+import type { GateAmendment } from './gates.js';
+import type { ReplaySnapshot } from '../replay/replay.js';
 
 /**
  * Time-weighted capital-at-work below which a run demonstrates nothing.
@@ -58,6 +60,90 @@ export const REGISTERED_MIN_WITHDRAWAL_SUCCESS = 0.99;
  */
 export const REGISTERED_S2_COVERAGE_FLOOR = 0.95;
 
+/** P37 (G3, P34): why a run's stressed coverage fell below the S2 floor. */
+export interface S2Attribution {
+  kind: 'NO BREACH' | 'VENUE FAILURE' | 'ALLOCATOR ERROR';
+  /** Origins below the floor. */
+  shortOrigins: number;
+  /** Largest share of NAV held in dry venues at a short origin; 0 when none. */
+  trappedShareMax: number;
+  /** Worst untrapped coverage over the short origins; 1 when none. */
+  untrappedCoverageMin: number;
+  detail: string;
+}
+
+/**
+ * P37 (G3): classify an S2 breach. VENUE FAILURE only when, at EVERY origin
+ * below `floor`, (1) the vault holds a venue whose `cashBase` is 0 and (2) the
+ * untrapped remainder's coverage is at or above `floor`, and (3) at NO origin
+ * of the run did an executed deploy enter a venue that was dry there. Every
+ * other breach — including one this function cannot see into — is an
+ * ALLOCATOR ERROR, which blocks exactly as the registered gate does.
+ */
+export function attributeS2Breach(
+  snapshots: readonly ReplaySnapshot[],
+  floor: number = REGISTERED_S2_COVERAGE_FLOOR,
+): S2Attribution {
+  if (snapshots.length === 0) {
+    return {
+      kind: 'ALLOCATOR ERROR',
+      shortOrigins: 0,
+      trappedShareMax: 0,
+      untrappedCoverageMin: 1,
+      detail: 'ALLOCATOR ERROR: no per-origin snapshots to attribute the breach to a venue',
+    };
+  }
+  const short = snapshots.filter((s) => s.stressedLiquidCoverage < floor);
+  if (short.length === 0) {
+    return {
+      kind: 'NO BREACH',
+      shortOrigins: 0,
+      trappedShareMax: 0,
+      untrappedCoverageMin: 1,
+      detail: `no origin below ${floor}`,
+    };
+  }
+
+  const intoDry = snapshots.filter((s) =>
+    (s.dryMarketIds ?? []).some((m) => ((s.executedDeployBaseByMarket ?? {})[m] ?? 0n) > 0n),
+  );
+  let trappedShareMax = 0;
+  let untrappedCoverageMin = 1;
+  let unexplained = 0;
+  for (const s of short) {
+    const holdings = s.holdingsBaseByMarket ?? {};
+    const trappedBase = (s.dryMarketIds ?? []).reduce((sum, m) => sum + (holdings[m] ?? 0n), 0n);
+    const share = s.totalAssets > 0n ? Number(trappedBase) / Number(s.totalAssets) : 0;
+    const untrapped = s.untrappedStressedLiquidCoverage ?? s.stressedLiquidCoverage;
+    if (share > trappedShareMax) trappedShareMax = share;
+    if (untrapped < untrappedCoverageMin) untrappedCoverageMin = untrapped;
+    if (!(trappedBase > 0n && untrapped >= floor)) unexplained += 1;
+  }
+
+  const measured = { shortOrigins: short.length, trappedShareMax, untrappedCoverageMin };
+  if (unexplained === 0 && intoDry.length === 0) {
+    return {
+      ...measured,
+      kind: 'VENUE FAILURE',
+      detail:
+        `VENUE FAILURE (P34): ${short.length} origin(s) below ${floor}, every one explained by a ` +
+        `position trapped in a venue with zero withdrawable cash (up to ` +
+        `${(trappedShareMax * 100).toFixed(1)}% of NAV); coverage on the untrapped part stayed ` +
+        `>= ${floor} (worst ${untrappedCoverageMin.toFixed(3)}), and no deploy entered a dry venue`,
+    };
+  }
+  return {
+    ...measured,
+    kind: 'ALLOCATOR ERROR',
+    detail:
+      intoDry.length > 0
+        ? `ALLOCATOR ERROR: the run deployed into a venue with zero withdrawable cash at ` +
+          `${intoDry.length} origin(s)`
+        : `ALLOCATOR ERROR: ${unexplained} of ${short.length} origin(s) below ${floor} are not ` +
+          `explained by a trapped position (untrapped coverage worst ${untrappedCoverageMin.toFixed(3)})`,
+  };
+}
+
 export interface SustainabilityVerdict {
   policyId: string;
   tier: string;
@@ -77,6 +163,8 @@ export interface SustainabilityVerdict {
   /** Published for every verdict — the price of unsustainability (§11.5 part 3). */
   realizedNetApy: number;
   displayedVsRealizedGapApy: number;
+  /** P37 (G3): set only under `amendment: 'p37'` when the S2 floor was breached. */
+  s2Attribution?: S2Attribution;
 }
 
 /**
@@ -91,7 +179,10 @@ export interface SustainabilityVerdict {
  * (a demonstrated breach is the strongest fact available); otherwise any
  * `null` makes it `null`; only an all-`true` set is `true`.
  */
-export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdict {
+export function sustainabilityAtTier(
+  run: PolicyRunResult,
+  opts: { amendment?: GateAmendment } = {},
+): SustainabilityVerdict {
   const r = run.replay;
   const tier = run.tier.toString();
   const capitalAtWork = r.capitalAtWorkFraction ?? 0;
@@ -145,7 +236,36 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
 
   // S2 — the §11.4 floor the optimiser itself enforces, imported rather than
   // re-declared so the two cannot drift apart.
-  const s2 = r.minStressedLiquidCoverage >= REGISTERED_S2_COVERAGE_FLOOR;
+  // P37 (G3, P34): under the amendment a breach fully explained by a venue's
+  // failure does not fail S2. Under v0.10 `s2Attribution` stays null and S2 is
+  // exactly the registered comparison.
+  //
+  // FAIL CLOSED: `floorBreached` is the run-level fact (§11.4's
+  // `minStressedLiquidCoverage`), computed independently of the per-origin
+  // attribution below. `attributeS2Breach` looks only at `r.snapshots`, so if
+  // that array is inconsistent with the run-level minimum (missing an origin,
+  // stale replay data) it can come back 'NO BREACH' even though S2 has
+  // failed. That must never read as a pass: a 'NO BREACH' result is
+  // downgraded to ALLOCATOR ERROR whenever `floorBreached` is true, so an
+  // unattributable breach always blocks exactly as v0.10 does.
+  const floorBreached = r.minStressedLiquidCoverage < REGISTERED_S2_COVERAGE_FLOOR;
+  let s2Attribution: S2Attribution | null = null;
+  if (opts.amendment === 'p37' && floorBreached) {
+    const attribution = attributeS2Breach(r.snapshots ?? []);
+    s2Attribution =
+      attribution.kind === 'NO BREACH'
+        ? {
+            ...attribution,
+            kind: 'ALLOCATOR ERROR',
+            detail:
+              `ALLOCATOR ERROR: S2 failed at the run level (min stressed liquid coverage ` +
+              `${r.minStressedLiquidCoverage.toFixed(3)}) but no per-origin snapshot fell below ` +
+              `${REGISTERED_S2_COVERAGE_FLOOR} — inconsistent replay data, so the breach cannot be ` +
+              `attributed to a venue`,
+          }
+        : attribution;
+  }
+  const s2 = !floorBreached || s2Attribution?.kind === 'VENUE FAILURE';
 
   // S3 — venue-stress share, graded on the MAXIMUM share over origins. This
   // is the SECOND of §11.5 S3's two clauses; the first — that the vault's own
@@ -209,6 +329,7 @@ export function sustainabilityAtTier(run: PolicyRunResult): SustainabilityVerdic
 
   return {
     ...base,
+    ...(s2Attribution === null ? {} : { s2Attribution }),
     demonstrated: true,
     s1,
     s2,

@@ -548,8 +548,8 @@ export function evaluateRegisteredRelease(
   // for the yield comparison and the counterexample table.
   const srclaResults = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
   const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id);
-  const sustainability = srclaResults.map(sustainabilityAtTier);
-  const comparatorSustainability = otherResults.map(sustainabilityAtTier);
+  const sustainability = srclaResults.map((r) => sustainabilityAtTier(r));
+  const comparatorSustainability = otherResults.map((r) => sustainabilityAtTier(r));
   const comparatorVerdict = new Map<string, SustainabilityVerdict>(
     comparatorSustainability.map((v) => [`${v.policyId}@${v.tier}`, v]),
   );
