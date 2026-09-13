@@ -183,6 +183,13 @@ changes; it re-derives from columns already stored and fetches no blocks.
   reverts with "transfer amount exceeds balance" AFTER the contracts are deployed.
   Fund the deployer out of band (`cast rpc anvil_impersonateAccount` on a whale, then
   `cast send`) and have the script `require` the balance instead.
+- **`DeployAndFund.s.sol` run without a terminal deploys NOTHING yet still prints
+  addresses** unless given `--disable-code-size-limit --non-interactive`: forge's own
+  simulation stops at EIP-170 and then at "not a terminal", and every printed address
+  has code size 0.
+- **A fork-replay transaction cannot be traced with `cast run`/`cast tx`.**
+  `runForkReplays` reverts its block with `evm_revert` after every policy, so the tx
+  is gone ("tx not found") — restart anvil with `--print-traces` and read its log.
 - **`report/SRCLA-REPORT.md`, `SRCLA-REPORT.json`, `report/figures/SRCLA-FIG*` and `report/chart/SRCLA-FIGURE-SWEEP-*.json`
   are GENERATED** by `phase4:run` from `src/evaluation/report/` (`render-markdown.ts`, `charts.ts`); the retired
   untracked `srcla/quarantine/evaluation-v2/*.mjs` harness produced every earlier version. Hand-edits are erased
@@ -212,13 +219,14 @@ changes; it re-derives from columns already stored and fetches no blocks.
 
 1. **§11.1's fork replay is WIRED and executing** — on each sealed era 59 of 64 plans
    execute on the chain, the four B0 runs HOLD with no plan to submit, and **no SRCLA
-   plan is refused**. The one refusal is B4's (10k tier): the vault reverts that plan
-   with no reason string, while B4's plans at 100k/1M/10M execute — verified on a fresh
-   fork (`contract/audit/b4-fork-refusal-root-cause.md`): B4's third deploy reverts
-   `InsufficientIdle()` in `NavyVaultSRCLA._deploy`, a HARNESS DEFECT, because
-   `harnessConfig`'s `adminReserveBase: 0n` sizes B4 against a $500 floor at 10k while
-   the bench vault enforces `VaultGuardrails`' $1,000 `adminReserve` (the "no reason
-   string" is only ethers reading a mined receipt, which never carries revert data). It still reports `NOT PRODUCED`
+   plan is refused**. The one refusal, B4's at 10k, was a HARNESS DEFECT: `harnessConfig`'s
+   `adminReserveBase: 0n` sized B4 against a $500 floor while the bench vault enforced
+   `VaultGuardrails`' $1,000 `adminReserve`, so its third deploy reverted
+   `InsufficientIdle()`. `DeployAndFund.s.sol` now gives the bench vaults the registered
+   `adminReserve` (0, and the registered `absoluteCap`), and `runForkReplays` refuses to
+   replay on a tier vault that does not carry the registered harness values — those
+   results are NOT PRODUCED, never a chain refusal (`contract/audit/b4-fork-refusal-root-cause.md`,
+   *Resolution*). It still reports `NOT PRODUCED`
    and blocks if the `SRCLA_FORK_REPLAY_*` env is absent; that is designed, and a
    reproducible `FAIL` is an acceptable outcome §11.5 forbids retuning to avoid.
 1b. **The v0.10 re-run returns `FAIL` on both sealed eras**, and none of the causes

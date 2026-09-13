@@ -155,3 +155,62 @@ The two plans have the same shape: each deploys `totalAssets − 5%` as three eq
 The live keeper does not have this gap. `srcla/src/runtime/decision-driver.ts:410` takes `adminReserveBase: snap.vault.reserve.admin` from the chain, so the mismatch exists only in the evaluation harness. SRCLA and the other kernel policies passed at 10k because their plans happened to leave more idle: SRCLA's deployed `957446806 + 2340425530 + 1702127658`, about 5,000 USDC, well above 1,000 USDC. They were sized under the same $500 floor, though, so the gap is latent for them too.
 
 **Where the fix belongs (not made here).** Some change has to make the harness's floor and the bench's floor the same number. That means either `harnessConfig`'s `adminReserveBase`, which is a registered configuration value and changes every policy's inputs at the 10k tier, or the `adminReserve` the §11.1 bench vaults are deployed with (`DeployAndFund.s.sol` via `VaultGuardrails`). Choosing between them is a registered-configuration decision. Either way the change is not in `buildForkPlan`'s encoding. A regression test can reproduce the shape from this trace: B4's 10k target of three `3166666666` deploys against a vault with `totalAssets 10000000000`, `minIdleBps 500` and `adminReserve 1000000000` must have its third deploy refused.
+
+## Resolution
+
+**Ruling: the bench is aligned with the registration, not the other way round.** `harnessConfig` is a registered configuration. Changing `vault.adminReserveBase` would move a registered value and change every policy's inputs at the 10k tier, which the spec's integrity rule 1 forbids. `CLAUDE.md` already required every §11.1 tier vault to carry `harnessConfig`'s registered values, and this bench did not. `VaultGuardrails.sol` and `DeployBaseSystem.s.sol` are unchanged: the deploy-ready package keeps the $1,000 `adminReserve` as a production guardrail. `harnessConfig`, `NavyVaultSRCLA.sol` and every registered threshold are unchanged too.
+
+### The script change (`contract/script/DeployAndFund.s.sol`)
+
+Immediately after `VaultGuardrails.applyTo(_vault, ordered);`, each tier vault gets `_vault.setAdminReserve(0)`, the registered `harnessConfig.vault.adminReserveBase = 0n`. The header now says that a run without a terminal needs `--disable-code-size-limit --non-interactive`.
+
+The same block also sets each adapter's `absoluteCap` to `HARNESS_ABSOLUTE_CAP_BASE = 1e15`, through `setAdapterRisk`. It reads back `capBps`, `maxLossBps` and `applyTo`'s `liquidityFloorBps` and passes them through unchanged. The brief named only `adminReserve`, so this goes further than the brief. It was needed because `registerAdapter` leaves `absoluteCap` at `type(uint256).max` while `harnessConfig.defaultMarket` registers `absoluteCapBase: 10n ** 15n`, and the guard below compares registered values exactly, so a bench that fixed only the reserve would still be refused. The cap binds at no registered tier: at 10M, 5000 bps is `5e12` base units, far below `1e15`. It does change the vault's `currentConfigurationDigest()`, which covers each adapter's `absoluteCap` and the `adminReserve`. `buildForkPlan` reads that digest from the live vault, so the plan and the vault still agree.
+
+### The guard (`srcla/src/evaluation/fork-runner.ts`)
+
+- `forkBenchMismatches(onChain, registered)` is pure. It returns one entry per field that differs (`adminReserve`, `minIdleBps`, and each adapter's `capBps` / `absoluteCap` / `maxLossBps`), plus an entry for any adapter present on only one side. It returns an empty list when the two agree. Tests: `srcla/test/unit/evaluation/fork-bench-config.spec.ts`.
+- In `runForkReplays`, `contextFor` reads each tier vault's `adminReserve()`, `minIdleBps()`, `registeredAdapters(address)` and `adapters(address)` at the untouched prestate, before the first `evm_snapshot`, and compares them with `opts.registeredBench`.
+- If the list is not empty, every (policy, tier) on that vault is recorded before its `evm_revert` and before anything is submitted. Each gets `executed: false` and a detail beginning `fork bench does not carry the registered harness values:`, followed by the entries and `NOT PRODUCED: no plan was submitted … so this is not a chain verdict on the allocation`. It is never an execution and never `REFUSED BY THE CHAIN`. On an aligned bench, or when no `registeredBench` is supplied, every other result path is unchanged.
+- `kernel/harness.ts#runRegisteredForkReplays` now requires `registeredBench` in its type, so the registered path cannot skip the check by leaving it out. `scripts/run-phase4.ts` builds it with `registeredForkBench(config, <the dataset's marketIds>)` from the same `config` the evaluation ran on. `registeredForkBench` resolves each market the way `kernel/decision-input.ts` does: `config.markets[id] ?? config.defaultMarket`.
+- At the gate, a NOT PRODUCED entry is `executed: false`. §11.1's check therefore lists it under `did not execute on fork` and blocks, like the existing infrastructure path. `ForkReplayResult` has no per-entry NOT PRODUCED state, and `gates.ts` was not changed.
+
+### Verification on a fresh fork (local Anvil only)
+
+This was a diagnostic run on `heldout-c`, which has been design data since v0.9. It is not a registered result. Outputs went to `/tmp/b4-fork-fix` and `/tmp/b4-fork-guard`, and `git status --short report SRCLA-REPORT.json` printed nothing after both runs.
+
+**Bench.** anvil 1.4.4-stable (05794498bf), `anvil --fork-url https://mainnet.base.org --code-size-limit 100000`, with the fork head at `51267808`. The deployer was funded out of band from aBasUSDC: a USDC `transfer` of `11110000000000` in block `51267809`, read back as `11110000000000`. Then `forge script script/DeployAndFund.s.sol --fork-url http://127.0.0.1:8545 --broadcast --disable-code-size-limit --non-interactive` printed `ONCHAIN EXECUTION COMPLETE & SUCCESSFUL.`, and the head moved to `51267872`, the pinned prestate. All four vaults read back code size `32378`.
+
+- 10k vault `0x9610BE4938d71A834CBa65162B19045bB4c4B4CE`: aave-v3-usdc `0x3c204937e8215274FaB559f58537262C96EB46f7`, compound-v3-usdc `0x8AFC41257f03cb1B10A57f0A551C4bEAE228701e`, moonwell-usdc `0xd72e18DA8c6FD4885bDEc973A3b6d38945CB4568`. Values read back: `adminReserve() = 0`, `dynamicReserve() = 0`, `minIdleBps() = 500`, `requiredIdle() = 500000000`, `totalAssets() = 10000000000`. Every adapter reads `adapters(address) = 5000 1000000000000000 50 0 0 9000 <uint256 max>` (capBps, absoluteCap, maxLossBps, state, lastSyncIdleBase, liquidityFloorBps, accountingCap).
+- 100k vault `0xf1f41918Eb5073831837e94bE7B73E59c1d2752a`, 1M vault `0x28eFddd2837C78ef109b5FC0C8E63A27ADFe55ea`, and 10M vault `0x2FDe3713B8bD2C181F9721282c236722E1801F20`: each reads `adminReserve=0 minIdleBps=500`, with its aave adapter at `5000 1e15 50`. These addresses differ from the reproduction's because the new per-vault admin transactions change the deployer's nonces. All four were named in `SRCLA_FORK_REPLAY_TIER_VAULTS`; only the 10k tier was replayed.
+
+**Positive check.** `pnpm exec tsx scripts/run-phase4.ts --eras heldout-c --tiers 10000 --policies b4,srcla --figure-stride 100000 --out-dir /tmp/b4-fork-fix`:
+
+```
+    §11.1 fork replay: 2/2 EXECUTED (0 HOLD — no chain interaction) against http://127.0.0.1:8545 at pinned block 51267872
+```
+
+The fork-replay details in `/tmp/b4-fork-fix/SRCLA-REPORT.json`:
+
+```
+b4 10000000000: origin 0: 3 action(s) executed on the fork from pinned prestate 0x93ec1c82c3e1566e5824b43dc69821652dd78d627474a33b9737dbb8972ba568; gas 2353587; strategyAssets 0x3c204937e8215274fab559f58537262c96eb46f7:+3166666665,0x8afc41257f03cb1b10a57f0a551c4beae228701e:+3166666664,0xd72e18da8c6fd4885bdec973a3b6d38945cb4568:+3166666665
+
+srcla 10000000000: origin 0: 3 action(s) executed on the fork from pinned prestate 0x93ec1c82c3e1566e5824b43dc69821652dd78d627474a33b9737dbb8972ba568; gas 2353647; strategyAssets 0x3c204937e8215274fab559f58537262c96eb46f7:+2340425530,0x8afc41257f03cb1b10a57f0a551c4beae228701e:+957446807,0xd72e18da8c6fd4885bdec973a3b6d38945cb4568:+1702127658
+```
+
+B4's plan, previously refused, now executes all three deploys, and SRCLA's still executes. The §11.1 check still reads `FAILED`, but only on completeness (`no fork replay for: b0@10000000000, …`), and the gate blocks, as it must for a restricted run. `run-phase4.ts` sets `process.exitCode = 1` whenever a gate fails.
+
+**Negative check.** On the same fork, the 10k vault's admin (the deployer, `--unlocked`) ran `cast send 0x9610BE4938d71A834CBa65162B19045bB4c4B4CE "setAdminReserve(uint256)" 1000000000`: block `51267873`, status 1, transaction `0x4a9e2d1aecf903047d38e87fc30864b3acab7a47845e05fb08718724e320ccaa`. It then read back `adminReserve=1000000000 requiredIdle=1000000000`. The same command with `--out-dir /tmp/b4-fork-guard` printed:
+
+```
+    §11.1 fork replay: 0/2 EXECUTED (0 HOLD — no chain interaction) against http://127.0.0.1:8545 at pinned block 51267873
+```
+
+and wrote these details to `/tmp/b4-fork-guard/SRCLA-REPORT.json`:
+
+```
+b4 10000000000: fork bench does not carry the registered harness values: adminReserve: on-chain 1000000000, registered 0. b4@10000000000 NOT PRODUCED: no plan was submitted to 0x9610BE4938d71A834CBa65162B19045bB4c4B4CE, so this is not a chain verdict on the allocation
+
+srcla 10000000000: fork bench does not carry the registered harness values: adminReserve: on-chain 1000000000, registered 0. srcla@10000000000 NOT PRODUCED: no plan was submitted to 0x9610BE4938d71A834CBa65162B19045bB4c4B4CE, so this is not a chain verdict on the allocation
+```
+
+Both results are `executed: false`, and neither says `REFUSED BY THE CHAIN`. The run exited `1`. The anvil log after the `setAdminReserve` send holds no `eth_sendRawTransaction` at all, only `eth_call`, `eth_blockNumber`, `eth_chainId`, `eth_getTransactionCount`, `eth_getTransactionReceipt`, and one `evm_snapshot` and one `evm_revert`, so nothing was submitted to the vault.
