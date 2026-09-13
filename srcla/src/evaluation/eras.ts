@@ -111,7 +111,7 @@ export const OPEN_ENDED_END_SECONDS = OPEN_ENDED;
  * its registered span, and a `heldout-b` shorter than 30 days (from
  * 2026-08-24) would make the 1-day horizon untestable (see `eras.spec.ts`).
  */
-export const P37_FREEZE_SECONDS = at('2027-01-01T00:00:00Z');
+export const P37_FREEZE_SECONDS = at('2026-09-23T00:00:00Z');
 
 /**
  * Origins `heldout-d` must hold, with zero gaps, before the release verdict is

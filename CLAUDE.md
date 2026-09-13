@@ -102,8 +102,8 @@ Base archive state for all three venues reads back to the deployment floor (bloc
 | `burned-a` | 2025-06-01 → 2026-02-28 | 273 | former held-out A; burned while diagnosing v0.5. Reported by nothing |
 | `heldout-c` | 2026-03-01 → 2026-05-25 | 86 | **sealed** — the era with statistical power |
 | `burned` | 2026-05-26 → 2026-08-23 | 90 | §4.1 design data; in NEITHER era |
-| `heldout-b` | 2026-08-24 → `P37_FREEZE_SECONDS` | closed by P37 | **sealed**; design data for P37 (fourth burned-window declaration) |
-| `heldout-d` | `P37_FREEZE_SECONDS` + 1s → present | open | **sealed** — P37's release era; graded only at ≥ 2,064 origins with zero gaps |
+| `heldout-b` | 2026-08-24 → 2026-09-23T00:00:00Z | closed by P37 | **sealed**; design data for P37 (fourth burned-window declaration) |
+| `heldout-d` | 2026-09-23T00:00:00Z + 1s → present | open | **sealed** — P37's release era; graded only at ≥ 2,064 origins with zero gaps |
 
 **There is no `heldout-a`** — it was renamed `burned-a` when v0.5's diagnosis read
 its aggregates. Read the windows from `eras.ts`, never from memory.
