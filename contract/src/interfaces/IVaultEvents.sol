@@ -47,4 +47,7 @@ interface IVaultEvents {
     event Unpause();
 
     event WithdrawalOrderSet(address[] order);
+
+    /// @notice P37 release scope: the deposit cap changed.
+    event DepositCapSet(uint256 previousCap, uint256 newCap);
 }
