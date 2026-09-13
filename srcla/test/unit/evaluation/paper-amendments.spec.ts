@@ -5,9 +5,9 @@ const paper = readFileSync(
   join(process.cwd(), '../docs/research/output/srcla-paper.md'), 'utf8',
 );
 
-describe('paper v0.9', () => {
-  it('declares version 0.9', () => {
-    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.9/);
+describe('paper v0.10', () => {
+  it('declares version 0.10', () => {
+    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.10/);
   });
 
   it('carries an amendment record for v0.5 -> v0.6', () => {
@@ -38,7 +38,7 @@ describe('paper v0.9', () => {
   });
 });
 
-describe('paper v0.8 -> v0.9 amendments', () => {
+describe('paper v0.8 -> v0.10 amendments', () => {
   it('carries amendment records for v0.6 -> v0.7 and v0.7 -> v0.8', () => {
     expect(paper).toContain('Amendment Record (v0.6 → v0.7)');
     expect(paper).toContain('Amendment Record (v0.7 → v0.8)');
@@ -69,5 +69,10 @@ describe('paper v0.8 -> v0.9 amendments', () => {
 
   it('states the yield criterion as non-inferiority, not superiority', () => {
     expect(paper).toMatch(/non-inferior/i);
+  });
+
+  it('carries the v0.9 -> v0.10 record and registers P36', () => {
+    expect(paper).toContain('Amendment Record (v0.9 → v0.10)');
+    expect(paper).toMatch(/\|\s*P36\s*\|/);
   });
 });
