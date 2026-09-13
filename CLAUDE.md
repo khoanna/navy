@@ -213,8 +213,12 @@ changes; it re-derives from columns already stored and fetches no blocks.
 1. **§11.1's fork replay is WIRED and executing** — on each sealed era 59 of 64 plans
    execute on the chain, the four B0 runs HOLD with no plan to submit, and **no SRCLA
    plan is refused**. The one refusal is B4's (10k tier): the vault reverts that plan
-   with no reason string, while B4's plans at 100k/1M/10M execute — the cause is
-   unverified, so do not attribute it to a guardrail. It still reports `NOT PRODUCED`
+   with no reason string, while B4's plans at 100k/1M/10M execute — verified on a fresh
+   fork (`contract/audit/b4-fork-refusal-root-cause.md`): B4's third deploy reverts
+   `InsufficientIdle()` in `NavyVaultSRCLA._deploy`, a HARNESS DEFECT, because
+   `harnessConfig`'s `adminReserveBase: 0n` sizes B4 against a $500 floor at 10k while
+   the bench vault enforces `VaultGuardrails`' $1,000 `adminReserve` (the "no reason
+   string" is only ethers reading a mined receipt, which never carries revert data). It still reports `NOT PRODUCED`
    and blocks if the `SRCLA_FORK_REPLAY_*` env is absent; that is designed, and a
    reproducible `FAIL` is an acceptable outcome §11.5 forbids retuning to avoid.
 1b. **The v0.10 re-run returns `FAIL` on both sealed eras**, and none of the causes
