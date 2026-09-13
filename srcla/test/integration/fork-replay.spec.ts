@@ -1,9 +1,8 @@
 /**
  * §11.1's pinned-prestate fork replay, exercised against a REAL chain.
  *
- * GATED on `NAVY_FORK_E2E=1` (the repo's existing pattern for tests that need
- * a live chain — see `NAVY_E2E` / `NAVY_VAULT_E2E` in be/). Unset, the whole
- * suite is skipped and reports nothing; it never fabricates a pass.
+ * GATED on `NAVY_FORK_E2E=1`, as tests that need a live chain are. Unset, the
+ * whole suite is skipped and reports nothing; it never fabricates a pass.
  *
  * It needs:
  *   - an Anvil fork of Base mainnet, started with `--code-size-limit 100000`

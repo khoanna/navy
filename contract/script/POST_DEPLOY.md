@@ -18,7 +18,7 @@ The script prints this list at the end of every run.
 `NavyVaultSRCLA.deposit`/`mint` call on every share-changing action (paper §9.2). If it
 does not equal the vault, **every deposit and mint reverts `Unauthorized`**. The vault
 reports `maxDeposit == 0` / `maxMint == 0` in that state rather than advertising capacity
-it cannot honour, so the condition is visible from the read path (and to `/vault/limits`).
+it cannot honour, so the condition is visible from the read path.
 
 ## Already set by the deploy script (verify, do not re-set)
 

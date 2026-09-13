@@ -1,9 +1,5 @@
-# The srcla strategy service's own Postgres.
-#
-# `be/docker-compose.yml` serves `be`'s `navy` database on :5432; this one
-# serves srcla's `srcla` database on :5433. They are separate instances on
-# separate Prisma major versions (be is Prisma 7, srcla is Prisma 5), so they
-# must not be merged into one compose project.
+# The srcla strategy service's own Postgres: the `srcla` database on :5433
+# (Prisma 5 schema in prisma/schema.prisma).
 services:
   postgres:
     image: postgres:16-alpine
