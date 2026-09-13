@@ -939,10 +939,12 @@ describe('renderReport — P37 three verdicts', () => {
   });
 
   // Controller ruling T1.7-c: the P37 gate carries no 10M comparator results
-  // (comparisons, comparator sustainability, skill windows, price of
-  // unsustainability), because P37 decides over the release tiers only. The
-  // per-era P37 section must say so, so the report does not imply those
-  // results are absent — they are in the registered (v0.10) tables above.
+  // (comparisons, comparator sustainability, EXCLUDED COMPARATORS, skill
+  // windows, price of unsustainability), because P37 decides over the
+  // release tiers only. The per-era P37 section must name all five, so the
+  // report does not imply any of them is silently absent — they are in the
+  // registered (v0.10) tables above. Asserting each category by name means a
+  // category dropped from the sentence fails this test.
   it('states that 10M comparator results live in the registered tables above (T1.7-c)', () => {
     const md = renderReport({ ...params, runs: [withP37(fakeRun('heldout-c', false), false)] });
     const idx = md.indexOf('### §11.5 policy gate under P37');
@@ -951,5 +953,10 @@ describe('renderReport — P37 three verdicts', () => {
     expect(section).toMatch(/10,000,000|10M/);
     expect(section).toMatch(/registered \(v0\.10\)|registered v0\.10/i);
     expect(section).toMatch(/above/i);
+    expect(section).toMatch(/comparisons/i);
+    expect(section).toMatch(/comparator sustainability/i);
+    expect(section).toMatch(/excluded comparators/i);
+    expect(section).toMatch(/skill windows/i);
+    expect(section).toMatch(/price of unsustainability/i);
   });
 });

@@ -1366,9 +1366,9 @@ export function renderReport(params: ReportParams): string {
       out.push(gateTable(run.gateP37));
       out.push('');
       out.push(
-        'P37 decides its comparisons, comparator sustainability, skill windows and price of ' +
-          "unsustainability over the release tiers (10k/100k/1M) only — the 10M results for " +
-          'this era are the registered (v0.10) tables above, not repeated here.',
+        'P37 decides its comparisons, comparator sustainability, excluded comparators, skill ' +
+          'windows and price of unsustainability over the release tiers (10k/100k/1M) only — ' +
+          'the 10M results for this era are the registered (v0.10) tables above, not repeated here.',
       );
       out.push('');
       const outOfScope = run.gateP37.outOfScopeSustainability ?? [];
