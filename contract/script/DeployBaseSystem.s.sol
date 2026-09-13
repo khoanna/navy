@@ -12,6 +12,7 @@ import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
 import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
 import {VaultGuardrails} from "./VaultGuardrails.sol";
+import {MAINNET_DEPOSIT_CAP_BASE} from "./ReleaseScope.sol";
 
 /// @notice Deploys the Base vault and lending adapters with production identity checks.
 /// @dev Reward routes are configured even when inactive - the route manifest encodes
@@ -103,6 +104,11 @@ contract DeployBaseSystem is Script {
         ordered[2] = address(moonwell);
         VaultGuardrails.applyTo(vault, ordered);
 
+        // P37 release scope (see ReleaseScope.sol). Set here, not in
+        // VaultGuardrails: DeployAndFund's §11.1 tier vaults share those
+        // guardrails and must accept 10M.
+        vault.setDepositCap(MAINNET_DEPOSIT_CAP_BASE);
+
         // Admin gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE only
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), admin);
         vault.grantRole(vault.ADMIN_ROLE(), admin);
@@ -133,6 +139,7 @@ contract DeployBaseSystem is Script {
         console2.log("RewardAccountant", address(accountant));
         console2.log("Admin", admin);
         console2.log("Allocator", allocator);
+        console2.log("Deposit cap (USDC base units)", vault.depositCap());
 
         // Steps the broadcaster cannot perform: RewardAccountant's
         // REWARD_ADMIN_ROLE is held only by `admin`. Printed on every run so

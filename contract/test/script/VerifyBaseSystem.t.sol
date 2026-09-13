@@ -6,6 +6,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {NavyVaultSRCLA} from "../../src/NavyVaultSRCLA.sol";
 import {RewardExecutor} from "../../src/reward/RewardExecutor.sol";
 import {VerifyBaseSystem} from "../../script/VerifyBaseSystem.s.sol";
+import {MAINNET_DEPOSIT_CAP_BASE} from "../../script/ReleaseScope.sol";
+
+/// @notice Exposes the verifier's vault checks without its chain and USDC
+///         preconditions, which need a Base fork.
+contract VerifyBaseSystemHarness is VerifyBaseSystem {
+    function exposedVerifyVault(address vault, address admin, address allocator) external view {
+        _verifyVault(vault, admin, allocator);
+    }
+}
 
 /// @notice Tests for the VerifyBaseSystem script
 /// @dev These tests verify the verifier correctly validates deployment state
@@ -211,6 +220,30 @@ contract VerifyBaseSystemTest is Test {
             ADMIN,
             ALLOCATOR
         );
+    }
+
+    /// @dev P37: a mainnet vault without the $1,000,000 deposit cap fails verification.
+    function testVerifyVaultRevertsWhenDepositCapIsNotTheMainnetCap() public {
+        VerifyBaseSystemHarness harness = new VerifyBaseSystemHarness();
+        vm.expectRevert(abi.encodeWithSelector(VerifyBaseSystem.Mismatch.selector, "Vault deposit cap"));
+        harness.exposedVerifyVault(address(vault), ADMIN, ALLOCATOR);
+    }
+
+    function testVerifyVaultPassesWithTheMainnetDepositCap() public {
+        VerifyBaseSystemHarness harness = new VerifyBaseSystemHarness();
+        vm.prank(ADMIN);
+        vault.setDepositCap(MAINNET_DEPOSIT_CAP_BASE);
+        harness.exposedVerifyVault(address(vault), ADMIN, ALLOCATOR);
+    }
+
+    /// @dev P37: the verifier rejects a cap that is merely present but wrong,
+    ///      not only an uncapped vault.
+    function testVerifyVaultRevertsWhenDepositCapDiffers() public {
+        VerifyBaseSystemHarness harness = new VerifyBaseSystemHarness();
+        vm.prank(ADMIN);
+        vault.setDepositCap(MAINNET_DEPOSIT_CAP_BASE - 1);
+        vm.expectRevert(abi.encodeWithSelector(VerifyBaseSystem.Mismatch.selector, "Vault deposit cap"));
+        harness.exposedVerifyVault(address(vault), ADMIN, ALLOCATOR);
     }
 
     function testRevertsWhenRewardsHasWrongFactory() public {
