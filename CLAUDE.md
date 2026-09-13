@@ -111,7 +111,9 @@ its aggregates. Read the windows from `eras.ts`, never from memory.
 Two deviations stay disclosed in any report: §4.1's letter puts the burned window
 inside calibration and here it is in neither (including it would place fitting data
 *after* `heldout-c` and invert walk-forward order); and `heldout-c` *precedes* the
-burned window, so it carries a design-knowledge caveat `heldout-b` does not.
+burned window, so it carried a design-knowledge caveat `heldout-b` did not — before
+P37. Since v0.11, `heldout-b` carries one too (P37 was designed by reading it); only
+`heldout-d` carries none.
 **All three sealed eras are reported; only `heldout-d` decides release.**
 
 ⚠️ **`heldout-c` is DESIGN DATA as of v0.9, and `heldout-b` is DESIGN DATA as of
