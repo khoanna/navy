@@ -1001,6 +1001,47 @@ describe('renderReport — P37 three verdicts', () => {
     expect(row).not.toMatch(/\|\s*—\s*\|\s*$/);
   });
 
+  // Ruling T10-0(a): a row can carry an S2 attribution AND independently
+  // fail S1 (or S3/S4) -- a venue trapping part of NAV does not preclude the
+  // full-exit bound also missing. `v.s2Attribution?.detail ?? v.breach ??
+  // '—'` printed only the attribution and silently dropped the S1 failure
+  // whenever both were present on the same row.
+  it('keeps the S1/S3/S4 breach detail beside the s2Attribution detail when a row carries both', () => {
+    const base = withP37(fakeRun('heldout-c', false), false);
+    const run: RunSummary = {
+      ...base,
+      gateP37: {
+        ...(base.gateP37 as RegisteredGateResult),
+        outOfScopeSustainability: [
+          {
+            policyId: 'srcla',
+            tier: '10000000000000',
+            demonstrated: true,
+            s1: false,
+            s2: true,
+            s3: true,
+            s4: true,
+            sustainable: false,
+            realizedNetApy: 0.031,
+            breach: 'NOT DEMONSTRATED: full exit lower bound 0.612 < 0.8',
+            s2Attribution: {
+              kind: 'VENUE FAILURE',
+              shortOrigins: 2,
+              trappedShareMax: 0.12,
+              untrappedCoverageMin: 1,
+              detail: 'VENUE FAILURE (P34): 2 origin(s) below 0.95, up to 12.0% of NAV trapped',
+            },
+          },
+        ],
+      } as RegisteredGateResult,
+    };
+    const md = renderReport({ ...params, runs: [run] });
+    const row = md.split('\n').find((l) => l.includes('| 10,000,000 |'));
+    expect(row).toBeDefined();
+    expect(row).toContain('NOT DEMONSTRATED: full exit lower bound 0.612 < 0.8');
+    expect(row).toContain('VENUE FAILURE (P34): 2 origin(s) below 0.95, up to 12.0% of NAV trapped');
+  });
+
   // Controller ruling T1.7-c: the P37 gate carries no 10M comparator results
   // (comparisons, comparator sustainability, EXCLUDED COMPARATORS, skill
   // windows, price of unsustainability), because P37 decides over the
@@ -1067,6 +1108,29 @@ describe('renderReport — P37 three verdicts', () => {
     expect(v.release.status).toBe('NOT YET POWERED');
     const md = renderReport({ ...params, runs: [d] });
     expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
+  });
+
+  // Ruling T10-0(b): both design eras passing the v0.10 gates must not leak
+  // into the banner once a `heldout-d` run is present but not yet powered --
+  // the release line alone decides, and an underpowered release still reads
+  // DO NOT RELEASE, never RELEASE, however clean `heldout-c`/`heldout-b` are.
+  it('reads DO NOT RELEASE from an underpowered heldout-d even when both design eras pass v0.10 (T10-0(b))', () => {
+    const d: RunSummary = {
+      ...withP37(fakeRun('heldout-c', true), true),
+      era: 'heldout-d',
+      datasetOrigins: HELDOUT_D_MIN_ORIGINS - 1,
+      originGaps: 0,
+    };
+    const md = renderReport({
+      ...params,
+      runs: [fakeRun('heldout-c', true), fakeRun('heldout-b', true), d],
+    });
+    expect(threeVerdicts([fakeRun('heldout-c', true), fakeRun('heldout-b', true), d]).release.status).toBe(
+      'NOT YET POWERED',
+    );
+    expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
+    expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) did not pass/);
   });
 
   // I-2 (b): with no `heldout-d` run at all, the pre-P37 sentence pair is

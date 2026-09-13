@@ -921,7 +921,7 @@ function sustainabilityTable(
         // `s2Attribution.detail` names the attribution kind and the trapped
         // share whenever it is present; v0.10 never sets the field, so this
         // is byte-identical there.
-        `${pct(v.realizedNetApy)} | ${v.s2Attribution?.detail ?? v.breach ?? '—'} |`,
+        `${pct(v.realizedNetApy)} | ${[v.breach, v.s2Attribution?.detail].filter(Boolean).join('; ') || '—'} |`,
     );
   const invariant = gate.scaleInvariant;
   const out = [
