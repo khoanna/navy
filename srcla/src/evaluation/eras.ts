@@ -64,7 +64,7 @@
  * UNITS: all boundaries are Unix seconds, inclusive at both ends.
  */
 
-export type EraTag = 'calibration' | 'burned-a' | 'heldout-c' | 'burned' | 'heldout-b';
+export type EraTag = 'calibration' | 'burned-a' | 'heldout-c' | 'burned' | 'heldout-b' | 'heldout-d';
 
 export interface RegisteredEra {
   tag: EraTag;
@@ -95,6 +95,28 @@ const OPEN_ENDED = at('2099-12-31T23:59:59Z');
  * should ever compare against a hardcoded far-future date.
  */
 export const OPEN_ENDED_END_SECONDS = OPEN_ENDED;
+
+/**
+ * P37's freeze time `T` (paper v0.11): the first full hour after the commit
+ * that lands P37's gate code with C6's outcome. Nothing after that commit may
+ * change a gate, a threshold, the policy or the artifact before the release
+ * verdict. `heldout-b` ends at the last hourly origin at or before `T` — `T`
+ * itself, since `T` is on the hour — and `heldout-d` starts one second later.
+ *
+ * Fixed IN CODE, not read from git, so the boundaries reproduce from the tree
+ * alone. This is the DEVELOPMENT value; Task 10 sets the real `T` and it MUST
+ * stay >= 2026-09-23T00:00:00Z: `testableHorizons` measures a sealed era by
+ * its registered span, and a `heldout-b` shorter than 30 days (from
+ * 2026-08-24) would make the 1-day horizon untestable (see `eras.spec.ts`).
+ */
+export const P37_FREEZE_SECONDS = at('2027-01-01T00:00:00Z');
+
+/**
+ * Origins `heldout-d` must hold, with zero gaps, before the release verdict is
+ * graded: the size of `heldout-c`, the one era with statistical power. Below it
+ * the release verdict reads NOT YET POWERED and blocks.
+ */
+export const HELDOUT_D_MIN_ORIGINS = 2_064;
 
 export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.freeze({
   calibration: {
@@ -139,12 +161,24 @@ export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.f
   'heldout-b': {
     tag: 'heldout-b',
     startSeconds: at('2026-08-24T00:00:00Z'),
-    endSeconds: OPEN_ENDED,
+    endSeconds: P37_FREEZE_SECONDS,
     sealed: true,
     role:
       'SECONDARY held-out era, chronologically after everything including the burned ' +
-      'window, and growing with the live collector. Low power; reported for temporal ' +
-      'purity, not for significance.',
+      'window. Registered open-ended; P37 closed it at P37_FREEZE_SECONDS (disclosed), and ' +
+      'it is DESIGN DATA for P37 (fourth burned-window declaration, paper v0.11). Low ' +
+      'power; reported for temporal purity, not for significance.',
+  },
+  'heldout-d': {
+    tag: 'heldout-d',
+    startSeconds: P37_FREEZE_SECONDS + 1,
+    endSeconds: OPEN_ENDED,
+    sealed: true,
+    role:
+      'P37 RELEASE era, open-ended from one second after P37_FREEZE_SECONDS and growing with ' +
+      'collection. Nothing in P37 was designed, fit or tuned with any of it in view. The ' +
+      `release verdict is graded on it only once it holds ${HELDOUT_D_MIN_ORIGINS} hourly ` +
+      'origins with zero gaps.',
   },
 });
 
@@ -270,4 +304,41 @@ export function testableHorizons(
   });
   if (spans.length === 0) return [...horizons];
   return horizons.filter((h) => spans.every((span) => Math.floor(span / h) >= minWindows));
+}
+
+/**
+ * Missing hourly origins on the registered 3,600 s cadence, counted from the
+ * first EXPECTED origin of the era through the last LOADED one, inclusive.
+ *
+ * `timestampsSeconds` sees only what was actually loaded, so a gap between
+ * the era's start and the first loaded origin -- collection starting late, or
+ * a query that silently dropped the opening rows -- would go uncounted if
+ * this only looked at internal gaps between loaded rows. `eraStartSeconds`
+ * fixes the first expected origin independently of what arrived, so a
+ * late-starting era cannot read as gap-free. A gap AFTER the last loaded
+ * origin (collection stopping early) is not counted here; it is covered by
+ * comparing the origin count itself against `HELDOUT_D_MIN_ORIGINS`.
+ *
+ * ASSUMES every timestamp in `timestampsSeconds` is already on an hour
+ * boundary (a multiple of 3,600) -- the registered collector guarantees this;
+ * this function does not re-validate it. Duplicates are counted once. Returns
+ * 0 for an empty array.
+ */
+export function hourlyOriginGaps(
+  timestampsSeconds: readonly number[],
+  eraStartSeconds: number,
+): number {
+  if (timestampsSeconds.length === 0) return 0;
+  const sorted = [...new Set(timestampsSeconds)].sort((a, b) => a - b);
+  const firstExpected = Math.ceil(eraStartSeconds / 3_600) * 3_600;
+  const last = sorted[sorted.length - 1]!;
+  if (last < firstExpected) return 0;
+  const expectedCount = (last - firstExpected) / 3_600 + 1;
+  const loadedFromFirstExpected = sorted.filter((t) => t >= firstExpected).length;
+  return Math.max(0, expectedCount - loadedFromFirstExpected);
+}
+
+/** P37: whether an era run is powered for the release verdict. */
+export function releasePowered(origins: number, gaps: number): boolean {
+  return origins >= HELDOUT_D_MIN_ORIGINS && gaps === 0;
 }

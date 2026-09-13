@@ -450,8 +450,10 @@ export async function loadEra(
  * is not look-ahead.
  *
  * Deliberately NOT behind `assertNotSealed`: the warm-up for a sealed era is
- * drawn from the era BEFORE it, which is calibration or burned data, and
- * loading it is exactly what a live deployment's own history would be.
+ * drawn from the era BEFORE it, and loading it is exactly what a live
+ * deployment's own history would be. For `heldout-c` that is calibration or
+ * burned data; for `heldout-d` it is the last days of `heldout-b`, sealed but
+ * already opened and declared design data by P37 — history only, never scored.
  */
 export async function loadWarmup(
   prisma: PrismaClient,

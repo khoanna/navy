@@ -8,6 +8,7 @@
  * SRCLA-REPORT.md exhibited.
  */
 import { renderReport, type RunSummary } from '../../../src/evaluation/report/render-markdown.js';
+import { eraBounds } from '../../../src/evaluation/eras.js';
 import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
 import type { ForecastGateResult } from '../../../src/evaluation/kernel/forecast-gate.js';
@@ -318,9 +319,12 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).not.toContain('2099');
     expect(md).not.toContain('26793');
     expect(md).not.toContain('26,793');
-    expect(md).toMatch(/\| `heldout-b` \| 2026-08-24 \| open \| open \|/);
-    // The Verdict heading for that era must not print a sentinel day count either.
-    expect(md).toContain('`heldout-b` — open-ended,');
+    // P37 closed heldout-b at P37_FREEZE_SECONDS; heldout-d is the open-ended era now.
+    expect(md).toMatch(/\| `heldout-d` \| \d{4}-\d{2}-\d{2} \| open \| open \|/);
+    const b = eraBounds('heldout-b');
+    expect(md).toContain(`| \`heldout-b\` | 2026-08-24 | ${b.end.slice(0, 10)} | ${b.days} |`);
+    // The Verdict heading for that era prints its real span, never a sentinel.
+    expect(md).toContain(`\`heldout-b\` — ${b.days}d,`);
   });
 
   // v0.6 re-cut the eras. This test previously PINNED the v0.5 text, so it

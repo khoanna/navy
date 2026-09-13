@@ -1,11 +1,20 @@
 import {
   ERAS_IN_ORDER,
+  HELDOUT_D_MIN_ORIGINS,
+  P37_FREEZE_SECONDS,
   REGISTERED_ERAS,
   SEALED_ERAS,
   assertNotSealed,
   eraBounds,
   eraFor,
+  hourlyOriginGaps,
+  isOpenEnded,
+  releasePowered,
+  testableHorizons,
+  type EraTag,
 } from '../../../src/evaluation/eras.js';
+import { MIN_EXCEEDANCE_OBSERVATIONS } from '../../../src/evaluation/kernel/forecast-gate.js';
+import { REGISTERED_HORIZONS_SECONDS } from '../../../src/policy/registered.js';
 
 const at = (iso: string): number => Math.floor(Date.parse(iso) / 1000);
 
@@ -22,8 +31,8 @@ describe('registered eras — structure', () => {
     );
   });
 
-  it('seals both held-out eras and neither of the others', () => {
-    expect([...SEALED_ERAS].sort()).toEqual(['heldout-b', 'heldout-c']);
+  it('seals the three held-out eras and none of the others', () => {
+    expect([...SEALED_ERAS].sort()).toEqual(['heldout-b', 'heldout-c', 'heldout-d']);
     expect(REGISTERED_ERAS.calibration.sealed).toBe(false);
     expect(REGISTERED_ERAS.burned.sealed).toBe(false);
     expect(REGISTERED_ERAS['burned-a'].sealed).toBe(false);
@@ -172,5 +181,77 @@ describe('v0.6 era re-cut', () => {
     expect(eraBounds('heldout-c').start).toBe('2026-03-01T00:00:00.000Z');
     expect(eraBounds('heldout-c').end).toBe('2026-05-25T23:59:59.000Z');
     expect(eraBounds('heldout-c').days).toBe(86);
+  });
+});
+
+describe('P37 eras (paper v0.11)', () => {
+  it('fixes T on the hour, and heldout-b ends at T', () => {
+    expect(P37_FREEZE_SECONDS % 3_600).toBe(0);
+    expect(REGISTERED_ERAS['heldout-b'].endSeconds).toBe(P37_FREEZE_SECONDS);
+    expect(isOpenEnded('heldout-b')).toBe(false);
+  });
+
+  it('starts heldout-d one second after heldout-b, open-ended and sealed', () => {
+    expect(REGISTERED_ERAS['heldout-d'].startSeconds).toBe(
+      REGISTERED_ERAS['heldout-b'].endSeconds + 1,
+    );
+    expect(isOpenEnded('heldout-d')).toBe(true);
+    expect(() => assertNotSealed('heldout-d', 'grid sweep')).toThrow(/sealed/i);
+  });
+
+  it('puts the origin at T in heldout-b and the next hourly origin in heldout-d', () => {
+    expect(eraFor(P37_FREEZE_SECONDS)).toBe('heldout-b');
+    expect(eraFor(P37_FREEZE_SECONDS + 3_600)).toBe('heldout-d');
+  });
+
+  it('keeps heldout-b long enough that the 1-day horizon stays testable', () => {
+    expect(P37_FREEZE_SECONDS - REGISTERED_ERAS['heldout-b'].startSeconds).toBeGreaterThanOrEqual(
+      30 * 86_400,
+    );
+    const sealed = (Object.keys(REGISTERED_ERAS) as EraTag[]).filter(
+      (e) => REGISTERED_ERAS[e].sealed,
+    );
+    expect(
+      testableHorizons([...REGISTERED_HORIZONS_SECONDS], MIN_EXCEEDANCE_OBSERVATIONS, sealed),
+    ).toContain(86_400);
+  });
+
+  // `hourlyOriginGaps` sees only loaded timestamps. Without an explicit era
+  // start, a missing origin between the era's start and the first loaded
+  // origin would go uncounted -- a late-starting heldout-d could then read as
+  // powered when its first hour of data never arrived. `eraStartSeconds`
+  // fixes the first expected origin regardless of what was actually loaded.
+  describe('hourlyOriginGaps', () => {
+    const H = 3_600;
+
+    it('returns 0 for an empty array', () => {
+      expect(hourlyOriginGaps([], 0)).toBe(0);
+    });
+
+    it('counts internal gaps between the first and last loaded origin', () => {
+      expect(hourlyOriginGaps([0, H, 2 * H], 0)).toBe(0);
+      expect(hourlyOriginGaps([0, 3 * H], 0)).toBe(2);
+      expect(hourlyOriginGaps([0], 0)).toBe(0);
+    });
+
+    it('counts a leading gap when the first loaded origin is later than the first expected one', () => {
+      expect(hourlyOriginGaps([H, 2 * H], 0)).toBe(1);
+      expect(hourlyOriginGaps([2 * H], 0)).toBe(2);
+    });
+
+    it('counts the leading gap at the heldout-d boundary (first expected origin = P37_FREEZE_SECONDS + 3600)', () => {
+      const eraStart = P37_FREEZE_SECONDS + 1;
+      const firstExpected = P37_FREEZE_SECONDS + H;
+      expect(hourlyOriginGaps([firstExpected], eraStart)).toBe(0);
+      expect(hourlyOriginGaps([firstExpected + H], eraStart)).toBe(1);
+    });
+  });
+
+  it('powers the release verdict only at >= 2,064 origins with zero gaps', () => {
+    expect(HELDOUT_D_MIN_ORIGINS).toBe(2_064);
+    expect(releasePowered(2_064, 0)).toBe(true);
+    expect(releasePowered(2_063, 0)).toBe(false);
+    expect(releasePowered(2_064, 1)).toBe(false);
+    expect(releasePowered(0, 0)).toBe(false);
   });
 });
