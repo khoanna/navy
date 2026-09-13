@@ -931,3 +931,133 @@ describe('§11.5 part 3: a breaching comparator is a counterexample, not a basel
     expect(gate.excludedComparators).toEqual([]);
   });
 });
+
+describe('P37: the amended policy gate (G3, G4, G5)', () => {
+  const gateOpts = { minPairedObservations: 20, bootstrapIterations: 200 };
+  const p37 = { ...gateOpts, amendment: 'p37' as const };
+  const TEN_K = REGISTERED_TIERS[0]!;
+  const ONE_M = REGISTERED_TIERS[2]!;
+  const TEN_M = REGISTERED_TIERS[3]!;
+
+  /** SRCLA@tier rewritten into the Moonwell shape: 12% of NAV trapped at origin 1, the rest liquid. */
+  function withTrappedPosition(
+    out: RegisteredEvaluationResult,
+    tier: bigint,
+    over: { untrapped?: number; deployIntoDry?: boolean } = {},
+  ): RegisteredEvaluationResult {
+    return {
+      ...out,
+      results: out.results.map((r) => {
+        if (r.policy.id !== SRCLA_POLICY.id || r.tier !== tier) return r;
+        const snapshots = r.replay.snapshots.map((s, i) =>
+          i === 1
+            ? {
+                ...s,
+                stressedLiquidCoverage: 0.878,
+                dryMarketIds: ['moonwell-usdc'],
+                holdingsBaseByMarket: { 'moonwell-usdc': (tier * 12n) / 100n },
+                executedDeployBaseByMarket: over.deployIntoDry ? { 'moonwell-usdc': 1n } : {},
+                untrappedStressedLiquidCoverage: over.untrapped ?? 1,
+              }
+            : {
+                ...s,
+                holdingsBaseByMarket: {},
+                executedDeployBaseByMarket: {},
+                dryMarketIds: [],
+                untrappedStressedLiquidCoverage: 1,
+              },
+        );
+        return {
+          ...r,
+          replay: {
+            ...r.replay,
+            snapshots,
+            minStressedLiquidCoverage: 0.878,
+            coverageDistribution: { min: 0.878, p05: 1, median: 1 },
+          },
+        };
+      }),
+    };
+  }
+
+  /** SRCLA@tier with a plain coverage breach and no dry venue. */
+  function withPlainBreach(out: RegisteredEvaluationResult, tier: bigint): RegisteredEvaluationResult {
+    return {
+      ...out,
+      results: out.results.map((r) =>
+        r.policy.id === SRCLA_POLICY.id && r.tier === tier
+          ? { ...r, replay: { ...r.replay, minStressedLiquidCoverage: 0.5 } }
+          : r,
+      ),
+    };
+  }
+
+  it('G3: a VENUE FAILURE blocks neither safety coverage nor scale invariance', () => {
+    const gate = evaluateRegisteredRelease(withTrappedPosition(evaluation(), TEN_K), {
+      ...p37,
+      forkResults: completeForkResults(),
+    });
+    const coverage = named(gate, 'Safety: stressed liquid coverage');
+    expect(coverage.passed).toBe(true);
+    expect(coverage.detail).toMatch(/VENUE FAILURE \(P34, reported, not gating\)/);
+    expect(named(gate, 'Sustainability: scale invariance across every registered tier (P26)').passed).toBe(
+      true,
+    );
+    expect(gate.amendment).toBe('p37');
+  });
+
+  it('G3: the registered v0.10 gate on the same run still blocks', () => {
+    const gate = evaluateRegisteredRelease(withTrappedPosition(evaluation(), TEN_K), {
+      ...gateOpts,
+      forkResults: completeForkResults(),
+    });
+    expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(false);
+    expect(gate.pass).toBe(false);
+    expect(gate.outOfScopeSustainability).toEqual([]);
+  });
+
+  it('G3: a deploy into the dry venue still blocks under P37', () => {
+    const gate = evaluateRegisteredRelease(
+      withTrappedPosition(evaluation(), TEN_K, { deployIntoDry: true }),
+      { ...p37, forkResults: completeForkResults() },
+    );
+    expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(false);
+  });
+
+  it('G4: a refused BASELINE plan passes the P37 fork gate and is reported', () => {
+    const fork = completeForkResults();
+    const b4 = fork.find((f) => f.policyId === 'b4' && f.tier === TEN_K)!;
+    b4.executed = false;
+    b4.detail = 'REFUSED BY THE CHAIN';
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: fork });
+    const c = named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)');
+    expect(c.passed).toBe(true);
+    expect(c.detail).toMatch(/reported \(not gating\).*b4@10000000000/);
+  });
+
+  it('G4: a refused SRCLA plan fails the P37 fork gate', () => {
+    const fork = completeForkResults();
+    const s = fork.find((f) => f.policyId === SRCLA_POLICY.id && f.tier === TEN_K)!;
+    s.executed = false;
+    s.detail = 'REFUSED BY THE CHAIN';
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: fork });
+    expect(named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)').passed).toBe(false);
+  });
+
+  it('G5: a breach at 10M only does not block P37, and is reported outside the scope', () => {
+    const out = withPlainBreach(evaluation(), TEN_M);
+    const gate = evaluateRegisteredRelease(out, { ...p37, forkResults: completeForkResults() });
+    expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(true);
+    expect(gate.outOfScopeSustainability?.map((v) => v.tier)).toEqual([TEN_M.toString()]);
+    expect(gate.outOfScopeSustainability?.[0]!.sustainable).toBe(false);
+    expect(evaluateRegisteredRelease(out, { ...gateOpts, forkResults: completeForkResults() }).pass).toBe(false);
+  });
+
+  it('G5: the same breach at 1M blocks P37', () => {
+    const gate = evaluateRegisteredRelease(withPlainBreach(evaluation(), ONE_M), {
+      ...p37,
+      forkResults: completeForkResults(),
+    });
+    expect(named(gate, 'Safety: stressed liquid coverage').passed).toBe(false);
+  });
+});

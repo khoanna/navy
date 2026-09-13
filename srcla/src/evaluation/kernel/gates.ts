@@ -36,10 +36,16 @@ import {
   type PairedTestResult,
 } from '../metrics/significance.js';
 import { REGISTERED_STRESS_DEMAND_BPS } from '../../policy/steps/coverage.js';
-import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from './harness.js';
+import {
+  RELEASE_TIERS,
+  REGISTERED_TIERS,
+  type PolicyRunResult,
+  type RegisteredEvaluationResult,
+} from './harness.js';
 import { REGISTERED_ABLATIONS, REGISTERED_POLICIES, SRCLA_POLICY } from './registry.js';
 import {
   REGISTERED_S2_COVERAGE_FLOOR,
+  attributeS2Breach,
   qualifiesAsComparator,
   scaleInvariant,
   sustainabilityAtTier,
@@ -47,6 +53,7 @@ import {
   REGISTERED_MAX_EXIT_ORIGINS,
   REGISTERED_MAX_VENUE_STRESS_SHARE,
   REGISTERED_MIN_WITHDRAWAL_SUCCESS,
+  type S2Attribution,
   type SustainabilityVerdict,
 } from './sustainability.js';
 
@@ -197,6 +204,13 @@ export interface RegisteredGateResult {
   skillWindows: SkillWindow[];
   /** The registered non-inferiority margin actually used, so the run record testifies to it. */
   nonInferiorityMarginApy: number;
+  /** The specification this result was graded against. */
+  amendment?: GateAmendment;
+  /**
+   * P37 (G5): SRCLA's verdicts at registered tiers OUTSIDE the release scope.
+   * Published, never gating. Empty under v0.10.
+   */
+  outOfScopeSustainability?: SustainabilityVerdict[];
 }
 
 /**
@@ -277,6 +291,13 @@ export interface RegisteredGateOptions {
    * Default: no claim, and therefore no superiority check at all.
    */
   claimedSuperiorityDimensions?: readonly 'yield'[];
+  /**
+   * `'v0.10'` (default): the registered gate exactly as run. `'p37'` (paper
+   * v0.11): G3 attributes S2 breaches (P34), G4 gates §11.1 on SRCLA's own
+   * plans, and G5 decides every check that aggregates over tiers on
+   * `RELEASE_TIERS`. Completeness still requires every registered tier.
+   */
+  amendment?: GateAmendment;
 }
 
 const check = (
@@ -522,6 +543,73 @@ function forkClaim(fork: readonly ForkReplayResult[]): string {
   );
 }
 
+/**
+ * §11.1's pinned-prestate fork-replay check, scoped by which (policy, tier)
+ * runs are IN SCOPE for it.
+ *
+ * Under v0.10 the caller passes `requiredKeys = requiredRuns()` (every
+ * registered (policy, tier)) and `inForkScope = () => true`, which admits
+ * every fork result — exactly the check that has always shipped, byte for
+ * byte. Under P37 (G4) the caller narrows both to SRCLA's plans at the
+ * release tiers: §11.1 asks whether the chain accepts SRCLA's allocation, so
+ * a refused BASELINE plan — like `b4@10000000000`'s — is published in the
+ * detail rather than blocking.
+ */
+function forkReplayCheck(
+  fork: readonly ForkReplayResult[],
+  name: string,
+  requiredKeys: readonly string[],
+  inForkScope: (f: ForkReplayResult) => boolean,
+): RegisteredGateCheck {
+  const scoped = fork.filter(inForkScope);
+  const outOfScope = fork.filter((f) => !inForkScope(f));
+
+  const required = new Set(requiredKeys);
+  for (const f of scoped) required.delete(`${f.policyId}@${f.tier}`);
+  const notExecuted = scoped.filter((f) => !f.executed);
+  // A HOLD is `executed: true` — the chain trivially accepts doing nothing —
+  // so a policy that proposed nothing at every replayed origin used to clear
+  // this check with ZERO chain interaction: the completeness set was full,
+  // `notExecuted` was empty, and only the prose detail changed. That is the
+  // absence-reads-as-success shape this revision exists to close, sitting on
+  // the one check it exists to wire, and the pathology it hid — a controller
+  // that never trades — is the original failure itself.
+  //
+  // §11.1 asks whether the chain ACCEPTS SRCLA's allocation. A run in which
+  // SRCLA never proposed one has not answered that question either way, so
+  // the outcome is NOT PRODUCED (`null`, which never rolls up into a pass),
+  // not a pass.
+  const srclaFork = scoped.filter((f) => f.policyId === SRCLA_POLICY.id);
+  const srclaExecutions = srclaFork.filter((f) => f.held !== true);
+  const noSrclaExecution = srclaExecutions.length === 0;
+
+  // P37 (G4): a plan OUT of scope (a baseline, under P37) that the chain
+  // refused is published here, never gating.
+  const outOfScopeRefusals = outOfScope.filter((f) => !f.executed);
+  const reportedDetail =
+    outOfScopeRefusals.length > 0
+      ? ` reported (not gating): baseline plans not executed: ${outOfScopeRefusals
+          .map((f) => `${f.policyId}@${f.tier} (${f.detail})`)
+          .join('; ')}`
+      : '';
+
+  return check(
+    name,
+    required.size > 0 || notExecuted.length > 0 ? false : noSrclaExecution ? null : true,
+    (required.size > 0
+      ? `no fork replay for: ${[...required].sort().join(', ')}`
+      : notExecuted.length > 0
+        ? `did not execute on fork: ${notExecuted.map((f) => `${f.policyId}@${f.tier} (${f.detail})`).join(', ')}`
+        : noSrclaExecution
+          ? `NOT PRODUCED: ${srclaFork.length} SRCLA (policy, tier) run(s) were replayed and ` +
+            `EVERY ONE held, so no allocation was ever submitted to the chain. A hold is ` +
+            `trivially executable and demonstrates nothing about whether the vault would ` +
+            `accept SRCLA's plan; §11.1 needs at least one non-held SRCLA execution. ` +
+            forkClaim(scoped)
+          : forkClaim(scoped)) + reportedDetail,
+  );
+}
+
 export function evaluateRegisteredRelease(
   out: RegisteredEvaluationResult,
   opts: RegisteredGateOptions = {},
@@ -538,6 +626,11 @@ export function evaluateRegisteredRelease(
   // 0.95 bar the very next check applied.
   const minStressed = opts.minStressedLiquidCoverage ?? REGISTERED_S2_COVERAGE_FLOOR;
   const alpha = opts.significanceLevel ?? 0.05;
+  // P37 (G5): under the amendment every check that aggregates over tiers is
+  // decided on RELEASE_TIERS. Under v0.10 `inScope` admits everything.
+  const p37 = opts.amendment === 'p37';
+  const inScope = (r: PolicyRunResult): boolean => !p37 || RELEASE_TIERS.includes(r.tier);
+  const verdictOpts = { amendment: opts.amendment ?? ('v0.10' as GateAmendment) };
 
   const checks: RegisteredGateCheck[] = [];
 
@@ -546,10 +639,19 @@ export function evaluateRegisteredRelease(
   // in the same batch as the candidate — but its verdict is computed on
   // IDENTICAL terms, because that verdict is both the admissibility filter
   // for the yield comparison and the counterexample table.
-  const srclaResults = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
-  const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id);
-  const sustainability = srclaResults.map((r) => sustainabilityAtTier(r));
-  const comparatorSustainability = otherResults.map((r) => sustainabilityAtTier(r));
+  //
+  // P37 (G5): the runs decided over are narrowed to `RELEASE_TIERS`; every
+  // registered tier still ran and is checked for completeness above, but the
+  // P37 verdict itself is scoped to the release tiers. SRCLA's OUT-OF-SCOPE
+  // runs (10M) are graded on identical terms and published, never gating.
+  const srclaAll = out.results.filter((r) => r.policy.id === SRCLA_POLICY.id);
+  const srclaResults = srclaAll.filter(inScope);
+  const otherResults = out.results.filter((r) => r.policy.id !== SRCLA_POLICY.id && inScope(r));
+  const sustainability = srclaResults.map((r) => sustainabilityAtTier(r, verdictOpts));
+  const comparatorSustainability = otherResults.map((r) => sustainabilityAtTier(r, verdictOpts));
+  const outOfScopeSustainability = p37
+    ? srclaAll.filter((r) => !inScope(r)).map((r) => sustainabilityAtTier(r, verdictOpts))
+    : [];
   const comparatorVerdict = new Map<string, SustainabilityVerdict>(
     comparatorSustainability.map((v) => [`${v.policyId}@${v.tier}`, v]),
   );
@@ -644,47 +746,20 @@ export function evaluateRegisteredRelease(
           'with the vault deployed, and pass it as `forkResults`.',
       ),
     );
-  } else {
-    const required = new Set(requiredRuns());
-    for (const f of fork) required.delete(`${f.policyId}@${f.tier}`);
-    const notExecuted = fork.filter((f) => !f.executed);
-    // A HOLD is `executed: true` — the chain trivially accepts doing nothing
-    // — so a policy that proposed nothing at every replayed origin used to
-    // clear this check with ZERO chain interaction: the completeness set was
-    // full, `notExecuted` was empty, and only the prose detail changed. That
-    // is the absence-reads-as-success shape this revision exists to close,
-    // sitting on the one check it exists to wire, and the pathology it hid —
-    // a controller that never trades — is the original failure itself.
-    //
-    // §11.1 asks whether the chain ACCEPTS SRCLA's allocation. A run in which
-    // SRCLA never proposed one has not answered that question either way, so
-    // the outcome is NOT PRODUCED (`null`, which never rolls up into a pass),
-    // not a pass. Scoped to SRCLA's own runs, matching the sustainability
-    // section: a baseline that holds is a fact about the baseline.
-    const srclaFork = fork.filter((f) => f.policyId === SRCLA_POLICY.id);
-    const srclaExecutions = srclaFork.filter((f) => f.held !== true);
-    const noSrclaExecution = srclaExecutions.length === 0;
+  } else if (p37) {
+    // P37 (G4): §11.1 asks whether the chain accepts SRCLA's allocation, so
+    // only SRCLA's own replays at the release tiers gate here. Every baseline
+    // plan the chain did not execute is still published in the detail.
     checks.push(
-      check(
-        '§11.1 pinned-prestate fork replay',
-        required.size > 0 || notExecuted.length > 0
-          ? false
-          : noSrclaExecution
-            ? null
-            : true,
-        required.size > 0
-          ? `no fork replay for: ${[...required].sort().join(', ')}`
-          : notExecuted.length > 0
-            ? `did not execute on fork: ${notExecuted.map((f) => `${f.policyId}@${f.tier} (${f.detail})`).join(', ')}`
-            : noSrclaExecution
-              ? `NOT PRODUCED: ${srclaFork.length} SRCLA (policy, tier) run(s) were replayed and ` +
-                `EVERY ONE held, so no allocation was ever submitted to the chain. A hold is ` +
-                `trivially executable and demonstrates nothing about whether the vault would ` +
-                `accept SRCLA's plan; §11.1 needs at least one non-held SRCLA execution. ` +
-                forkClaim(fork)
-              : forkClaim(fork),
+      forkReplayCheck(
+        fork,
+        '§11.1 pinned-prestate fork replay (SRCLA plans, P37)',
+        RELEASE_TIERS.map((t) => `${SRCLA_POLICY.id}@${t}`),
+        (f) => f.policyId === SRCLA_POLICY.id && RELEASE_TIERS.includes(f.tier),
       ),
     );
+  } else {
+    checks.push(forkReplayCheck(fork, '§11.1 pinned-prestate fork replay', requiredRuns(), () => true));
   }
 
   // =========================================================================
@@ -744,10 +819,42 @@ export function evaluateRegisteredRelease(
   // S2 — stressed liquid coverage, with §11.4's capacity-infeasibility
   // partition. Scoped to SRCLA; a comparator's breach is reported, not
   // gating, and is carried into the counterexample table below.
-  const squeezed = srclaResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  //
+  // P37 (G3, P34): an SRCLA breach fully explained by a position trapped in a
+  // venue with zero withdrawable cash is a VENUE FAILURE — published here,
+  // never gating. FAIL CLOSED: every other outcome, including 'NO BREACH'
+  // (an inconsistent replay), stays blocking exactly as v0.10. Under v0.10
+  // the map stays empty and this check is exactly the registered one.
+  const venueFailures = new Map<PolicyRunResult, S2Attribution>();
+  if (p37) {
+    for (const r of srclaResults) {
+      if (r.replay.minStressedLiquidCoverage >= minStressed) continue;
+      const a = attributeS2Breach(r.replay.snapshots ?? [], minStressed);
+      if (a.kind === 'VENUE FAILURE') venueFailures.set(r, a);
+    }
+  }
+  const squeezed = srclaResults.filter(
+    (r) => r.replay.minStressedLiquidCoverage < minStressed && !venueFailures.has(r),
+  );
   const reportedOnly = otherResults.filter((r) => r.replay.minStressedLiquidCoverage < minStressed);
+  const coverageCheck = stressedLiquidCoverageCheck(
+    squeezed,
+    srclaResults.length,
+    minStressed,
+    opts.universeLiquidity,
+    reportedOnly,
+  );
   checks.push(
-    stressedLiquidCoverageCheck(squeezed, srclaResults.length, minStressed, opts.universeLiquidity, reportedOnly),
+    venueFailures.size === 0
+      ? coverageCheck
+      : {
+          ...coverageCheck,
+          detail:
+            coverageCheck.detail +
+            ` VENUE FAILURE (P34, reported, not gating): ${[...venueFailures]
+              .map(([r, a]) => `${label(r)} — ${a.detail}`)
+              .join('; ')}`,
+        },
   );
 
   // S1b — a bounded COMPLETE exit. Coverage answers "could the vault meet
@@ -896,7 +1003,7 @@ export function evaluateRegisteredRelease(
   const ablationIds = new Set(REGISTERED_ABLATIONS.map((p) => p.id));
   const comparisons: BaselineComparison[] = [];
   const excludedComparators: Array<{ baselineId: string; tier: string; reason: string }> = [];
-  const tiers = [...new Set(out.results.map((r) => r.tier.toString()))].sort((x, y) =>
+  const tiers = [...new Set(out.results.filter(inScope).map((r) => r.tier.toString()))].sort((x, y) =>
     BigInt(x) < BigInt(y) ? -1 : BigInt(x) > BigInt(y) ? 1 : 0,
   );
 
@@ -1196,6 +1303,8 @@ export function evaluateRegisteredRelease(
     excludedComparators,
     skillWindows,
     nonInferiorityMarginApy: margin,
+    amendment: opts.amendment ?? 'v0.10',
+    outOfScopeSustainability,
   };
 }
 

@@ -72,6 +72,18 @@ export const REGISTERED_TIERS: readonly bigint[] = [
   10_000_000_000_000n,
 ];
 
+/**
+ * P37 (G5): the tiers the P37 and release verdicts are decided over — 10,000,
+ * 100,000 and 1,000,000 USDC, in base units. Every registered tier still runs
+ * and is reported; 10,000,000 is outside the release scope, matching the
+ * mainnet vault's deposit cap.
+ */
+export const RELEASE_TIERS: readonly bigint[] = [
+  10_000_000_000n,
+  100_000_000_000n,
+  1_000_000_000_000n,
+];
+
 export interface WithdrawalSchedule {
   requests: WithdrawalRequest[];
   /**
