@@ -1,0 +1,254 @@
+{
+  "criterion": {
+    "gapThresholdApy": 0.00215,
+    "decisionTier": "1000000000000",
+    "minGapClosed": 0.5,
+    "s2Floor": 0.95,
+    "maxCapitalAtWorkDrift": 0.01,
+    "spec": "docs/superpowers/specs/2026-09-13-srcla-p37-release-gates-design.md#c6"
+  },
+  "window": {
+    "start": "2024-04-15T00:00:00.000Z",
+    "end": "2025-05-31T23:00:00.000Z"
+  },
+  "stride": 3,
+  "warmupDays": 31,
+  "decision": {
+    "outcome": "NO_GAP",
+    "gapApy": -0.005173922248310925,
+    "srclaNetApy": 0.051562893961317746,
+    "b4NetApy": 0.04638897171300682,
+    "ablations": [
+      {
+        "policyId": "h1",
+        "netApy": 0.050788740298373325,
+        "gapClosedFraction": 0,
+        "minStressedCoverage": 0.9837250104034007,
+        "capitalAtWorkDrift": 0.0001832448422325328,
+        "qualifies": false,
+        "reasons": [
+          "no calibration gap to close",
+          "closes 0.0% of the gap, below 50%"
+        ]
+      },
+      {
+        "policyId": "h7",
+        "netApy": 0.051477131773088436,
+        "gapClosedFraction": 0,
+        "minStressedCoverage": 0.9171395559150236,
+        "capitalAtWorkDrift": 0.00658577791262005,
+        "qualifies": false,
+        "reasons": [
+          "no calibration gap to close",
+          "closes 0.0% of the gap, below 50%",
+          "min stressed coverage 0.9171 is below 0.95"
+        ]
+      }
+    ],
+    "qualifying": []
+  },
+  "meanVenueWeightsAt1M": {
+    "srcla": {
+      "aave-v3-usdc": 0.330815337682039,
+      "compound-v3-usdc": 0.22430469296116487,
+      "moonwell-usdc": 0.3222379156553402
+    },
+    "b4": {
+      "aave-v3-usdc": 0.0319012063106796,
+      "compound-v3-usdc": 0.12400541656553424,
+      "moonwell-usdc": 0.7511071629247558
+    },
+    "h1": {
+      "aave-v3-usdc": 0.27998332736650505,
+      "compound-v3-usdc": 0.31562340139563144,
+      "moonwell-usdc": 0.2827392606189321
+    },
+    "h7": {
+      "aave-v3-usdc": 0.35300585376213656,
+      "compound-v3-usdc": 0.20235631007281502,
+      "moonwell-usdc": 0.3154994450849519
+    }
+  },
+  "rows": [
+    {
+      "policyId": "srcla",
+      "tier": "10000000000",
+      "tierUsd": 10000,
+      "netApy": 0.05013548379885924,
+      "capitalAtWork": 0.9799910166868925,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 1257,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.33893037894417466,
+        "compound-v3-usdc": 0.21150761832524284,
+        "moonwell-usdc": 0.32760282433252425
+      }
+    },
+    {
+      "policyId": "b4",
+      "tier": "10000000000",
+      "tierUsd": 10000,
+      "netApy": 0.04582791659340524,
+      "capitalAtWork": 0.9991508731796116,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 3240,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.03190186286407765,
+        "compound-v3-usdc": 0.12401559951456341,
+        "moonwell-usdc": 0.7515644641990287
+      }
+    },
+    {
+      "policyId": "h1",
+      "tier": "10000000000",
+      "tierUsd": 10000,
+      "netApy": 0.048610580489860444,
+      "capitalAtWork": 0.9798421283373786,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 1269,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.28750555885922263,
+        "compound-v3-usdc": 0.31034706280339774,
+        "moonwell-usdc": 0.2820456037621357
+      }
+    },
+    {
+      "policyId": "h7",
+      "tier": "10000000000",
+      "tierUsd": 10000,
+      "netApy": 0.05013548379885924,
+      "capitalAtWork": 0.9799910166868925,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 1257,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.33893037894417466,
+        "compound-v3-usdc": 0.21150761832524284,
+        "moonwell-usdc": 0.32760282433252425
+      }
+    },
+    {
+      "policyId": "srcla",
+      "tier": "100000000000",
+      "tierUsd": 100000,
+      "netApy": 0.0515288875880644,
+      "capitalAtWork": 0.9807202487864095,
+      "minStressedCoverage": 0.9870801400564005,
+      "p05Coverage": 1,
+      "rebalances": 1338,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.3460766416868933,
+        "compound-v3-usdc": 0.22716568810679674,
+        "moonwell-usdc": 0.3036386492718447
+      }
+    },
+    {
+      "policyId": "b4",
+      "tier": "100000000000",
+      "tierUsd": 100000,
+      "netApy": 0.04633797251400784,
+      "capitalAtWork": 0.9991508771237864,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 3240,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.03190126699029125,
+        "compound-v3-usdc": 0.12400634223300953,
+        "moonwell-usdc": 0.7511487190533989
+      }
+    },
+    {
+      "policyId": "h1",
+      "tier": "100000000000",
+      "tierUsd": 100000,
+      "netApy": 0.05073674363535274,
+      "capitalAtWork": 0.9801459669296114,
+      "minStressedCoverage": 0.987466937450377,
+      "p05Coverage": 1,
+      "rebalances": 1351,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.2888019993932046,
+        "compound-v3-usdc": 0.3122540351941745,
+        "moonwell-usdc": 0.2769014183859223
+      }
+    },
+    {
+      "policyId": "h7",
+      "tier": "100000000000",
+      "tierUsd": 100000,
+      "netApy": 0.0515288875880644,
+      "capitalAtWork": 0.9807202487864095,
+      "minStressedCoverage": 0.9870801400564005,
+      "p05Coverage": 1,
+      "rebalances": 1338,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.3460766416868933,
+        "compound-v3-usdc": 0.22716568810679674,
+        "moonwell-usdc": 0.3036386492718447
+      }
+    },
+    {
+      "policyId": "srcla",
+      "tier": "1000000000000",
+      "tierUsd": 1000000,
+      "netApy": 0.051562893961317746,
+      "capitalAtWork": 0.980158726638349,
+      "minStressedCoverage": 0.9873680577723808,
+      "p05Coverage": 1,
+      "rebalances": 1330,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.330815337682039,
+        "compound-v3-usdc": 0.22430469296116487,
+        "moonwell-usdc": 0.3222379156553402
+      }
+    },
+    {
+      "policyId": "b4",
+      "tier": "1000000000000",
+      "tierUsd": 1000000,
+      "netApy": 0.04638897171300682,
+      "capitalAtWork": 0.9991508777305825,
+      "minStressedCoverage": 1,
+      "p05Coverage": 1,
+      "rebalances": 3240,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.0319012063106796,
+        "compound-v3-usdc": 0.12400541656553424,
+        "moonwell-usdc": 0.7511071629247558
+      }
+    },
+    {
+      "policyId": "h1",
+      "tier": "1000000000000",
+      "tierUsd": 1000000,
+      "netApy": 0.050788740298373325,
+      "capitalAtWork": 0.9799754817961165,
+      "minStressedCoverage": 0.9837250104034007,
+      "p05Coverage": 1,
+      "rebalances": 1338,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.27998332736650505,
+        "compound-v3-usdc": 0.31562340139563144,
+        "moonwell-usdc": 0.2827392606189321
+      }
+    },
+    {
+      "policyId": "h7",
+      "tier": "1000000000000",
+      "tierUsd": 1000000,
+      "netApy": 0.051477131773088436,
+      "capitalAtWork": 0.973572948725729,
+      "minStressedCoverage": 0.9171395559150236,
+      "p05Coverage": 1,
+      "rebalances": 1344,
+      "meanVenueWeights": {
+        "aave-v3-usdc": 0.35300585376213656,
+        "compound-v3-usdc": 0.20235631007281502,
+        "moonwell-usdc": 0.3154994450849519
+      }
+    }
+  ]
+}
