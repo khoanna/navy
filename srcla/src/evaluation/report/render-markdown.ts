@@ -17,7 +17,14 @@
  * PURE: no I/O, no Date.now() beyond what the caller passes in.
  * UNITS: money is USDC base units (6 dp); APYs are dimensionless fractions.
  */
-import { ERAS_IN_ORDER, eraBounds, isOpenEnded, type EraTag } from '../eras.js';
+import {
+  ERAS_IN_ORDER,
+  HELDOUT_D_MIN_ORIGINS,
+  eraBounds,
+  isOpenEnded,
+  releasePowered,
+  type EraTag,
+} from '../eras.js';
 import {
   ablationContributions,
   type ForkReplayResult,
@@ -61,6 +68,136 @@ export interface RunSummary {
    * and a figure that silently vanishes is worse than none.
    */
   figures?: readonly { filename: string; caption: string }[];
+  /** P37 (paper v0.11): the policy gate graded under the amendment. Absent = NOT PRODUCED. */
+  gateP37?: RegisteredGateResult | undefined;
+  /** Missing hourly origins in the evaluated window; the release verdict needs 0. */
+  originGaps?: number | undefined;
+}
+
+export type VerdictStatus = 'PASS' | 'FAIL' | 'NOT YET POWERED' | 'NOT RUN';
+
+export interface EraVerdict {
+  era: EraTag;
+  forecast: 'PASS' | 'FAIL' | 'NOT PRODUCED';
+  policy: 'PASS' | 'FAIL' | 'NOT PRODUCED';
+  blocked: string[];
+}
+
+export interface VerdictLine {
+  status: VerdictStatus;
+  eras: EraVerdict[];
+  note: string;
+}
+
+export interface ThreeVerdicts {
+  /** The registered v0.10 gates on `heldout-c` + `heldout-b`. */
+  registered: VerdictLine;
+  /** P37's gates on the same two eras — POST-HOC, since P37 was designed after both were read. */
+  p37PostHoc: VerdictLine;
+  /** P37's gates on `heldout-d`, graded only once it is powered. */
+  release: VerdictLine;
+}
+
+const DESIGN_ERAS: readonly EraTag[] = ['heldout-c', 'heldout-b'];
+
+function eraVerdict(run: RunSummary, amended: boolean): EraVerdict {
+  const fg = amended ? run.evaluation.forecastGateP37 : run.evaluation.forecastGate;
+  const pg = amended ? run.gateP37 : run.gate;
+  return {
+    era: run.era,
+    forecast: fg === undefined ? 'NOT PRODUCED' : fg.pass ? 'PASS' : 'FAIL',
+    policy: pg === undefined ? 'NOT PRODUCED' : pg.pass ? 'PASS' : 'FAIL',
+    blocked: [
+      ...(fg === undefined ? ['forecast gate NOT PRODUCED'] : fg.blockedReasons.map((b) => `forecast: ${b}`)),
+      ...(pg === undefined ? ['policy gate NOT PRODUCED'] : pg.blockedReasons.map((b) => `policy: ${b}`)),
+    ],
+  };
+}
+
+function designEraLine(runs: readonly RunSummary[], amended: boolean, note: string): VerdictLine {
+  const present = DESIGN_ERAS.map((era) => runs.find((r) => r.era === era)).filter(
+    (r): r is RunSummary => r !== undefined,
+  );
+  const eras = present.map((r) => eraVerdict(r, amended));
+  const missing = DESIGN_ERAS.filter((era) => !present.some((r) => r.era === era));
+  const pass = missing.length === 0 && eras.every((e) => e.forecast === 'PASS' && e.policy === 'PASS');
+  return {
+    status: pass ? 'PASS' : 'FAIL',
+    eras,
+    note: missing.length === 0 ? note : `${note} Missing era(s): ${missing.join(', ')}.`,
+  };
+}
+
+/**
+ * P37's three verdicts (paper v0.11). PURE, and the only place they are decided.
+ *
+ *  1. Registered v0.10 — the unchanged gates on `heldout-c` + `heldout-b`.
+ *  2. P37, post-hoc — the amended gates on the same eras, which P37 was
+ *     designed after reading; never a test of P37.
+ *  3. Release — the amended gates on `heldout-d`, graded only once it holds
+ *     HELDOUT_D_MIN_ORIGINS origins with zero gaps. A missing P37 gate is NOT
+ *     PRODUCED and never passes.
+ */
+export function threeVerdicts(runs: readonly RunSummary[]): ThreeVerdicts {
+  const d = runs.find((r) => r.era === 'heldout-d');
+  let release: VerdictLine;
+  if (d === undefined) {
+    release = {
+      status: 'NOT RUN',
+      eras: [],
+      note: '`heldout-d` was not evaluated in this run, so the release verdict blocks.',
+    };
+  } else if (!releasePowered(d.datasetOrigins, d.originGaps ?? Number.POSITIVE_INFINITY)) {
+    release = {
+      status: 'NOT YET POWERED',
+      eras: [eraVerdict(d, true)],
+      note:
+        `\`heldout-d\` holds ${d.datasetOrigins} origins with ` +
+        `${d.originGaps === undefined ? 'an unmeasured number of' : d.originGaps} gap(s); the ` +
+        `release verdict needs ${HELDOUT_D_MIN_ORIGINS} with zero gaps, so it blocks.`,
+    };
+  } else {
+    const v = eraVerdict(d, true);
+    release = {
+      status: v.forecast === 'PASS' && v.policy === 'PASS' ? 'PASS' : 'FAIL',
+      eras: [v],
+      note: 'The amended gates on data P37 has not seen.',
+    };
+  }
+  return {
+    registered: designEraLine(runs, false, 'The registered gates exactly as run.'),
+    p37PostHoc: designEraLine(
+      runs,
+      true,
+      'POST-HOC: P37 was designed after both eras were opened, so this line is not a test of P37.',
+    ),
+    release,
+  };
+}
+
+function threeVerdictsSection(v: ThreeVerdicts): string[] {
+  const out: string[] = ['## Verdicts under Amendment P37 (paper v0.11)', ''];
+  out.push(
+    'No registered threshold value moved. P37 changes what three gates measure — P34\'s forecast ' +
+      'domain and redeemability attribution, one-sided coverage tests, and the fork replay scoped ' +
+      'to SRCLA\'s own plans — and scopes the release to vaults up to 1,000,000 USDC.',
+  );
+  out.push('');
+  const line = (title: string, l: VerdictLine): void => {
+    out.push(`**${title}: ${l.status}** — ${l.note}`);
+    out.push('');
+    for (const e of l.eras) {
+      out.push(
+        `- \`${e.era}\`: forecast ${e.forecast}, policy ${e.policy}` +
+          (e.blocked.length > 0 ? ` — blocked on ${e.blocked.join('; ')}` : ''),
+      );
+    }
+    if (l.eras.length > 0) out.push('');
+  };
+  line('1. Registered v0.10', v.registered);
+  line('2. P37, post-hoc', v.p37PostHoc);
+  line('3. Release (`heldout-d`)', v.release);
+  return out;
 }
 
 /** One row of the DERIVED (measured) per-era coverage table — distinct from
@@ -279,9 +416,11 @@ const eraRoleLine = (role: string): string =>
  * PRISTINE" caveat the run's credibility depends on. A 200-character caveat
  * does not belong in a table cell; it belongs in a list, whole.
  *
- * OPEN-ENDED ERAS. `heldout-b` ends at the far-future sentinel, so rendering
- * `eraBounds().end` and `.days` printed "2099-12-31" and "26793 days" in a
- * published document. Such an era's End and Days are reported as `open`.
+ * OPEN-ENDED ERAS. `heldout-d` (P37: paper v0.11) is now the open-ended era —
+ * `heldout-b` was closed at `P37_FREEZE_SECONDS` — so rendering
+ * `eraBounds().end` and `.days` for `heldout-d` would print the far-future
+ * sentinel's date and day count in a published document. Such an era's End
+ * and Days are reported as `open`.
  */
 function eraTable(): string {
   const rows = ERAS_IN_ORDER.map((e) => {
@@ -755,7 +894,11 @@ function ablationContributionsSection(evaluation: RegisteredEvaluationResult): s
  * "held up under stress while deployed" and "held cash and was never tested"
  * is the entire point of the demonstration floor.
  */
-function sustainabilityTable(gate: RegisteredGateResult): string {
+function sustainabilityTable(
+  gate: RegisteredGateResult,
+  opts: { scaleInvarianceFooter?: boolean } = {},
+): string {
+  const { scaleInvarianceFooter = true } = opts;
   const verdicts: SustainabilityVerdict[] = gate.sustainability ?? [];
   if (verdicts.length === 0) return '_No sustainability verdict was produced._';
 
@@ -772,7 +915,7 @@ function sustainabilityTable(gate: RegisteredGateResult): string {
         `${pct(v.realizedNetApy)} | ${v.breach ?? '—'} |`,
     );
   const invariant = gate.scaleInvariant;
-  return [
+  const out = [
     `Demonstration floor: capital at work >= **${REGISTERED_DEMONSTRATION_FLOOR}**. Below it a run ` +
       'is trivially redeemable and demonstrates nothing, so every criterion reports **ND** (NOT ' +
       'DEMONSTRATED) and no sustainability claim may be drawn from it.',
@@ -791,15 +934,20 @@ function sustainabilityTable(gate: RegisteredGateResult): string {
     '| Tier | Demonstrated | S1 redeem | S2 coverage | S3 venue stress | S4 action validity | Verdict | Net APY | Breach |',
     '|---|---|---|---|---|---|---|---|---|',
     ...rows,
-    '',
-    `**Scale invariance (P26):** ${
-      invariant === true
-        ? 'sustainable at EVERY registered tier.'
-        : invariant === false
-          ? '**NOT scale invariant** — a breach at any tier is a breach, and no average over tiers may stand in for it.'
-          : '**NOT DEMONSTRATED** — at least one tier proved nothing, and a tier that proved nothing cannot be counted as invariant.'
-    }`,
-  ].join('\n');
+  ];
+  if (scaleInvarianceFooter) {
+    out.push('');
+    out.push(
+      `**Scale invariance (P26):** ${
+        invariant === true
+          ? 'sustainable at EVERY registered tier.'
+          : invariant === false
+            ? '**NOT scale invariant** — a breach at any tier is a breach, and no average over tiers may stand in for it.'
+            : '**NOT DEMONSTRATED** — at least one tier proved nothing, and a tier that proved nothing cannot be counted as invariant.'
+      }`,
+    );
+  }
+  return out.join('\n');
 }
 
 /**
@@ -983,6 +1131,7 @@ export function renderReport(params: ReportParams): string {
       'retuned after a sealed era was opened.',
   );
   out.push('');
+  out.push(...threeVerdictsSection(threeVerdicts(params.runs)));
 
   // ---- What the reader must know before reading a number. -----------------
   out.push('## Read this before citing any number');
@@ -1203,6 +1352,35 @@ export function renderReport(params: ReportParams): string {
     out.push('');
     out.push(gateTable(run.gate));
     out.push('');
+    // P37 (paper v0.11): the same run under the amendment — post-hoc on
+    // heldout-c and heldout-b, the release gates on heldout-d.
+    if (run.evaluation.forecastGateP37 !== undefined) {
+      out.push('### §11.5 forecast gate under P37');
+      out.push('');
+      out.push(gateTable(run.evaluation.forecastGateP37));
+      out.push('');
+    }
+    if (run.gateP37 !== undefined) {
+      out.push('### §11.5 policy gate under P37');
+      out.push('');
+      out.push(gateTable(run.gateP37));
+      out.push('');
+      out.push(
+        'P37 decides its comparisons, comparator sustainability, skill windows and price of ' +
+          "unsustainability over the release tiers (10k/100k/1M) only — the 10M results for " +
+          'this era are the registered (v0.10) tables above, not repeated here.',
+      );
+      out.push('');
+      const outOfScope = run.gateP37.outOfScopeSustainability ?? [];
+      if (outOfScope.length > 0) {
+        out.push('#### Outside the release scope (10M) — reported, never gating (G5)');
+        out.push('');
+        out.push(
+          sustainabilityTable({ ...run.gateP37, sustainability: outOfScope }, { scaleInvarianceFooter: false }),
+        );
+        out.push('');
+      }
+    }
   }
 
   // ---- Limitations. -------------------------------------------------------

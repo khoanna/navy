@@ -7,7 +7,11 @@
  * evidence than the run supports, which is the specific failure the previous
  * SRCLA-REPORT.md exhibited.
  */
-import { renderReport, type RunSummary } from '../../../src/evaluation/report/render-markdown.js';
+import {
+  renderReport,
+  threeVerdicts,
+  type RunSummary,
+} from '../../../src/evaluation/report/render-markdown.js';
 import { eraBounds } from '../../../src/evaluation/eras.js';
 import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
@@ -836,5 +840,116 @@ describe('renderReport — §11.5 sustainability sections', () => {
     expect(md).toContain('registered utilization ceiling');
     expect(md).toContain('unrecoverable plan state');
     expect(md).toMatch(/What S3 and S4 do \*\*NOT\*\* cover|What S3 and S4 do NOT cover/);
+  });
+});
+
+describe('renderReport — P37 three verdicts', () => {
+  const withP37 = (run: RunSummary, pass: boolean): RunSummary => ({
+    ...run,
+    gateP37: {
+      ...run.gate,
+      pass,
+      blockedReasons: pass ? [] : ['Safety: stressed liquid coverage'],
+    } as RegisteredGateResult,
+    evaluation: {
+      ...run.evaluation,
+      forecastGateP37: fakeForecastGate(pass),
+    } as unknown as RegisteredEvaluationResult,
+  });
+
+  it('prints all three verdicts, after the registered verdict and without changing it', () => {
+    const md = renderReport(params);
+    expect(md).toContain('## Verdicts under Amendment P37 (paper v0.11)');
+    expect(md).toMatch(/\*\*1\. Registered v0\.10: FAIL\*\*/);
+    expect(md).toMatch(/\*\*2\. P37, post-hoc: FAIL\*\*/);
+    expect(md).toMatch(/\*\*3\. Release \(`heldout-d`\): NOT RUN\*\*/);
+    expect(md.indexOf('## Verdict\n')).toBeLessThan(md.indexOf('## Verdicts under Amendment P37'));
+  });
+
+  it('labels the P37 verdict on the design eras post-hoc', () => {
+    const v = threeVerdicts([
+      withP37(fakeRun('heldout-c', true), true),
+      withP37(fakeRun('heldout-b', true), true),
+    ]);
+    expect(v.p37PostHoc.status).toBe('PASS');
+    expect(v.p37PostHoc.note).toMatch(/POST-HOC/);
+    expect(v.release.status).toBe('NOT RUN');
+  });
+
+  it('reads NOT YET POWERED below 2,064 origins or with a gap, and grades only once powered', () => {
+    const d = (origins: number, gaps: number, pass: boolean): RunSummary => ({
+      ...withP37(fakeRun('heldout-c', pass), pass),
+      era: 'heldout-d',
+      datasetOrigins: origins,
+      originGaps: gaps,
+    });
+    expect(threeVerdicts([d(2_063, 0, true)]).release.status).toBe('NOT YET POWERED');
+    expect(threeVerdicts([d(2_064, 1, true)]).release.status).toBe('NOT YET POWERED');
+    expect(threeVerdicts([d(2_064, 0, true)]).release.status).toBe('PASS');
+    expect(threeVerdicts([d(2_064, 0, false)]).release.status).toBe('FAIL');
+  });
+
+  it('never lets a missing P37 gate read as a pass', () => {
+    const v = threeVerdicts([fakeRun('heldout-c', true), fakeRun('heldout-b', true)]);
+    expect(v.registered.status).toBe('PASS');
+    expect(v.p37PostHoc.status).toBe('FAIL');
+    expect(v.p37PostHoc.eras[0]!.policy).toBe('NOT PRODUCED');
+  });
+
+  it('prints the P37 gate tables beneath the registered ones', () => {
+    const md = renderReport({ ...params, runs: [withP37(fakeRun('heldout-c', false), false)] });
+    expect(md.indexOf('### §11.5 policy gate under P37')).toBeGreaterThan(
+      md.indexOf('### §11.5 policy gate\n'),
+    );
+    expect(md).toContain('### §11.5 forecast gate under P37');
+  });
+
+  // Controller ruling T1.7-a: the out-of-scope 10M rows render under a label
+  // that says they are outside the release scope, WITHOUT the in-scope
+  // scale-invariance footer that `sustainabilityTable` normally appends — P37
+  // never decides scale invariance over a tier it excludes from the release.
+  it('renders the out-of-scope 10M rows without the in-scope scale-invariance footer (T1.7-a)', () => {
+    const base = withP37(fakeRun('heldout-c', false), false);
+    const run: RunSummary = {
+      ...base,
+      gateP37: {
+        ...(base.gateP37 as RegisteredGateResult),
+        outOfScopeSustainability: [
+          {
+            policyId: 'srcla',
+            tier: '10000000000000',
+            demonstrated: true,
+            s1: true,
+            s2: true,
+            s3: true,
+            s4: true,
+            sustainable: true,
+            realizedNetApy: 0.031,
+            breach: null,
+          },
+        ],
+      } as RegisteredGateResult,
+    };
+    const md = renderReport({ ...params, runs: [run] });
+    const heading = md.indexOf('Outside the release scope');
+    expect(heading).toBeGreaterThan(-1);
+    const nextHeading = md.indexOf('\n### ', heading);
+    const block = md.slice(heading, nextHeading === -1 ? md.length : nextHeading);
+    expect(block).not.toContain('Scale invariance (P26)');
+  });
+
+  // Controller ruling T1.7-c: the P37 gate carries no 10M comparator results
+  // (comparisons, comparator sustainability, skill windows, price of
+  // unsustainability), because P37 decides over the release tiers only. The
+  // per-era P37 section must say so, so the report does not imply those
+  // results are absent — they are in the registered (v0.10) tables above.
+  it('states that 10M comparator results live in the registered tables above (T1.7-c)', () => {
+    const md = renderReport({ ...params, runs: [withP37(fakeRun('heldout-c', false), false)] });
+    const idx = md.indexOf('### §11.5 policy gate under P37');
+    expect(idx).toBeGreaterThan(-1);
+    const section = md.slice(idx, idx + 800);
+    expect(section).toMatch(/10,000,000|10M/);
+    expect(section).toMatch(/registered \(v0\.10\)|registered v0\.10/i);
+    expect(section).toMatch(/above/i);
   });
 });

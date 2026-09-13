@@ -29,7 +29,7 @@
  *   DATABASE_URL=... pnpm exec tsx scripts/run-phase4.ts \
  *     [--artifact config/registered-artifact.json] \
  *     [--tiers 10000,100000,1000000,10000000] \
- *     [--eras heldout-c,heldout-b] \
+ *     [--eras heldout-c,heldout-b]      (add heldout-d for the P37 release verdict) \
  *     [--out-dir .]
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
@@ -40,7 +40,13 @@ import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 import { loadEra, loadWarmup } from '../src/evaluation/dataset.js';
 import { loadGasSeries } from '../src/evaluation/gas-series.js';
-import { REGISTERED_ERAS, ERAS_IN_ORDER, eraBounds, type EraTag } from '../src/evaluation/eras.js';
+import {
+  REGISTERED_ERAS,
+  ERAS_IN_ORDER,
+  eraBounds,
+  hourlyOriginGaps,
+  type EraTag,
+} from '../src/evaluation/eras.js';
 import { loadRegisteredArtifact } from '../src/policy/artifact.js';
 import { DEFAULT_DECIDE_OPTS } from '../src/policy/decide.js';
 import {
@@ -64,6 +70,7 @@ import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gat
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 import {
   renderReport,
+  threeVerdicts,
   type RunSummary,
   type DatasetProvenance,
   type EraProvenanceRow,
@@ -133,6 +140,17 @@ function registeredDisclosures(artifact: PolicyArtifact) {
         'relative form is the LOOSER of the two.',
       "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
         'carried at its registered default. Every result that depends on it is provisional.',
+      'AMENDMENT P37 (paper v0.11) IS POST-HOC. It was designed after both sealed eras had ' +
+        'been opened and read, so its verdict on `heldout-c` and `heldout-b` is labelled post-hoc ' +
+        'and is not a test of P37. It moves no registered threshold value. It implements P34 in ' +
+        "the gates (a residual whose label window saw its venue at zero withdrawable cash is " +
+        "outside the forecast's domain; an S2 breach fully explained by a position trapped in " +
+        'such a venue, with no deposit into it, is a VENUE FAILURE rather than an allocator ' +
+        'error), makes the coverage tests one-sided for a lower bound, gates the fork replay on ' +
+        "SRCLA's own plans, and scopes the release to vaults up to 1,000,000 USDC. `heldout-b`, " +
+        'registered open-ended, now ends at P37_FREEZE_SECONDS; the release verdict rests on ' +
+        '`heldout-d`, sealed from the next second, and only once it holds 2,064 origins with ' +
+        'zero gaps.',
     ],
     archive: [
       '**31 spurious single-hour Aave regime boundaries** survive in the `burned` (17 rows) ' +
@@ -502,6 +520,27 @@ function serialisableRun(run: RunSummary): Record<string, unknown> {
       nonInferiorityMarginApy: run.gate.nonInferiorityMarginApy,
       skillWindows: run.gate.skillWindows,
     },
+    // P37 (paper v0.11). `null` is NOT PRODUCED, never a pass.
+    policyGateP37:
+      run.gateP37 === undefined
+        ? null
+        : {
+            amendment: run.gateP37.amendment,
+            pass: run.gateP37.pass,
+            blockedReasons: run.gateP37.blockedReasons,
+            checks: run.gateP37.checks,
+            sustainability: run.gateP37.sustainability,
+            outOfScopeSustainability: run.gateP37.outOfScopeSustainability ?? [],
+          },
+    forecastGateP37:
+      run.evaluation.forecastGateP37 === undefined
+        ? null
+        : {
+            pass: run.evaluation.forecastGateP37.pass,
+            blockedReasons: run.evaluation.forecastGateP37.blockedReasons,
+            checks: run.evaluation.forecastGateP37.checks,
+          },
+    originGaps: run.originGaps ?? null,
   };
 }
 
@@ -680,6 +719,24 @@ async function runEra(
     universeLiquidity,
     ...(forkResults === undefined ? {} : { forkResults }),
   });
+  // P37 (paper v0.11): the same run graded under the amendment — post-hoc on
+  // heldout-c/heldout-b, the release verdict on heldout-d. The registered gate
+  // above is unchanged and still decides this script's exit code.
+  const gateP37 = evaluateRegisteredRelease(evaluation, {
+    universeLiquidity,
+    ...(forkResults === undefined ? {} : { forkResults }),
+    amendment: 'p37',
+  });
+  const originGaps = hourlyOriginGaps(
+    dataset.snapshots.map((s) => Math.floor(s.timestamp.getTime() / 1000)),
+    REGISTERED_ERAS[era].startSeconds,
+  );
+  console.error(
+    `    P37: forecast ${evaluation.forecastGateP37?.pass === true ? 'PASS' : 'FAIL'}, ` +
+      `policy ${gateP37.pass ? 'PASS' : 'FAIL'}` +
+      (gateP37.pass ? '' : ` — blocked on ${gateP37.blockedReasons.join(', ')}`) +
+      `; ${dataset.snapshots.length} origins, ${originGaps} gap(s)`,
+  );
 
   // §11.5's FIRST gate, printed first. It is not a subset of the policy gate
   // and it was never run before this release.
@@ -738,6 +795,8 @@ async function runEra(
       era,
       evaluation,
       gate,
+      gateP37,
+      originGaps,
       datasetOrigins: dataset.snapshots.length,
       // Relative to report/SRCLA-REPORT.md, which links them.
       figures: figures.map((f) => ({ filename: `figures/${f.filename}`, caption: f.caption })),
@@ -846,6 +905,8 @@ async function main(): Promise<void> {
       disclosures: registeredDisclosures(artifact),
     });
 
+    const verdicts = threeVerdicts(runs);
+
     mkdirSync(join(outDir, 'report'), { recursive: true });
     const mdPath = join(outDir, 'report', 'SRCLA-REPORT.md');
     const jsonPath = join(outDir, 'SRCLA-REPORT.json');
@@ -865,6 +926,7 @@ async function main(): Promise<void> {
             registration: reg,
           },
           notObserved: [...NOT_OBSERVED],
+          verdicts,
           runs: runs.map(serialisableRun),
         },
         null,
@@ -880,8 +942,13 @@ async function main(): Promise<void> {
           `policy ${r.gate.pass ? 'PASS' : 'FAIL'} — result hash ${r.provenance.resultHash}`,
       );
     }
+    console.error(
+      `[phase4] verdicts: registered v0.10 ${verdicts.registered.status}, P37 post-hoc ` +
+        `${verdicts.p37PostHoc.status}, release ${verdicts.release.status}`,
+    );
     // A blocked gate is a failed run. Exiting 0 would let CI, and a reader,
-    // treat "did not verify" as "verified".
+    // treat "did not verify" as "verified". The registered v0.10 gate decides
+    // this script's exit code; P37 is reported alongside it, never in place of it.
     if (runs.some((r) => !r.gate.pass || !r.evaluation.forecastGate.pass)) process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
