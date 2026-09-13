@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 506" width="900" height="506" font-family="'Noto Sans', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif" role="img">
+<title>Capital at work by vault size</title>
+<rect x="0" y="0" width="900" height="506" fill="#ffffff"/>
+<text data-role="title" x="24" y="34" font-size="18" font-weight="600" fill="#0b0b0b">Capital at work by vault size</text>
+<text data-role="subtitle" x="24" y="56" font-size="13" fill="#52514e">Sealed era heldout-c · 16 vault sizes, every 3rd origin · markers at the 4 registered tiers</text>
+<line x1="24.0" y1="78" x2="48.0" y2="78" stroke="#2a78d6" stroke-width="3" stroke-linecap="round"/>
+<circle data-role="legend-marker" cx="36.0" cy="78.0" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<text data-role="legend-label" x="58.0" y="82" font-size="12" font-weight="600" fill="#0b0b0b">SRCLA (proposed)</text>
+<line x1="308.0" y1="78" x2="332.0" y2="78" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<rect data-role="legend-marker" x="316.2" y="74.2" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<text data-role="legend-label" x="342.0" y="82" font-size="12" fill="#0b0b0b">B1 · highest displayed rate</text>
+<line x1="592.0" y1="78" x2="616.0" y2="78" stroke="#1baf7a" stroke-width="2" stroke-linecap="round"/>
+<path data-role="legend-marker" d="M604.0,72.8 L608.5,81.4 L599.5,81.4 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<text data-role="legend-label" x="626.0" y="82" font-size="12" fill="#0b0b0b">B2 · capacity-aware, no uncertainty</text>
+<line x1="24.0" y1="100" x2="48.0" y2="100" stroke="#8a8883" stroke-width="1.75" stroke-linecap="round" stroke-dasharray="6 4"/>
+<circle data-role="legend-marker" cx="36.0" cy="100.0" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<text data-role="legend-label" x="58.0" y="104" font-size="12" fill="#0b0b0b">B2u · B2, no reserve (diagnostic)</text>
+<line x1="308.0" y1="100" x2="332.0" y2="100" stroke="#eda100" stroke-width="2" stroke-linecap="round"/>
+<path data-role="legend-marker" d="M320.0,94.6 L325.4,100.0 L320.0,105.4 L314.6,100.0 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<text data-role="legend-label" x="342.0" y="104" font-size="12" fill="#0b0b0b">B3 · B2 + movement-cost threshold</text>
+<line x1="592.0" y1="100" x2="616.0" y2="100" stroke="#e87ba4" stroke-width="2" stroke-linecap="round"/>
+<path data-role="legend-marker" d="M604.0,105.2 L608.5,96.6 L599.5,96.6 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<text data-role="legend-label" x="626.0" y="104" font-size="12" fill="#0b0b0b">B4 · frozen robust allocation</text>
+<rect data-role="plot-area" x="76" y="124" width="796" height="320" fill="none"/>
+<line x1="76" y1="444.0" x2="872" y2="444.0" stroke="#a8a79f" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="448.0" font-size="12" text-anchor="end" fill="#52514e">75%</text>
+<line x1="76" y1="382.0" x2="872" y2="382.0" stroke="#e7e6e1" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="386.0" font-size="12" text-anchor="end" fill="#52514e">80%</text>
+<line x1="76" y1="320.0" x2="872" y2="320.0" stroke="#e7e6e1" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="324.0" font-size="12" text-anchor="end" fill="#52514e">85%</text>
+<line x1="76" y1="258.0" x2="872" y2="258.0" stroke="#e7e6e1" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="262.0" font-size="12" text-anchor="end" fill="#52514e">90%</text>
+<line x1="76" y1="196.0" x2="872" y2="196.0" stroke="#e7e6e1" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="200.0" font-size="12" text-anchor="end" fill="#52514e">95%</text>
+<line x1="76" y1="134.0" x2="872" y2="134.0" stroke="#e7e6e1" stroke-width="1"/>
+<text data-role="y-tick-label" x="66" y="138.0" font-size="12" text-anchor="end" fill="#52514e">100%</text>
+<line x1="76.0" y1="124" x2="76.0" y2="444" stroke="#e7e6e1" stroke-width="1"/>
+<line x1="76.0" y1="444" x2="76.0" y2="450" stroke="#a8a79f" stroke-width="1"/>
+<text data-role="x-tick-label" x="76.0" y="466" font-size="12" text-anchor="middle" fill="#52514e">$10k</text>
+<line x1="155.9" y1="444" x2="155.9" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="202.6" y1="444" x2="202.6" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="235.7" y1="444" x2="235.7" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="261.5" y1="444" x2="261.5" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="282.5" y1="444" x2="282.5" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="300.2" y1="444" x2="300.2" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="315.6" y1="444" x2="315.6" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="329.2" y1="444" x2="329.2" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="341.3" y1="124" x2="341.3" y2="444" stroke="#e7e6e1" stroke-width="1"/>
+<line x1="341.3" y1="444" x2="341.3" y2="450" stroke="#a8a79f" stroke-width="1"/>
+<text data-role="x-tick-label" x="341.3" y="466" font-size="12" text-anchor="middle" fill="#52514e">$100k</text>
+<line x1="421.2" y1="444" x2="421.2" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="467.9" y1="444" x2="467.9" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="501.1" y1="444" x2="501.1" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="526.8" y1="444" x2="526.8" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="547.8" y1="444" x2="547.8" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="565.6" y1="444" x2="565.6" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="581.0" y1="444" x2="581.0" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="594.5" y1="444" x2="594.5" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="606.7" y1="124" x2="606.7" y2="444" stroke="#e7e6e1" stroke-width="1"/>
+<line x1="606.7" y1="444" x2="606.7" y2="450" stroke="#a8a79f" stroke-width="1"/>
+<text data-role="x-tick-label" x="606.7" y="466" font-size="12" text-anchor="middle" fill="#52514e">$1M</text>
+<line x1="686.5" y1="444" x2="686.5" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="733.3" y1="444" x2="733.3" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="766.4" y1="444" x2="766.4" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="792.1" y1="444" x2="792.1" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="813.1" y1="444" x2="813.1" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="830.9" y1="444" x2="830.9" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="846.3" y1="444" x2="846.3" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="859.9" y1="444" x2="859.9" y2="448" stroke="#a8a79f" stroke-width="1"/>
+<line x1="872.0" y1="124" x2="872.0" y2="444" stroke="#e7e6e1" stroke-width="1"/>
+<line x1="872.0" y1="444" x2="872.0" y2="450" stroke="#a8a79f" stroke-width="1"/>
+<text data-role="x-tick-label" x="872.0" y="466" font-size="12" text-anchor="middle" fill="#52514e">$10M</text>
+<text x="474" y="492" font-size="13" text-anchor="middle" fill="#52514e">Vault size (USDC, log scale)</text>
+<text x="22" y="284.0" font-size="13" text-anchor="middle" fill="#52514e" transform="rotate(-90 22 284.0)">Time-weighted capital at work (%)</text>
+<path data-role="series" data-policy="b1" d="M76.0,208.9 L181.6,208.9 L261.5,208.9 L341.3,208.9 L446.9,208.9 L526.8,208.9 L573.5,201.8 L606.7,208.9 L653.4,204.8 L686.5,201.2 L733.3,196.1 L766.4,202.5 L792.1,210.6 L822.4,208.1 L846.3,197.3 L872.0,208.1" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2" d="M76.0,197.6 L181.6,197.5 L261.5,197.5 L341.3,197.4 L446.9,197.5 L526.8,198.6 L573.5,197.4 L606.7,200.2 L653.4,197.0 L686.5,201.7 L733.3,210.7 L766.4,235.2 L792.1,263.6 L822.4,291.2 L846.3,329.8 L872.0,375.3" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2u" d="M76.0,150.1 L181.6,150.0 L261.5,150.0 L341.3,150.0 L446.9,150.0 L526.8,157.6 L573.5,146.0 L606.7,150.5 L653.4,155.7 L686.5,152.7 L733.3,153.0 L766.4,157.0 L792.1,197.9 L822.4,209.2 L846.3,201.1 L872.0,231.3" fill="none" stroke="#8a8883" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
+<path data-role="series" data-policy="b3" d="M76.0,220.4 L181.6,220.4 L261.5,220.4 L341.3,220.4 L446.9,220.4 L526.8,220.5 L573.5,221.7 L606.7,221.1 L653.4,220.9 L686.5,220.3 L733.3,220.2 L766.4,229.3 L792.1,250.8 L822.4,282.0 L846.3,297.9 L872.0,329.3" fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b4" d="M76.0,139.0 L181.6,139.0 L261.5,139.0 L341.3,139.0 L446.9,139.0 L526.8,139.0 L573.5,139.0 L606.7,139.0 L653.4,139.0 L686.5,139.0 L733.3,139.0 L766.4,139.0 L792.1,139.0 L822.4,139.0 L846.3,139.0 L872.0,139.0" fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="srcla" d="M76.0,201.9 L181.6,201.9 L261.5,201.9 L341.3,201.9 L446.9,201.9 L526.8,201.9 L573.5,202.2 L606.7,202.1 L653.4,200.7 L686.5,198.0 L733.3,198.2 L766.4,207.5 L792.1,227.0 L822.4,265.2 L846.3,323.9 L872.0,372.8" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<rect data-role="marker" data-policy="b1" x="72.2" y="205.0" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="337.5" y="205.0" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="602.8" y="205.0" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="868.2" y="204.3" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M76.0,192.4 L80.5,200.9 L71.5,200.9 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M341.3,192.2 L345.8,200.8 L336.8,200.8 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M606.7,195.0 L611.2,203.6 L602.2,203.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M872.0,370.1 L876.5,378.6 L867.5,378.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="b2u" cx="76.0" cy="150.1" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="341.3" cy="150.0" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="606.7" cy="150.5" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="872.0" cy="231.3" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<path data-role="marker" data-policy="b3" d="M76.0,215.0 L81.4,220.4 L76.0,225.8 L70.6,220.4 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M341.3,215.0 L346.7,220.4 L341.3,225.8 L335.9,220.4 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M606.7,215.7 L612.1,221.1 L606.7,226.5 L601.3,221.1 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M872.0,323.9 L877.4,329.3 L872.0,334.7 L866.6,329.3 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M76.0,144.2 L80.5,135.7 L71.5,135.7 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M341.3,144.2 L345.8,135.7 L336.8,135.7 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M606.7,144.2 L611.2,135.7 L602.2,135.7 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M872.0,144.2 L876.5,135.7 L867.5,135.7 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="76.0" cy="201.9" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="341.3" cy="201.9" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="606.7" cy="202.1" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="872.0" cy="372.8" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+</svg>

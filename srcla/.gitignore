@@ -13,8 +13,9 @@ evaluation-results.json
 
 # Registered-evaluation run records (pnpm phase4:run). Tens of megabytes each
 # -- heldout-a is ~39 MB -- and fully re-derivable from the dataset plus the
-# committed code and artifact. SRCLA-REPORT.{md,json} at the repo root are the
-# committed outputs; these are the verifiable intermediates behind them.
+# committed code and artifact. report/SRCLA-REPORT.md and the root
+# SRCLA-REPORT.json are the committed outputs; these are the verifiable
+# intermediates behind them.
 evaluation-heldout-*.json
 phase4-run.log
 

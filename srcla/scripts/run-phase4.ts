@@ -34,7 +34,7 @@
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.
  */
-import { writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
@@ -54,6 +54,7 @@ import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
 import {
   FIGURE_TIERS,
   PLOTTED,
+  buildFigureSweep,
   reportFigures,
   venueFailureWarning,
 } from '../src/evaluation/report/charts.js';
@@ -99,6 +100,17 @@ const VENUE_META: Record<string, { displayName: string; address: string }> = {
 function registeredDisclosures(artifact: PolicyArtifact) {
   const rel = artifact.relativeResidualQuantileWadByMarket ?? {};
   const q = (id: string): string => (rel[id] === undefined ? 'absent' : (Number(rel[id]) / 1e18).toFixed(3));
+  const abs = artifact.residualQuantileWadByMarket;
+  // P29's crossover: the rate at which the relative haircut `mu * |q_rel|` equals the
+  // annualised absolute haircut. Above it the relative bound is stricter; below it, looser.
+  const crossover = (id: string): string => {
+    if (abs[id] === undefined || rel[id] === undefined) return 'n/a';
+    const annualAbsHaircut = (-Number(abs[id]) / 1e18) * (31_536_000 / artifact.horizonSeconds);
+    return `${((annualAbsHaircut / (-Number(rel[id]) / 1e18)) * 100).toFixed(2)}%`;
+  };
+  const crossovers =
+    `aave ${crossover(MARKET_IDS.aave)}, compound ${crossover(MARKET_IDS.compound)}, ` +
+    `moonwell ${crossover(MARKET_IDS.moonwell)}`;
   return {
     artifactFreeze: [
       'The artifact was frozen by `pnpm phase4:freeze` against the corrected archive — the ' +
@@ -113,8 +125,12 @@ function registeredDisclosures(artifact: PolicyArtifact) {
         'retained and still reported. The re-specification was derived from ' +
         'CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast ' +
         'error varies 2.9x-5.9x across utilization bands while the relative error varies ' +
-        '1.8x-2.9x and tracks the level being forecast — and it is STRICTER than the ' +
-        'absolute form above 6.90% APY, looser only below it.',
+        '1.8x-2.9x and tracks the level being forecast. It is not uniformly stricter: it is ' +
+        "STRICTER than the absolute form only above each venue's crossover rate (annualised " +
+        `absolute haircut ÷ |relative quantile|: ${crossovers}) and LOOSER below it. The ` +
+        'typical venue rates both sealed eras observed sit below every crossover — only peak ' +
+        "rates and Moonwell's failed state on `heldout-b` exceed them — so on those eras the " +
+        'relative form is the LOOSER of the two.',
       "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
         'carried at its registered default. Every result that depends on it is provisional.',
     ],
@@ -144,8 +160,10 @@ function registeredDisclosures(artifact: PolicyArtifact) {
         'controller is a future one.',
       'The mitigating facts, stated so a reader can weigh them rather than take the above as ' +
         "boilerplate: P1's re-specification was derived from CALIBRATION-era measurements " +
-        'only (per-band forecast-error dispersion), it is stricter than what it replaces ' +
-        'above 6.90% APY, and it was chosen before its effect on any sealed era was known. ' +
+        'only (per-band forecast-error dispersion), and it was chosen before its effect on any ' +
+        'sealed era was known. It is not a conservative choice on these eras: it is stricter ' +
+        `than what it replaces only above each venue's crossover (${crossovers}) and looser ` +
+        "below it, where the sealed eras' typical venue rates sit. " +
         'The threshold revisions were NOT: each is justified on its own terms below, but ' +
         'each was made after seeing which checks blocked.',
       '**Revised release thresholds** (previous → current): demonstration floor 0.80 → 0.70; ' +
@@ -619,37 +637,23 @@ async function runEra(
     1000;
   const warning = venueFailureWarning(dryByVenue, Math.max(1, Math.round(spanSeconds / 86_400)));
   if (warning !== undefined) console.error(`    ${warning}`);
-  const figures = reportFigures(
-    era,
-    figureEval,
-    REGISTERED_S2_COVERAGE_FLOOR,
-    figureStride,
-    warning,
-  );
-  for (const f of figures) writeFileSync(join(outDir, f.filename), f.svg);
-  console.error(`    figures: ${figures.map((f) => f.filename).join(', ')}`);
+  // The figures are drawn from the sweep object that is persisted below, so the
+  // published numbers and the pictures cannot disagree. Everything lands under
+  // report/: the figures in report/figures/, the sweep in report/chart/, where
+  // `pnpm figures:render` can redraw the figures from it without a replay.
+  const sweep = buildFigureSweep(era, figureStride, figureEval, REGISTERED_S2_COVERAGE_FLOOR, warning);
+  const figures = reportFigures(sweep);
+  const figuresDir = join(outDir, 'report', 'figures');
+  mkdirSync(figuresDir, { recursive: true });
+  for (const f of figures) writeFileSync(join(figuresDir, f.filename), f.svg + '\n');
+  console.error(`    figures -> ${figuresDir}: ${figures.map((f) => f.filename).join(', ')}`);
   // The figures' numbers, machine-readable. An SVG carries only pixel
   // coordinates, so without this file the dense-grid table in the paper
   // (Appendix F.7) could not be rebuilt from the run that drew it.
-  const sweepPath = join(outDir, `SRCLA-FIGURE-SWEEP-${era}.json`);
-  writeFileSync(
-    sweepPath,
-    JSON.stringify(
-      {
-        era,
-        stride: figureStride,
-        rows: figureEval.results.map((r) => ({
-          policyId: r.policy.id,
-          tierUsd: Number(r.tier / 1_000_000n),
-          netApy: r.replay.realizedNetApy,
-          capitalAtWork: r.replay.capitalAtWorkFraction,
-          minStressedLiquidCoverage: r.replay.minStressedLiquidCoverage,
-        })),
-      },
-      null,
-      2,
-    ) + '\n',
-  );
+  const chartDir = join(outDir, 'report', 'chart');
+  mkdirSync(chartDir, { recursive: true });
+  const sweepPath = join(chartDir, `SRCLA-FIGURE-SWEEP-${era}.json`);
+  writeFileSync(sweepPath, JSON.stringify(sweep, null, 2) + '\n');
   console.error(`    figure data -> ${sweepPath}`);
   const universeLiquidity = worstTotalCashLiquidity(dataset);
   console.error(
@@ -735,7 +739,8 @@ async function runEra(
       evaluation,
       gate,
       datasetOrigins: dataset.snapshots.length,
-      figures: figures.map((f) => ({ filename: f.filename, caption: f.caption })),
+      // Relative to report/SRCLA-REPORT.md, which links them.
+      figures: figures.map((f) => ({ filename: `figures/${f.filename}`, caption: f.caption })),
       // Carried onto the run summary so `serialisableRun` can put §11.1 in
       // the JSON as data. `undefined` here IS the NOT PRODUCED case.
       forkResults,
@@ -753,10 +758,11 @@ async function runEra(
 
 async function main(): Promise<void> {
   const artifactPath = arg('artifact') ?? 'config/registered-artifact.json';
-  // Default to the REPOSITORY ROOT, not the cwd. SRCLA-REPORT.{md,json} are
-  // tracked at the root; writing them to srcla/ produced a fresh report
-  // sitting beside a stale tracked one, which is the shape of mistake where
-  // someone later cites the wrong file.
+  // Default to the REPOSITORY ROOT, not the cwd: writing to srcla/ produced a
+  // fresh report sitting beside a stale one, which is the shape of mistake
+  // where someone later cites the wrong file. The report and everything it
+  // shows go under <out-dir>/report/ (figures/, chart/); SRCLA-REPORT.json and
+  // the run records stay at <out-dir>.
   const outDir = arg('out-dir') ?? '..';
   const eras = (arg('eras') ?? 'heldout-c,heldout-b').split(',').map((e) => e.trim()) as EraTag[];
   const tiers = arg('tiers')
@@ -840,7 +846,8 @@ async function main(): Promise<void> {
       disclosures: registeredDisclosures(artifact),
     });
 
-    const mdPath = join(outDir, 'SRCLA-REPORT.md');
+    mkdirSync(join(outDir, 'report'), { recursive: true });
+    const mdPath = join(outDir, 'report', 'SRCLA-REPORT.md');
     const jsonPath = join(outDir, 'SRCLA-REPORT.json');
     writeFileSync(mdPath, markdown);
     writeFileSync(

@@ -1,0 +1,680 @@
+{
+  "era": "heldout-b",
+  "stride": 3,
+  "s2CoverageFloor": 0.95,
+  "warning": "WARNING: moonwell-usdc held ZERO withdrawable cash for 29% of this era (peak 90% APY, unwithdrawable). Returns below are annualized from 17 days and are NOT attainable yield.",
+  "rows": [
+    {
+      "policyId": "srcla",
+      "tierUsd": 10000,
+      "netApy": 0.2896322813615464,
+      "capitalAtWork": 0.9460235942028987,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 10000,
+      "netApy": 0.09745450616449314,
+      "capitalAtWork": 0.8757695507246376,
+      "minStressedLiquidCoverage": 0.9990703801970964
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 10000,
+      "netApy": 0.07752970466959641,
+      "capitalAtWork": 0.8526778768115945,
+      "minStressedLiquidCoverage": 0.9994260434153459
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 10000,
+      "netApy": 0.08657503356441754,
+      "capitalAtWork": 0.899764710144929,
+      "minStressedLiquidCoverage": 0.9994125582906
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 10000,
+      "netApy": 0.34149502340291393,
+      "capitalAtWork": 0.9460456304347827,
+      "minStressedLiquidCoverage": 0.8778895143868789
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 10000,
+      "netApy": 0.22569503133195923,
+      "capitalAtWork": 0.9797302173913043,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 25000,
+      "netApy": 0.2896498209909424,
+      "capitalAtWork": 0.946023652173913,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 25000,
+      "netApy": 0.09757466480091637,
+      "capitalAtWork": 0.875769492753623,
+      "minStressedLiquidCoverage": 0.9990691244566596
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 25000,
+      "netApy": 0.07762118056793943,
+      "capitalAtWork": 0.8526774927536234,
+      "minStressedLiquidCoverage": 0.9994251185987266
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 25000,
+      "netApy": 0.08664860183800771,
+      "capitalAtWork": 0.8997645072463755,
+      "minStressedLiquidCoverage": 0.9994116331793138
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 25000,
+      "netApy": 0.341508982474207,
+      "capitalAtWork": 0.9460456739130437,
+      "minStressedLiquidCoverage": 0.8778886905248351
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 25000,
+      "netApy": 0.2257051036819122,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 50000,
+      "netApy": 0.2896556627623461,
+      "capitalAtWork": 0.9460236884057974,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 50000,
+      "netApy": 0.09761472647164182,
+      "capitalAtWork": 0.8757694565217391,
+      "minStressedLiquidCoverage": 0.9990687059171411
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 50000,
+      "netApy": 0.07765166655753553,
+      "capitalAtWork": 0.8526773623188406,
+      "minStressedLiquidCoverage": 0.9994248103535365
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 50000,
+      "netApy": 0.08667311865199068,
+      "capitalAtWork": 0.8997645072463755,
+      "minStressedLiquidCoverage": 0.999411324942442
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 50000,
+      "netApy": 0.3415136376114545,
+      "capitalAtWork": 0.9460456811594207,
+      "minStressedLiquidCoverage": 0.8778884157821962
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 50000,
+      "netApy": 0.22570844375015242,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 100000,
+      "netApy": 0.2896585824521616,
+      "capitalAtWork": 0.9460236884057974,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 100000,
+      "netApy": 0.0976347493024361,
+      "capitalAtWork": 0.8757694492753624,
+      "minStressedLiquidCoverage": 0.9990684966475134
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 100000,
+      "netApy": 0.07766691442378981,
+      "capitalAtWork": 0.8526773333333333,
+      "minStressedLiquidCoverage": 0.9994246562709667
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 100000,
+      "netApy": 0.08668538032456574,
+      "capitalAtWork": 0.8997644420289842,
+      "minStressedLiquidCoverage": 0.9994111708440538
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 100000,
+      "netApy": 0.34151596268390016,
+      "capitalAtWork": 0.9460456811594207,
+      "minStressedLiquidCoverage": 0.8778882785314001
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 100000,
+      "netApy": 0.22571012096003895,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 250000,
+      "netApy": 0.28966033812380565,
+      "capitalAtWork": 0.9460236956521743,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 250000,
+      "netApy": 0.0976467663709375,
+      "capitalAtWork": 0.8757694492753624,
+      "minStressedLiquidCoverage": 0.9990683710857787
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 250000,
+      "netApy": 0.08151223132415852,
+      "capitalAtWork": 0.8608124420289854,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 250000,
+      "netApy": 0.08331792019585338,
+      "capitalAtWork": 0.8869656666666664,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 250000,
+      "netApy": 0.341517356853537,
+      "capitalAtWork": 0.9460456884057975,
+      "minStressedLiquidCoverage": 0.877888196195223
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 250000,
+      "netApy": 0.22571112143378436,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 500000,
+      "netApy": 0.289660922485532,
+      "capitalAtWork": 0.946023702898551,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 500000,
+      "netApy": 0.09765077308678949,
+      "capitalAtWork": 0.8757694492753624,
+      "minStressedLiquidCoverage": 0.9990683292278817
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 500000,
+      "netApy": 0.091636578196028,
+      "capitalAtWork": 0.8822764202898548,
+      "minStressedLiquidCoverage": 0.9994270279332022
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 500000,
+      "netApy": 0.093157585110351,
+      "capitalAtWork": 0.9159658478260871,
+      "minStressedLiquidCoverage": 0.9994135424942262
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 500000,
+      "netApy": 0.341517822744448,
+      "capitalAtWork": 0.9460456884057975,
+      "minStressedLiquidCoverage": 0.8778881687176748
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 500000,
+      "netApy": 0.2257114570483687,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 750000,
+      "netApy": 0.29360312807442934,
+      "capitalAtWork": 0.9408848840579709,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 750000,
+      "netApy": 0.0936186768985583,
+      "capitalAtWork": 0.8735640869565218,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 750000,
+      "netApy": 0.08344151269221256,
+      "capitalAtWork": 0.8707474565217392,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 750000,
+      "netApy": 0.0834838990519533,
+      "capitalAtWork": 0.8924909347826087,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 750000,
+      "netApy": 0.32748507002097305,
+      "capitalAtWork": 0.9409016956521742,
+      "minStressedLiquidCoverage": 0.9221263065564939
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 750000,
+      "netApy": 0.22571156823167904,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 1000000,
+      "netApy": 0.28965510696872077,
+      "capitalAtWork": 0.9460236884057974,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 1000000,
+      "netApy": 0.09765277598501898,
+      "capitalAtWork": 0.8757694492753624,
+      "minStressedLiquidCoverage": 0.9990683082969383
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 1000000,
+      "netApy": 0.09374397888688124,
+      "capitalAtWork": 0.8895134275362319,
+      "minStressedLiquidCoverage": 0.9994287152268467
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 1000000,
+      "netApy": 0.09524448915596273,
+      "capitalAtWork": 0.9240737246376812,
+      "minStressedLiquidCoverage": 0.9994148873053001
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 1000000,
+      "netApy": 0.34150838040932396,
+      "capitalAtWork": 0.9460456811594207,
+      "minStressedLiquidCoverage": 0.8778885248989149
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 1000000,
+      "netApy": 0.2257116241383974,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 1500000,
+      "netApy": 0.23308080513228346,
+      "capitalAtWork": 0.9408525507246378,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 1500000,
+      "netApy": 0.09607831495865615,
+      "capitalAtWork": 0.8674299420289856,
+      "minStressedLiquidCoverage": 0.9990704864100234
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 1500000,
+      "netApy": 0.08265034553756045,
+      "capitalAtWork": 0.8450491521739131,
+      "minStressedLiquidCoverage": 0.999431472118485
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 1500000,
+      "netApy": 0.07195533963272194,
+      "capitalAtWork": 0.9036590362318836,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 1500000,
+      "netApy": 0.296084197796713,
+      "capitalAtWork": 0.940885427536232,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 1500000,
+      "netApy": 0.2257116797394363,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 2000000,
+      "netApy": 0.22832002340840618,
+      "capitalAtWork": 0.9536431304347827,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 2000000,
+      "netApy": 0.13447852556189765,
+      "capitalAtWork": 0.9276802028985507,
+      "minStressedLiquidCoverage": 0.7301759087693085
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 2000000,
+      "netApy": 0.04243671939670168,
+      "capitalAtWork": 0.7012407463768116,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 2000000,
+      "netApy": 0.04983501206255414,
+      "capitalAtWork": 0.7347612101449279,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 2000000,
+      "netApy": 0.29902894276356795,
+      "capitalAtWork": 0.9522554492753622,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 2000000,
+      "netApy": 0.22571170755444592,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 3000000,
+      "netApy": 0.20792327591407078,
+      "capitalAtWork": 0.9496825,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 3000000,
+      "netApy": 0.05610204006406749,
+      "capitalAtWork": 0.8496496086956519,
+      "minStressedLiquidCoverage": 0.7083891011913194
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 3000000,
+      "netApy": 0.03909300478115285,
+      "capitalAtWork": 0.6503134927536234,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 3000000,
+      "netApy": 0.04842493519832192,
+      "capitalAtWork": 0.7176982318840583,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 3000000,
+      "netApy": 0.21464749679729045,
+      "capitalAtWork": 0.9277115362318841,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 3000000,
+      "netApy": 0.22571173554132562,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 4000000,
+      "netApy": 0.16382332202027783,
+      "capitalAtWork": 0.9043100434782607,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 4000000,
+      "netApy": 0.08839275453219653,
+      "capitalAtWork": 0.8730157101449275,
+      "minStressedLiquidCoverage": 0.7812629981331671
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 4000000,
+      "netApy": 0.037045859180592444,
+      "capitalAtWork": 0.6327381521739133,
+      "minStressedLiquidCoverage": 0.9987267246752312
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 4000000,
+      "netApy": 0.04444981262570691,
+      "capitalAtWork": 0.7164149202898551,
+      "minStressedLiquidCoverage": 0.9960560941876746
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 4000000,
+      "netApy": 0.19524305611227755,
+      "capitalAtWork": 0.9311349492753619,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 4000000,
+      "netApy": 0.22571174939137428,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 0.7430635973425241
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 5000000,
+      "netApy": 0.1298287691088602,
+      "capitalAtWork": 0.7482803840579711,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 5000000,
+      "netApy": 0.08191459848113047,
+      "capitalAtWork": 0.8585731811594204,
+      "minStressedLiquidCoverage": 0.8090732442130162
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 5000000,
+      "netApy": 0.06666198632258857,
+      "capitalAtWork": 0.6558093405797104,
+      "minStressedLiquidCoverage": 0.9536048004558889
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 5000000,
+      "netApy": 0.06308391470211894,
+      "capitalAtWork": 0.6702786086956524,
+      "minStressedLiquidCoverage": 0.9602604353183118
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 5000000,
+      "netApy": 0.14652880217110864,
+      "capitalAtWork": 0.8601259855072466,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 5000000,
+      "netApy": 0.22571175783339004,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 0.5895257858279163
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 6500000,
+      "netApy": 0.10787529421370778,
+      "capitalAtWork": 0.5878319637681155,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 6500000,
+      "netApy": 0.07570695328735577,
+      "capitalAtWork": 0.8511283405797103,
+      "minStressedLiquidCoverage": 0.8127292959696368
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 6500000,
+      "netApy": 0.04873441687015001,
+      "capitalAtWork": 0.5963768840579711,
+      "minStressedLiquidCoverage": 0.9952435325309256
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 6500000,
+      "netApy": 0.06054195670166207,
+      "capitalAtWork": 0.6645582101449273,
+      "minStressedLiquidCoverage": 0.9066927916080327
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 6500000,
+      "netApy": 0.11629196677347986,
+      "capitalAtWork": 0.790275427536232,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 6500000,
+      "netApy": 0.2257117655267391,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 0.5895257853538997
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 8000000,
+      "netApy": 0.08754315153597192,
+      "capitalAtWork": 0.4921056739130435,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 8000000,
+      "netApy": 0.07671670918256979,
+      "capitalAtWork": 0.8653571594202902,
+      "minStressedLiquidCoverage": 0.7971214145953168
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 8000000,
+      "netApy": 0.04843586722209281,
+      "capitalAtWork": 0.579783579710145,
+      "minStressedLiquidCoverage": 0.9576918420119445
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 8000000,
+      "netApy": 0.030778252135273965,
+      "capitalAtWork": 0.6653373913043477,
+      "minStressedLiquidCoverage": 0.9985739360228545
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 8000000,
+      "netApy": 0.11251859210751047,
+      "capitalAtWork": 0.7594844999999999,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 8000000,
+      "netApy": 0.22571177037446555,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 0.5895257850572175
+    },
+    {
+      "policyId": "srcla",
+      "tierUsd": 10000000,
+      "netApy": 0.06999007241829736,
+      "capitalAtWork": 0.4071574130434784,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b1",
+      "tierUsd": 10000000,
+      "netApy": 0.07267216144247013,
+      "capitalAtWork": 0.8556519420289852,
+      "minStressedLiquidCoverage": 0.8421958502312646
+    },
+    {
+      "policyId": "b2",
+      "tierUsd": 10000000,
+      "netApy": 0.04060297553850711,
+      "capitalAtWork": 0.5496306014492752,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b2u",
+      "tierUsd": 10000000,
+      "netApy": 0.03259465540036688,
+      "capitalAtWork": 0.6521697681159419,
+      "minStressedLiquidCoverage": 0.9994660474680205
+    },
+    {
+      "policyId": "b3",
+      "tierUsd": 10000000,
+      "netApy": 0.09315128958446972,
+      "capitalAtWork": 0.7118845652173913,
+      "minStressedLiquidCoverage": 1
+    },
+    {
+      "policyId": "b4",
+      "tierUsd": 10000000,
+      "netApy": 0.2257117745567636,
+      "capitalAtWork": 0.9797302318840578,
+      "minStressedLiquidCoverage": 0.5895257848003743
+    }
+  ]
+}

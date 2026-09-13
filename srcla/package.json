@@ -40,6 +40,7 @@
     "backfill:history": "tsx scripts/backfill-history.ts",
     "phase4:freeze": "tsx scripts/freeze-artifact.ts",
     "phase4:run": "tsx scripts/run-phase4.ts",
+    "figures:render": "tsx scripts/render-figures.ts",
     "digests:rewrite": "tsx scripts/rewrite-config-digests.ts"
   },
   "dependencies": {
