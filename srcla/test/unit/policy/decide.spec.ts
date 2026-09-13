@@ -545,3 +545,25 @@ describe('decide', () => {
     spy.mockRestore();
   });
 });
+
+describe('P36 — H2 (disable.uncertainty) reaches the movement hurdles', () => {
+  it('a deploy the calibrated hurdle blocks clears when H2 removes the haircut', () => {
+    // An absolute haircut of 1% per 7-day horizon (~52 pp annualised) blocks
+    // every calibrated deploy leg. The optimiser never reads this map — its
+    // portfolio quantile comes from `portfolioResidualQuantileWad` and the
+    // panels — so both runs propose a deployment and only the hurdle differs.
+    const harsh: PolicyArtifact = {
+      ...rebalanceArtifact(),
+      residualQuantileWadByMarket: { aa: -(WAD / 100n), bb: -(WAD / 100n) },
+    };
+
+    const srcla = decide(rebalanceInput(), harsh, REBALANCE_OPTS);
+    const h2 = decide(rebalanceInput(), harsh, { ...REBALANCE_OPTS, disable: { uncertainty: true } });
+
+    expect(srcla.action).toBe('hold');
+    expect(srcla.costGate.legs.some((l) => l.kind === 'deploy')).toBe(true);
+    expect(srcla.costGate.legs.every((l) => !l.clears)).toBe(true);
+    expect(h2.action).toBe('rebalance');
+    expect(h2.costGate.legs.some((l) => l.kind === 'deploy' && l.clears)).toBe(true);
+  });
+});

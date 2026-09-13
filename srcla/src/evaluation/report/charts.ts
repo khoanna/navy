@@ -80,6 +80,12 @@ export function lineChart(opts: {
   yMax: number;
   yFormat: (v: number) => string;
   floor?: { value: number; label: string };
+  /**
+   * A warning drawn INSIDE the figure. Captions are separated from images the
+   * moment a figure is imported into LaTeX or Word, so a caveat that only
+   * exists in the caption is a caveat the reader of the figure does not get.
+   */
+  warning?: string;
 }): string {
   const tiers = [...new Set(opts.series.flatMap((s) => s.points.map((p) => p.tier)))].sort((a, b) => a - b);
   if (tiers.length === 0) return '';
@@ -93,6 +99,9 @@ export function lineChart(opts: {
   out.push(`<title>${esc(opts.title)}</title>`);
   out.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`);
   out.push(`<text x="${PAD.left}" y="20" font-size="15" font-weight="600" fill="#111111">${esc(opts.title)}</text>`);
+  if (opts.warning !== undefined) {
+    out.push(`<text x="${PAD.left}" y="${PAD.top - 2}" font-size="11" font-weight="600" fill="#c1121f">${esc(opts.warning)}</text>`);
+  }
 
   // Horizontal grid + y labels.
   for (let i = 0; i <= 4; i++) {
@@ -172,6 +181,36 @@ function seriesOf(
   return out;
 }
 
+/**
+ * A warning for an era in which a venue was in a FAILED STATE — zero
+ * withdrawable cash — for a material share of the run.
+ *
+ * Detected, not hard-coded to an era: a venue holding no cash while its
+ * kinked rate model is in its jump region advertises an enormous APY that no
+ * depositor can realize, and any policy holding it accrues that rate on a
+ * position it cannot exit. Annualizing a short era containing such a window
+ * magnifies it further. A yield figure drawn over that period is not a figure
+ * about attainable return, and must say so on its face.
+ *
+ * Returns `undefined` when no venue was ever dry, which is the normal case.
+ */
+export function venueFailureWarning(
+  originsByVenue: Readonly<Record<string, { dryOrigins: number; total: number; maxApy: number }>>,
+  eraDays: number,
+): string | undefined {
+  const failed = Object.entries(originsByVenue)
+    .filter(([, v]) => v.total > 0 && v.dryOrigins / v.total >= 0.05)
+    .sort((a, b) => b[1].dryOrigins - a[1].dryOrigins);
+  if (failed.length === 0) return undefined;
+  const [venue, v] = failed[0]!;
+  const share = ((v.dryOrigins / v.total) * 100).toFixed(0);
+  return (
+    `WARNING: ${venue} held ZERO withdrawable cash for ${share}% of this era ` +
+    `(peak ${(v.maxApy * 100).toFixed(0)}% APY, unwithdrawable). Returns below are ` +
+    `annualized from ${eraDays} days and are NOT attainable yield.`
+  );
+}
+
 export interface ReportFigure {
   filename: string;
   svg: string;
@@ -188,6 +227,7 @@ export function reportFigures(
   evaluation: RegisteredEvaluationResult,
   s2Floor: number,
   stride = 1,
+  warning?: string,
 ): ReportFigure[] {
   const provenance =
     stride > 1
@@ -209,11 +249,13 @@ export function reportFigures(
         series: apy,
         yMax: apyMax,
         yFormat: (v) => `${v.toFixed(1)}%`,
+        ...(warning === undefined ? {} : { warning }),
       }),
       caption:
         '**Figure 1 — Net APY by vault size.** Read this together with Figure 2: a ' +
         'yield curve alone cannot distinguish a policy that earns well from one that ' +
-        'earns well by becoming unredeemable.' + provenance,
+        'earns well by becoming unredeemable.' +
+        (warning === undefined ? '' : ` **${warning}**`) + provenance,
     },
     {
       filename: `SRCLA-FIG2-coverage-by-vault-size-${era}.svg`,

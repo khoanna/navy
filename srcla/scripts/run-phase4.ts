@@ -51,7 +51,12 @@ import {
 import { NOT_OBSERVED, type HarnessConfig } from '../src/evaluation/kernel/decision-input.js';
 import { buildRunRecord, manifestConfigForRun } from '../src/evaluation/kernel/provenance.js';
 import { evaluateRegisteredRelease } from '../src/evaluation/kernel/gates.js';
-import { FIGURE_TIERS, PLOTTED, reportFigures } from '../src/evaluation/report/charts.js';
+import {
+  FIGURE_TIERS,
+  PLOTTED,
+  reportFigures,
+  venueFailureWarning,
+} from '../src/evaluation/report/charts.js';
 import { REGISTERED_S2_COVERAGE_FLOOR } from '../src/evaluation/kernel/sustainability.js';
 import { forkReplayOptionsFromEnv } from '../src/evaluation/fork-runner.js';
 import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gate.js';
@@ -91,68 +96,94 @@ const VENUE_META: Record<string, { displayName: string; address: string }> = {
  * taken. An entry is removed only when the underlying fact stops being true,
  * never because it is inconvenient.
  */
-const REGISTERED_DISCLOSURES = {
-  artifactFreeze: [
-    'The artifact was frozen by `pnpm phase4:freeze` against the corrected archive — the ' +
-      'one in which every venue rate map reproduces chain and per-origin IRM attribution ' +
-      'is present for all five eras. It selects `state-space` at a 1-day horizon on a ' +
-      'selection margin of 0.4095 over the runner-up, so the choice is not a coin flip ' +
-      'between near-ties.',
-    "P1's residual quantile is carried in RELATIVE form " +
-      '(`relativeResidualQuantileWadByMarket`: aave -0.168, compound -0.157, moonwell ' +
-      '-0.196), applied as `mu * (1 + q)` rather than `mu + q`. The absolute map is ' +
-      'retained and still reported. The re-specification was derived from ' +
-      'CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast ' +
-      'error varies 2.9x-5.9x across utilization bands while the relative error varies ' +
-      '1.8x-2.9x and tracks the level being forecast — and it is STRICTER than the ' +
-      'absolute form above 6.90% APY, looser only below it.',
-    "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
-      'carried at its registered default. Every result that depends on it is provisional.',
-  ],
-  archive: [
-    '**31 spurious single-hour Aave regime boundaries** survive in the `burned` (17 rows) ' +
-      'and `heldout-c` (14 rows) eras. Each is an isolated one-hour flip of ' +
-      '`irmSlopeLowWad` (450 bps → 460 bps → 450 bps) at an IDENTICAL block number and an ' +
-      'identical strategy address, reverting at the next hourly sample — the signature of ' +
-      'an inconsistent archive read against a lagging RPC replica, not of governance ' +
-      'action. The controls are direct: `burned-a` shows zero such flips, and ' +
-      "calibration's 1,082 Aave regime changes are 100% genuine rate-model ADDRESS swaps " +
-      'with zero same-address flicker. Measured effect on the Aave rate-model mean ' +
-      'absolute error is 5.8e-4 percentage points. The rows were NOT re-read: the ' +
-      'magnitude is immaterial to every reported result, and re-reading archive data once ' +
-      'a sealed era is open is itself a hazard. Disclosed, not repaired.',
-    'An earlier account of this defect — that Aave V3.2 mutates rate parameters in place — ' +
-      'was WRONG and is retracted. Row-level diffing showed isolated same-block, ' +
-      'same-address flicker, which no in-place governance mutation produces.',
-  ],
-  reproducibility: [
-    '**THIS IS NOT A CLEAN PRE-REGISTERED TEST OF `heldout-c`, and must not be cited as ' +
-      'one.** An earlier registered run opened both sealed eras and returned FAIL. Its ' +
-      'results then informed two changes made before this run: a re-specification of ' +
-      "P1's uncertainty term, and a revision of four release thresholds. `heldout-c` has " +
-      'therefore INFORMED THE DESIGN and is design data by §2.2\'s own standard. This run ' +
-      'is a CONFIRMATORY RE-RUN. The only era carrying no design knowledge of this ' +
-      'controller is a future one.',
-    'The mitigating facts, stated so a reader can weigh them rather than take the above as ' +
-      "boilerplate: P1's re-specification was derived from CALIBRATION-era measurements " +
-      'only (per-band forecast-error dispersion), it is stricter than what it replaces ' +
-      'above 6.90% APY, and it was chosen before its effect on any sealed era was known. ' +
-      'The threshold revisions were NOT: each is justified on its own terms below, but ' +
-      'each was made after seeing which checks blocked.',
-    '**Revised release thresholds** (previous → current): demonstration floor 0.80 → 0.70; ' +
-      'S2 stressed coverage 0.99 → 0.95; regime purity zero-tolerance → a 10% share; ' +
-      '"no inert ablation" from BLOCKING to REPORTED. The non-inferiority margin was left ' +
-      'at 43 bps precisely because raising it could only have been justified by the result ' +
-      'it would produce. S2\'s grading floor was also SEPARATED from the constant the ' +
-      "optimiser filters candidate allocations with, so relaxing the release bar does not " +
-      "silently relax the controller's own safety filter.",
-    '**Decision hashes from this version are not comparable to v0.6 ones.** The hashed ' +
-      'decision component is now `legs` where it was a permanently-constant empty `costs` ' +
-      'object, and the bootstrap `artifactHash` moved. An externally recorded decision hash ' +
-      'from before this change will not reproduce; that is a documented format change ' +
-      'rather than evidence of non-determinism.',
-  ],
-} as const;
+function registeredDisclosures(artifact: PolicyArtifact) {
+  const rel = artifact.relativeResidualQuantileWadByMarket ?? {};
+  const q = (id: string): string => (rel[id] === undefined ? 'absent' : (Number(rel[id]) / 1e18).toFixed(3));
+  return {
+    artifactFreeze: [
+      'The artifact was frozen by `pnpm phase4:freeze` against the corrected archive — the ' +
+        'one in which every venue rate map reproduces chain and per-origin IRM attribution ' +
+        'is present for all five eras. It selects `state-space` at a 1-day horizon on a ' +
+        'selection margin of 0.4095 over the runner-up, so the choice is not a coin flip ' +
+        'between near-ties.',
+      "P1's residual quantile is carried in RELATIVE form " +
+        `(\`relativeResidualQuantileWadByMarket\`: aave ${q(MARKET_IDS.aave)}, compound ` +
+        `${q(MARKET_IDS.compound)}, moonwell ${q(MARKET_IDS.moonwell)}), applied as ` +
+        '`mu * (1 + q)` rather than `mu + q`. The absolute map is ' +
+        'retained and still reported. The re-specification was derived from ' +
+        'CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast ' +
+        'error varies 2.9x-5.9x across utilization bands while the relative error varies ' +
+        '1.8x-2.9x and tracks the level being forecast — and it is STRICTER than the ' +
+        'absolute form above 6.90% APY, looser only below it.',
+      "P8's significance multiplier `k` did NOT resolve on the calibration sweep and is " +
+        'carried at its registered default. Every result that depends on it is provisional.',
+    ],
+    archive: [
+      '**31 spurious single-hour Aave regime boundaries** survive in the `burned` (17 rows) ' +
+        'and `heldout-c` (14 rows) eras. Each is an isolated one-hour flip of ' +
+        '`irmSlopeLowWad` (450 bps → 460 bps → 450 bps) at an IDENTICAL block number and an ' +
+        'identical strategy address, reverting at the next hourly sample — the signature of ' +
+        'an inconsistent archive read against a lagging RPC replica, not of governance ' +
+        'action. The controls are direct: `burned-a` shows zero such flips, and ' +
+        "calibration's 1,082 Aave regime changes are 100% genuine rate-model ADDRESS swaps " +
+        'with zero same-address flicker. Measured effect on the Aave rate-model mean ' +
+        'absolute error is 5.8e-4 percentage points. The rows were NOT re-read: the ' +
+        'magnitude is immaterial to every reported result, and re-reading archive data once ' +
+        'a sealed era is open is itself a hazard. Disclosed, not repaired.',
+      'An earlier account of this defect — that Aave V3.2 mutates rate parameters in place — ' +
+        'was WRONG and is retracted. Row-level diffing showed isolated same-block, ' +
+        'same-address flicker, which no in-place governance mutation produces.',
+    ],
+    reproducibility: [
+      '**THIS IS NOT A CLEAN PRE-REGISTERED TEST OF `heldout-c`, and must not be cited as ' +
+        'one.** An earlier registered run opened both sealed eras and returned FAIL. Its ' +
+        'results then informed two changes made before this run: a re-specification of ' +
+        "P1's uncertainty term, and a revision of four release thresholds. `heldout-c` has " +
+        'therefore INFORMED THE DESIGN and is design data by §2.2\'s own standard. This run ' +
+        'is a CONFIRMATORY RE-RUN. The only era carrying no design knowledge of this ' +
+        'controller is a future one.',
+      'The mitigating facts, stated so a reader can weigh them rather than take the above as ' +
+        "boilerplate: P1's re-specification was derived from CALIBRATION-era measurements " +
+        'only (per-band forecast-error dispersion), it is stricter than what it replaces ' +
+        'above 6.90% APY, and it was chosen before its effect on any sealed era was known. ' +
+        'The threshold revisions were NOT: each is justified on its own terms below, but ' +
+        'each was made after seeing which checks blocked.',
+      '**Revised release thresholds** (previous → current): demonstration floor 0.80 → 0.70; ' +
+        'S2 stressed coverage 0.99 → 0.95; regime purity zero-tolerance → a 10% share; ' +
+        '"no inert ablation" from BLOCKING to REPORTED. The non-inferiority margin was left ' +
+        'at 43 bps precisely because raising it could only have been justified by the result ' +
+        'it would produce. S2\'s grading floor was also SEPARATED from the constant the ' +
+        "optimiser filters candidate allocations with, so relaxing the release bar does not " +
+        "silently relax the controller's own safety filter.",
+      '**Decision hashes from this version are not comparable to v0.6 ones.** The hashed ' +
+        'decision component is now `legs` where it was a permanently-constant empty `costs` ' +
+        'object, and the bootstrap `artifactHash` moved. An externally recorded decision hash ' +
+        'from before this change will not reproduce; that is a documented format change ' +
+        'rather than evidence of non-determinism.',
+      '**P36 — the movement hurdles now read the relative bound. This change is POST-HOC and ' +
+        'is disclosed under P32.** P29 made the uncertainty haircut multiplicative in the ' +
+        "optimiser's objective, but §9.1.2/§9.1.3's hurdles kept computing `rate + q_abs·year/H` " +
+        'from the absolute map — −4.09 pp (Aave), −2.11 pp (Compound) and −3.12 pp (Moonwell) ' +
+        'annualised at the registered 1-day horizon — so a vault large enough to compress a ' +
+        "venue's post-deposit rate below that haircut could not deploy into it at all. The defect " +
+        "was FOUND by reading the previous run's `heldout-c` ablation rows, where H3d restored " +
+        'capital at work at ten million. It is justified by P29\'s own calibration-era ' +
+        'measurements and by conformance to §7.1, not by any held-out number. Its go/no-go ' +
+        'was a calibration-era sweep (2025-03-03 → 2025-05-31, sixteen vault sizes) with ' +
+        'three criteria fixed before it ran. Two passed: stressed coverage held at 1.000 at ' +
+        'every size, and net APY at or below one million USDC moved by +0.3 to +1.4 bps. ' +
+        'The third — capital at work and net APY no lower after the change at every size of ' +
+        '$3M or more, with no tolerance — FAILED at $3M, $5M, $6.5M, $8M and $10M, by at ' +
+        'most 0.72 percentage points of capital at work and 1.4 bps of APY (mean APY change ' +
+        'at $3M or more: −0.03 bps). That window never exhibited the ten-million collapse ' +
+        '(capital at work was already at least 0.917 before the change), so it could test ' +
+        'for harm but not for benefit. **The repository owner overrode the failed criterion ' +
+        'after seeing these numbers; that override is itself post-hoc.** The frozen artifact ' +
+        "is unchanged (same hash, no refit). H2's switch now also removes the hurdle's haircut, " +
+        'which changes H2 and B3. Both sealed eras are therefore CONFIRMATORY RE-RUNS for P36.',
+    ],
+  };
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -561,9 +592,65 @@ async function runEra(
     warmupSnapshots,
     registration,
   });
-  const figures = reportFigures(era, figureEval, REGISTERED_S2_COVERAGE_FLOOR, figureStride);
+  // A venue that was DRY — zero withdrawable cash — for a material share of the
+  // era makes every yield figure over that period unattainable, because the
+  // rate accrues on a position nobody can exit. Measured per venue and drawn
+  // on the figure itself; see `venueFailureWarning`.
+  const dryByVenue: Record<string, { dryOrigins: number; total: number; maxApy: number }> = {};
+  for (const o of dataset.snapshots) {
+    for (const m of o.snapshots) {
+      const v = (dryByVenue[m.marketId] ??= { dryOrigins: 0, total: 0, maxApy: 0 });
+      v.total += 1;
+      // `cashBase` is the venue's own withdrawable cash at the origin.
+      // `maxWithdrawableBase` does not exist on the archive snapshot — it is
+      // derived from exactly this field later, in `decision-input.ts`.
+      if (m.cashBase === 0n) v.dryOrigins += 1;
+      const apy = Number(m.supplyRateE18) / 1e18;
+      if (apy > v.maxApy) v.maxApy = apy;
+    }
+  }
+  // OBSERVED days, not the registered bound. `heldout-b` is open-ended and its
+  // registered end is a far-future sentinel, so `eraBounds().days` is 26,793 --
+  // which would have printed "annualized from 26793 days" on a figure whose
+  // whole point is that the window is SHORT.
+  const spanSeconds =
+    (dataset.snapshots[dataset.snapshots.length - 1]!.timestamp.getTime() -
+      dataset.snapshots[0]!.timestamp.getTime()) /
+    1000;
+  const warning = venueFailureWarning(dryByVenue, Math.max(1, Math.round(spanSeconds / 86_400)));
+  if (warning !== undefined) console.error(`    ${warning}`);
+  const figures = reportFigures(
+    era,
+    figureEval,
+    REGISTERED_S2_COVERAGE_FLOOR,
+    figureStride,
+    warning,
+  );
   for (const f of figures) writeFileSync(join(outDir, f.filename), f.svg);
   console.error(`    figures: ${figures.map((f) => f.filename).join(', ')}`);
+  // The figures' numbers, machine-readable. An SVG carries only pixel
+  // coordinates, so without this file the dense-grid table in the paper
+  // (Appendix F.7) could not be rebuilt from the run that drew it.
+  const sweepPath = join(outDir, `SRCLA-FIGURE-SWEEP-${era}.json`);
+  writeFileSync(
+    sweepPath,
+    JSON.stringify(
+      {
+        era,
+        stride: figureStride,
+        rows: figureEval.results.map((r) => ({
+          policyId: r.policy.id,
+          tierUsd: Number(r.tier / 1_000_000n),
+          netApy: r.replay.realizedNetApy,
+          capitalAtWork: r.replay.capitalAtWorkFraction,
+          minStressedLiquidCoverage: r.replay.minStressedLiquidCoverage,
+        })),
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  console.error(`    figure data -> ${sweepPath}`);
   const universeLiquidity = worstTotalCashLiquidity(dataset);
   console.error(
     `    worst-case venue universe: $${(universeLiquidity.worstTotalCashBase / 1_000_000n).toString()} ` +
@@ -750,7 +837,7 @@ async function main(): Promise<void> {
         calibrationEra: reg.calibrationEra,
         perVenueCoverage: reg.coverageByMarket,
       },
-      disclosures: REGISTERED_DISCLOSURES,
+      disclosures: registeredDisclosures(artifact),
     });
 
     const mdPath = join(outDir, 'SRCLA-REPORT.md');

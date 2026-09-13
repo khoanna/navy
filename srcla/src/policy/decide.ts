@@ -370,8 +370,17 @@ export function decide(input: DecisionInput, artifact: PolicyArtifact, opts: Dec
   // brakes below stay live on every path — §9.1.4 states they "remain in
   // force" independently of the hurdles — so H3 is an ablation of the
   // thresholds, not of the churn budget.
+  //
+  // P36: H2 removes the calibrated lower bound EVERYWHERE it is read, the
+  // movement hurdles included. Before P36 the switch reached only the
+  // optimiser's objective, so H2 never ablated the one copy of the haircut
+  // that was withholding capital at scale.
   const verdicts =
-    disable.costGate === true ? [] : planLegs(current, target, input, artifact, curves, opts.cost);
+    disable.costGate === true
+      ? []
+      : planLegs(current, target, input, artifact, curves, opts.cost, {
+          pointForecast: disable.uncertainty === true,
+        });
 
   // H3d: remove the DEPLOYMENT hurdle only, keeping the rotation hurdle, so
   // §9.1.2 and §9.1.3 can be attributed separately.

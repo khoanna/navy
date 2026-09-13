@@ -11,7 +11,7 @@
  *
  * PURE. UNITS: bigint USDC base units (6 dp).
  */
-import { deployClears, rotateClears, type LegVerdict } from './hurdles.js';
+import { deployClears, rotateClears, type HurdleBoundOpts, type LegVerdict } from './hurdles.js';
 import type { CostParams } from './cost.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
@@ -50,6 +50,7 @@ export function planLegs(
   artifact: PolicyArtifact,
   curves: RateCurve[],
   p: CostParams,
+  bound: HurdleBoundOpts = {},
 ): LegVerdict[] {
   const curveOf = new Map(curves.map((c) => [c.marketId, c]));
   const ids = [...new Set([...current.keys(), ...target.keys()])]
@@ -95,6 +96,7 @@ export function planLegs(
           toLevel,
           fromLevel,
           p,
+          bound,
         ),
       );
       level.set(up.id, toLevel);
@@ -106,7 +108,7 @@ export function planLegs(
     // Whatever is left is funded from idle: a deployment, not a rotation.
     if (remaining > 0n) {
       const toLevel = (level.get(up.id) ?? 0n) + remaining;
-      out.push(deployClears(input, artifact, curveOf.get(up.id)!, up.id, remaining, toLevel, p));
+      out.push(deployClears(input, artifact, curveOf.get(up.id)!, up.id, remaining, toLevel, p, bound));
       level.set(up.id, toLevel);
     }
   }

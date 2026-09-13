@@ -14,6 +14,7 @@
  */
 import { movementCostBase, type CostParams, type Move } from './cost.js';
 import { rateAt } from './simulate.js';
+import { relativeQuantileFor } from './forecast.js';
 import type { DecisionInput, PolicyArtifact, RateCurve } from '../types.js';
 
 const WAD = 10n ** 18n;
@@ -41,22 +42,60 @@ export interface LegVerdict {
   reason: string;
 }
 
+/** Options for the bound the movement hurdles read. */
+export interface HurdleBoundOpts {
+  /**
+   * H2 (`disable.uncertainty`; §11.3 "remove calibrated lower bounds; use the
+   * point forecast"). When true, a leg is priced on the post-deposit curve
+   * rate itself with no residual haircut. Absent or false: the calibrated
+   * bound below, which is what every existing caller gets.
+   */
+  pointForecast?: boolean;
+}
+
 /**
- * §7's conservative bound expressed as an ANNUAL rate. The artifact's
- * quantile is a horizon-return quantile, so annualising it is what makes the
- * hurdle horizon-free: a bound that subtracts a near-constant from a linearly
- * growing quantity is not comparable across horizons until both are annual.
+ * §7's conservative bound expressed as an ANNUAL rate, for §9.1.2/§9.1.3.
+ *
+ * P36. When the artifact carries P29's relative quantiles the bound is
+ * `rate(x) * (1 + q_rel)` — the same arithmetic `forecast.ts#lowerBoundAt`
+ * applies, read at a one-year horizon, with the same fallback ladder
+ * (`relativeQuantileFor`) and the same floor at zero. P29 changed that form in
+ * the optimiser's objective but these hurdles kept the additive one, so a
+ * vault large enough to compress a venue's post-deposit rate below the
+ * annualised absolute haircut (4.09 pp for Aave at H = 1 day) received a
+ * NEGATIVE bound and could never deploy there: the idle capital of the
+ * ten-million tier.
+ *
+ * An artifact WITHOUT a relative map keeps the additive form exactly:
+ * `rate(x) + q_abs * year / H`. The live service's bootstrap artifact is one,
+ * so its decisions are unchanged. Annualising there is what keeps the hurdle
+ * horizon-free: a bound that subtracts a near-constant from a linearly growing
+ * quantity is not comparable across horizons until both are annual.
  */
 export function annualLowerBound(
   curve: RateCurve,
   artifact: PolicyArtifact,
   marketId: string,
   xBase: bigint,
+  opts: HurdleBoundOpts = {},
 ): bigint {
+  const rate = rateAt(curve, xBase);
+  if (opts.pointForecast === true) return rate;
+
+  const qRel = relativeQuantileFor(artifact, marketId);
+  if (qRel !== undefined) {
+    if (qRel > 0n) {
+      throw new Error(`relative residual quantile for ${marketId} must be <= 0, got ${qRel}`);
+    }
+    // Clamped at -WAD, exactly as lowerBoundAt: the bound floors at 0, never inverts.
+    const scale = qRel < -WAD ? 0n : WAD + qRel;
+    return (rate * scale) / WAD;
+  }
+
   const q = artifact.residualQuantileWadByMarket[marketId] ?? 0n;
   if (q > 0n) throw new Error(`residual quantile for ${marketId} must be <= 0, got ${q}`);
   const annualQ = (q * SECONDS_PER_YEAR) / BigInt(artifact.horizonSeconds);
-  return rateAt(curve, xBase) + annualQ;
+  return rate + annualQ;
 }
 
 /** Sample standard deviation of one venue's residual column, in WAD. */
@@ -217,8 +256,9 @@ export function deployClears(
   amountBase: bigint,
   toLevelBase: bigint,
   p: CostParams,
+  bound: HurdleBoundOpts = {},
 ): LegVerdict {
-  const ell = annualLowerBound(curve, artifact, marketId, toLevelBase);
+  const ell = annualLowerBound(curve, artifact, marketId, toLevelBase, bound);
   const cost = lendingCost(input, [{ adapter: marketId, amountBase, kind: 'deploy' }], p);
   const hurdleWad = costHurdleWad(cost, amountBase, artifact);
   const clears = ell > hurdleWad;
@@ -267,9 +307,10 @@ export function rotateClears(
   toLevelBase: bigint,
   fromLevelBase: bigint,
   p: CostParams,
+  bound: HurdleBoundOpts = {},
 ): LegVerdict {
-  const edge = annualLowerBound(curveTo, artifact, toId, toLevelBase)
-    - annualLowerBound(curveFrom, artifact, fromId, fromLevelBase);
+  const edge = annualLowerBound(curveTo, artifact, toId, toLevelBase, bound)
+    - annualLowerBound(curveFrom, artifact, fromId, fromLevelBase, bound);
   const cost = lendingCost(input, [
     { adapter: fromId, amountBase, kind: 'divest' },
     { adapter: toId, amountBase, kind: 'deploy' },

@@ -483,3 +483,22 @@ describe('P17/I1 chooseExecuted', () => {
     expect(out.backedOff).toBe(false);
   });
 });
+
+describe('P36 — planLegs forwards the hurdle bound option', () => {
+  it('prices legs on the point forecast when asked, and on the calibrated bound by default', () => {
+    // 1% per 7-day horizon annualises to ~52 pp, far above venue 'a''s 20%, so
+    // the calibrated deploy leg is blocked; the point forecast is not.
+    const harsh: PolicyArtifact = { ...artifact(), residualQuantileWadByMarket: { a: -(WAD / 100n), b: -(WAD / 100n) } };
+    const current = new Map<string, bigint>([['a', 0n], ['b', 0n]]);
+    const target = new Map<string, bigint>([['a', 5_000_000_000n], ['b', 0n]]);
+
+    const calibrated = planLegs(current, target, input(), harsh, curves(), params());
+    const point = planLegs(current, target, input(), harsh, curves(), params(), { pointForecast: true });
+
+    expect(calibrated).toHaveLength(1);
+    expect(calibrated[0]!.clears).toBe(false);
+    expect(point).toHaveLength(1);
+    expect(point[0]!.clears).toBe(true);
+    expect(point[0]!.edgeWad).toBe(pct(20));
+  });
+});

@@ -1,4 +1,5 @@
 import { annualLowerBound, deployClears, rotateClears, edgeStandardErrorWad } from '../../../src/policy/steps/hurdles.js';
+import { lowerBoundAt } from '../../../src/policy/steps/forecast.js';
 import type { CostParams } from '../../../src/policy/steps/cost.js';
 import type { DecisionInput, PolicyArtifact, RateCurve, ResidualPanel } from '../../../src/policy/types.js';
 
@@ -431,5 +432,100 @@ describe('P13/P15/P16 hurdles (R1-REVISED)', () => {
     // and this needs its own exact pin.
     const expected365_25 = (q * 31_557_600n) / BigInt(H);
     expect(result).not.toBe(expected365_25);
+  });
+});
+
+// --- P36: the movement hurdles read P29's relative bound -------------------
+
+/** config/registered-artifact.json, verbatim (frozen 2026-09-08, 1-day horizon). */
+const REGISTERED_ABS: Record<string, bigint> = {
+  aave: -111952677884091n,
+  compound: -57725298134695n,
+  moonwell: -85492888580799n,
+};
+const REGISTERED_REL: Record<string, bigint> = {
+  aave: -369088988601202527n,
+  compound: -259973753266678057n,
+  moonwell: -341999668472629653n,
+};
+
+function registeredArtifact(withRelative = true): PolicyArtifact {
+  const base = artifact({ horizonSeconds: 86_400, residualQuantileWadByMarket: REGISTERED_ABS });
+  return withRelative ? { ...base, relativeResidualQuantileWadByMarket: REGISTERED_REL } : base;
+}
+
+describe("P36 — the movement hurdles read P29's relative bound", () => {
+  it('13. the relative branch equals lowerBoundAt at a one-year horizon, per venue and rate', () => {
+    const art = registeredArtifact();
+    for (const id of ['aave', 'compound', 'moonwell']) {
+      for (const r of [pct(0.5), pct(1.5), pct(3.5), pct(12)]) {
+        const curve = flatCurve(r, id);
+        const bound = annualLowerBound(curve, art, id, AMOUNT);
+        expect(bound).toBe(lowerBoundAt(curve, art, id, AMOUNT, 31_536_000));
+        expect(bound).toBe((r * (WAD + REGISTERED_REL[id]!)) / WAD);
+      }
+    }
+  });
+
+  it('14. a $1M deploy at a compressed 1.5% rate clears under the relative bound and is blocked by the additive one', () => {
+    const curve = flatCurve(pct(1.5), 'aave');
+    const relative = deployClears(idleInput(), registeredArtifact(true), curve, 'aave', AMOUNT, AMOUNT, params());
+    const additive = deployClears(idleInput(), registeredArtifact(false), curve, 'aave', AMOUNT, AMOUNT, params());
+    expect(additive.edgeWad).toBeLessThan(0n);
+    expect(additive.clears).toBe(false);
+    expect(relative.edgeWad).toBeGreaterThan(0n);
+    expect(relative.clears).toBe(true);
+  });
+
+  it('15. an artifact without a relative map keeps the additive form exactly (the live bootstrap path)', () => {
+    const r = pct(3.5);
+    const expected = r + (REGISTERED_ABS['aave']! * SECONDS_PER_YEAR) / 86_400n;
+    expect(annualLowerBound(flatCurve(r, 'aave'), registeredArtifact(false), 'aave', AMOUNT)).toBe(expected);
+  });
+
+  it('16. q_rel <= -1 floors the bound at zero; a positive q_rel throws', () => {
+    const floored: PolicyArtifact = { ...registeredArtifact(), relativeResidualQuantileWadByMarket: { aave: -2n * WAD } };
+    expect(annualLowerBound(flatCurve(pct(5), 'aave'), floored, 'aave', AMOUNT)).toBe(0n);
+    const positive: PolicyArtifact = { ...registeredArtifact(), relativeResidualQuantileWadByMarket: { aave: WAD / 10n } };
+    expect(() => annualLowerBound(flatCurve(pct(5), 'aave'), positive, 'aave', AMOUNT)).toThrow(/must be <= 0/);
+  });
+
+  it('17. a venue missing from the relative map takes the most conservative registered peer', () => {
+    const partial: PolicyArtifact = {
+      ...registeredArtifact(),
+      relativeResidualQuantileWadByMarket: { aave: REGISTERED_REL['aave']!, compound: REGISTERED_REL['compound']! },
+    };
+    const r = pct(4);
+    expect(annualLowerBound(flatCurve(r, 'moonwell'), partial, 'moonwell', AMOUNT)).toBe(
+      (r * (WAD + REGISTERED_REL['aave']!)) / WAD,
+    );
+  });
+
+  it('18. pointForecast (H2) prices the hurdle on the curve rate, with or without a relative map', () => {
+    const r = pct(1.5);
+    for (const art of [registeredArtifact(true), registeredArtifact(false)]) {
+      expect(annualLowerBound(flatCurve(r, 'aave'), art, 'aave', AMOUNT, { pointForecast: true })).toBe(r);
+      const v = deployClears(idleInput(), art, flatCurve(r, 'aave'), 'aave', AMOUNT, AMOUNT, params(), {
+        pointForecast: true,
+      });
+      expect(v.edgeWad).toBe(r);
+      const rot = rotateClears(
+        deployedInput(), art, flatCurve(pct(6), 'aave'), flatCurve(pct(4), 'compound'),
+        'aave', 'compound', AMOUNT, AMOUNT, 0n, params(), { pointForecast: true },
+      );
+      expect(rot.edgeWad).toBe(pct(6) - pct(4));
+    }
+  });
+
+  it('19. a rotation edge is the difference of two relative bounds', () => {
+    const rTo = pct(6);
+    const rFrom = pct(4);
+    const v = rotateClears(
+      deployedInput(), registeredArtifact(), flatCurve(rTo, 'aave'), flatCurve(rFrom, 'compound'),
+      'aave', 'compound', AMOUNT, AMOUNT, 0n, params(),
+    );
+    expect(v.edgeWad).toBe(
+      (rTo * (WAD + REGISTERED_REL['aave']!)) / WAD - (rFrom * (WAD + REGISTERED_REL['compound']!)) / WAD,
+    );
   });
 });

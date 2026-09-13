@@ -39,7 +39,7 @@ function quantileFor(artifact: PolicyArtifact, marketId: string): bigint {
  * interconvertible without the forecast level each was measured against, and
  * inventing one from the other would be a haircut nobody calibrated.
  */
-function relativeQuantileFor(artifact: PolicyArtifact, marketId: string): bigint | undefined {
+export function relativeQuantileFor(artifact: PolicyArtifact, marketId: string): bigint | undefined {
   const map = artifact.relativeResidualQuantileWadByMarket;
   if (map === undefined) return undefined;
   const own = map[marketId];
