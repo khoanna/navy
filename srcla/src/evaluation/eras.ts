@@ -38,11 +38,13 @@
  *    2026, and `heldout-c` is Mar-May 2026 -- earlier. There is no direct
  *    contamination from that knowledge, but a designer who knew the later
  *    period could in principle have chosen mechanisms that happen to suit the
- *    earlier one. `heldout-b` is chronologically after everything, including
- *    the burned window, and carries no such caveat -- but it is 16 days long.
- *    This is why BOTH sealed eras are reported: `heldout-c` for what little
- *    statistical power exists, `heldout-b` for temporal purity. Neither alone
- *    is sufficient evidence.
+ *    earlier one. `heldout-b` was chronologically after everything, including
+ *    the burned window, and carried no such caveat -- until Amendment P37
+ *    (paper v0.11) read its per-venue and per-policy results to design G1, G3
+ *    and G5, which makes it design data too (the fourth burned-window
+ *    declaration). Since P37, only `heldout-d` carries none. All THREE sealed
+ *    eras (`heldout-c`, `heldout-b`, `heldout-d`) are reported for the
+ *    registered v0.10 verdict; only `heldout-d` decides release.
  *
  *    (In v0.5 this disclosure was about `heldout-a`, 2025-09-01 -> 2026-05-25.
  *    Reading that era's aggregates while diagnosing v0.5 burned it; it is now
@@ -83,7 +85,7 @@ export interface RegisteredEra {
 const at = (iso: string): number => Math.floor(Date.parse(iso) / 1000);
 
 /**
- * A far-future end for the forward-growing era. Held-out B's EFFECTIVE end is
+ * A far-future end for the forward-growing era. Held-out D's EFFECTIVE end is
  * whenever collection last ran; it is written open here so that adding
  * tomorrow's origins does not require editing a registered boundary.
  */

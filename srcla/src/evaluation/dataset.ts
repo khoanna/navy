@@ -284,7 +284,7 @@ export interface ProvenanceViolation {
 /**
  * Rows in a held-out era that were NOT produced by the archive backfill.
  *
- * WHY THIS EXISTS (ruling R30). `heldout-b` is registered OPEN_ENDED, so its
+ * WHY THIS EXISTS (ruling R30). `heldout-d` is registered OPEN_ENDED, so its
  * window includes the present and the live collector is writing into it right
  * now. If the era were ever "populated" by relabelling those live rows instead
  * of by re-running `backfill.ts`, it would inherit a separate defect: the live
@@ -433,7 +433,7 @@ export async function loadEra(
 
   const era = REGISTERED_ERAS[tag];
   const start = new Date(era.startSeconds * 1000);
-  // Held-out B's registered end is an open sentinel; clamp to now, since no
+  // Held-out D's registered end is an open sentinel; clamp to now, since no
   // data exists past the present and a far-future bound would make an empty
   // result look like a collection failure.
   const end = new Date(Math.min(era.endSeconds, Math.floor(Date.now() / 1000)) * 1000);

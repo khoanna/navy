@@ -7,17 +7,22 @@
  * `src/evaluation/report/` — replacing the untracked `evaluation-v2/*.mjs`
  * harness that produced every earlier version of that file (defect V5).
  *
- * BOTH eras are reported, and the report says why:
+ * BOTH sealed design eras are reported, and the report says why:
  *   heldout-c  86d, the v0.6 VALIDATION era. LESS BURNED, NOT PRISTINE: its
  *              aggregate statistics were read while diagnosing v0.5, so it is
  *              used because the alternative, heldout-b alone, is too short
  *              and too dominated by one venue's liquidity failure to
  *              adjudicate a yield claim -- not because it is clean.
  *   heldout-b  SECONDARY, chronologically after everything including the
- *              burned window and growing with the live collector -- clean
- *              but low power; reported for temporal purity, not significance.
- * Neither alone is sufficient evidence. Reporting only the flattering one
- * would be the choice this whole phase exists to make impossible.
+ *              burned window; closed by Amendment P37 at P37_FREEZE_SECONDS
+ *              and now DESIGN DATA for it (the fourth burned-window
+ *              declaration) -- low power; reported alongside heldout-c for
+ *              the registered v0.10 verdict, not for release.
+ * Neither alone is sufficient evidence for the registered v0.10 verdict.
+ * Reporting only the flattering one would be the choice this whole phase
+ * exists to make impossible. Release itself is decided by `heldout-d` alone
+ * (see `--eras` below), which carries no design knowledge and grows only as
+ * origins are backfilled -- R30 refuses live-collector rows in a sealed era.
  *
  * THIS IS THE MOMENT THE SEALED DATA IS OPENED. Everything that fits anything
  * must already be committed: a result that prompts a change to the artifact
@@ -671,7 +676,7 @@ async function runEra(
       if (apy > v.maxApy) v.maxApy = apy;
     }
   }
-  // OBSERVED days, not the registered bound. `heldout-b` is open-ended and its
+  // OBSERVED days, not the registered bound. `heldout-d` is open-ended and its
   // registered end is a far-future sentinel, so `eraBounds().days` is 26,793 --
   // which would have printed "annualized from 26793 days" on a figure whose
   // whole point is that the window is SHORT.

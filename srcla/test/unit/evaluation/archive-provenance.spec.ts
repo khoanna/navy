@@ -1,7 +1,7 @@
 /**
  * Ruling R30: a held-out era's rows must come from the archive backfill.
  *
- * `heldout-b` is registered OPEN_ENDED, so the live collector is writing into
+ * `heldout-d` is registered OPEN_ENDED, so the live collector is writing into
  * its window continuously. Promoting those rows instead of re-running
  * `backfill.ts` would build the project's most valuable sealed era on rows
  * that carry NULL `irm*` -- every venue replayed on `DefaultConfigs`, measured
