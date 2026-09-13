@@ -167,7 +167,8 @@ export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.f
       'SECONDARY held-out era, chronologically after everything including the burned ' +
       'window. Registered open-ended; P37 closed it at P37_FREEZE_SECONDS (disclosed), and ' +
       'it is DESIGN DATA for P37 (fourth burned-window declaration, paper v0.11). Low ' +
-      'power; reported for temporal purity, not for significance.',
+      'power; reported alongside `heldout-c` for the registered v0.10 verdict, not as ' +
+      'release evidence -- only `heldout-d` decides release.',
   },
   'heldout-d': {
     tag: 'heldout-d',

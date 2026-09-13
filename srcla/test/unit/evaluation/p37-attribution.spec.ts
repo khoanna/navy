@@ -109,6 +109,27 @@ describe('P37 (G3): attributing an S2 breach', () => {
   it('no snapshots cannot be attributed to a venue', () => {
     expect(attributeS2Breach([]).kind).toBe('ALLOCATOR ERROR');
   });
+
+  // M-1 / R5: FAIL CLOSED, not open, when a snapshot lacks the field this
+  // function attributes on. Otherwise a deserialized or hand-built snapshot
+  // predating P37 -- which the type requires the field on but cannot enforce
+  // at runtime -- would read `?? {}` as "no deploy into a dry venue" and could
+  // reach VENUE FAILURE on data that was never actually measured.
+  it('a snapshot missing executedDeployBaseByMarket is ALLOCATOR ERROR, never VENUE FAILURE', () => {
+    const missingField = { ...trapped() } as Record<string, unknown>;
+    delete missingField.executedDeployBaseByMarket;
+    const a = attributeS2Breach([missingField as unknown as ReplaySnapshot]);
+    expect(a.kind).toBe('ALLOCATOR ERROR');
+    expect(a.detail).toMatch(/attribution data missing/);
+  });
+
+  it('the missing-field check still fires when only ONE of several snapshots lacks the field', () => {
+    const missingField = { ...trapped() } as Record<string, unknown>;
+    delete missingField.executedDeployBaseByMarket;
+    const a = attributeS2Breach([snap(), trapped(), missingField as unknown as ReplaySnapshot]);
+    expect(a.kind).toBe('ALLOCATOR ERROR');
+    expect(a.detail).toMatch(/attribution data missing/);
+  });
 });
 
 describe('P37 (G3): S2 under the amendment', () => {

@@ -12,7 +12,7 @@ import {
   threeVerdicts,
   type RunSummary,
 } from '../../../src/evaluation/report/render-markdown.js';
-import { eraBounds } from '../../../src/evaluation/eras.js';
+import { eraBounds, HELDOUT_D_MIN_ORIGINS } from '../../../src/evaluation/eras.js';
 import type { RegisteredGateResult } from '../../../src/evaluation/kernel/gates.js';
 import type { RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
 import type { ForecastGateResult } from '../../../src/evaluation/kernel/forecast-gate.js';
@@ -293,6 +293,15 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).toMatch(/\*\*sealed\*\*/);
   });
 
+  // M-4: `heldout-d` (the open-ended era) is SEALED, and R30 refuses
+  // live-collector rows in any sealed era, so it accrues only via the
+  // backfill -- never say it "grows with the live collector".
+  it('says the open-ended era grows via the backfill, not the live collector (M-4)', () => {
+    expect(md).toMatch(/grows only as new origins\s+are backfilled/);
+    expect(md).toContain('pnpm backfill:history');
+    expect(md).not.toMatch(/grows with the live collector/);
+  });
+
   // FINAL-REVIEW FIX 1. The role column used to be `e.role.split('.')[0]`,
   // meant as "the first sentence". `heldout-c`'s role opens `v0.6 VALIDATION
   // era...`, so the split landed inside the version string and the published
@@ -344,6 +353,19 @@ describe('renderReport — mandatory disclosures', () => {
     expect(md).toMatch(/`heldout-c` for what statistical power exists/);
     expect(md).toMatch(/`heldout-b` for temporal purity/);
     expect(md).toMatch(/`heldout-c` is \*\*less burned, not pristine\.\*\*/);
+  });
+
+  // I-1: the pre-P37 "carries no such caveat ... Neither alone is sufficient"
+  // sentence stays (the test above pins it), but it is no longer the whole
+  // story once Amendment P37 makes `heldout-b` design data too. The report
+  // must say so immediately after, scope "neither alone is sufficient" to the
+  // registered v0.10 verdict, and name `heldout-d` as the only era release is
+  // decided on.
+  it('scopes the pre-P37 heldout-b caveat to the registered verdict and names heldout-d as the only design-free era (I-1)', () => {
+    expect(md).toMatch(/registered for the v0\.10 verdict/);
+    expect(md).toMatch(/heldout-b`\s+is design data too/);
+    expect(md).toMatch(/only `heldout-d` carries no\s+design knowledge/);
+    expect(md).toMatch(/release itself is decided by `heldout-d` alone/);
   });
 
   it('no longer publishes the retired v0.5 held-out-A claims', () => {
@@ -938,6 +960,47 @@ describe('renderReport — P37 three verdicts', () => {
     expect(block).not.toContain('Scale invariance (P26)');
   });
 
+  // M-2: a VENUE FAILURE clears S2 (`mark(v.s2)` reads PASS) with `breach`
+  // left `null`, so the out-of-scope (10M) table printed a bare PASS on a run
+  // whose minimum coverage was below the floor -- the trapped share and the
+  // attribution kind existed only in the JSON. `s2Attribution.detail` must
+  // appear in the Breach column whenever the field is present.
+  it('prints s2Attribution.detail in the Breach column instead of a bare dash (M-2)', () => {
+    const base = withP37(fakeRun('heldout-c', false), false);
+    const run: RunSummary = {
+      ...base,
+      gateP37: {
+        ...(base.gateP37 as RegisteredGateResult),
+        outOfScopeSustainability: [
+          {
+            policyId: 'srcla',
+            tier: '10000000000000',
+            demonstrated: true,
+            s1: true,
+            s2: true,
+            s3: true,
+            s4: true,
+            sustainable: true,
+            realizedNetApy: 0.031,
+            breach: null,
+            s2Attribution: {
+              kind: 'VENUE FAILURE',
+              shortOrigins: 2,
+              trappedShareMax: 0.12,
+              untrappedCoverageMin: 1,
+              detail: 'VENUE FAILURE (P34): 2 origin(s) below 0.95, up to 12.0% of NAV trapped',
+            },
+          },
+        ],
+      } as RegisteredGateResult,
+    };
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toContain('VENUE FAILURE (P34): 2 origin(s) below 0.95, up to 12.0% of NAV trapped');
+    const row = md.split('\n').find((l) => l.includes('| 10,000,000 |'));
+    expect(row).toBeDefined();
+    expect(row).not.toMatch(/\|\s*—\s*\|\s*$/);
+  });
+
   // Controller ruling T1.7-c: the P37 gate carries no 10M comparator results
   // (comparisons, comparator sustainability, EXCLUDED COMPARATORS, skill
   // windows, price of unsustainability), because P37 decides over the
@@ -958,5 +1021,196 @@ describe('renderReport — P37 three verdicts', () => {
     expect(section).toMatch(/excluded comparators/i);
     expect(section).toMatch(/skill windows/i);
     expect(section).toMatch(/price of unsustainability/i);
+  });
+
+  // I-2: once `heldout-d` is produced, the release line -- not `anyBlocked`
+  // over the registered v0.10 gates -- decides the top banner. Without this
+  // fix the documented release invocation (`--eras heldout-c,heldout-b,
+  // heldout-d`) prints DO NOT RELEASE forever, because the registered v0.10
+  // result on the design eras is frozen FAIL, even the moment release itself
+  // passes.
+  it('I-2 (a): the banner reads RELEASE from the heldout-d release verdict alone, even though the registered v0.10 line is FAIL', () => {
+    const d: RunSummary = {
+      ...withP37(fakeRun('heldout-c', true), true),
+      era: 'heldout-d',
+      datasetOrigins: HELDOUT_D_MIN_ORIGINS,
+      originGaps: 0,
+    };
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', false), d] });
+    expect(md).toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).not.toContain('**DO NOT RELEASE.**');
+    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) passed/);
+    expect(md).toMatch(/do not decide release/);
+  });
+
+  it('I-2 (a): the banner reads DO NOT RELEASE when heldout-d is produced but its own verdict is not PASS', () => {
+    const d: RunSummary = {
+      ...withP37(fakeRun('heldout-c', false), false),
+      era: 'heldout-d',
+      datasetOrigins: HELDOUT_D_MIN_ORIGINS,
+      originGaps: 0,
+    };
+    const md = renderReport({ ...params, runs: [d] });
+    expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
+    expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) did not pass/);
+  });
+
+  it('I-2 (a): a NOT YET POWERED heldout-d still reads DO NOT RELEASE, never RELEASE', () => {
+    const d: RunSummary = {
+      ...withP37(fakeRun('heldout-c', true), true),
+      era: 'heldout-d',
+      datasetOrigins: HELDOUT_D_MIN_ORIGINS - 1,
+      originGaps: 0,
+    };
+    const v = threeVerdicts([d]);
+    expect(v.release.status).toBe('NOT YET POWERED');
+    const md = renderReport({ ...params, runs: [d] });
+    expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
+  });
+
+  // I-2 (b): with no `heldout-d` run at all, the pre-P37 sentence pair is
+  // untouched (existing tests at :565 and :577-578 already pin its
+  // substrings), and exactly one new sentence names where release is
+  // actually decided.
+  it('I-2 (b): with no heldout-d run, the pre-P37 banner sentence is byte-identical and one new sentence names heldout-d', () => {
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+    expect(md).toContain(
+      '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
+    );
+    expect(md).toMatch(/release decision under Amendment P37 is the `heldout-d` line/);
+  });
+});
+
+/**
+ * I-3: the Limitations §11.1 paragraph must read BOTH the v0.10 fork-check
+ * name and the P37 one (`gates.ts:788-789`), or a P37 run whose SRCLA plans
+ * DID execute still publishes "this run supplied none" beside a passing P37
+ * fork line -- a false statement about the evidence directly contradicting a
+ * published gate in the SAME report.
+ */
+describe('renderReport — Limitations §11.1 (I-3)', () => {
+  /** A run carrying exactly the fork checks under test, nothing else changed. */
+  function runWithForkChecks(
+    v10: { detail: string; passed: boolean | null },
+    p37?: { detail: string; passed: boolean | null },
+  ): RunSummary {
+    const base = fakeRun('heldout-c', true);
+    const gate = {
+      ...base.gate,
+      checks: [{ name: '§11.1 pinned-prestate fork replay', passed: v10.passed, detail: v10.detail }],
+    } as RegisteredGateResult;
+    if (p37 === undefined) return { ...base, gate };
+    return {
+      ...base,
+      gate,
+      gateP37: {
+        ...base.gate,
+        checks: [
+          {
+            name: '§11.1 pinned-prestate fork replay (SRCLA plans, P37)',
+            passed: p37.passed,
+            detail: p37.detail,
+          },
+        ],
+      } as RegisteredGateResult,
+      evaluation: {
+        ...base.evaluation,
+        forecastGateP37: fakeForecastGate(true),
+      } as unknown as RegisteredEvaluationResult,
+    };
+  }
+
+  // (i) unchanged: no replay supplied anywhere in the report.
+  it('(i) prints the byte-identical NOT-PRODUCED sentence when no replay was supplied', () => {
+    const run = runWithForkChecks({
+      passed: null,
+      detail:
+        'NOT PRODUCED: no fork replay was supplied. Produce one with ' +
+        'src/evaluation/fork-runner.ts#runForkReplays (via ' +
+        'kernel/harness.ts#runRegisteredForkReplays) against an Anvil fork of Base ' +
+        'with the vault deployed, and pass it as `forkResults`.',
+    });
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toContain(
+      '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
+        '`src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base ' +
+        'fork with the vault deployed; this run supplied none, so the gate reports NOT ' +
+        'PRODUCED and blocks. No allocation in this report has been shown to be one the ' +
+        'chain would have accepted.',
+    );
+    expect(md).not.toMatch(/was supplied, but not every required run executed/);
+  });
+
+  // (iii) unchanged: every required run executed on the fork.
+  it('(iii) prints the byte-identical honest PARTIAL when every required run executed', () => {
+    const run = runWithForkChecks({
+      passed: true,
+      detail:
+        '64 of 64 registered (policy, tier) runs had their FIRST proposed rebalance submitted ' +
+        'and executed against the deployed vault on a Base fork, from a verified-restored ' +
+        'pinned prestate. NOT claimed: the era\'s remaining origins and its returns were not ' +
+        'replayed on chain, and all tiers were replayed against a single vault NAV, so cap and ' +
+        'reserve limits were evaluated at that NAV rather than at each tier\'s.',
+    });
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toContain('- **§11.1\'s pinned-prestate fork replay is an honest PARTIAL.**');
+    expect(md).not.toContain('this run supplied none');
+  });
+
+  // (ii): the exact I-3 shape — a replay WAS supplied and SRCLA's own P37
+  // plans DID execute, but the v0.10 check still reads FAILED because a
+  // baseline (B4) was refused. The old lookup published "this run supplied
+  // none" here, directly contradicting the passing P37 fork line elsewhere
+  // in the same report.
+  it('(ii) says a replay was supplied and names what did not execute, without claiming none was supplied', () => {
+    const run = runWithForkChecks(
+      { passed: false, detail: 'did not execute on fork: b4@10000000000000 (reverted, no reason string)' },
+      {
+        passed: true,
+        detail:
+          '3 of 3 registered (policy, tier) runs had their FIRST proposed rebalance submitted ' +
+          'and executed against the deployed vault on a Base fork, from a verified-restored ' +
+          'pinned prestate. reported (not gating), outside the release scope: ' +
+          'srcla@10000000000000 (no fork replay)',
+      },
+    );
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toContain(
+      '- **§11.1\'s pinned-prestate fork replay was supplied, but not every required run ' +
+        'executed on chain.**',
+    );
+    expect(md).toContain('did not execute on fork: b4@10000000000000');
+    expect(md).not.toContain('this run supplied none');
+  });
+
+  it('(ii) states SRCLA\'s own plans DID execute under P37 even though the v0.10 check failed on a baseline refusal', () => {
+    const run = runWithForkChecks(
+      { passed: false, detail: 'did not execute on fork: b4@10000000000000 (reverted, no reason string)' },
+      {
+        passed: true,
+        detail: '3 of 3 registered (policy, tier) runs had their FIRST proposed rebalance submitted and executed.',
+      },
+    );
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toMatch(/SRCLA's own plans DID execute at every release tier under Amendment P37/);
+  });
+
+  it('(ii) states SRCLA\'s own plans did NOT execute when the P37 fork check itself failed', () => {
+    const run = runWithForkChecks(
+      { passed: false, detail: 'did not execute on fork: b4@10000000000000 (reverted, no reason string)' },
+      { passed: false, detail: 'no fork replay for: srcla@100000000000' },
+    );
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toMatch(/SRCLA's own plans did NOT execute at every release tier under Amendment P37/);
+  });
+
+  it('(ii) says execution is not distinguished when only the v0.10 check is present (no P37 fork check)', () => {
+    const run = runWithForkChecks({
+      passed: false,
+      detail: 'no fork replay for: srcla@10000000000',
+    });
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toMatch(/not distinguished for this run: no P37 fork check/);
   });
 });

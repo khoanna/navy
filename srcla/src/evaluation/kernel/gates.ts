@@ -510,6 +510,19 @@ export function skillWindow(
  *      measured price of the thing the study says is not free.
  */
 /**
+ * Triage `:65` (fix wave before Task 10): the wording a P37-only check detail
+ * appends when its OK/pass branch could otherwise be read as covering every
+ * registered tier. Under `amendment: 'p37'` every tier-aggregating check
+ * (demonstration, scale invariance, the fork claim) is decided over
+ * `RELEASE_TIERS` only — 10M is measured and published, but separately, under
+ * "Outside the release scope" — so a v0.10-shaped "all N tiers/runs" detail
+ * would overstate what the P37 verdict actually covers. Never applied under
+ * v0.10, whose details stay byte-identical.
+ */
+const P37_TIER_SCOPE_NOTE =
+  'decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope"';
+
+/**
  * What the fork check is entitled to claim, stated in full because this is the
  * sentence a reader quotes.
  *
@@ -525,8 +538,12 @@ export function skillWindow(
  *     replayable; that is exactly why the FIRST proposal is the one selected,
  *     and a later origin could not be substituted without funding the adapters
  *     into the prestate first.
+ *
+ * `p37`, when true, appends `P37_TIER_SCOPE_NOTE`: the P37 caller passes only
+ * SRCLA's release-tier replays as `fork`, so "of N registered (policy, tier)
+ * runs" here means the release tiers, not all four (triage `:65`).
  */
-function forkClaim(fork: readonly ForkReplayResult[]): string {
+function forkClaim(fork: readonly ForkReplayResult[], p37 = false): string {
   const holds = fork.filter((f) => f.held === true).length;
   const executed = fork.length - holds;
   return (
@@ -539,7 +556,8 @@ function forkClaim(fork: readonly ForkReplayResult[]): string {
       : '') +
     `. NOT claimed: the era's remaining origins and its returns were not replayed on chain, ` +
     `and all tiers were replayed against a single vault NAV, so cap and reserve limits were ` +
-    `evaluated at that NAV rather than at each tier's.`
+    `evaluated at that NAV rather than at each tier's.` +
+    (p37 ? ` ${P37_TIER_SCOPE_NOTE.charAt(0).toUpperCase()}${P37_TIER_SCOPE_NOTE.slice(1)}.` : '')
   );
 }
 
@@ -586,6 +604,7 @@ function forkReplayCheck(
   requiredKeys: readonly string[],
   inForkScope: (f: ForkReplayResult) => boolean,
   outOfScope: OutOfForkScopeReporting = NO_OUT_OF_SCOPE_REPORTING,
+  p37 = false,
 ): RegisteredGateCheck {
   const scoped = fork.filter(inForkScope);
   const outOfScopeEntries = fork.filter((f) => !inForkScope(f));
@@ -651,8 +670,8 @@ function forkReplayCheck(
             `EVERY ONE held, so no allocation was ever submitted to the chain. A hold is ` +
             `trivially executable and demonstrates nothing about whether the vault would ` +
             `accept SRCLA's plan; §11.1 needs at least one non-held SRCLA execution. ` +
-            forkClaim(scoped)
-          : forkClaim(scoped)) + reportedDetail,
+            forkClaim(scoped, p37)
+          : forkClaim(scoped, p37)) + reportedDetail,
   );
 }
 
@@ -725,7 +744,8 @@ export function evaluateRegisteredRelease(
           notDemonstrated.length === 0,
           notDemonstrated.length === 0
             ? `capital at work >= ${REGISTERED_DEMONSTRATION_FLOOR} across all ` +
-              `${sustainability.length} SRCLA runs`
+              `${sustainability.length} SRCLA runs` +
+              (p37 ? ` (${P37_TIER_SCOPE_NOTE})` : '')
             : `NOT DEMONSTRATED at ${notDemonstrated
                 .map(
                   (v) =>
@@ -818,6 +838,7 @@ export function evaluateRegisteredRelease(
           ),
           isReleaseScope: (f) => f.policyId === SRCLA_POLICY.id,
         },
+        true,
       ),
     );
   } else {
@@ -1005,7 +1026,8 @@ export function evaluateRegisteredRelease(
       'Sustainability: scale invariance across every registered tier (P26)',
       invariant,
       invariant === true
-        ? `sustainable at all ${sustainability.length} tiers measured`
+        ? `sustainable at all ${sustainability.length} tiers measured` +
+          (p37 ? ` (${P37_TIER_SCOPE_NOTE})` : '')
         : invariant === false
           ? `breaches at ${breaching.map((v) => `${v.policyId}@${v.tier} (${v.breach})`).join('; ')}`
           : sustainability.length === 0

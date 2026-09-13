@@ -104,6 +104,25 @@ export function attributeS2Breach(
     };
   }
 
+  // M-1 / R5: `executedDeployBaseByMarket` is required by `ReplaySnapshot` and
+  // `runReplay` always writes it, so only a hand-built or deserialized
+  // snapshot (e.g. a persisted run record predating P37) can arrive without
+  // it. The `?? {}` below reads a missing field as "no deploy into a dry
+  // venue", which FAILS OPEN exactly where the other two conditions fail
+  // closed to "unexplained" -- an attribution this function cannot actually
+  // compute must never read as VENUE FAILURE.
+  if (snapshots.some((s) => s.executedDeployBaseByMarket === undefined)) {
+    return {
+      kind: 'ALLOCATOR ERROR',
+      shortOrigins: short.length,
+      trappedShareMax: 0,
+      untrappedCoverageMin: 1,
+      detail:
+        'ALLOCATOR ERROR: attribution data missing -- at least one snapshot has no ' +
+        'executedDeployBaseByMarket, so the breach cannot be attributed to a venue',
+    };
+  }
+
   const intoDry = snapshots.filter((s) =>
     (s.dryMarketIds ?? []).some((m) => ((s.executedDeployBaseByMarket ?? {})[m] ?? 0n) > 0n),
   );

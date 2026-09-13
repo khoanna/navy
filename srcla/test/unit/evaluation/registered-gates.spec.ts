@@ -15,6 +15,7 @@ import {
   type ForkReplayResult,
 } from '../../../src/evaluation/kernel/gates.js';
 import { REGISTERED_TIERS, type PolicyRunResult, type RegisteredEvaluationResult } from '../../../src/evaluation/kernel/harness.js';
+import { REGISTERED_DEMONSTRATION_FLOOR } from '../../../src/evaluation/kernel/sustainability.js';
 import { REGISTERED_POLICIES, SRCLA_POLICY } from '../../../src/evaluation/kernel/registry.js';
 import { mulberry32 } from '../../../src/evaluation/metrics/significance.js';
 import type { PolicyArtifact } from '../../../src/policy/types.js';
@@ -1135,5 +1136,46 @@ describe('P37: the amended policy gate (G3, G4, G5)', () => {
 
     expect(p37Gate.sustainability.map((s) => s.tier)).not.toContain(TEN_M.toString());
     expect(v010Gate.sustainability.map((s) => s.tier)).toContain(TEN_M.toString());
+  });
+
+  // Triage `:65` (fix wave before Task 10): the P37 gate table printed
+  // "sustainable at all 3 tiers measured" / "across all 3 SRCLA runs" as a
+  // bare OK, which a reader of the P37 and release verdicts could mistake
+  // for "every registered tier including 10M" -- G5 decides these checks
+  // over RELEASE_TIERS only, and 10M is published separately, never folded
+  // in. Check NAMES stay the ones the gating set and other tests key on;
+  // only the detail gains the scope note, and only under `amendment: 'p37'`.
+  it('P37: the demonstration, scale-invariance and fork-claim OK details disclose the RELEASE_TIERS scope', () => {
+    const gate = evaluateRegisteredRelease(evaluation(), { ...p37, forkResults: completeForkResults() });
+
+    const demonstration = named(gate, 'Demonstration: sustainability was demonstrated while deployed');
+    expect(demonstration.passed).toBe(true);
+    expect(demonstration.detail).toMatch(/decided over RELEASE_TIERS \(G5\)/);
+    expect(demonstration.detail).toMatch(/10M is reported under "Outside the release scope"/);
+
+    const invariance = named(gate, 'Sustainability: scale invariance across every registered tier (P26)');
+    expect(invariance.passed).toBe(true);
+    expect(invariance.detail).toMatch(/decided over RELEASE_TIERS \(G5\)/);
+    expect(invariance.detail).toMatch(/10M is reported under "Outside the release scope"/);
+
+    const fork = named(gate, '§11.1 pinned-prestate fork replay (SRCLA plans, P37)');
+    expect(fork.detail).toMatch(/Decided over RELEASE_TIERS \(G5\)/);
+    expect(fork.detail).toMatch(/10M is reported under "Outside the release scope"/);
+  });
+
+  it('v0.10: the same three OK details carry no RELEASE_TIERS scope note, byte-identical to before', () => {
+    const gate = evaluateRegisteredRelease(evaluation(), { ...gateOpts, forkResults: completeForkResults() });
+
+    const demonstration = named(gate, 'Demonstration: sustainability was demonstrated while deployed');
+    expect(demonstration.passed).toBe(true);
+    expect(demonstration.detail).toBe(`capital at work >= ${REGISTERED_DEMONSTRATION_FLOOR} across all 4 SRCLA runs`);
+
+    const invariance = named(gate, 'Sustainability: scale invariance across every registered tier (P26)');
+    expect(invariance.passed).toBe(true);
+    expect(invariance.detail).toBe('sustainable at all 4 tiers measured');
+
+    const fork = named(gate, '§11.1 pinned-prestate fork replay');
+    expect(fork.detail).not.toContain('RELEASE_TIERS');
+    expect(fork.detail).not.toContain('Outside the release scope');
   });
 });

@@ -437,8 +437,10 @@ function eraTable(): string {
     '|---|---|---|---|---|',
     ...rows,
     '',
-    'An era with an End of `open` grows with the live collector; its effective end is ' +
-      'whenever collection last ran, reported per era in the measured-coverage table below.',
+    'An era with an End of `open` (`heldout-d`) is SEALED, so it grows only as new origins ' +
+      'are backfilled (`pnpm backfill:history`) -- ruling R30 refuses live-collector rows in ' +
+      'any sealed era. Its effective end is whenever the backfill last ran, reported per era ' +
+      'in the measured-coverage table below.',
     '',
     'Each era\'s registered role, in full — none of this is abbreviated, because the caveats ' +
       'are the point:',
@@ -912,7 +914,14 @@ function sustainabilityTable(
         `| ${usdc(BigInt(v.tier))} | ${v.demonstrated ? 'yes' : '**NOT DEMONSTRATED**'} | ` +
         `${mark(v.s1)} | ${mark(v.s2)} | ${mark(v.s3)} | ${mark(v.s4)} | ` +
         `${v.sustainable === true ? '**SUSTAINABLE**' : v.sustainable === false ? '**BREACH**' : '**NOT DEMONSTRATED**'} | ` +
-        `${pct(v.realizedNetApy)} | ${v.breach ?? '—'} |`,
+        // M-2: an S2 breach P37 attributed to a VENUE FAILURE clears S2 (a
+        // bare `mark(v.s2)` PASS) with `v.breach` left null, so the out-of-
+        // scope (10M) table -- and any other P37 row carrying an attribution
+        // -- printed a plain PASS with no sign the floor was ever missed.
+        // `s2Attribution.detail` names the attribution kind and the trapped
+        // share whenever it is present; v0.10 never sets the field, so this
+        // is byte-identical there.
+        `${pct(v.realizedNetApy)} | ${v.s2Attribution?.detail ?? v.breach ?? '—'} |`,
     );
   const invariant = gate.scaleInvariant;
   const out = [
@@ -1098,14 +1107,43 @@ export function renderReport(params: ReportParams): string {
   // release decision is the single most important line in this document, so
   // it is stated once, in the imperative, and then itemised.
   const anyBlocked = params.runs.some((r) => !r.evaluation.forecastGate.pass || !r.gate.pass);
+  // I-2: computed once and reused below (`threeVerdictsSection`) so the
+  // banner and the "Verdicts under Amendment P37" section can never disagree
+  // about what `heldout-d` did.
+  const verdicts = threeVerdicts(params.runs);
   out.push('## Verdict');
   out.push('');
-  out.push(
-    anyBlocked
-      ? '> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. ' +
-          'The blocking checks are itemised below and evidenced in full further down.'
-      : '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
-  );
+  if (verdicts.release.status !== 'NOT RUN') {
+    // (a) `heldout-d` was evaluated: the release line is the ONLY verdict
+    // this banner may be drawn from -- the registered v0.10 result on
+    // `heldout-c`/`heldout-b` is frozen FAIL and would otherwise pin this
+    // banner to DO NOT RELEASE forever, even once release itself passes.
+    out.push(
+      verdicts.release.status === 'PASS'
+        ? '> **RELEASE.** The release verdict (`heldout-d`, Amendment P37) passed both §11.5 ' +
+            'gates. The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` ' +
+            'are reported beside it below and do not decide release.'
+        : '> **DO NOT RELEASE.** The release verdict (`heldout-d`, Amendment P37) did not pass ' +
+            'both §11.5 gates. The registered v0.10 and P37 post-hoc verdicts on ' +
+            '`heldout-c`/`heldout-b` are reported beside it below and do not decide release.',
+    );
+  } else {
+    // (b) No `heldout-d` run in this report. Keep the pre-P37 sentence pair
+    // byte-identical -- it still decides between the two branches on
+    // `anyBlocked` exactly as before -- and add ONE sentence, on its own
+    // line, naming where the actual release decision lives.
+    out.push(
+      anyBlocked
+        ? '> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. ' +
+            'The blocking checks are itemised below and evidenced in full further down.'
+        : '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
+    );
+    out.push('');
+    out.push(
+      'The release decision under Amendment P37 is the `heldout-d` line under "Verdicts ' +
+        'under Amendment P37" below, which this run did not produce.',
+    );
+  }
   out.push('');
   for (const run of params.runs) {
     const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
@@ -1131,7 +1169,7 @@ export function renderReport(params: ReportParams): string {
       'retuned after a sealed era was opened.',
   );
   out.push('');
-  out.push(...threeVerdictsSection(threeVerdicts(params.runs)));
+  out.push(...threeVerdictsSection(verdicts));
 
   // ---- What the reader must know before reading a number. -----------------
   out.push('## Read this before citing any number');
@@ -1157,6 +1195,19 @@ export function renderReport(params: ReportParams): string {
       'window, and carries no such caveat — but it is only 16 days. **Both sealed eras are ' +
       'reported: `heldout-c` for what statistical power exists, `heldout-b` for temporal ' +
       'purity. Neither alone is sufficient.**',
+  );
+  // I-1 fix: the sentence above describes `heldout-b` as it was registered
+  // for the v0.10 verdict, before Amendment P37 existed to read it. It must
+  // not stand alone once P37 (paper v0.11) makes `heldout-b` design data too
+  // (the fourth burned-window declaration) -- the report otherwise contradicts
+  // its own "Verdicts under Amendment P37" section a few paragraphs down.
+  out.push(
+    'That statement describes `heldout-b` as it was registered for the v0.10 verdict. Under ' +
+      'Amendment P37 (paper v0.11), `heldout-b` is design data too — its per-venue and ' +
+      'per-policy results were read to design G1, G3 and G5 — so only `heldout-d` carries no ' +
+      'design knowledge. "Neither alone is sufficient" above applies to the registered v0.10 ' +
+      'verdict; release itself is decided by `heldout-d` alone (see "Verdicts under Amendment ' +
+      'P37" below).',
   );
   out.push(
     '3. `heldout-c` is **less burned, not pristine.** It was carved out of the era this ' +
@@ -1389,27 +1440,80 @@ export function renderReport(params: ReportParams): string {
   // The fork-replay limitation is CONDITIONAL: once a run supplies replays,
   // printing "not produced" beneath a gate line that says otherwise would be
   // a false limitation, which is as misleading as a missing one.
-  const forkChecks = params.runs
-    .map((r) => r.gate.checks.find((c) => c.name === '§11.1 pinned-prestate fork replay'))
-    .filter((c): c is RegisteredGateCheck => c !== undefined);
-  const forkProduced = forkChecks.length > 0 && forkChecks.every((c) => c.passed === true);
-  out.push(
-    forkProduced
-      ? '- **§11.1\'s pinned-prestate fork replay is an honest PARTIAL.** What was shown: each ' +
-          'registered (policy, tier)\'s FIRST proposed rebalance was submitted and executed ' +
-          'against the deployed vault on a Base fork, from a pinned prestate verified restored ' +
-          'before every candidate. What was NOT shown: the era\'s remaining origins and its ' +
-          'returns were not replayed on chain; all four tiers were replayed against a SINGLE ' +
-          'vault NAV, so `capBps`, `minIdleBps` and the reserve were evaluated at that NAV ' +
-          'rather than at each tier\'s scale; and the pinned prestate is all-idle, which is why ' +
-          'the first proposal is the origin selected — a later origin would contain divests ' +
-          'that no unfunded prestate could execute.'
-      : '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
-          '`src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base ' +
-          'fork with the vault deployed; this run supplied none, so the gate reports NOT ' +
-          'PRODUCED and blocks. No allocation in this report has been shown to be one the ' +
-          'chain would have accepted.',
-  );
+  //
+  // I-3: a lookup keyed on the v0.10 check name alone never sees the P37
+  // fork check (`'§11.1 pinned-prestate fork replay (SRCLA plans, P37)'`,
+  // `gates.ts:788-789`), so a P37 run whose SRCLA plans DID execute still
+  // published "this run supplied none" beneath a passing P37 fork line.
+  // Branch three ways, reading BOTH names, and distinguish "no replay was
+  // ever supplied" (the check detail starts with the literal prefix below)
+  // from "a replay was supplied but did not fully execute" -- only the first
+  // of those two is the pre-existing NOT-PRODUCED sentence.
+  const NOT_SUPPLIED_PREFIX = 'NOT PRODUCED: no fork replay';
+  interface ForkCheckRef {
+    era: EraTag;
+    amendment: 'v0.10' | 'p37';
+    check: RegisteredGateCheck;
+  }
+  const forkCheckRefs: ForkCheckRef[] = [];
+  for (const r of params.runs) {
+    const v10 = r.gate.checks.find((c) => c.name === '§11.1 pinned-prestate fork replay');
+    if (v10 !== undefined) forkCheckRefs.push({ era: r.era, amendment: 'v0.10', check: v10 });
+    const p37Check = r.gateP37?.checks.find(
+      (c) => c.name === '§11.1 pinned-prestate fork replay (SRCLA plans, P37)',
+    );
+    if (p37Check !== undefined) forkCheckRefs.push({ era: r.era, amendment: 'p37', check: p37Check });
+  }
+  const supplied = forkCheckRefs.filter((f) => !f.check.detail.startsWith(NOT_SUPPLIED_PREFIX));
+  const everyRequiredExecuted = supplied.length > 0 && supplied.every((f) => f.check.passed === true);
+
+  if (supplied.length === 0) {
+    // (i) No replay was supplied anywhere in this report — byte-identical to
+    // the sentence this report has always printed in that case.
+    out.push(
+      '- **§11.1\'s pinned-prestate fork replay is not produced.** ' +
+        '`src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base ' +
+        'fork with the vault deployed; this run supplied none, so the gate reports NOT ' +
+        'PRODUCED and blocks. No allocation in this report has been shown to be one the ' +
+        'chain would have accepted.',
+    );
+  } else if (everyRequiredExecuted) {
+    // (iii) Every run executed — the pre-existing honest PARTIAL, unchanged.
+    out.push(
+      '- **§11.1\'s pinned-prestate fork replay is an honest PARTIAL.** What was shown: each ' +
+        'registered (policy, tier)\'s FIRST proposed rebalance was submitted and executed ' +
+        'against the deployed vault on a Base fork, from a pinned prestate verified restored ' +
+        'before every candidate. What was NOT shown: the era\'s remaining origins and its ' +
+        'returns were not replayed on chain; all four tiers were replayed against a SINGLE ' +
+        'vault NAV, so `capBps`, `minIdleBps` and the reserve were evaluated at that NAV ' +
+        'rather than at each tier\'s scale; and the pinned prestate is all-idle, which is why ' +
+        'the first proposal is the origin selected — a later origin would contain divests ' +
+        'that no unfunded prestate could execute.',
+    );
+  } else {
+    // (ii) A replay was supplied, but not every required run executed. Name
+    // what did not execute (from the check's own detail) and say whether
+    // SRCLA's own plans executed, read from the P37 check when one exists —
+    // a refused BASELINE plan does not mean SRCLA's own plan was refused.
+    const notExecuted = supplied.filter((f) => f.check.passed !== true);
+    const p37Refs = supplied.filter((f) => f.amendment === 'p37');
+    const srclaExecuted = p37Refs.length === 0 ? undefined : p37Refs.every((f) => f.check.passed === true);
+    out.push(
+      '- **§11.1\'s pinned-prestate fork replay was supplied, but not every required run ' +
+        'executed on chain.** ' +
+        notExecuted.map((f) => `\`${f.era}\` (${f.amendment}): ${f.check.detail}`).join(' ') +
+        ' ' +
+        (srclaExecuted === undefined
+          ? 'Whether SRCLA\'s own plans executed is not distinguished for this run: no P37 ' +
+            'fork check (which scopes to SRCLA\'s own plans) was produced.'
+          : srclaExecuted
+            ? 'SRCLA\'s own plans DID execute at every release tier under Amendment P37 — the ' +
+              'failure above belongs to a baseline or an out-of-scope tier, not to an SRCLA ' +
+              'refusal.'
+            : 'SRCLA\'s own plans did NOT execute at every release tier under Amendment P37 — ' +
+              'see the P37 fork line above for which one.'),
+    );
+  }
   out.push(
     '- **Withdrawals are synthetic** (see above), so the withdrawal-success and ' +
       'stressed-coverage figures describe the registered schedule, not observed demand.',
