@@ -19,7 +19,11 @@
  *
  * Usage (from srcla/):
  *   DATABASE_URL=postgresql://user:password@localhost:5433/srcla pnpm exec tsx scripts/sweep-calibration-gap.ts --run
- *   pnpm exec tsx scripts/sweep-calibration-gap.ts --decide evaluation-sweep-c6-calibration.json [--decision-out <path>]
+ *   pnpm exec tsx scripts/sweep-calibration-gap.ts --decide evaluation-sweep-c6-calibration.json --decision-out <path>
+ *
+ * --decision-out is REQUIRED with --decide (no default): the committed
+ * evidence at config/c6-calibration-gap-decision.json is `--run`'s output,
+ * and --decide must never overwrite it by accident.
  */
 import { readFileSync, writeFileSync } from 'fs';
 import { PrismaClient } from '@prisma/client';
@@ -209,17 +213,37 @@ function decide(sweepPath: string, decisionOut: string): void {
   console.error(`[c6] wrote ${decisionOut}`);
 }
 
+const USAGE = 'usage: --run | --decide <sweep.json> --decision-out <path>';
+
 async function main(): Promise<void> {
   const d = process.argv.indexOf('--decide');
   if (d >= 0) {
-    decide(process.argv[d + 1] ?? SWEEP_OUT, arg('decision-out') ?? DEFAULT_DECISION_OUT);
+    const sweepPath = process.argv[d + 1];
+    if (sweepPath === undefined || sweepPath.startsWith('--')) {
+      throw new Error(`${USAGE} — --decide requires a sweep JSON path`);
+    }
+    // --decide MUST NOT fall back to the committed evidence path: without an
+    // explicit --decision-out it would silently overwrite
+    // config/c6-calibration-gap-decision.json with whatever fixture the
+    // caller happened to point --decide at.
+    const decisionOut = arg('decision-out');
+    if (decisionOut === undefined) {
+      throw new Error(
+        `${USAGE} — --decide requires an explicit --decision-out <path>; without it, it would ` +
+          `silently overwrite the committed evidence at ${DEFAULT_DECISION_OUT}`,
+      );
+    }
+    if (decisionOut.startsWith('--')) {
+      throw new Error(`${USAGE} — --decision-out requires a path, not another flag`);
+    }
+    decide(sweepPath, decisionOut);
     return;
   }
   if (process.argv.includes('--run')) {
     await run();
     return;
   }
-  throw new Error('usage: --run | --decide <sweep.json> [--decision-out <path>]');
+  throw new Error(USAGE);
 }
 
 main().catch((e) => {

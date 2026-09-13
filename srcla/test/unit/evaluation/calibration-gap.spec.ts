@@ -97,6 +97,55 @@ describe('C6 decision — the gap criterion fixed before the run', () => {
       ]),
     ).toThrow(/no b4 row/);
   });
+
+  it('refuses a NaN netApy at the decision tier instead of silently passing it through', () => {
+    expect(() =>
+      decideCalibrationGap([row('srcla', 0.03), row('b4', NaN), row('h1', 0.03), row('h7', 0.03)]),
+    ).toThrow(/C6:.*b4.*1000000000000.*netApy/);
+  });
+
+  it('refuses a JSON null (parsed as unknown) standing in for a numeric field', () => {
+    const b4 = row('b4', 0.034, { capitalAtWork: JSON.parse('null') as unknown as number });
+    expect(() => decideCalibrationGap([row('srcla', 0.03), b4, row('h1', 0.03), row('h7', 0.03)])).toThrow(
+      /C6:.*b4.*1000000000000.*capitalAtWork/,
+    );
+  });
+
+  it('refuses a duplicate policy@tier row instead of silently taking the first', () => {
+    expect(() =>
+      decideCalibrationGap([
+        row('srcla', 0.03),
+        row('b4', 0.034),
+        row('b4', 0.05), // duplicate b4@1M — `find` would silently take the first
+        row('h1', 0.03),
+        row('h7', 0.03),
+      ]),
+    ).toThrow(/C6:.*duplicate.*b4.*1000000000000/);
+  });
+
+  it('refuses a duplicate row at a non-decision tier too', () => {
+    expect(() =>
+      decideCalibrationGap([
+        row('srcla', 0.03),
+        row('b4', 0.034),
+        row('h1', 0.03),
+        row('h7', 0.03),
+        row('srcla', 0.03, { tier: 10_000_000_000n }),
+        row('srcla', 0.031, { tier: 10_000_000_000n }),
+      ]),
+    ).toThrow(/C6:.*duplicate.*srcla.*10000000000/);
+  });
+
+  it('refuses a non-finite minStressedCoverage even when netApy shows a real gap', () => {
+    expect(() =>
+      decideCalibrationGap([
+        row('srcla', 0.03),
+        row('b4', 0.0304, { minStressedCoverage: NaN }),
+        row('h1', 0.03, { minStressedCoverage: NaN }),
+        row('h7', 0.03),
+      ]),
+    ).toThrow(/C6:.*minStressedCoverage/);
+  });
 });
 
 const HOUR_MS = 3_600_000;

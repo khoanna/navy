@@ -62,6 +62,9 @@ export interface C6Decision {
   qualifying: C6AblationId[];
 }
 
+/** The C6Row fields the decision arithmetic reads; each must be finite. */
+const C6_NUMERIC_FIELDS = ['netApy', 'capitalAtWork', 'minStressedCoverage'] as const;
+
 function rowAtDecisionTier(rows: readonly C6Row[], policyId: string): C6Row {
   const found = rows.find((r) => r.policyId === policyId && r.tier === C6_DECISION_TIER);
   if (found === undefined) {
@@ -69,10 +72,45 @@ function rowAtDecisionTier(rows: readonly C6Row[], policyId: string): C6Row {
       `C6: no ${policyId} row at the ${C6_DECISION_TIER} tier — a missing run is never a decision`,
     );
   }
+  for (const field of C6_NUMERIC_FIELDS) {
+    // Guards against NaN (every comparison against it is false, so a real
+    // gap with a NaN metric would silently read as NO_GAP or as a
+    // qualifying ablation) AND against `null` — what `JSON.stringify` writes
+    // for NaN, and what a sweep row parsed via `JSON.parse` can carry
+    // straight through the `C6Row` type via an `unknown` cast, coercing to 0
+    // the moment it reaches arithmetic.
+    if (!Number.isFinite(found[field])) {
+      throw new Error(
+        `C6: ${policyId}@${C6_DECISION_TIER} has a non-finite ${field} (${String(found[field])}) — ` +
+          'refusing to decide on it',
+      );
+    }
+  }
   return found;
 }
 
+/**
+ * Throw unless every (policyId, tier) combination among the C6 policies and
+ * tiers appears at most once. `rowAtDecisionTier` uses `Array.find`, which
+ * silently takes the first match — a duplicate row (a re-run merged into the
+ * same sweep, say) would then be dropped rather than flagged.
+ */
+function assertOneRowPerPolicyTier(rows: readonly C6Row[]): void {
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    if (!(C6_POLICY_IDS as readonly string[]).includes(r.policyId)) continue;
+    if (!C6_TIERS.includes(r.tier)) continue;
+    const key = `${r.policyId}@${r.tier}`;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  const duplicates = [...seen.entries()].filter(([, count]) => count > 1).map(([key]) => key);
+  if (duplicates.length > 0) {
+    throw new Error(`C6: duplicate rows for ${duplicates.join(', ')} — refusing to pick one arbitrarily`);
+  }
+}
+
 export function decideCalibrationGap(rows: readonly C6Row[]): C6Decision {
+  assertOneRowPerPolicyTier(rows);
   const srcla = rowAtDecisionTier(rows, 'srcla');
   const b4 = rowAtDecisionTier(rows, 'b4');
   const gapApy = b4.netApy - srcla.netApy;
