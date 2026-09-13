@@ -1,9 +1,14 @@
 import {
   C6_DECISION_TIER,
   C6_GAP_THRESHOLD_APY,
+  assertCalibrationOnly,
   decideCalibrationGap,
+  splitWarmup,
+  timeAveragedVenueWeights,
+  venueWeightsAt,
   type C6Row,
 } from '../../../src/evaluation/calibration-gap.js';
+import type { TimeOrderedSnapshot } from '../../../src/evaluation/dataset.js';
 
 const row = (policyId: string, netApy: number, over: Partial<C6Row> = {}): C6Row => ({
   policyId,
@@ -91,5 +96,70 @@ describe('C6 decision — the gap criterion fixed before the run', () => {
         row('h7', 0.03),
       ]),
     ).toThrow(/no b4 row/);
+  });
+});
+
+const HOUR_MS = 3_600_000;
+const origins = (count: number, startIso = '2024-03-15T00:00:00Z'): TimeOrderedSnapshot[] =>
+  Array.from({ length: count }, (_, i) => ({
+    index: i,
+    timestamp: new Date(Date.parse(startIso) + i * HOUR_MS),
+    blockHash: '0x',
+    snapshots: [],
+  }));
+
+describe('C6 venue weights', () => {
+  it('reads each venue as its share of total assets', () => {
+    expect(
+      venueWeightsAt({
+        totalAssets: 1_000_000n,
+        holdingsBaseByMarket: { 'aave-v3-usdc': 250_000n, 'moonwell-usdc': 500_000n },
+      }),
+    ).toEqual({ 'aave-v3-usdc': 0.25, 'moonwell-usdc': 0.5 });
+  });
+
+  it('gives no weights for a vault holding nothing', () => {
+    expect(venueWeightsAt({ totalAssets: 0n, holdingsBaseByMarket: { 'aave-v3-usdc': 0n } })).toEqual({});
+  });
+
+  it('averages over every origin, counting an absent venue as zero', () => {
+    expect(
+      timeAveragedVenueWeights([
+        { totalAssets: 1_000_000n, holdingsBaseByMarket: { 'aave-v3-usdc': 500_000n } },
+        { totalAssets: 1_000_000n, holdingsBaseByMarket: {} },
+      ]),
+    ).toEqual({ 'aave-v3-usdc': 0.25 });
+  });
+});
+
+describe('C6 warm-up split', () => {
+  it('takes the first 31 days as warm-up and evaluates from 2024-04-15', () => {
+    const all = origins(24 * 40);
+    const { warmup, evaluated } = splitWarmup(all, 31);
+    expect(warmup).toHaveLength(24 * 31);
+    expect(evaluated[0]!.timestamp.toISOString()).toBe('2024-04-15T00:00:00.000Z');
+    expect(warmup.length + evaluated.length).toBe(all.length);
+  });
+
+  it('refuses an empty era', () => {
+    expect(() => splitWarmup([], 31)).toThrow(/holds no origins/);
+  });
+
+  it('refuses a warm-up that leaves nothing to evaluate', () => {
+    expect(() => splitWarmup(origins(24 * 10), 31)).toThrow(/nothing left to evaluate/);
+  });
+});
+
+describe('C6 calibration-only guard', () => {
+  it('accepts calibration origins', () => {
+    expect(() => assertCalibrationOnly(origins(3), 'test')).not.toThrow();
+  });
+
+  it('refuses an origin in a sealed era', () => {
+    expect(() => assertCalibrationOnly(origins(1, '2026-08-30T00:00:00Z'), 'test')).toThrow(/heldout-b/);
+  });
+
+  it('refuses an origin outside every registered era', () => {
+    expect(() => assertCalibrationOnly(origins(1, '2024-01-01T00:00:00Z'), 'test')).toThrow(/'none'/);
   });
 });

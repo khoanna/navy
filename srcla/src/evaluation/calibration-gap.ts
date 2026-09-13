@@ -11,6 +11,10 @@
  * units (6 dp).
  */
 
+import { eraFor } from './eras.js';
+import type { TimeOrderedSnapshot } from './dataset.js';
+import type { ReplaySnapshot } from './replay/replay.js';
+
 /** Half the registered 43 bps non-inferiority margin. */
 export const C6_GAP_THRESHOLD_APY = 0.00215;
 /** The tier whose non-inferiority failed on heldout-c: 1,000,000 USDC. */
@@ -107,4 +111,65 @@ export function decideCalibrationGap(rows: readonly C6Row[]): C6Decision {
       ? 'GAP_COMPONENT_QUALIFIES'
       : 'GAP_NO_QUALIFYING_COMPONENT';
   return { outcome, gapApy, srclaNetApy: srcla.netApy, b4NetApy: b4.netApy, ablations, qualifying };
+}
+
+export type HoldingsSnapshot = Pick<ReplaySnapshot, 'totalAssets' | 'holdingsBaseByMarket'>;
+
+/** Resolution of a weight: six decimal places, exact in bigint before the float. */
+const WEIGHT_SCALE = 1_000_000n;
+
+/** Each venue's holding as a share of the vault's total assets at one origin. */
+export function venueWeightsAt(s: HoldingsSnapshot): Record<string, number> {
+  if (s.totalAssets <= 0n) return {};
+  const out: Record<string, number> = {};
+  for (const [marketId, held] of Object.entries(s.holdingsBaseByMarket)) {
+    out[marketId] = Number((held * WEIGHT_SCALE) / s.totalAssets) / Number(WEIGHT_SCALE);
+  }
+  return out;
+}
+
+/** Mean weight per venue over every origin; an origin without the venue counts as zero. */
+export function timeAveragedVenueWeights(snapshots: readonly HoldingsSnapshot[]): Record<string, number> {
+  if (snapshots.length === 0) return {};
+  const sums: Record<string, number> = {};
+  for (const s of snapshots) {
+    for (const [marketId, w] of Object.entries(venueWeightsAt(s))) {
+      sums[marketId] = (sums[marketId] ?? 0) + w;
+    }
+  }
+  return Object.fromEntries(Object.entries(sums).map(([m, v]) => [m, v / snapshots.length]));
+}
+
+/**
+ * Split an era's origins into a warm-up (its first `warmupDays`) and the
+ * evaluated remainder. The calibration era is the earliest data the backfill
+ * holds, so its warm-up cannot come from before it the way `loadWarmup`
+ * supplies one for later eras.
+ */
+export function splitWarmup(
+  snapshots: readonly TimeOrderedSnapshot[],
+  warmupDays: number,
+): { warmup: TimeOrderedSnapshot[]; evaluated: TimeOrderedSnapshot[] } {
+  if (snapshots.length === 0) {
+    throw new Error('C6: the calibration era holds no origins; the backfill has not been run');
+  }
+  const cutoffMs = snapshots[0]!.timestamp.getTime() + warmupDays * 86_400_000;
+  const warmup = snapshots.filter((s) => s.timestamp.getTime() < cutoffMs);
+  const evaluated = snapshots.filter((s) => s.timestamp.getTime() >= cutoffMs);
+  if (evaluated.length === 0) {
+    throw new Error(`C6: a ${warmupDays}-day warm-up leaves nothing left to evaluate`);
+  }
+  return { warmup, evaluated };
+}
+
+/** Throw unless every origin lies in the calibration era. */
+export function assertCalibrationOnly(snapshots: readonly { timestamp: Date }[], purpose: string): void {
+  for (const s of snapshots) {
+    const tag = eraFor(Math.floor(s.timestamp.getTime() / 1000));
+    if (tag !== 'calibration') {
+      throw new Error(
+        `C6 (${purpose}): origin ${s.timestamp.toISOString()} is in era '${tag ?? 'none'}', not calibration — refusing`,
+      );
+    }
+  }
 }
