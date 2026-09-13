@@ -41,40 +41,29 @@ describe('forkBenchMismatches', () => {
 
   it("names adminReserve and both values — the b4@10k refusal's cause", () => {
     const out = forkBenchMismatches(bench({ adminReserveBase: 1_000_000_000n }), bench());
-    expect(out).toHaveLength(1);
-    expect(out[0]).toContain('adminReserve');
-    expect(out[0]).toContain('1000000000');
-    expect(out[0]).toContain('0');
+    expect(out).toEqual(['adminReserve: on-chain 1000000000, registered 0']);
   });
 
   it('names minIdleBps and both values', () => {
     const out = forkBenchMismatches(bench({ minIdleBps: 50 }), bench());
-    expect(out).toHaveLength(1);
-    expect(out[0]).toContain('minIdleBps');
-    expect(out[0]).toContain('50');
-    expect(out[0]).toContain('500');
+    expect(out).toEqual(['minIdleBps: on-chain 50, registered 500']);
   });
 
   it.each([
-    ['capBps', { capBps: 4_000 }, '4000', '5000'],
-    ['maxLossBps', { maxLossBps: 100 }, '100', '50'],
+    ['capBps', { capBps: 4_000 }, 'moonwell-usdc capBps: on-chain 4000, registered 5000'],
+    ['maxLossBps', { maxLossBps: 100 }, 'moonwell-usdc maxLossBps: on-chain 100, registered 50'],
     [
       'absoluteCap',
       { absoluteCapBase: 2n ** 256n - 1n },
-      (2n ** 256n - 1n).toString(),
-      (10n ** 15n).toString(),
+      `moonwell-usdc absoluteCap: on-chain ${(2n ** 256n - 1n).toString()}, registered ${(10n ** 15n).toString()}`,
     ],
   ] as const)(
     "names the marketId and field when one adapter's %s differs",
-    (field, change, onChainValue, registeredValue) => {
+    (_field, change, expected) => {
       const onChain = bench();
       const adapters = { ...onChain.adapters, 'moonwell-usdc': { ...MARKET, ...change } };
       const out = forkBenchMismatches({ ...onChain, adapters }, bench());
-      expect(out).toHaveLength(1);
-      expect(out[0]).toContain('moonwell-usdc');
-      expect(out[0]).toContain(field);
-      expect(out[0]).toContain(onChainValue);
-      expect(out[0]).toContain(registeredValue);
+      expect(out).toEqual([expected]);
     },
   );
 
@@ -82,15 +71,13 @@ describe('forkBenchMismatches', () => {
     const onChain = bench();
     const adapters = { ...onChain.adapters, 'euler-usdc': { ...MARKET } };
     const out = forkBenchMismatches({ ...onChain, adapters }, bench());
-    expect(out).toHaveLength(1);
-    expect(out[0]).toContain('euler-usdc');
+    expect(out).toEqual(['adapter euler-usdc: on the vault but not registered by the harness']);
   });
 
   it('names an adapter the harness registers but the bench does not carry', () => {
     const { 'aave-v3-usdc': _dropped, ...rest } = bench().adapters;
     const out = forkBenchMismatches(bench({ adapters: rest }), bench());
-    expect(out).toHaveLength(1);
-    expect(out[0]).toContain('aave-v3-usdc');
+    expect(out).toEqual(['adapter aave-v3-usdc: registered by the harness but not registered on the vault']);
   });
 
   it('reports every mismatching field, one entry each', () => {
