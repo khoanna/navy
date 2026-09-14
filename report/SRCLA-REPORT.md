@@ -1,6 +1,6 @@
 # SRCLA Evaluation Report
 
-**Generated:** 2026-09-13T08:20:27.612Z · **Code:** `deae84084edd026baf3baf64902ca6403dc1bdfa` · **Artifact:** `694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf`
+**Generated:** 2026-09-14T06:48:07.099Z · **Code:** `f5f67806f9779292effe816bfa76d32f7e0734ff` · **Artifact:** `694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf`
 
 > Regenerated from `src/evaluation/report/`. It supersedes every earlier version of this file, which was produced by an untracked `evaluation-v2/*.mjs` harness that is not the code this repository ships.
 
@@ -20,7 +20,9 @@ The release decision therefore reads in §11.5's order: **demonstration → comp
 
 ## Verdict
 
-> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. The blocking checks are itemised below and evidenced in full further down.
+> **RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) passed both §11.5 gates. It is post-hoc: `heldout-c` is design data. The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are reported beside it below and do not decide release.
+
+_Verdict block re-rendered on 2026-09-14T07:32:48.141Z at commit 446aad3f3163bdd1ecedf2098c1852e84f467c84 from the run at commit f5f67806f9779292effe816bfa76d32f7e0734ff, without a replay; every number outside this block is that run's._
 
 ### `heldout-c` — 86d, 2064 origins
 
@@ -32,10 +34,9 @@ The release decision therefore reads in §11.5's order: **demonstration → comp
 
 **Policy gate: FAIL**
 
-- §11.1 pinned-prestate fork replay
 - Non-inferior to every sustainable baseline (margin 43.0 bps)
 
-### `heldout-b` — open-ended, 413 origins
+### `heldout-b` — 30d, 507 origins
 
 **Forecast gate: FAIL**
 
@@ -48,7 +49,6 @@ The release decision therefore reads in §11.5's order: **demonstration → comp
 **Policy gate: FAIL**
 
 - Demonstration: sustainability was demonstrated while deployed
-- §11.1 pinned-prestate fork replay
 - Safety: stressed liquid coverage
 - Sustainability S1: complete exit within the registered bound
 - Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED)
@@ -56,6 +56,26 @@ The release decision therefore reads in §11.5's order: **demonstration → comp
 - Sustainability: scale invariance across every registered tier (P26)
 
 A `FAIL` here is a result, not an error. §11.5 requires publishing a negative result rather than retuning against held-out data, and nothing in this run was retuned after a sealed era was opened.
+
+## Verdicts under Amendment P37 (paper v0.11)
+
+No registered threshold value moved. P37 changes what three gates measure — P34's forecast domain and redeemability attribution, one-sided coverage tests, and the fork replay scoped to SRCLA's own plans — and scopes the release to vaults up to 1,000,000 USDC.
+
+Amendment P38 (paper v0.12) decides release on P37's verdict on `heldout-c` alone. `heldout-c` is design data, so that verdict is post-hoc; `heldout-b` and `heldout-d` are reported and never decide it.
+
+**1. Registered v0.10: FAIL** — The registered gates exactly as run.
+
+- `heldout-c`: forecast FAIL, policy FAIL — blocked on forecast: Kupiec unconditional coverage — aave-v3-usdc; forecast: Kupiec unconditional coverage — compound-v3-usdc; forecast: Kupiec unconditional coverage — moonwell-usdc; policy: Non-inferior to every sustainable baseline (margin 43.0 bps)
+- `heldout-b`: forecast FAIL, policy FAIL — blocked on forecast: Kupiec unconditional coverage — aave-v3-usdc; forecast: Kupiec unconditional coverage — compound-v3-usdc; forecast: Per-venue coverage — moonwell-usdc; forecast: Kupiec unconditional coverage — moonwell-usdc; forecast: Christoffersen conditional coverage — moonwell-usdc; policy: Demonstration: sustainability was demonstrated while deployed; policy: Safety: stressed liquid coverage; policy: Sustainability S1: complete exit within the registered bound; policy: Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED); policy: Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED); policy: Sustainability: scale invariance across every registered tier (P26)
+
+**2. P37, post-hoc: FAIL** — POST-HOC: P37 was designed after both eras were opened, so this line is not a test of P37.
+
+- `heldout-c`: forecast PASS, policy FAIL — blocked on policy: Non-inferior to every sustainable baseline (margin 43.0 bps)
+- `heldout-b`: forecast FAIL, policy FAIL — blocked on forecast: Per-venue coverage, P34 domain — moonwell-usdc; forecast: Kupiec unconditional coverage, one-sided — moonwell-usdc; policy: Safety: stressed liquid coverage; policy: Sustainability: scale invariance across every registered tier (P26)
+
+**3. Release (`heldout-c`, Amendment P38): PASS** — POST-HOC (Amendment P38): P37's gates on `heldout-c`, which is design data — it informed P29, P31 and P37 — so this verdict is not an out-of-sample test of P37. Amendment P39: yield non-inferiority is reported, not gating; every other P37 check blocks.
+
+- `heldout-c`: forecast PASS, policy PASS — reported (not gating, Amendment P39): policy: Non-inferior to every sustainable baseline (margin 43.0 bps)
 
 ## Read this before citing any number
 
@@ -67,9 +87,10 @@ A `FAIL` here is a result, not an error. §11.5 requires publishing a negative r
 | `burned-a` | 2025-06-01 | 2026-02-28 | 273 | — |
 | `heldout-c` | 2026-03-01 | 2026-05-25 | 86 | **sealed** |
 | `burned` | 2026-05-26 | 2026-08-23 | 90 | — |
-| `heldout-b` | 2026-08-24 | open | open | **sealed** |
+| `heldout-b` | 2026-08-24 | 2026-09-23 | 30 | **sealed** |
+| `heldout-d` | 2026-09-23 | open | open | **sealed** |
 
-An era with an End of `open` grows with the live collector; its effective end is whenever collection last ran, reported per era in the measured-coverage table below.
+An era with an End of `open` (`heldout-d`) is SEALED, so it grows only as new origins are backfilled (`pnpm backfill:history`) -- ruling R30 refuses live-collector rows in any sealed era. Its effective end is whenever the backfill last ran, reported per era in the measured-coverage table below.
 
 Each era's registered role, in full — none of this is abbreviated, because the caveats are the point:
 
@@ -77,12 +98,14 @@ Each era's registered role, in full — none of this is abbreviated, because the
 - `burned-a` — Former PRIMARY held-out era (was heldout-a). Its aggregate statistics were read while diagnosing v0.5, which burned it under paper §2.2 -- it is design data now, not held-out. Excluded from fitting and from evaluation alike, same as `burned`.
 - `heldout-c` — v0.6 VALIDATION era, 86 days. Sealed until the registered run. LESS BURNED, NOT PRISTINE -- see disclosure 3. Used because heldout-b alone is too short and too dominated by one venue's liquidity failure to adjudicate a yield claim.
 - `burned` — Paper §4.1 DESIGN DATA. Read and reasoned about while deriving amendments P1-P8, so it is in neither the calibration nor a held-out era. Excluded from fitting and from evaluation alike. See disclosure 1.
-- `heldout-b` — SECONDARY held-out era, chronologically after everything including the burned window, and growing with the live collector. Low power; reported for temporal purity, not for significance.
+- `heldout-b` — SECONDARY held-out era, chronologically after everything including the burned window. Registered open-ended; P37 closed it at P37_FREEZE_SECONDS (disclosed), and it is DESIGN DATA for P37 (fourth burned-window declaration, paper v0.11). Low power; reported alongside `heldout-c` for the registered v0.10 verdict, not as release evidence -- release is decided by P37's verdict on `heldout-c` (Amendment P38).
+- `heldout-d` — P37 confirmation era, open-ended from one second after P37_FREEZE_SECONDS and growing as origins are backfilled. Nothing in P37 was designed, fit or tuned with any of it in view. Since Amendment P38 it does not decide release; it is reported when evaluated and graded only once it holds 2064 hourly origins with zero gaps.
 
 **Three deviations are disclosed, not buried:**
 
 1. Paper §4.1 says the burned window "lies inside the calibration era". Here it lies in **neither** era. Putting it in calibration would place fitting data *after* `heldout-c` in time, inverting walk-forward order and creating exactly the look-ahead §7.3 forbids. Excluding it satisfies §4.1's purpose — the window must never be held-out — strictly more than including it would. This is a paper-owner decision.
 2. `heldout-c` (Mar–May 2026) **precedes** the burned window in time. The amendments P1–P8 and the code were designed with knowledge of May–Aug 2026, so a designer who knew the later period could in principle have chosen mechanisms that suit the earlier one. `heldout-b` is chronologically after everything, including the burned window, and carries no such caveat — but it is only 16 days. **Both sealed eras are reported: `heldout-c` for what statistical power exists, `heldout-b` for temporal purity. Neither alone is sufficient.**
+That statement describes `heldout-b` as it was registered for the v0.10 verdict. Under Amendment P37 (paper v0.11), `heldout-b` is design data too — its per-venue and per-policy results were read to design G1, G3 and G5 — so only `heldout-d` carries no design knowledge. "Neither alone is sufficient" above applies to the registered v0.10 verdict; release itself is decided by P37's verdict on `heldout-c` (Amendment P38, post-hoc); see "Verdicts under Amendment P37" below.
 3. `heldout-c` is **less burned, not pristine.** It was carved out of the era this project called held-out A in v0.5. That era's *aggregate* statistics — net APY, worst stressed coverage, total cost and turnover — were read while diagnosing v0.5, which is why the remainder of it is now `burned-a` and is reported by nothing. What was learned is that era's overall direction, not this 86-day period's structure, so `heldout-c` is weaker evidence than a never-seen era would be and stronger than `burned-a`. It is used because `heldout-b` alone cannot adjudicate a yield claim.
 
 ### Withdrawals are a registered schedule, not observed
@@ -108,7 +131,7 @@ The archive is read from Base mainnet at historical blocks, and a historical rea
 ### Reproducibility caveats
 
 - **THIS IS NOT A CLEAN PRE-REGISTERED TEST OF `heldout-c`, and must not be cited as one.** An earlier registered run opened both sealed eras and returned FAIL. Its results then informed two changes made before this run: a re-specification of P1's uncertainty term, and a revision of four release thresholds. `heldout-c` has therefore INFORMED THE DESIGN and is design data by §2.2's own standard. This run is a CONFIRMATORY RE-RUN. The only era carrying no design knowledge of this controller is a future one.
-- The mitigating facts, stated so a reader can weigh them rather than take the above as boilerplate: P1's re-specification was derived from CALIBRATION-era measurements only (per-band forecast-error dispersion), it is stricter than what it replaces above 6.90% APY, and it was chosen before its effect on any sealed era was known. The threshold revisions were NOT: each is justified on its own terms below, but each was made after seeing which checks blocked.
+- The mitigating facts, stated so a reader can weigh them rather than take the above as boilerplate: P1's re-specification was derived from CALIBRATION-era measurements only (per-band forecast-error dispersion), and it was chosen before its effect on any sealed era was known. It is not a conservative choice on these eras: it is stricter than what it replaces only above each venue's crossover (aave 11.07%, compound 8.10%, moonwell 9.12%) and looser below it, where the sealed eras' typical venue rates sit. The threshold revisions were NOT: each is justified on its own terms below, but each was made after seeing which checks blocked.
 - **Revised release thresholds** (previous → current): demonstration floor 0.80 → 0.70; S2 stressed coverage 0.99 → 0.95; regime purity zero-tolerance → a 10% share; "no inert ablation" from BLOCKING to REPORTED. The non-inferiority margin was left at 43 bps precisely because raising it could only have been justified by the result it would produce. S2's grading floor was also SEPARATED from the constant the optimiser filters candidate allocations with, so relaxing the release bar does not silently relax the controller's own safety filter.
 - **Decision hashes from this version are not comparable to v0.6 ones.** The hashed decision component is now `legs` where it was a permanently-constant empty `costs` object, and the bootstrap `artifactHash` moved. An externally recorded decision hash from before this change will not reproduce; that is a documented format change rather than evidence of non-determinism.
 - **P36 — the movement hurdles now read the relative bound. This change is POST-HOC and is disclosed under P32.** P29 made the uncertainty haircut multiplicative in the optimiser's objective, but §9.1.2/§9.1.3's hurdles kept computing `rate + q_abs·year/H` from the absolute map — −4.09 pp (Aave), −2.11 pp (Compound) and −3.12 pp (Moonwell) annualised at the registered 1-day horizon — so a vault large enough to compress a venue's post-deposit rate below that haircut could not deploy into it at all. The defect was FOUND by reading the previous run's `heldout-c` ablation rows, where H3d restored capital at work at ten million. It is justified by P29's own calibration-era measurements and by conformance to §7.1, not by any held-out number. Its go/no-go was a calibration-era sweep (2025-03-03 → 2025-05-31, sixteen vault sizes) with three criteria fixed before it ran. Two passed: stressed coverage held at 1.000 at every size, and net APY at or below one million USDC moved by +0.3 to +1.4 bps. The third — capital at work and net APY no lower after the change at every size of $3M or more, with no tolerance — FAILED at $3M, $5M, $6.5M, $8M and $10M, by at most 0.72 percentage points of capital at work and 1.4 bps of APY (mean APY change at $3M or more: −0.03 bps). That window never exhibited the ten-million collapse (capital at work was already at least 0.917 before the change), so it could test for harm but not for benefit. **The repository owner overrode the failed criterion after seeing these numbers; that override is itself post-hoc.** The frozen artifact is unchanged (same hash, no refit). H2's switch now also removes the hurdle's haircut, which changes H2 and B3. Both sealed eras are therefore CONFIRMATORY RE-RUNS for P36.
@@ -132,8 +155,9 @@ Per-venue achieved coverage (amendment P1 — the quantile is solved per venue t
 A registered artifact is frozen before any sealed era is opened and is never refit afterwards. How this one came to be frozen, and against what:
 
 - The artifact was frozen by `pnpm phase4:freeze` against the corrected archive — the one in which every venue rate map reproduces chain and per-origin IRM attribution is present for all five eras. It selects `state-space` at a 1-day horizon on a selection margin of 0.4095 over the runner-up, so the choice is not a coin flip between near-ties.
-- P1's residual quantile is carried in RELATIVE form (`relativeResidualQuantileWadByMarket`: aave -0.369, compound -0.260, moonwell -0.342), applied as `mu * (1 + q)` rather than `mu + q`. The absolute map is retained and still reported. The re-specification was derived from CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast error varies 2.9x-5.9x across utilization bands while the relative error varies 1.8x-2.9x and tracks the level being forecast — and it is STRICTER than the absolute form above 6.90% APY, looser only below it.
+- P1's residual quantile is carried in RELATIVE form (`relativeResidualQuantileWadByMarket`: aave -0.369, compound -0.260, moonwell -0.342), applied as `mu * (1 + q)` rather than `mu + q`. The absolute map is retained and still reported. The re-specification was derived from CALIBRATION-era measurements alone — the 5% lower quantile of absolute forecast error varies 2.9x-5.9x across utilization bands while the relative error varies 1.8x-2.9x and tracks the level being forecast. It is not uniformly stricter: it is STRICTER than the absolute form only above each venue's crossover rate (annualised absolute haircut ÷ |relative quantile|: aave 11.07%, compound 8.10%, moonwell 9.12%) and LOOSER below it. The typical venue rates both sealed eras observed sit below every crossover — only peak rates and Moonwell's failed state on `heldout-b` exceed them — so on those eras the relative form is the LOOSER of the two.
 - P8's significance multiplier `k` did NOT resolve on the calibration sweep and is carried at its registered default. Every result that depends on it is provisional.
+- AMENDMENT P37 (paper v0.11) IS POST-HOC. It was designed after both sealed eras had been opened and read, so its verdict on `heldout-c` and `heldout-b` is labelled post-hoc and is not a test of P37. It moves no registered threshold value. It implements P34 in the gates (a residual whose label window saw its venue at zero withdrawable cash is outside the forecast's domain; an S2 breach fully explained by a position trapped in such a venue, with no deposit into it, is a VENUE FAILURE rather than an allocator error), makes the coverage tests one-sided for a lower bound, gates the fork replay on SRCLA's own plans, and scopes the release to vaults up to 1,000,000 USDC. `heldout-b`, registered open-ended, now ends at P37_FREEZE_SECONDS; the release verdict rests on `heldout-d`, sealed from the next second, and only once it holds 2,064 origins with zero gaps.
 
 ## Dataset and provenance
 
@@ -149,7 +173,8 @@ The registered era boundaries above are what was *declared*; this table is what 
 | `burned-a` | 2025-06-01 | 2026-02-28 | 30,973,326 | 42,765,126 | 6,552 | 273 | — |
 | `heldout-c` | 2026-03-01 | 2026-05-25 | 42,766,926 | 46,480,326 | 2,064 | 86 | **sealed** |
 | `burned` | 2026-05-26 | 2026-08-23 | 46,482,126 | 50,368,326 | 2,160 | 90 | — |
-| `heldout-b` | 2026-08-24 | 2026-09-10 | 50,370,126 | 51,111,726 | 413 | 17 | **sealed** |
+| `heldout-b` | 2026-08-24 | 2026-09-14 | 50,370,126 | 51,280,926 | 507 | 21 | **sealed** |
+| `heldout-d` | — | — | — | — | 0 | 0 | **sealed** |
 
 ### Venue registry
 
@@ -157,9 +182,9 @@ The three allowlisted yield venues, and the asset moved between them. Addresses 
 
 | Venue | Market ID | Contract address | APY min | APY mean | APY max | Config regimes | IRM contracts |
 |---|---|---|---|---|---|---|---|
-| Aave V3 Pool | `aave-v3-usdc` | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` | 2.31% | 3.06% | 13.05% | 4 | 1 |
-| Compound III Comet | `compound-v3-usdc` | `0xb125E6687d4313864e53df431d5425969c15Eb2F` | 2.19% | 3.79% | 14.41% | 1 | 1 |
-| Moonwell mUSDC | `moonwell-usdc` | `0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22` | 1.79% | 12.16% | 97.10% | 5 | 5 |
+| Aave V3 Pool | `aave-v3-usdc` | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` | 2.31% | 3.08% | 13.05% | 4 | 1 |
+| Compound III Comet | `compound-v3-usdc` | `0xb125E6687d4313864e53df431d5425969c15Eb2F` | 2.19% | 3.83% | 14.41% | 1 | 1 |
+| Moonwell mUSDC | `moonwell-usdc` | `0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22` | 1.79% | 12.25% | 97.10% | 5 | 5 |
 
 **Asset:** Circle native USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, 6 decimals — the one unified USDC across every venue above.
 
@@ -170,12 +195,12 @@ Gas and oracle values are **measured per origin, not assumed**: the L2 base fee 
 | Era | Observations | L2 base fee (wei) | L1 base fee (wei) | ETH/USD | USDC/USD | Gas-series digest |
 |---|---|---|---|---|---|---|
 | `heldout-c` | 2,088 | 5,000,000–83,554,996 | 24,660,517–14,616,020,080 | $1,839.6041–$2,451.6109 | $0.9997–$1.00 | `0x0dea1516387012faeeddeb7cb5d44a8858e71ceec7da511b6899dbdec9f6c555` |
-| `heldout-b` | 437 | 5,000,000–3,427,489,358 | 34,783,083–5,127,002,769 | $2,367.1784–$2,534.7721 | $0.9998–$1.00 | `0xb76522b6823c9d60cc4e5e0d12bca0f645392ccf373373caf8f477fef7a94260` |
+| `heldout-b` | 531 | 5,000,000–3,427,489,358 | 34,783,083–5,127,002,769 | $2,367.1784–$2,629.7062 | $0.9998–$1.00 | `0x521455a1dd562157ad4281f0b24003879eac0e2c585f348b34661ae9cd7c8320` |
 
 
 ## Results — era `heldout-c`
 
-2064 origins. Manifest `c75428629fcc200e73b9549e9087cf6cdd58ea17c8830ea570487a07615e1fa4`, dataset `230b5c117b8b7f3809f2b42dac014e0f1d6ace6e1a39e8d7b3658a06fda80640`, result `5787aef99afad5bcedcacda328c1169f55808587b8edf09ea14bb4cf3d4f90ee`. Reproduce with `pnpm run evaluation:verify`.
+2064 origins. Manifest `3e19c2a8402ece8bb2bd0ce1d791468a36612024521463302c0b6f82a86bff73`, dataset `230b5c117b8b7f3809f2b42dac014e0f1d6ace6e1a39e8d7b3658a06fda80640`, result `5787aef99afad5bcedcacda328c1169f55808587b8edf09ea14bb4cf3d4f90ee`. Reproduce with `pnpm run evaluation:verify`.
 
 ### Figures
 
@@ -567,7 +592,7 @@ Coverage is recomputed OUT OF SAMPLE. The artifact's per-venue quantile was solv
 | PASS | gates | Every registered tier ran | all 4 of §11.1's tiers |
 | PASS | gates | Every registered policy ran at every tier | all 64 required (policy, tier) runs |
 | PASS | gates | Calibrated artifact | 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
-| **FAIL** | gates | §11.1 pinned-prestate fork replay | did not execute on fork: b4@10000000000 (b4@10000000000 REFUSED BY THE CHAIN: the vault reverted the plan: transaction execution reverted (action="sendTransaction", data=null, reason=null, invocation=null, revert=null, transaction={ "data": "", "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "to": "0xEBBb24079B6fd4c26d84C2f1c66f4377Fb6B7C0e" }, receipt={ "_type": "TransactionReceipt", "blobGasPrice": "1", "blobGasUsed": null, "blockHash": "0x3830298412b757f30bf6afa6cc78e6fbf78a9372e14731f08baa46de29882642", "blockNumber": 51207219, "contractAddress": null, "cumulativeGasUsed": "302961",… |
+| PASS | gates | §11.1 pinned-prestate fork replay | 60 of 64 registered (policy, tier) runs had their FIRST proposed rebalance submitted and executed against the deployed vault on a Base fork, from a verified-restored pinned prestate; 4 proposed nothing at any origin (HOLD — no chain interaction, so no allocation was demonstrated for them). NOT claimed: the era's remaining origins and its returns were not replayed on chain, and all tiers were replayed against a single vault NAV, so cap and reserve limits were evaluated at that NAV rather than at each tier's. |
 | PASS | gates | Safety: withdrawal success measured and met | >= 99% across 4 SRCLA runs |
 | PASS | gates | Safety: stressed liquid coverage | >= 0.95 across 4 SRCLA runs reported (not gating): b5@10000000000 0.800, b5@100000000000 0.800, b5@1000000000000 0.800, h2@1000000000000 0.808, b1@10000000000000 0.151, b4@10000000000000 0.000 |
 | PASS | gates | Sustainability S1: complete exit within the registered bound | withdrawals filled and full exit within 24 origins across all 4 SRCLA runs |
@@ -579,9 +604,66 @@ Coverage is recomputed OUT OF SAMPLE. The artifact's per-venue quantile was solv
 | **FAIL** | gates | Non-inferior to every sustainable baseline (margin 43.0 bps) | inferior by more than the margin: b4@1000000000000 SRCLA 3.195% vs 3.627% (one-sided p=0.280) POWER DISCLOSURE — the skill window is inside the 43.0 bps margin at 4 of 4 tiers (10000000000: bounded hindsight 3.463% − best sustainable baseline b4 3.625% = -16.2 bps vs a 43.0 bps margin; 100000000000: bounded hindsight 3.472% − best sustainable baseline b4 3.627% = -15.5 bps vs a 43.0 bps margin; 1000000000000: bounded hindsight 3.473% − best sustainable baseline b4 3.627% = -15.4 bps vs a 43.0 bps margin; 10000000000000: bounded hindsight 2.793% − best sustainable baseline b3 2.653% = 14.0 bps… |
 | PASS | gates | Price of unsustainability published | b0@10000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b5@10000000000 3.463% (displayed−realized 0.096pp) — S2 stressed coverage 0.800 vs floor 0.950 (short by 0.150); b0@100000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b5@100000000000 3.472% (displayed−realized… |
 
+### §11.5 forecast gate under P37
+
+| Verdict | Role | Check | Detail |
+|---|---|---|---|
+| PASS | gates | Per-venue coverage, P34 domain — aave-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 2290 out-of-sample residuals, q=-1.1195e-4; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Kupiec unconditional coverage, one-sided — aave-v3-usdc | LR_uc 46.0305, one-sided p 1.0000 >= 0.05 — breach rate 0.00% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Christoffersen independence — aave-v3-usdc | LR_ind 0.0000, p 1.0000 >= 0.05 on 101 non-overlapping windows; LR_cc 2.0302 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Per-venue coverage, P34 domain — compound-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 2754 out-of-sample residuals, q=-5.7725e-5; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Kupiec unconditional coverage, one-sided — compound-v3-usdc | LR_uc 55.3572, one-sided p 1.0000 >= 0.05 — breach rate 0.00% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Christoffersen independence — compound-v3-usdc | LR_ind 0.0000, p 1.0000 >= 0.05 on 115 non-overlapping windows; LR_cc 2.3116 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Per-venue coverage, P34 domain — moonwell-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 2694 out-of-sample residuals, q=-8.5493e-5; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Kupiec unconditional coverage, one-sided — moonwell-usdc | LR_uc 54.1512, one-sided p 1.0000 >= 0.05 — breach rate 0.00% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Christoffersen independence — moonwell-usdc | LR_ind 0.0000, p 1.0000 >= 0.05 on 113 non-overlapping windows; LR_cc 2.2714 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Label completeness | worst venue aave-v3-usdc at 100.00% of 2784 origins (floor 99.00%); aave-v3-usdc 100.00%, compound-v3-usdc 100.00%, moonwell-usdc 100.00% |
+| PASS | gates | Regime purity | 433 of 8352 label windows straddle a regime change (5.18%, tolerance 10%): aave-v3-usdc@1769691600 (aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:7500000000000000:900000000000000000000000000:50000000000000000:100000000000000000:active -> aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:50000000000000000:100000000000000000:active at 1769778000, inside [origin, origin+H]); aave-v3-usdc@1769695200… |
+| PASS | gates | Availability-lag barrier | all 8352 labels are readable no earlier than origin + 86400s + 900s lag |
+| PASS | gates | Registered grid points present | swept 36, scorable 36, registered grid 36 |
+| PASS | gates | Selection margin | margin 6.4198e-1 against the registered floor 1e-3 |
+| PASS | gates | Artifact reproducibility | content hash re-derives from the artifact body: 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
+| PASS | gates | Calibrated artifact | artifact is registered, not provisional |
+| PASS | gates | Artifact completeness (P23) | the artifact carries every field the policy reads |
+
+### §11.5 policy gate under P37
+
+| Verdict | Role | Check | Detail |
+|---|---|---|---|
+| PASS | gates | Demonstration: sustainability was demonstrated while deployed | capital at work >= 0.7 across all 3 SRCLA runs (decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope") |
+| PASS | gates | Every registered tier ran | all 4 of §11.1's tiers |
+| PASS | gates | Every registered policy ran at every tier | all 64 required (policy, tier) runs |
+| PASS | gates | Calibrated artifact | 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
+| PASS | gates | §11.1 pinned-prestate fork replay (SRCLA plans, P37) | 3 of 3 registered (policy, tier) runs had their FIRST proposed rebalance submitted and executed against the deployed vault on a Base fork, from a verified-restored pinned prestate. NOT claimed: the era's remaining origins and its returns were not replayed on chain, and all tiers were replayed against a single vault NAV, so cap and reserve limits were evaluated at that NAV rather than at each tier's. Decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope". |
+| PASS | gates | Safety: withdrawal success measured and met | >= 99% across 3 SRCLA runs |
+| PASS | gates | Safety: stressed liquid coverage | >= 0.95 across 3 SRCLA runs reported (not gating): b5@10000000000 0.800, b5@100000000000 0.800, b5@1000000000000 0.800, h2@1000000000000 0.808 |
+| PASS | gates | Sustainability S1: complete exit within the registered bound | withdrawals filled and full exit within 24 origins across all 3 SRCLA runs |
+| PASS | gates | Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED) | no venue share above 0.25 at any origin. NOT EVALUATED: §11.5 S3's first clause — that the vault's own deposits do not push a venue past its registered utilization ceiling — is not measured by this run; only the venue-stress bound is across all 3 SRCLA runs |
+| PASS | gates | Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED) | no invalid action over any run (a deploy into a paused or absent venue, or a divest from a venue holding nothing). NOT EVALUATED: §11.5 S4 also names cap, dependency, reserve and loss violations and unrecoverable plan state; none of those five is measured by this run across all 3 SRCLA runs |
+| PASS | gates | Sustainability: scale invariance across every registered tier (P26) | sustainable at all 3 tiers measured (decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope") |
+| **FAIL** | reported | No inert ablation | reported (not gating): these made byte-identical decisions to SRCLA: h5, h6, h7 — any delta attributed to the component each removes is noise |
+| **FAIL** | reported | Diagnostic: statistical distinguishability from every sustainable baseline | b2@10000000000 p=0.058, b2@100000000000 p=0.124, b2@1000000000000 p=0.228 |
+| **FAIL** | gates | Non-inferior to every sustainable baseline (margin 43.0 bps) | inferior by more than the margin: b4@1000000000000 SRCLA 3.195% vs 3.627% (one-sided p=0.280) POWER DISCLOSURE — the skill window is inside the 43.0 bps margin at 3 of 3 tiers (10000000000: bounded hindsight 3.463% − best sustainable baseline b4 3.625% = -16.2 bps vs a 43.0 bps margin; 100000000000: bounded hindsight 3.472% − best sustainable baseline b4 3.627% = -15.5 bps vs a 43.0 bps margin; 1000000000000: bounded hindsight 3.473% − best sustainable baseline b4 3.627% = -15.4 bps vs a 43.0 bps margin): at those tiers non-inferiority is weak evidence of allocation quality, because… |
+| PASS | gates | Price of unsustainability published | b0@10000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b5@10000000000 3.463% (displayed−realized 0.096pp) — S2 stressed coverage 0.800 vs floor 0.950 (short by 0.150); b0@100000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b5@100000000000 3.472% (displayed−realized… |
+
+P37 decides its comparisons, comparator sustainability, excluded comparators, skill windows and price of unsustainability over the release tiers (10k/100k/1M) only — the 10M results for this era are the registered (v0.10) tables above, not repeated here.
+
+#### Outside the release scope (10M) — reported, never gating (G5)
+
+Demonstration floor: capital at work >= **0.7**. Below it a run is trivially redeemable and demonstrates nothing, so every criterion reports **ND** (NOT DEMONSTRATED) and no sustainability claim may be drawn from it.
+
+**What S3 and S4 do NOT cover.** Two of §11.5 part 3's clauses are not measured by this run, and the columns are named for what they measure rather than for the clause:
+
+- **S3** grades only the venue-stress bound. §11.5 S3's first clause — that the vault's own deposits do not push a venue past its **registered utilization ceiling** — is **NOT EVALUATED**. A PASS in that column is not evidence about the ceiling.
+- **S4** grades **action validity**: no deploy into a paused or absent venue, and no divest from a venue holding nothing. §11.5 S4's named classes — **cap, dependency, reserve and loss violations, and unrecoverable plan state** — are **NOT EVALUATED**. A PASS in that column is not evidence that no cap or reserve was breached.
+
+| Tier | Demonstrated | S1 redeem | S2 coverage | S3 venue stress | S4 action validity | Verdict | Net APY | Breach |
+|---|---|---|---|---|---|---|---|---|
+| 10,000,000 | yes | PASS | PASS | PASS | PASS | **SUSTAINABLE** | 2.547% | — |
+
 ## Results — era `heldout-b`
 
-413 origins. Manifest `3b87c83fea2729ae03761fa56b1601022cd788d81b592fc32037d51d177f19ee`, dataset `c00f5a0d165bdd7158d1c2c557095952446ff04063bfb5081d50873627e02807`, result `4a6bbc0b1866083e76be6c7f3ce895ade3593a71cc3ad4a8b07edb9b7a00944c`. Reproduce with `pnpm run evaluation:verify`.
+507 origins. Manifest `b8860454efb17fc9a82b05d869621d679732430bbe878860cf616170df532543`, dataset `bb8b6776da165a75ac1cd3169370e11aae864b9bea16639187b1c9876ff29aac`, result `79171e9539dba00171281bbab42a88a24c3b47d334959bf8fe6314095f207772`. Reproduce with `pnpm run evaluation:verify`.
 
 ### Figures
 
@@ -589,7 +671,7 @@ Vault size is on a logarithmic axis in all three: the registered tiers span thre
 
 ![figures/SRCLA-FIG1-apy-by-vault-size-heldout-b.svg](figures/SRCLA-FIG1-apy-by-vault-size-heldout-b.svg)
 
-**Figure 1 — Net APY by vault size.** Read this together with Figure 2: a yield curve alone cannot distinguish a policy that earns well from one that earns well by becoming unredeemable. **WARNING: moonwell-usdc held ZERO withdrawable cash for 29% of this era (peak 90% APY, unwithdrawable). Returns below are annualized from 17 days and are NOT attainable yield.** Computed on every 3rd origin of the era over 16 vault sizes; §11.1's four registered tiers are unchanged and remain the only sizes any gate is scored on.
+**Figure 1 — Net APY by vault size.** Read this together with Figure 2: a yield curve alone cannot distinguish a policy that earns well from one that earns well by becoming unredeemable. **WARNING: moonwell-usdc held ZERO withdrawable cash for 34% of this era (peak 90% APY, unwithdrawable). Returns below are annualized from 21 days and are NOT attainable yield.** Computed on every 3rd origin of the era over 16 vault sizes; §11.1's four registered tiers are unchanged and remain the only sizes any gate is scored on.
 
 ![figures/SRCLA-FIG2-coverage-by-vault-size-heldout-b.svg](figures/SRCLA-FIG2-coverage-by-vault-size-heldout-b.svg)
 
@@ -610,10 +692,10 @@ Demonstration floor: capital at work >= **0.7**. Below it a run is trivially red
 
 | Tier | Demonstrated | S1 redeem | S2 coverage | S3 venue stress | S4 action validity | Verdict | Net APY | Breach |
 |---|---|---|---|---|---|---|---|---|
-| 10,000 | yes | PASS | **FAIL** | PASS | PASS | **BREACH** | 34.457% | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| 100,000 | yes | PASS | **FAIL** | PASS | PASS | **BREACH** | 34.463% | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| 1,000,000 | yes | PASS | PASS | PASS | PASS | **SUSTAINABLE** | 29.051% | — |
-| 10,000,000 | **NOT DEMONSTRATED** | **ND** | **ND** | **ND** | **ND** | **NOT DEMONSTRATED** | 5.856% | NOT DEMONSTRATED: capital at work 0.391 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.856%) |
+| 10,000 | yes | PASS | **FAIL** | PASS | PASS | **BREACH** | 29.432% | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| 100,000 | yes | PASS | **FAIL** | PASS | PASS | **BREACH** | 29.438% | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| 1,000,000 | yes | PASS | PASS | PASS | PASS | **SUSTAINABLE** | 24.995% | — |
+| 10,000,000 | **NOT DEMONSTRATED** | **ND** | **ND** | **ND** | **ND** | **NOT DEMONSTRATED** | 5.219% | NOT DEMONSTRATED: capital at work 0.389 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.219%) |
 
 **Scale invariance (P26):** **NOT scale invariant** — a breach at any tier is a breach, and no average over tiers may stand in for it.
 
@@ -627,38 +709,40 @@ These policies are **not comparators**. Each is a counterexample: the return bel
 | `b0` | 100,000 | 0.000% | 0.000% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%) |
 | `b0` | 1,000,000 | 0.000% | 0.000% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%) |
 | `b0` | 10,000,000 | 0.000% | 0.000% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%) |
-| `b1` | 10,000,000 | 7.422% | 0.572% | **BREACH** | S2 stressed coverage 0.842 vs floor 0.950 (short by 0.108) |
-| `b2` | 10,000,000 | 4.054% | 2.865% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.578 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 4.054%) |
-| `b3` | 10,000 | 34.248% | -2.696% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `b3` | 100,000 | 34.251% | -2.699% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `b3` | 1,000,000 | 32.930% | 10.130% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.668 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 32.930%) |
-| `b3` | 10,000,000 | 9.192% | 3.601% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.690 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 9.192%) |
-| `b4` | 10,000,000 | 22.668% | -1.674% | **BREACH** | S2 stressed coverage 0.589 vs floor 0.950 (short by 0.361) |
-| `b5` | 10,000 | 34.559% | -2.746% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
-| `b5` | 100,000 | 34.568% | -2.756% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
-| `b5` | 1,000,000 | 34.588% | -2.793% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
-| `b5` | 10,000,000 | 13.419% | 9.190% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.560 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 13.419%) |
-| `h1` | 10,000,000 | 8.646% | 7.826% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.505 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 8.646%) |
-| `h2` | 10,000 | 34.248% | -2.696% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h2` | 100,000 | 34.251% | -2.699% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h2` | 1,000,000 | 34.272% | -2.740% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h2` | 10,000,000 | 6.889% | 10.237% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.390 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 6.889%) |
-| `h3` | 10,000,000 | 9.404% | 11.436% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.434 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 9.404%) |
-| `h3d` | 10,000 | 34.457% | -2.718% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h3d` | 100,000 | 34.463% | -2.724% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h3d` | 10,000,000 | 5.856% | 8.725% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.391 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.856%) |
-| `h4` | 10,000 | 34.457% | -2.718% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h4` | 100,000 | 34.463% | -2.724% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h4` | 10,000,000 | 5.856% | 8.725% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.391 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.856%) |
-| `h5` | 10,000 | 34.457% | -2.718% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h5` | 100,000 | 34.463% | -2.724% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h5` | 10,000,000 | 5.856% | 8.725% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.391 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.856%) |
-| `h6` | 10,000 | 34.457% | -2.718% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h6` | 100,000 | 34.463% | -2.724% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h6` | 10,000,000 | 8.276% | 9.548% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.448 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 8.276%) |
-| `h7` | 10,000 | 34.457% | -2.718% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h7` | 100,000 | 34.463% | -2.724% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
-| `h7` | 10,000,000 | 12.511% | 5.933% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.643 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 12.511%) |
+| `b1` | 10,000,000 | 6.686% | 0.776% | **BREACH** | S2 stressed coverage 0.842 vs floor 0.950 (short by 0.108) |
+| `b2` | 10,000,000 | 3.658% | 2.901% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.553 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 3.658%) |
+| `b2u` | 10,000,000 | 3.308% | 1.589% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.668 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 3.308%) |
+| `b3` | 10,000 | 29.209% | -1.593% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `b3` | 100,000 | 29.212% | -1.596% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `b3` | 1,000,000 | 27.978% | 9.886% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.665 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 27.978%) |
+| `b3` | 10,000,000 | 8.030% | 3.491% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.678 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 8.030%) |
+| `b4` | 10,000,000 | 19.833% | -1.175% | **BREACH** | S2 stressed coverage 0.515 vs floor 0.950 (short by 0.435) |
+| `b5` | 10,000 | 29.553% | -1.644% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
+| `b5` | 100,000 | 29.561% | -1.652% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
+| `b5` | 1,000,000 | 29.628% | -1.764% | **BREACH** | S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069) |
+| `b5` | 10,000,000 | 11.471% | 8.835% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.542 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 11.471%) |
+| `h1` | 10,000,000 | 7.638% | 7.322% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.497 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 7.638%) |
+| `h2` | 10,000 | 29.209% | -1.593% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h2` | 100,000 | 29.212% | -1.596% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h2` | 1,000,000 | 29.286% | -1.721% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h2` | 10,000,000 | 5.880% | 9.328% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.380 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.880%) |
+| `h3` | 10,000,000 | 8.289% | 10.091% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.439 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 8.289%) |
+| `h3d` | 10,000 | 29.432% | -1.616% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h3d` | 100,000 | 29.438% | -1.622% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h3d` | 10,000,000 | 5.219% | 7.978% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.389 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.219%) |
+| `h4` | 10,000 | 29.432% | -1.616% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h4` | 100,000 | 29.438% | -1.622% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h4` | 10,000,000 | 5.219% | 7.978% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.389 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.219%) |
+| `h5` | 10,000 | 29.432% | -1.616% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h5` | 100,000 | 29.438% | -1.622% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h5` | 10,000,000 | 5.219% | 7.978% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.389 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.219%) |
+| `h6` | 10,000 | 29.432% | -1.616% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h6` | 100,000 | 29.438% | -1.622% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h6` | 10,000,000 | 7.280% | 8.575% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.448 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 7.280%) |
+| `h7` | 10,000 | 29.432% | -1.616% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h7` | 100,000 | 29.438% | -1.622% | **BREACH** | S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072) |
+| `h7` | 1,000,000 | 25.102% | 6.474% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: S1 was not measured — the observation window ended before a complete exit could be tested (right-censored) |
+| `h7` | 10,000,000 | 10.900% | 5.501% | **NOT DEMONSTRATED** | NOT DEMONSTRATED: capital at work 0.639 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 10.900%) |
 
 ### Why capital sits idle — attributed to a component, not guessed
 
@@ -666,15 +750,15 @@ Capital at work is what decides the demonstration check, and a bare number canno
 
 | Policy | Removes | 10,000 | 100,000 | 1,000,000 | 10,000,000 |
 |---|---|---|---|---|---|
-| `srcla` | _nothing — the full controller_ | **0.943** | **0.943** | **0.943** | **0.391** |
-| `h1` | remove post-deposit simulation; rank on displayed rate. | 0.944 | 0.944 | 0.943 | 0.505 | **← restores deployment**
-| `h2` | remove calibrated lower bounds; use the point forecast. | 0.943 | 0.943 | 0.944 | 0.390 |
-| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P | 0.882 | 0.882 | 0.886 | 0.434 |
-| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 0.943 | 0.943 | 0.943 | 0.391 |
-| `h5` | remove shared-dependency caps. | 0.943 | 0.943 | 0.943 | 0.391 |
-| `h6` | remove c_i^liquidity. | 0.943 | 0.943 | 0.943 | 0.448 | **← restores deployment**
-| `h7` | remove the phi_i weighting. | 0.943 | 0.943 | 0.719 | 0.643 | **← restores deployment**
-| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 0.943 | 0.943 | 0.943 | 0.391 |
+| `srcla` | _nothing — the full controller_ | **0.945** | **0.945** | **0.947** | **0.389** |
+| `h1` | remove post-deposit simulation; rank on displayed rate. | 0.949 | 0.949 | 0.947 | 0.497 | **← restores deployment**
+| `h2` | remove calibrated lower bounds; use the point forecast. | 0.945 | 0.945 | 0.949 | 0.380 |
+| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P | 0.877 | 0.875 | 0.864 | 0.439 | **← restores deployment**
+| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 0.945 | 0.945 | 0.947 | 0.389 |
+| `h5` | remove shared-dependency caps. | 0.945 | 0.945 | 0.947 | 0.389 |
+| `h6` | remove c_i^liquidity. | 0.945 | 0.945 | 0.947 | 0.448 | **← restores deployment**
+| `h7` | remove the phi_i weighting. | 0.945 | 0.945 | 0.723 | 0.639 | **← restores deployment**
+| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 0.945 | 0.945 | 0.947 | 0.389 |
 
 
 ### The capacity frontier — was the tier beyond the venues, or was the capacity declined?
@@ -685,84 +769,84 @@ Idle capital has two opposite explanations — the venues could not absorb the t
 
 | Policy | Capital at work | Stressed coverage (min) | Full exit | Net APY | Displayed − realized |
 |---|---|---|---|---|---|
-| `b4` | 0.980 | 100.000% | 0 | 22.666% | -1.672% |
-| `h1` | 0.944 | 100.000% | 0 | 19.271% | -0.465% |
-| `b5` | 0.943 | 88.125% | 1 | 34.559% | -2.746% |
-| **`srcla`** | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `h4` | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `h5` | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `h6` | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `h7` | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `h3d` | 0.943 | 87.800% | 1 | 34.457% | -2.718% |
-| `b3` | 0.943 | 87.807% | 1 | 34.248% | -2.696% |
-| `h2` | 0.943 | 87.807% | 1 | 34.248% | -2.696% |
-| `b2u` | 0.929 | 99.932% | 1 | 7.893% | 0.310% |
-| `b1` | 0.927 | 99.898% | 1 | 9.949% | 0.414% |
-| `b2` | 0.886 | 99.933% | 1 | 7.102% | 0.673% |
-| `h3` | 0.882 | 100.000% | 0 | 6.067% | 0.597% |
+| `b4` | 0.983 | 100.000% | 0 | 19.831% | -1.173% |
+| `h1` | 0.949 | 100.000% | 0 | 17.282% | -0.254% |
+| `b5` | 0.945 | 88.125% | 1 | 29.553% | -1.644% |
+| **`srcla`** | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `h4` | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `h5` | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `h6` | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `h7` | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `h3d` | 0.945 | 87.800% | 1 | 29.432% | -1.616% |
+| `b3` | 0.945 | 87.807% | 1 | 29.209% | -1.593% |
+| `h2` | 0.945 | 87.807% | 1 | 29.209% | -1.593% |
+| `b1` | 0.918 | 99.898% | 1 | 8.942% | 0.552% |
+| `b2u` | 0.904 | 99.932% | 1 | 7.137% | 0.548% |
+| `b2` | 0.886 | 99.933% | 1 | 6.667% | 0.678% |
+| `h3` | 0.877 | 100.000% | 0 | 5.765% | 0.640% |
 | `b0` | 0.000 | 100.000% | 0 | 0.000% | 0.000% |
 
 **Tier 100,000 USDC**
 
 | Policy | Capital at work | Stressed coverage (min) | Full exit | Net APY | Displayed − realized |
 |---|---|---|---|---|---|
-| `b4` | 0.980 | 100.000% | 0 | 22.668% | -1.673% |
-| `h1` | 0.944 | 100.000% | 0 | 19.276% | -0.470% |
-| `b5` | 0.943 | 88.125% | 1 | 34.568% | -2.756% |
-| **`srcla`** | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `h4` | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `h5` | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `h6` | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `h7` | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `h3d` | 0.943 | 87.800% | 1 | 34.463% | -2.724% |
-| `b3` | 0.943 | 87.807% | 1 | 34.251% | -2.699% |
-| `h2` | 0.943 | 87.807% | 1 | 34.251% | -2.699% |
-| `b2u` | 0.929 | 99.932% | 1 | 7.909% | 0.294% |
-| `b1` | 0.927 | 99.898% | 1 | 9.973% | 0.391% |
-| `b2` | 0.886 | 99.933% | 1 | 7.117% | 0.658% |
-| `h3` | 0.882 | 100.000% | 0 | 6.087% | 0.577% |
+| `b4` | 0.983 | 100.000% | 0 | 19.833% | -1.175% |
+| `h1` | 0.949 | 100.000% | 0 | 17.287% | -0.259% |
+| `b5` | 0.945 | 88.125% | 1 | 29.561% | -1.652% |
+| **`srcla`** | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `h4` | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `h5` | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `h6` | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `h7` | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `h3d` | 0.945 | 87.800% | 1 | 29.438% | -1.622% |
+| `b3` | 0.945 | 87.807% | 1 | 29.212% | -1.596% |
+| `h2` | 0.945 | 87.807% | 1 | 29.212% | -1.596% |
+| `b1` | 0.918 | 99.898% | 1 | 8.965% | 0.529% |
+| `b2u` | 0.904 | 99.932% | 1 | 7.154% | 0.531% |
+| `b2` | 0.886 | 99.933% | 1 | 6.684% | 0.661% |
+| `h3` | 0.875 | 100.000% | 0 | 5.777% | 0.627% |
 | `b0` | 0.000 | 100.000% | 0 | 0.000% | 0.000% |
 
 **Tier 1,000,000 USDC**
 
 | Policy | Capital at work | Stressed coverage (min) | Full exit | Net APY | Displayed − realized |
 |---|---|---|---|---|---|
-| `b4` | 0.980 | 100.000% | 0 | 22.668% | -1.674% |
-| `h2` | 0.944 | 87.807% | 1 | 34.272% | -2.740% |
-| `b5` | 0.944 | 88.125% | 1 | 34.588% | -2.793% |
-| `b2u` | 0.944 | 99.890% | 1 | 9.344% | 0.172% |
-| **`srcla`** | 0.943 | 100.000% | 0 | 29.051% | -1.772% |
-| `h4` | 0.943 | 100.000% | 0 | 29.051% | -1.772% |
-| `h5` | 0.943 | 100.000% | 0 | 29.051% | -1.772% |
-| `h6` | 0.943 | 100.000% | 0 | 29.051% | -1.772% |
-| `h3d` | 0.943 | 100.000% | 0 | 29.051% | -1.772% |
-| `h1` | 0.943 | 100.000% | 0 | 19.138% | -0.443% |
-| `b1` | 0.927 | 99.898% | 1 | 9.975% | 0.389% |
-| `b2` | 0.899 | 99.892% | 1 | 8.751% | 0.646% |
-| `h3` | 0.886 | 100.000% | 0 | 7.035% | 0.677% |
-| `h7` | 0.719 | 100.000% | 0 | 29.270% | 6.762% |
-| `b3` | 0.668 | 87.850% | 3 | 32.930% | 10.130% |
+| `b4` | 0.983 | 100.000% | 0 | 19.833% | -1.175% |
+| `h2` | 0.949 | 87.807% | 1 | 29.286% | -1.721% |
+| `b5` | 0.949 | 88.125% | 1 | 29.628% | -1.764% |
+| **`srcla`** | 0.947 | 100.000% | 0 | 24.995% | -1.034% |
+| `h4` | 0.947 | 100.000% | 0 | 24.995% | -1.034% |
+| `h5` | 0.947 | 100.000% | 0 | 24.995% | -1.034% |
+| `h6` | 0.947 | 100.000% | 0 | 24.995% | -1.034% |
+| `h3d` | 0.947 | 100.000% | 0 | 24.995% | -1.034% |
+| `h1` | 0.947 | 100.000% | 0 | 16.816% | -0.171% |
+| `b2u` | 0.922 | 99.890% | 1 | 8.319% | 0.445% |
+| `b1` | 0.918 | 99.898% | 1 | 8.967% | 0.527% |
+| `b2` | 0.887 | 99.892% | 1 | 7.895% | 0.772% |
+| `h3` | 0.864 | 100.000% | 0 | 6.374% | 0.842% |
+| `h7` | 0.723 | 95.802% | **censored** | 25.102% | 6.474% |
+| `b3` | 0.665 | 86.444% | **censored** | 27.978% | 9.886% |
 | `b0` | 0.000 | 100.000% | 0 | 0.000% | 0.000% |
 
 **Tier 10,000,000 USDC**
 
 | Policy | Capital at work | Stressed coverage (min) | Full exit | Net APY | Displayed − realized |
 |---|---|---|---|---|---|
-| `b4` | 0.980 | 58.949% | **censored** | 22.668% | -1.674% |
-| `b1` | 0.898 | 84.214% | 1 | 7.422% | 0.572% |
-| `b2u` | 0.719 | 99.945% | 1 | 3.621% | 1.346% |
-| `b3` | 0.690 | 100.000% | 0 | 9.192% | 3.601% |
-| `h7` | 0.643 | 100.000% | 0 | 12.511% | 5.933% |
-| `b2` | 0.578 | 100.000% | 0 | 4.054% | 2.865% |
-| `b5` | 0.560 | 100.000% | 0 | 13.419% | 9.190% |
-| `h1` | 0.505 | 100.000% | 0 | 8.646% | 7.826% |
-| `h6` | 0.448 | 100.000% | 1 | 8.276% | 9.548% |
-| `h3` | 0.434 | 100.000% | 0 | 9.404% | 11.436% |
-| **`srcla`** | 0.391 | 100.000% | 0 | 5.856% | 8.725% |
-| `h4` | 0.391 | 100.000% | 0 | 5.856% | 8.725% |
-| `h5` | 0.391 | 100.000% | 0 | 5.856% | 8.725% |
-| `h3d` | 0.391 | 100.000% | 0 | 5.856% | 8.725% |
-| `h2` | 0.390 | 100.000% | 0 | 6.889% | 10.237% |
+| `b4` | 0.983 | 51.473% | **censored** | 19.833% | -1.175% |
+| `b1` | 0.873 | 84.214% | 1 | 6.686% | 0.776% |
+| `b3` | 0.678 | 100.000% | 0 | 8.030% | 3.491% |
+| `b2u` | 0.668 | 99.945% | 1 | 3.308% | 1.589% |
+| `h7` | 0.639 | 100.000% | 0 | 10.900% | 5.501% |
+| `b2` | 0.553 | 100.000% | 0 | 3.658% | 2.901% |
+| `b5` | 0.542 | 100.000% | 0 | 11.471% | 8.835% |
+| `h1` | 0.497 | 100.000% | 0 | 7.638% | 7.322% |
+| `h6` | 0.448 | 100.000% | 1 | 7.280% | 8.575% |
+| `h3` | 0.439 | 100.000% | 0 | 8.289% | 10.091% |
+| **`srcla`** | 0.389 | 100.000% | 0 | 5.219% | 7.978% |
+| `h4` | 0.389 | 100.000% | 0 | 5.219% | 7.978% |
+| `h5` | 0.389 | 100.000% | 0 | 5.219% | 7.978% |
+| `h3d` | 0.389 | 100.000% | 0 | 5.219% | 7.978% |
+| `h2` | 0.380 | 100.000% | 0 | 5.880% | 9.328% |
 | `b0` | 0.000 | 100.000% | 0 | 0.000% | 0.000% |
 
 
@@ -776,85 +860,85 @@ Idle capital has two opposite explanations — the venues could not absorb the t
 
 | Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Full exit (origins, lower bound) | Max venue share | Displayed − realized | Ablation |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `srcla` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | — |
+| `srcla` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | — |
 | `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.000% | — |
-| `b1` | 11.2 | 9.949% | 18 | 33,836 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.414% | — |
-| `b2` | 11.2 | 7.102% | 11 | 39,821 | 0 | 100.0% | 99.933% | 100.000% | 100.000% | 1 | — | 0.673% | — |
-| `b2u` | 11.2 | 7.893% | 13 | 40,626 | 0 | 100.0% | 99.932% | 100.000% | 100.000% | 1 | — | 0.310% | — |
-| `b3` | 11.2 | 34.248% | 3 | 10,200 | 0 | 100.0% | 87.807% | 87.827% | 94.191% | 1 | — | -2.696% | — |
-| `b4` | 11.2 | 22.666% | 245 | 9,981 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.672% | — |
-| `b5` | 11.2 | 34.559% | 7 | 14,570 | 0 | 100.0% | 88.125% | 88.146% | 94.499% | 1 | — | -2.746% | — |
-| `h1` | 11.3 | 19.271% | 4 | 14,877 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.465% | — |
-| `h2` | 11.3 | 34.248% | 3 | 10,200 | 0 | 100.0% | 87.807% | 87.827% | 94.191% | 1 | — | -2.696% | — |
-| `h3` | 11.3 | 6.067% | 16 | 38,627 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.597% | — |
-| `h4` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | — |
-| `h5` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | **INERT** |
-| `h6` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | **INERT** |
-| `h7` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | **INERT** |
-| `h3d` | 11.3 | 34.457% | 4 | 11,800 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.718% | — |
+| `b1` | 11.2 | 8.942% | 24 | 38,750 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.552% | — |
+| `b2` | 11.2 | 6.667% | 17 | 45,305 | 0 | 100.0% | 99.933% | 100.000% | 100.000% | 1 | — | 0.678% | — |
+| `b2u` | 11.2 | 7.137% | 17 | 50,038 | 0 | 100.0% | 99.932% | 100.000% | 100.000% | 1 | — | 0.548% | — |
+| `b3` | 11.2 | 29.209% | 3 | 10,242 | 0 | 100.0% | 87.807% | 87.832% | 96.827% | 1 | — | -1.593% | — |
+| `b4` | 11.2 | 19.831% | 339 | 10,437 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.173% | — |
+| `b5` | 11.2 | 29.553% | 7 | 14,612 | 0 | 100.0% | 88.125% | 88.151% | 97.140% | 1 | — | -1.644% | — |
+| `h1` | 11.3 | 17.282% | 4 | 15,051 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.254% | — |
+| `h2` | 11.3 | 29.209% | 3 | 10,242 | 0 | 100.0% | 87.807% | 87.832% | 96.827% | 1 | — | -1.593% | — |
+| `h3` | 11.3 | 5.765% | 21 | 43,544 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.640% | — |
+| `h4` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | — |
+| `h5` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | **INERT** |
+| `h6` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | **INERT** |
+| `h7` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | **INERT** |
+| `h3d` | 11.3 | 29.432% | 4 | 11,842 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.616% | — |
 
 #### Tier 100,000 USDC
 
 | Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Full exit (origins, lower bound) | Max venue share | Displayed − realized | Ablation |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `srcla` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | — |
+| `srcla` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | — |
 | `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.000% | — |
-| `b1` | 11.2 | 9.973% | 18 | 338,358 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.391% | — |
-| `b2` | 11.2 | 7.117% | 11 | 398,209 | 0 | 100.0% | 99.933% | 100.000% | 100.000% | 1 | — | 0.658% | — |
-| `b2u` | 11.2 | 7.909% | 13 | 406,260 | 0 | 100.0% | 99.932% | 100.000% | 100.000% | 1 | — | 0.294% | — |
-| `b3` | 11.2 | 34.251% | 3 | 102,000 | 0 | 100.0% | 87.807% | 87.827% | 94.191% | 1 | — | -2.699% | — |
-| `b4` | 11.2 | 22.668% | 245 | 99,809 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.673% | — |
-| `b5` | 11.2 | 34.568% | 7 | 145,699 | 0 | 100.0% | 88.125% | 88.145% | 94.499% | 1 | — | -2.756% | — |
-| `h1` | 11.3 | 19.276% | 4 | 148,771 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.470% | — |
-| `h2` | 11.3 | 34.251% | 3 | 102,000 | 0 | 100.0% | 87.807% | 87.827% | 94.191% | 1 | — | -2.699% | — |
-| `h3` | 11.3 | 6.087% | 16 | 386,267 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.577% | — |
-| `h4` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | — |
-| `h5` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | **INERT** |
-| `h6` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | **INERT** |
-| `h7` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | **INERT** |
-| `h3d` | 11.3 | 34.463% | 4 | 118,000 | 0 | 100.0% | 87.800% | 87.820% | 94.187% | 1 | — | -2.724% | — |
+| `b1` | 11.2 | 8.965% | 24 | 387,506 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.529% | — |
+| `b2` | 11.2 | 6.684% | 17 | 453,055 | 0 | 100.0% | 99.933% | 100.000% | 100.000% | 1 | — | 0.661% | — |
+| `b2u` | 11.2 | 7.154% | 17 | 500,383 | 0 | 100.0% | 99.932% | 100.000% | 100.000% | 1 | — | 0.531% | — |
+| `b3` | 11.2 | 29.212% | 3 | 102,416 | 0 | 100.0% | 87.807% | 87.832% | 96.827% | 1 | — | -1.596% | — |
+| `b4` | 11.2 | 19.833% | 339 | 104,369 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.175% | — |
+| `b5` | 11.2 | 29.561% | 7 | 146,116 | 0 | 100.0% | 88.125% | 88.151% | 97.139% | 1 | — | -1.652% | — |
+| `h1` | 11.3 | 17.287% | 4 | 150,508 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.259% | — |
+| `h2` | 11.3 | 29.212% | 3 | 102,416 | 0 | 100.0% | 87.807% | 87.832% | 96.827% | 1 | — | -1.596% | — |
+| `h3` | 11.3 | 5.777% | 21 | 435,353 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.627% | — |
+| `h4` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | — |
+| `h5` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | **INERT** |
+| `h6` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | **INERT** |
+| `h7` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | **INERT** |
+| `h3d` | 11.3 | 29.438% | 4 | 118,417 | 0 | 100.0% | 87.800% | 87.825% | 96.816% | 1 | — | -1.622% | — |
 
 #### Tier 1,000,000 USDC
 
 | Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Full exit (origins, lower bound) | Max venue share | Displayed − realized | Ablation |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `srcla` | 11.3 | 29.051% | 3 | 1,012,395 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.772% | — |
+| `srcla` | 11.3 | 24.995% | 3 | 1,023,953 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.034% | — |
 | `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.000% | — |
-| `b1` | 11.2 | 9.975% | 18 | 3,383,584 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.389% | — |
-| `b2` | 11.2 | 8.751% | 13 | 4,418,337 | 0 | 100.0% | 99.892% | 100.000% | 100.000% | 1 | — | 0.646% | — |
-| `b2u` | 11.2 | 9.344% | 213 | 4,291,434 | 0 | 100.0% | 99.890% | 100.000% | 100.000% | 1 | — | 0.172% | — |
-| `b3` | 11.2 | 32.930% | 4 | 1,300,000 | 0 | 100.0% | 87.850% | 87.868% | 94.059% | 3 | — | 10.130% | — |
-| `b4` | 11.2 | 22.668% | 245 | 998,095 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.674% | — |
-| `b5` | 11.2 | 34.588% | 7 | 1,443,557 | 0 | 100.0% | 88.125% | 88.145% | 94.348% | 1 | — | -2.793% | — |
-| `h1` | 11.3 | 19.138% | 4 | 1,252,240 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.443% | — |
-| `h2` | 11.3 | 34.272% | 3 | 1,004,875 | 0 | 100.0% | 87.807% | 87.827% | 94.042% | 1 | — | -2.740% | — |
-| `h3` | 11.3 | 7.035% | 17 | 4,018,661 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.677% | — |
-| `h4` | 11.3 | 29.051% | 3 | 1,012,395 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.772% | — |
-| `h5` | 11.3 | 29.051% | 3 | 1,012,395 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.772% | **INERT** |
-| `h6` | 11.3 | 29.051% | 3 | 1,012,395 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.772% | **INERT** |
-| `h7` | 11.3 | 29.270% | 3 | 1,260,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 6.762% | — |
-| `h3d` | 11.3 | 29.051% | 3 | 1,012,395 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.772% | — |
+| `b1` | 11.2 | 8.967% | 24 | 3,875,063 | 0 | 100.0% | 99.898% | 100.000% | 100.000% | 1 | — | 0.527% | — |
+| `b2` | 11.2 | 7.895% | 19 | 4,955,332 | 0 | 100.0% | 99.892% | 100.000% | 100.000% | 1 | — | 0.772% | — |
+| `b2u` | 11.2 | 8.319% | 224 | 4,714,312 | 0 | 100.0% | 99.890% | 100.000% | 100.000% | 1 | — | 0.445% | — |
+| `b3` | 11.2 | 27.978% | 4 | 1,300,000 | 0 | 100.0% | 86.444% | 87.869% | 93.822% | **censored** | — | 9.886% | — |
+| `b4` | 11.2 | 19.833% | 339 | 1,043,693 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.175% | — |
+| `b5` | 11.2 | 29.628% | 7 | 1,461,163 | 0 | 100.0% | 88.125% | 88.150% | 94.259% | 1 | — | -1.764% | — |
+| `h1` | 11.3 | 16.816% | 4 | 1,263,539 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -0.171% | — |
+| `h2` | 11.3 | 29.286% | 3 | 1,024,160 | 0 | 100.0% | 87.807% | 87.831% | 93.798% | 1 | — | -1.721% | — |
+| `h3` | 11.3 | 6.374% | 20 | 4,477,220 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.842% | — |
+| `h4` | 11.3 | 24.995% | 3 | 1,023,953 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.034% | — |
+| `h5` | 11.3 | 24.995% | 3 | 1,023,953 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.034% | **INERT** |
+| `h6` | 11.3 | 24.995% | 3 | 1,023,953 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.034% | **INERT** |
+| `h7` | 11.3 | 25.102% | 3 | 1,260,000 | 0 | 100.0% | 95.802% | 100.000% | 100.000% | **censored** | — | 6.474% | — |
+| `h3d` | 11.3 | 24.995% | 3 | 1,023,953 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | -1.034% | — |
 
 #### Tier 10,000,000 USDC
 
 | Policy | § | Net APY | Rebalances | Turnover (USDC) | Costs (USDC) | Withdrawals filled | Stressed coverage — **min (gate)** | Stressed coverage — p05 | Stressed coverage — median | Full exit (origins, lower bound) | Max venue share | Displayed − realized | Ablation |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `srcla` | 11.3 | 5.856% | 23 | 18,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 8.725% | — |
+| `srcla` | 11.3 | 5.219% | 27 | 22,200,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.978% | — |
 | `b0` | 11.2 | 0.000% | 0 | 0 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 0.000% | — |
-| `b1` | 11.2 | 7.422% | 17 | 38,599,869 | 0 | 100.0% | 84.214% | 84.264% | 95.514% | 1 | — | 0.572% | — |
-| `b2` | 11.2 | 4.054% | 18 | 46,048,527 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 2.865% | — |
-| `b2u` | 11.2 | 3.621% | 18 | 74,659,999 | 0 | 100.0% | 99.945% | 99.964% | 100.000% | 1 | — | 1.346% | — |
-| `b3` | 11.2 | 9.192% | 9 | 9,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 3.601% | — |
-| `b4` | 11.2 | 22.668% | 245 | 9,980,948 | 0 | 100.0% | 58.949% | 58.959% | 66.315% | **censored** | — | -1.674% | — |
-| `b5` | 11.2 | 13.419% | 20 | 14,398,712 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 9.190% | — |
-| `h1` | 11.3 | 8.646% | 25 | 15,993,505 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.826% | — |
-| `h2` | 11.3 | 6.889% | 21 | 10,800,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 10.237% | — |
-| `h3` | 11.3 | 9.404% | 22 | 23,800,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 11.436% | — |
-| `h4` | 11.3 | 5.856% | 23 | 18,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 8.725% | — |
-| `h5` | 11.3 | 5.856% | 23 | 18,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 8.725% | **INERT** |
-| `h6` | 11.3 | 8.276% | 24 | 21,785,714 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 1 | — | 9.548% | — |
-| `h7` | 11.3 | 12.511% | 6 | 10,000,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 5.933% | — |
-| `h3d` | 11.3 | 5.856% | 23 | 18,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 8.725% | — |
+| `b1` | 11.2 | 6.686% | 21 | 47,566,514 | 0 | 100.0% | 84.214% | 87.960% | 98.434% | 1 | — | 0.776% | — |
+| `b2` | 11.2 | 3.658% | 22 | 59,374,525 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 2.901% | — |
+| `b2u` | 11.2 | 3.308% | 22 | 88,172,562 | 0 | 100.0% | 99.945% | 100.000% | 100.000% | 1 | — | 1.589% | — |
+| `b3` | 11.2 | 8.030% | 9 | 9,600,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 3.491% | — |
+| `b4` | 11.2 | 19.833% | 339 | 10,436,927 | 0 | 100.0% | 51.473% | 58.912% | 66.200% | **censored** | — | -1.175% | — |
+| `b5` | 11.2 | 11.471% | 24 | 16,598,712 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 8.835% | — |
+| `h1` | 11.3 | 7.638% | 29 | 18,193,505 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.322% | — |
+| `h2` | 11.3 | 5.880% | 22 | 11,200,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 9.328% | — |
+| `h3` | 11.3 | 8.289% | 24 | 26,000,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 10.091% | — |
+| `h4` | 11.3 | 5.219% | 27 | 22,200,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.978% | — |
+| `h5` | 11.3 | 5.219% | 27 | 22,200,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.978% | **INERT** |
+| `h6` | 11.3 | 7.280% | 28 | 25,385,714 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 1 | — | 8.575% | — |
+| `h7` | 11.3 | 10.900% | 6 | 10,000,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 5.501% | — |
+| `h3d` | 11.3 | 5.219% | 27 | 22,200,000 | 0 | 100.0% | 100.000% | 100.000% | 100.000% | 0 | — | 7.978% | — |
 
 ### The skill window (P22) — is either yield statement informative?
 
@@ -862,10 +946,10 @@ Registered non-inferiority margin: **43.0 bps** annualized (`REGISTERED_NONINFER
 
 | Tier | Bounded hindsight (B5) | Best sustainable baseline | its net APY | Skill window | Superiority resolvable? |
 |---|---|---|---|---|---|
-| 10,000 | 34.559% | b4 | 22.666% | 1189.3 bps | INFORMATIVE |
-| 100,000 | 34.568% | b4 | 22.668% | 1190.1 bps | INFORMATIVE |
-| 1,000,000 | 34.588% | b4 | 22.668% | 1192.0 bps | INFORMATIVE |
-| 10,000,000 | 13.419% | — | — | — | **NOT PRODUCED** |
+| 10,000 | 29.553% | b4 | 19.831% | 972.2 bps | INFORMATIVE |
+| 100,000 | 29.561% | b4 | 19.833% | 972.8 bps | INFORMATIVE |
+| 1,000,000 | 29.628% | b4 | 19.833% | 979.4 bps | INFORMATIVE |
+| 10,000,000 | 11.471% | — | — | — | **NOT PRODUCED** |
 
 A window narrower than the margin means **no policy could have demonstrated yield superiority at this resolution**, so the superiority line is reported NOT INFORMATIVE and gates nothing. It does **not** excuse the non-inferiority test: a narrow window makes non-inferiority *easier*, so a pass there is disclosed as weak evidence of allocation quality — deploy-and-hold would satisfy it too. The window never touches the demonstration, completeness or sustainability checks: yield can be beyond reach, redeemability cannot.
 
@@ -875,15 +959,15 @@ A window narrower than the margin means **no policy could have demonstrated yiel
 
 | Tier | Baseline | SRCLA | Baseline | Non-inferior (43.0 bps) | one-sided p | two-sided HAC p | bootstrap 95% CI of difference |
 |---|---|---|---|---|---|---|---|
-| 10,000 | `b1` | 34.457% | 9.949% | NON-INFERIOR | 0.0000 | 0.0000 | [1.78e-5, 2.85e-5] |
-| 10,000 | `b2` | 34.457% | 7.102% | NON-INFERIOR | 0.0000 | 0.0000 | [2.07e-5, 3.17e-5] |
-| 10,000 | `b4` | 34.457% | 22.666% | NON-INFERIOR | 0.0000 | 0.0000 | [8.40e-6, 1.28e-5] |
-| 100,000 | `b1` | 34.463% | 9.973% | NON-INFERIOR | 0.0000 | 0.0000 | [1.78e-5, 2.84e-5] |
-| 100,000 | `b2` | 34.463% | 7.117% | NON-INFERIOR | 0.0000 | 0.0000 | [2.06e-5, 3.17e-5] |
-| 100,000 | `b4` | 34.463% | 22.668% | NON-INFERIOR | 0.0000 | 0.0000 | [8.41e-6, 1.28e-5] |
-| 1,000,000 | `b1` | 29.051% | 9.975% | NON-INFERIOR | 0.0000 | 0.0000 | [1.39e-5, 2.28e-5] |
-| 1,000,000 | `b2` | 29.051% | 8.751% | NON-INFERIOR | 0.0000 | 0.0000 | [1.52e-5, 2.42e-5] |
-| 1,000,000 | `b4` | 29.051% | 22.668% | NON-INFERIOR | 0.0000 | 0.0000 | [4.61e-6, 7.10e-6] |
+| 10,000 | `b1` | 29.432% | 8.942% | NON-INFERIOR | 0.0000 | 0.0000 | [1.50e-5, 2.51e-5] |
+| 10,000 | `b2` | 29.432% | 6.667% | NON-INFERIOR | 0.0000 | 0.0000 | [1.73e-5, 2.79e-5] |
+| 10,000 | `b4` | 29.432% | 19.831% | NON-INFERIOR | 0.0000 | 0.0000 | [6.87e-6, 1.10e-5] |
+| 100,000 | `b1` | 29.438% | 8.965% | NON-INFERIOR | 0.0000 | 0.0000 | [1.50e-5, 2.51e-5] |
+| 100,000 | `b2` | 29.438% | 6.684% | NON-INFERIOR | 0.0000 | 0.0000 | [1.73e-5, 2.78e-5] |
+| 100,000 | `b4` | 29.438% | 19.833% | NON-INFERIOR | 0.0000 | 0.0000 | [6.87e-6, 1.10e-5] |
+| 1,000,000 | `b1` | 24.995% | 8.967% | NON-INFERIOR | 0.0000 | 0.0000 | [1.16e-5, 2.02e-5] |
+| 1,000,000 | `b2` | 24.995% | 7.895% | NON-INFERIOR | 0.0000 | 0.0000 | [1.29e-5, 2.14e-5] |
+| 1,000,000 | `b4` | 24.995% | 19.833% | NON-INFERIOR | 0.0000 | 0.0000 | [3.72e-6, 6.06e-6] |
 
 ## Ablation contributions
 
@@ -893,63 +977,63 @@ Each row below removes exactly one component from SRCLA (§11.3) and reports wha
 
 | Ablation | Removes | SRCLA net APY | Ablation net APY | Contribution | Ablation rebalances | SRCLA rebalances |
 |---|---|---|---|---|---|---|
-| `h1` | remove post-deposit simulation; rank on displayed rate. | 34.457% | 19.271% | +15.186 pp | 4 | 4 |
-| `h2` | remove calibrated lower bounds; use the point forecast. | 34.457% | 34.248% | +0.209 pp | 3 | 4 |
-| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 34.457% | 6.067% | +28.390 pp | 16 | 4 |
-| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 34.457% | 34.457% | +0.000 pp | 4 | 4 |
-| `h5` | remove shared-dependency caps. | 34.457% | 34.457% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h6` | remove c_i^liquidity. | 34.457% | 34.457% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h7` | remove the phi_i weighting. | 34.457% | 34.457% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 34.457% | 34.457% | +0.000 pp | 4 | 4 |
+| `h1` | remove post-deposit simulation; rank on displayed rate. | 29.432% | 17.282% | +12.150 pp | 4 | 4 |
+| `h2` | remove calibrated lower bounds; use the point forecast. | 29.432% | 29.209% | +0.223 pp | 3 | 4 |
+| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 29.432% | 5.765% | +23.667 pp | 21 | 4 |
+| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 29.432% | 29.432% | +0.000 pp | 4 | 4 |
+| `h5` | remove shared-dependency caps. | 29.432% | 29.432% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h6` | remove c_i^liquidity. | 29.432% | 29.432% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h7` | remove the phi_i weighting. | 29.432% | 29.432% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 29.432% | 29.432% | +0.000 pp | 4 | 4 |
 
 #### Tier 100,000 USDC
 
 | Ablation | Removes | SRCLA net APY | Ablation net APY | Contribution | Ablation rebalances | SRCLA rebalances |
 |---|---|---|---|---|---|---|
-| `h1` | remove post-deposit simulation; rank on displayed rate. | 34.463% | 19.276% | +15.187 pp | 4 | 4 |
-| `h2` | remove calibrated lower bounds; use the point forecast. | 34.463% | 34.251% | +0.212 pp | 3 | 4 |
-| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 34.463% | 6.087% | +28.376 pp | 16 | 4 |
-| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 34.463% | 34.463% | +0.000 pp | 4 | 4 |
-| `h5` | remove shared-dependency caps. | 34.463% | 34.463% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h6` | remove c_i^liquidity. | 34.463% | 34.463% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h7` | remove the phi_i weighting. | 34.463% | 34.463% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
-| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 34.463% | 34.463% | +0.000 pp | 4 | 4 |
+| `h1` | remove post-deposit simulation; rank on displayed rate. | 29.438% | 17.287% | +12.150 pp | 4 | 4 |
+| `h2` | remove calibrated lower bounds; use the point forecast. | 29.438% | 29.212% | +0.225 pp | 3 | 4 |
+| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 29.438% | 5.777% | +23.661 pp | 21 | 4 |
+| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 29.438% | 29.438% | +0.000 pp | 4 | 4 |
+| `h5` | remove shared-dependency caps. | 29.438% | 29.438% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h6` | remove c_i^liquidity. | 29.438% | 29.438% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h7` | remove the phi_i weighting. | 29.438% | 29.438% | **INERT** (identical decisions — not a measured contribution) | 4 | 4 |
+| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 29.438% | 29.438% | +0.000 pp | 4 | 4 |
 
 #### Tier 1,000,000 USDC
 
 | Ablation | Removes | SRCLA net APY | Ablation net APY | Contribution | Ablation rebalances | SRCLA rebalances |
 |---|---|---|---|---|---|---|
-| `h1` | remove post-deposit simulation; rank on displayed rate. | 29.051% | 19.138% | +9.913 pp | 4 | 3 |
-| `h2` | remove calibrated lower bounds; use the point forecast. | 29.051% | 34.272% | **-5.221 pp** | 3 | 3 |
-| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 29.051% | 7.035% | +22.016 pp | 17 | 3 |
-| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 29.051% | 29.051% | +0.000 pp | 3 | 3 |
-| `h5` | remove shared-dependency caps. | 29.051% | 29.051% | **INERT** (identical decisions — not a measured contribution) | 3 | 3 |
-| `h6` | remove c_i^liquidity. | 29.051% | 29.051% | **INERT** (identical decisions — not a measured contribution) | 3 | 3 |
-| `h7` | remove the phi_i weighting. | 29.051% | 29.270% | **-0.219 pp** | 3 | 3 |
-| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 29.051% | 29.051% | +0.000 pp | 3 | 3 |
+| `h1` | remove post-deposit simulation; rank on displayed rate. | 24.995% | 16.816% | +8.180 pp | 4 | 3 |
+| `h2` | remove calibrated lower bounds; use the point forecast. | 24.995% | 29.286% | **-4.291 pp** | 3 | 3 |
+| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 24.995% | 6.374% | +18.622 pp | 20 | 3 |
+| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 24.995% | 24.995% | +0.000 pp | 3 | 3 |
+| `h5` | remove shared-dependency caps. | 24.995% | 24.995% | **INERT** (identical decisions — not a measured contribution) | 3 | 3 |
+| `h6` | remove c_i^liquidity. | 24.995% | 24.995% | **INERT** (identical decisions — not a measured contribution) | 3 | 3 |
+| `h7` | remove the phi_i weighting. | 24.995% | 25.102% | **-0.106 pp** | 3 | 3 |
+| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 24.995% | 24.995% | +0.000 pp | 3 | 3 |
 
 #### Tier 10,000,000 USDC
 
 | Ablation | Removes | SRCLA net APY | Ablation net APY | Contribution | Ablation rebalances | SRCLA rebalances |
 |---|---|---|---|---|---|---|
-| `h1` | remove post-deposit simulation; rank on displayed rate. | 5.856% | 8.646% | **-2.790 pp** | 25 | 23 |
-| `h2` | remove calibrated lower bounds; use the point forecast. | 5.856% | 6.889% | **-1.034 pp** | 21 | 23 |
-| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 5.856% | 9.404% | **-3.548 pp** | 22 | 23 |
-| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 5.856% | 5.856% | +0.000 pp | 23 | 23 |
-| `h5` | remove shared-dependency caps. | 5.856% | 5.856% | **INERT** (identical decisions — not a measured contribution) | 23 | 23 |
-| `h6` | remove c_i^liquidity. | 5.856% | 8.276% | **-2.421 pp** | 24 | 23 |
-| `h7` | remove the phi_i weighting. | 5.856% | 12.511% | **-6.655 pp** | 6 | 23 |
-| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 5.856% | 5.856% | +0.000 pp | 23 | 23 |
+| `h1` | remove post-deposit simulation; rank on displayed rate. | 5.219% | 7.638% | **-2.419 pp** | 29 | 27 |
+| `h2` | remove calibrated lower bounds; use the point forecast. | 5.219% | 5.880% | **-0.661 pp** | 22 | 27 |
+| `h3` | remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles. | 5.219% | 8.289% | **-3.070 pp** | 24 | 27 |
+| `h4` | remove the dynamic reserve and stress feasibility; admin floor only. | 5.219% | 5.219% | +0.000 pp | 27 | 27 |
+| `h5` | remove shared-dependency caps. | 5.219% | 5.219% | **INERT** (identical decisions — not a measured contribution) | 27 | 27 |
+| `h6` | remove c_i^liquidity. | 5.219% | 7.280% | **-2.061 pp** | 28 | 27 |
+| `h7` | remove the phi_i weighting. | 5.219% | 10.900% | **-5.681 pp** | 6 | 27 |
+| `h3d` | remove §9.1.2's deployment hurdle, retaining §9.1.3's rotation hurdle. | 5.219% | 5.219% | +0.000 pp | 27 | 27 |
 
 > **Negative contribution: removing the component helped, not hurt.** This is the report's most important measured signal — the component cost more than it earned on this data.
 >
-> - `h2` (remove calibrated lower bounds; use the point forecast.) at tier 1,000,000 USDC: contribution **-5.221 pp**.
-> - `h7` (remove the phi_i weighting.) at tier 1,000,000 USDC: contribution **-0.219 pp**.
-> - `h1` (remove post-deposit simulation; rank on displayed rate.) at tier 10,000,000 USDC: contribution **-2.790 pp**.
-> - `h2` (remove calibrated lower bounds; use the point forecast.) at tier 10,000,000 USDC: contribution **-1.034 pp**.
-> - `h3` (remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles.) at tier 10,000,000 USDC: contribution **-3.548 pp**.
-> - `h6` (remove c_i^liquidity.) at tier 10,000,000 USDC: contribution **-2.421 pp**.
-> - `h7` (remove the phi_i weighting.) at tier 10,000,000 USDC: contribution **-6.655 pp**.
+> - `h2` (remove calibrated lower bounds; use the point forecast.) at tier 1,000,000 USDC: contribution **-4.291 pp**.
+> - `h7` (remove the phi_i weighting.) at tier 1,000,000 USDC: contribution **-0.106 pp**.
+> - `h1` (remove post-deposit simulation; rank on displayed rate.) at tier 10,000,000 USDC: contribution **-2.419 pp**.
+> - `h2` (remove calibrated lower bounds; use the point forecast.) at tier 10,000,000 USDC: contribution **-0.661 pp**.
+> - `h3` (remove the complete-cost gate and the no-trade band. As implemented (P13/P15/P16/P17) that is §9.1.2's deployment hurdle and §9.1.3's rotation hurdle, the two movement hurdles the `k*sigma` band was replaced by; the §9.1.4 churn brakes (cooldown, min/max turnover, reversal allowance) stay in force, since the paper puts them outside the hurdles.) at tier 10,000,000 USDC: contribution **-3.070 pp**.
+> - `h6` (remove c_i^liquidity.) at tier 10,000,000 USDC: contribution **-2.061 pp**.
+> - `h7` (remove the phi_i weighting.) at tier 10,000,000 USDC: contribution **-5.681 pp**.
 
 
 ### §11.5 forecast gate
@@ -958,18 +1042,18 @@ Each row below removes exactly one component from SRCLA (§11.3) and reports wha
 
 | Verdict | Role | Check | Detail |
 |---|---|---|---|
-| PASS | gates | Per-venue coverage — aave-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 899 out-of-sample residuals, q=-1.1195e-4 |
-| **FAIL** | gates | Kupiec unconditional coverage — aave-v3-usdc | LR_uc 18.0705, p 0.0000 < 0.05 — breach rate 0.00% against expected 1.00% |
-| PASS | gates | Christoffersen conditional coverage — aave-v3-usdc | LR_cc 0.8241 (LR_ind 0.0000), p 0.6623 >= 0.05 on 41 non-overlapping windows |
-| PASS | gates | Per-venue coverage — compound-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 1103 out-of-sample residuals, q=-5.7725e-5 |
-| **FAIL** | gates | Kupiec unconditional coverage — compound-v3-usdc | LR_uc 22.1710, p 0.0000 < 0.05 — breach rate 0.00% against expected 1.00% |
-| PASS | gates | Christoffersen conditional coverage — compound-v3-usdc | LR_cc 0.9246 (LR_ind 0.0000), p 0.6298 >= 0.05 on 46 non-overlapping windows |
-| **FAIL** | gates | Per-venue coverage — moonwell-usdc | achieved 92.45% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 1073 out-of-sample residuals, q=-8.5493e-5 |
-| **FAIL** | gates | Kupiec unconditional coverage — moonwell-usdc | LR_uc 191.6822, p 0.0000 < 0.05 — breach rate 7.55% against expected 1.00% |
-| **FAIL** | gates | Christoffersen conditional coverage — moonwell-usdc | LR_cc 8.5341 (LR_ind 2.1025), p 0.0140 < 0.05 on 45 non-overlapping windows |
-| PASS | gates | Label completeness | worst venue aave-v3-usdc at 100.00% of 1133 origins (floor 99.00%); aave-v3-usdc 100.00%, compound-v3-usdc 100.00%, moonwell-usdc 100.00% |
-| PASS | gates | Regime purity | 192 of 3399 label windows straddle a regime change (5.65%, tolerance 10%): aave-v3-usdc@1784851200 (aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:45000000000000000:100000000000000000:active -> aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:46000000000000000:100000000000000000:active at 1784916000, inside [origin, origin+H]); aave-v3-usdc@1784854800… |
-| PASS | gates | Availability-lag barrier | all 3399 labels are readable no earlier than origin + 86400s + 900s lag |
+| PASS | gates | Per-venue coverage — aave-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 963 out-of-sample residuals, q=-1.1195e-4 |
+| **FAIL** | gates | Kupiec unconditional coverage — aave-v3-usdc | LR_uc 19.3569, p 0.0000 < 0.05 — breach rate 0.00% against expected 1.00% |
+| PASS | gates | Christoffersen conditional coverage — aave-v3-usdc | LR_cc 0.8643 (LR_ind 0.0000), p 0.6491 >= 0.05 on 43 non-overlapping windows |
+| PASS | gates | Per-venue coverage — compound-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 1197 out-of-sample residuals, q=-5.7725e-5 |
+| **FAIL** | gates | Kupiec unconditional coverage — compound-v3-usdc | LR_uc 24.0605, p 0.0000 < 0.05 — breach rate 0.00% against expected 1.00% |
+| PASS | gates | Christoffersen conditional coverage — compound-v3-usdc | LR_cc 1.0050 (LR_ind 0.0000), p 0.6050 >= 0.05 on 50 non-overlapping windows |
+| **FAIL** | gates | Per-venue coverage — moonwell-usdc | achieved 93.06% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 1167 out-of-sample residuals, q=-8.5493e-5 |
+| **FAIL** | gates | Kupiec unconditional coverage — moonwell-usdc | LR_uc 179.4495, p 0.0000 < 0.05 — breach rate 6.94% against expected 1.00% |
+| **FAIL** | gates | Christoffersen conditional coverage — moonwell-usdc | LR_cc 8.2450 (LR_ind 2.2611), p 0.0162 < 0.05 on 49 non-overlapping windows |
+| PASS | gates | Label completeness | worst venue aave-v3-usdc at 100.00% of 1227 origins (floor 99.00%); aave-v3-usdc 100.00%, compound-v3-usdc 100.00%, moonwell-usdc 100.00% |
+| PASS | gates | Regime purity | 216 of 3681 label windows straddle a regime change (5.87%, tolerance 10%): aave-v3-usdc@1784851200 (aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:45000000000000000:100000000000000000:active -> aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:46000000000000000:100000000000000000:active at 1784916000, inside [origin, origin+H]); aave-v3-usdc@1784854800… |
+| PASS | gates | Availability-lag barrier | all 3681 labels are readable no earlier than origin + 86400s + 900s lag |
 | PASS | gates | Registered grid points present | swept 36, scorable 36, registered grid 36 |
 | PASS | gates | Selection margin | margin 6.4198e-1 against the registered floor 1e-3 |
 | PASS | gates | Artifact reproducibility | content hash re-derives from the artifact body: 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
@@ -980,21 +1064,21 @@ Coverage is recomputed OUT OF SAMPLE. The artifact's per-venue quantile was solv
 
 | Venue | Residuals | Achieved coverage | Exceedances | Kupiec p | Christoffersen p | Non-overlapping windows |
 |---|---|---|---|---|---|---|
-| aave-v3-usdc | 899 | 100.00% | 0 | 0.0000 | 0.6623 | 41 |
-| compound-v3-usdc | 1103 | 100.00% | 0 | 0.0000 | 0.6298 | 46 |
-| moonwell-usdc | 1073 | 92.45% | 81 | 0.0000 | 0.0140 | 45 |
+| aave-v3-usdc | 963 | 100.00% | 0 | 0.0000 | 0.6491 | 43 |
+| compound-v3-usdc | 1197 | 100.00% | 0 | 0.0000 | 0.6050 | 50 |
+| moonwell-usdc | 1167 | 93.06% | 81 | 0.0000 | 0.0162 | 49 |
 
 ### §11.5 policy gate
 
 | Verdict | Role | Check | Detail |
 |---|---|---|---|
-| **FAIL** | gates | Demonstration: sustainability was demonstrated while deployed | NOT DEMONSTRATED at srcla@10000000000000 (realized 5.856%): below the 0.7 capital-at-work floor, redeemability proves nothing and no sustainability claim may be drawn |
+| **FAIL** | gates | Demonstration: sustainability was demonstrated while deployed | NOT DEMONSTRATED at srcla@10000000000000 (realized 5.219%): below the 0.7 capital-at-work floor, redeemability proves nothing and no sustainability claim may be drawn |
 | PASS | gates | Every registered tier ran | all 4 of §11.1's tiers |
 | PASS | gates | Every registered policy ran at every tier | all 64 required (policy, tier) runs |
 | PASS | gates | Calibrated artifact | 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
-| **FAIL** | gates | §11.1 pinned-prestate fork replay | did not execute on fork: b4@10000000000 (b4@10000000000 REFUSED BY THE CHAIN: the vault reverted the plan: transaction execution reverted (action="sendTransaction", data=null, reason=null, invocation=null, revert=null, transaction={ "data": "", "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "to": "0xEBBb24079B6fd4c26d84C2f1c66f4377Fb6B7C0e" }, receipt={ "_type": "TransactionReceipt", "blobGasPrice": "1", "blobGasUsed": null, "blockHash": "0x6f87a4bb26d3e182a6dbac5f9ed1d9c7c25bb5132918cfe534b3d4de20a8b378", "blockNumber": 51207219, "contractAddress": null, "cumulativeGasUsed": "302961",… |
+| PASS | gates | §11.1 pinned-prestate fork replay | 60 of 64 registered (policy, tier) runs had their FIRST proposed rebalance submitted and executed against the deployed vault on a Base fork, from a verified-restored pinned prestate; 4 proposed nothing at any origin (HOLD — no chain interaction, so no allocation was demonstrated for them). NOT claimed: the era's remaining origins and its returns were not replayed on chain, and all tiers were replayed against a single vault NAV, so cap and reserve limits were evaluated at that NAV rather than at each tier's. |
 | PASS | gates | Safety: withdrawal success measured and met | >= 99% across 4 SRCLA runs |
-| **FAIL** | gates | Safety: stressed liquid coverage | srcla@10000000000 0.878, srcla@100000000000 0.878 reported (not gating): b3@10000000000 0.878, b5@10000000000 0.881, h2@10000000000 0.878, h4@10000000000 0.878, h5@10000000000 0.878, h6@10000000000 0.878, h7@10000000000 0.878, h3d@10000000000 0.878, b3@100000000000 0.878, b5@100000000000 0.881, h2@100000000000 0.878, h4@100000000000 0.878, h5@100000000000 0.878, h6@100000000000 0.878, h7@100000000000 0.878, h3d@100000000000 0.878, b3@1000000000000 0.879, b5@1000000000000 0.881, h2@1000000000000 0.878, b1@10000000000000 0.842, b4@10000000000000 0.589 |
+| **FAIL** | gates | Safety: stressed liquid coverage | srcla@10000000000 0.878, srcla@100000000000 0.878 reported (not gating): b3@10000000000 0.878, b5@10000000000 0.881, h2@10000000000 0.878, h4@10000000000 0.878, h5@10000000000 0.878, h6@10000000000 0.878, h7@10000000000 0.878, h3d@10000000000 0.878, b3@100000000000 0.878, b5@100000000000 0.881, h2@100000000000 0.878, h4@100000000000 0.878, h5@100000000000 0.878, h6@100000000000 0.878, h7@100000000000 0.878, h3d@100000000000 0.878, b3@1000000000000 0.864, b5@1000000000000 0.881, h2@1000000000000 0.878, b1@10000000000000 0.842, b4@10000000000000 0.515 |
 | **NOT PRODUCED** | gates | Sustainability S1: complete exit within the registered bound | NOT DEMONSTRATED at srcla@10000000000000 |
 | **NOT PRODUCED** | gates | Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED) | NOT DEMONSTRATED at srcla@10000000000000 |
 | **NOT PRODUCED** | gates | Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED) | NOT DEMONSTRATED at srcla@10000000000000 |
@@ -1002,11 +1086,68 @@ Coverage is recomputed OUT OF SAMPLE. The artifact's per-venue quantile was solv
 | **FAIL** | reported | No inert ablation | reported (not gating): these made byte-identical decisions to SRCLA: h5, h6, h7 — any delta attributed to the component each removes is noise |
 | PASS | reported | Diagnostic: statistical distinguishability from every sustainable baseline | p < 0.05 against all 9 admissible deployable comparisons |
 | PASS | gates | Non-inferior to every sustainable baseline (margin 43.0 bps) | within 43.0 bps of all 9 sustainable comparators (one-sided HAC p < 0.05, block-bootstrap agreeing) |
-| PASS | gates | Price of unsustainability published | b0@10000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b3@10000000000 34.248% (displayed−realized -2.696pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); b5@10000000000 34.559% (displayed−realized -2.746pp) — S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069); h2@10000000000 34.248% (displayed−realized -2.696pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); h4@10000000000 34.457%… |
+| PASS | gates | Price of unsustainability published | b0@10000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b3@10000000000 29.209% (displayed−realized -1.593pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); b5@10000000000 29.553% (displayed−realized -1.644pp) — S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069); h2@10000000000 29.209% (displayed−realized -1.593pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); h4@10000000000 29.432%… |
+
+### §11.5 forecast gate under P37
+
+| Verdict | Role | Check | Detail |
+|---|---|---|---|
+| PASS | gates | Per-venue coverage, P34 domain — aave-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 963 out-of-sample residuals, q=-1.1195e-4; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Kupiec unconditional coverage, one-sided — aave-v3-usdc | LR_uc 19.3569, one-sided p 1.0000 >= 0.05 — breach rate 0.00% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Christoffersen independence — aave-v3-usdc | LR_ind 0.0000, p 1.0000 >= 0.05 on 43 non-overlapping windows; LR_cc 0.8643 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Per-venue coverage, P34 domain — compound-v3-usdc | achieved 100.00% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 1197 out-of-sample residuals, q=-5.7725e-5; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Kupiec unconditional coverage, one-sided — compound-v3-usdc | LR_uc 24.0605, one-sided p 1.0000 >= 0.05 — breach rate 0.00% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| PASS | gates | Christoffersen independence — compound-v3-usdc | LR_ind 0.0000, p 1.0000 >= 0.05 on 50 non-overlapping windows; LR_cc 1.0050 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 0 residual(s) excluded, 0 of them breaches |
+| **FAIL** | gates | Per-venue coverage, P34 domain — moonwell-usdc | achieved 92.52% against target 99.00% (tolerance 1.00pp, floor 98.00%) on 775 out-of-sample residuals, q=-8.5493e-5; P34 domain: 392 residual(s) excluded, 23 of them breaches |
+| **FAIL** | gates | Kupiec unconditional coverage, one-sided — moonwell-usdc | LR_uc 136.3444, one-sided p 0.0000 < 0.05 — breach rate 7.48% against expected 1.00%; two-sided p 0.0000 reported, not gated; P34 domain: 392 residual(s) excluded, 23 of them breaches |
+| PASS | gates | Christoffersen independence — moonwell-usdc | LR_ind 3.4214, p 0.0644 >= 0.05 on 33 non-overlapping windows; LR_cc 7.3755 reported, not gated (its unconditional half is the two-sided statistic P37 replaces); P34 domain: 392 residual(s) excluded, 23 of them breaches |
+| PASS | gates | Label completeness | worst venue aave-v3-usdc at 100.00% of 1227 origins (floor 99.00%); aave-v3-usdc 100.00%, compound-v3-usdc 100.00%, moonwell-usdc 100.00% |
+| PASS | gates | Regime purity | 216 of 3681 label windows straddle a regime change (5.87%, tolerance 10%): aave-v3-usdc@1784851200 (aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:45000000000000000:100000000000000000:active -> aave:0xa238dd80c259a72e81d7e4664a9801593f98d1c5\|0x86ab1c62a8bf868e1b3e1ab87d587aba6fbcbdc5:0:900000000000000000000000000:46000000000000000:100000000000000000:active at 1784916000, inside [origin, origin+H]); aave-v3-usdc@1784854800… |
+| PASS | gates | Availability-lag barrier | all 3681 labels are readable no earlier than origin + 86400s + 900s lag |
+| PASS | gates | Registered grid points present | swept 36, scorable 36, registered grid 36 |
+| PASS | gates | Selection margin | margin 6.4198e-1 against the registered floor 1e-3 |
+| PASS | gates | Artifact reproducibility | content hash re-derives from the artifact body: 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
+| PASS | gates | Calibrated artifact | artifact is registered, not provisional |
+| PASS | gates | Artifact completeness (P23) | the artifact carries every field the policy reads |
+
+### §11.5 policy gate under P37
+
+| Verdict | Role | Check | Detail |
+|---|---|---|---|
+| PASS | gates | Demonstration: sustainability was demonstrated while deployed | capital at work >= 0.7 across all 3 SRCLA runs (decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope") |
+| PASS | gates | Every registered tier ran | all 4 of §11.1's tiers |
+| PASS | gates | Every registered policy ran at every tier | all 64 required (policy, tier) runs |
+| PASS | gates | Calibrated artifact | 694cf86f6f7363f2f76a19ce66781ae82311ab1cbd2b7220b3aab94bda8223cf |
+| PASS | gates | §11.1 pinned-prestate fork replay (SRCLA plans, P37) | 3 of 3 registered (policy, tier) runs had their FIRST proposed rebalance submitted and executed against the deployed vault on a Base fork, from a verified-restored pinned prestate. NOT claimed: the era's remaining origins and its returns were not replayed on chain, and all tiers were replayed against a single vault NAV, so cap and reserve limits were evaluated at that NAV rather than at each tier's. Decided over RELEASE_TIERS (G5); 10M is reported under "Outside the release scope". |
+| PASS | gates | Safety: withdrawal success measured and met | >= 99% across 3 SRCLA runs |
+| **FAIL** | gates | Safety: stressed liquid coverage | srcla@10000000000 0.878, srcla@100000000000 0.878 reported (not gating): b3@10000000000 0.878, b5@10000000000 0.881, h2@10000000000 0.878, h4@10000000000 0.878, h5@10000000000 0.878, h6@10000000000 0.878, h7@10000000000 0.878, h3d@10000000000 0.878, b3@100000000000 0.878, b5@100000000000 0.881, h2@100000000000 0.878, h4@100000000000 0.878, h5@100000000000 0.878, h6@100000000000 0.878, h7@100000000000 0.878, h3d@100000000000 0.878, b3@1000000000000 0.864, b5@1000000000000 0.881, h2@1000000000000 0.878 |
+| PASS | gates | Sustainability S1: complete exit within the registered bound | withdrawals filled and full exit within 24 origins across all 3 SRCLA runs |
+| PASS | gates | Sustainability S3: venue-stress share (utilization-ceiling clause NOT EVALUATED) | no venue share above 0.25 at any origin. NOT EVALUATED: §11.5 S3's first clause — that the vault's own deposits do not push a venue past its registered utilization ceiling — is not measured by this run; only the venue-stress bound is across all 3 SRCLA runs |
+| PASS | gates | Sustainability S4: action validity (§11.5 violation classes NOT EVALUATED) | no invalid action over any run (a deploy into a paused or absent venue, or a divest from a venue holding nothing). NOT EVALUATED: §11.5 S4 also names cap, dependency, reserve and loss violations and unrecoverable plan state; none of those five is measured by this run across all 3 SRCLA runs |
+| **FAIL** | gates | Sustainability: scale invariance across every registered tier (P26) | breaches at srcla@10000000000 (S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072)); srcla@100000000000 (S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072)) |
+| **FAIL** | reported | No inert ablation | reported (not gating): these made byte-identical decisions to SRCLA: h5, h6, h7 — any delta attributed to the component each removes is noise |
+| PASS | reported | Diagnostic: statistical distinguishability from every sustainable baseline | p < 0.05 against all 9 admissible deployable comparisons |
+| PASS | gates | Non-inferior to every sustainable baseline (margin 43.0 bps) | within 43.0 bps of all 9 sustainable comparators (one-sided HAC p < 0.05, block-bootstrap agreeing) |
+| PASS | gates | Price of unsustainability published | b0@10000000000 0.000% (displayed−realized 0.000pp) — NOT DEMONSTRATED: capital at work 0.000 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 0.000%); b3@10000000000 29.209% (displayed−realized -1.593pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); b5@10000000000 29.553% (displayed−realized -1.644pp) — S2 stressed coverage 0.881 vs floor 0.950 (short by 0.069); h2@10000000000 29.209% (displayed−realized -1.593pp) — S2 stressed coverage 0.878 vs floor 0.950 (short by 0.072); h4@10000000000 29.432%… |
+
+P37 decides its comparisons, comparator sustainability, excluded comparators, skill windows and price of unsustainability over the release tiers (10k/100k/1M) only — the 10M results for this era are the registered (v0.10) tables above, not repeated here.
+
+#### Outside the release scope (10M) — reported, never gating (G5)
+
+Demonstration floor: capital at work >= **0.7**. Below it a run is trivially redeemable and demonstrates nothing, so every criterion reports **ND** (NOT DEMONSTRATED) and no sustainability claim may be drawn from it.
+
+**What S3 and S4 do NOT cover.** Two of §11.5 part 3's clauses are not measured by this run, and the columns are named for what they measure rather than for the clause:
+
+- **S3** grades only the venue-stress bound. §11.5 S3's first clause — that the vault's own deposits do not push a venue past its **registered utilization ceiling** — is **NOT EVALUATED**. A PASS in that column is not evidence about the ceiling.
+- **S4** grades **action validity**: no deploy into a paused or absent venue, and no divest from a venue holding nothing. §11.5 S4's named classes — **cap, dependency, reserve and loss violations, and unrecoverable plan state** — are **NOT EVALUATED**. A PASS in that column is not evidence that no cap or reserve was breached.
+
+| Tier | Demonstrated | S1 redeem | S2 coverage | S3 venue stress | S4 action validity | Verdict | Net APY | Breach |
+|---|---|---|---|---|---|---|---|---|
+| 10,000,000 | **NOT DEMONSTRATED** | **ND** | **ND** | **ND** | **ND** | **NOT DEMONSTRATED** | 5.219% | NOT DEMONSTRATED: capital at work 0.389 < 0.7; a vault holding idle cash is trivially redeemable and has demonstrated nothing about sustainability (realized 5.219%) |
 
 ## Limitations
 
-- **§11.1's pinned-prestate fork replay is not produced.** `src/evaluation/fork-runner.ts#runForkReplays` produces it and needs a live Base fork with the vault deployed; this run supplied none, so the gate reports NOT PRODUCED and blocks. No allocation in this report has been shown to be one the chain would have accepted.
+- **§11.1's pinned-prestate fork replay is an honest PARTIAL.** What was shown: each registered (policy, tier)'s FIRST proposed rebalance was submitted and executed against the deployed vault on a Base fork, from a pinned prestate verified restored before every candidate. What was NOT shown: the era's remaining origins and its returns were not replayed on chain; all four tiers were replayed against a SINGLE vault NAV, so `capBps`, `minIdleBps` and the reserve were evaluated at that NAV rather than at each tier's scale; and the pinned prestate is all-idle, which is why the first proposal is the origin selected — a later origin would contain divests that no unfunded prestate could execute.
 - **Withdrawals are synthetic** (see above), so the withdrawal-success and stressed-coverage figures describe the registered schedule, not observed demand.
 - **An INERT ablation removed nothing** on this dataset: its decision sequence is byte-identical to SRCLA's, so any delta reported for it is noise and attributing it to the removed component would be a misattribution. Inert rows are marked in the tables above.
 - **Reward emissions** contribute whatever the measured probe found, which may be zero. A zero is reported as zero rather than omitted.

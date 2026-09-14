@@ -8,9 +8,9 @@ const HAS_PAPER = existsSync(PAPER_PATH);
 const describePaper = HAS_PAPER ? describe : describe.skip;
 const paper = HAS_PAPER ? readFileSync(PAPER_PATH, 'utf8') : '';
 
-describePaper('paper v0.11', () => {
-  it('declares version 0.11', () => {
-    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.11/);
+describePaper('paper v0.12', () => {
+  it('declares version 0.12', () => {
+    expect(paper).toMatch(/\*\*Research report version:\*\*\s*0\.12/);
   });
 
   it('carries an amendment record for v0.5 -> v0.6', () => {
@@ -85,5 +85,11 @@ describePaper('paper v0.8 -> v0.10 amendments', () => {
     expect(paper).toContain('Fourth burned-window declaration');
     expect(paper).toContain('#### 11.5.2');
     expect(paper).toContain('### 13.3');
+  });
+
+  it('carries the v0.11 -> v0.12 record and registers P38 and P39', () => {
+    expect(paper).toContain('Amendment Record (v0.11 → v0.12)');
+    expect(paper).toMatch(/\|\s*P38\s*\|/);
+    expect(paper).toMatch(/\|\s*P39\s*\|/);
   });
 });

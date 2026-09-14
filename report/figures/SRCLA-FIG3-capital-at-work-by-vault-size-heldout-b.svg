@@ -70,34 +70,34 @@
 <text data-role="x-tick-label" x="872.0" y="466" font-size="12" text-anchor="middle" fill="#52514e">$10M</text>
 <text x="474" y="492" font-size="13" text-anchor="middle" fill="#52514e">Vault size (USDC, log scale)</text>
 <text x="22" y="284.0" font-size="13" text-anchor="middle" fill="#52514e" transform="rotate(-90 22 284.0)">Time-weighted capital at work (%)</text>
-<path data-role="series" data-policy="b1" d="M76.0,182.1 L181.6,182.1 L261.5,182.1 L341.3,182.1 L446.9,182.1 L526.8,182.1 L573.5,183.0 L606.7,182.1 L653.4,185.4 L686.5,162.0 L733.3,192.3 L766.4,183.2 L792.1,188.8 L822.4,191.7 L846.3,186.2 L872.0,189.9" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b2" d="M76.0,191.1 L181.6,191.1 L261.5,191.1 L341.3,191.1 L446.9,187.9 L526.8,179.6 L573.5,184.1 L606.7,176.8 L653.4,194.0 L686.5,249.8 L733.3,269.5 L766.4,276.3 L792.1,267.4 L822.4,290.4 L846.3,296.8 L872.0,308.5" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b2u" d="M76.0,172.8 L181.6,172.8 L261.5,172.8 L341.3,172.8 L446.9,177.8 L526.8,166.6 L573.5,175.7 L606.7,163.4 L653.4,171.3 L686.5,236.8 L733.3,243.4 L766.4,243.9 L792.1,261.8 L822.4,264.0 L846.3,263.7 L872.0,268.8" fill="none" stroke="#8a8883" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
-<path data-role="series" data-policy="b3" d="M76.0,154.9 L181.6,154.9 L261.5,154.9 L341.3,154.9 L446.9,154.9 L526.8,154.9 L573.5,156.9 L606.7,154.9 L653.4,156.9 L686.5,152.5 L733.3,162.0 L766.4,160.7 L792.1,188.2 L822.4,215.3 L846.3,227.2 L872.0,245.6" fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b4" d="M76.0,141.9 L181.6,141.9 L261.5,141.9 L341.3,141.9 L446.9,141.9 L526.8,141.9 L573.5,141.9 L606.7,141.9 L653.4,141.9 L686.5,141.9 L733.3,141.9 L766.4,141.9 L792.1,141.9 L822.4,141.9 L846.3,141.9 L872.0,141.9" fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="srcla" d="M76.0,154.9 L181.6,154.9 L261.5,154.9 L341.3,154.9 L446.9,154.9 L526.8,154.9 L573.5,156.9 L606.7,154.9 L653.4,156.9 L686.5,152.0 L733.3,153.5 L766.4,171.1 L792.1,231.5 L822.4,293.7 L846.3,330.8 L872.0,363.7" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-<rect data-role="marker" data-policy="b1" x="72.2" y="178.3" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
-<rect data-role="marker" data-policy="b1" x="337.5" y="178.3" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
-<rect data-role="marker" data-policy="b1" x="602.8" y="178.3" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
-<rect data-role="marker" data-policy="b1" x="868.2" y="186.1" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b2" d="M76.0,185.9 L80.5,194.5 L71.5,194.5 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b2" d="M341.3,185.9 L345.8,194.5 L336.8,194.5 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b2" d="M606.7,171.6 L611.2,180.2 L602.2,180.2 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b2" d="M872.0,303.3 L876.5,311.9 L867.5,311.9 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
-<circle data-role="marker" data-policy="b2u" cx="76.0" cy="172.8" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<circle data-role="marker" data-policy="b2u" cx="341.3" cy="172.8" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<circle data-role="marker" data-policy="b2u" cx="606.7" cy="163.4" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<circle data-role="marker" data-policy="b2u" cx="872.0" cy="268.8" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<path data-role="marker" data-policy="b3" d="M76.0,149.5 L81.4,154.9 L76.0,160.3 L70.6,154.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b3" d="M341.3,149.5 L346.7,154.9 L341.3,160.3 L335.9,154.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b3" d="M606.7,149.5 L612.1,154.9 L606.7,160.3 L601.3,154.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b3" d="M872.0,240.2 L877.4,245.6 L872.0,251.0 L866.6,245.6 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b4" d="M76.0,147.0 L80.5,138.5 L71.5,138.5 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b4" d="M341.3,147.0 L345.8,138.5 L336.8,138.5 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b4" d="M606.7,147.0 L611.2,138.5 L602.2,138.5 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b4" d="M872.0,147.0 L876.5,138.5 L867.5,138.5 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
-<circle data-role="marker" data-policy="srcla" cx="76.0" cy="154.9" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
-<circle data-role="marker" data-policy="srcla" cx="341.3" cy="154.9" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
-<circle data-role="marker" data-policy="srcla" cx="606.7" cy="154.9" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
-<circle data-role="marker" data-policy="srcla" cx="872.0" cy="363.7" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="series" data-policy="b1" d="M76.0,208.4 L181.6,208.4 L261.5,208.4 L341.3,208.4 L446.9,208.4 L526.8,208.4 L573.5,180.2 L606.7,208.4 L653.4,211.3 L686.5,187.6 L733.3,212.4 L766.4,209.3 L792.1,213.5 L822.4,210.5 L846.3,205.0 L872.0,211.7" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2" d="M76.0,216.0 L181.6,216.0 L261.5,216.0 L341.3,216.0 L446.9,212.4 L526.8,204.5 L573.5,177.4 L606.7,202.3 L653.4,216.2 L686.5,273.4 L733.3,290.6 L766.4,295.0 L792.1,287.5 L822.4,306.6 L846.3,312.4 L872.0,323.4" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2u" d="M76.0,197.7 L181.6,197.7 L261.5,197.7 L341.3,197.7 L446.9,205.3 L526.8,191.5 L573.5,170.3 L606.7,188.9 L653.4,166.5 L686.5,252.9 L733.3,269.0 L766.4,268.1 L792.1,283.8 L822.4,286.1 L846.3,285.7 L872.0,291.1" fill="none" stroke="#8a8883" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
+<path data-role="series" data-policy="b3" d="M76.0,151.1 L181.6,151.1 L261.5,151.1 L341.3,151.1 L446.9,151.1 L526.8,151.1 L573.5,152.7 L606.7,151.1 L653.4,152.7 L686.5,149.1 L733.3,156.9 L766.4,155.8 L792.1,183.0 L822.4,210.7 L846.3,223.9 L872.0,242.5" fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b4" d="M76.0,140.4 L181.6,140.4 L261.5,140.4 L341.3,140.4 L446.9,140.4 L526.8,140.4 L573.5,140.4 L606.7,140.4 L653.4,140.4 L686.5,140.4 L733.3,140.4 L766.4,140.4 L792.1,140.4 L822.4,140.4 L846.3,140.4 L872.0,140.4" fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="srcla" d="M76.0,151.1 L181.6,151.1 L261.5,151.1 L341.3,151.1 L446.9,151.1 L526.8,151.1 L573.5,152.7 L606.7,151.1 L653.4,152.7 L686.5,148.7 L733.3,149.9 L766.4,166.3 L792.1,229.4 L822.4,294.5 L846.3,332.1 L872.0,366.5" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<rect data-role="marker" data-policy="b1" x="72.2" y="204.6" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="337.5" y="204.6" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="602.8" y="204.6" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<rect data-role="marker" data-policy="b1" x="868.2" y="207.8" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M76.0,210.8 L80.5,219.4 L71.5,219.4 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M341.3,210.8 L345.8,219.4 L336.8,219.4 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M606.7,197.1 L611.2,205.6 L602.2,205.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M872.0,318.2 L876.5,326.8 L867.5,326.8 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="b2u" cx="76.0" cy="197.7" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="341.3" cy="197.7" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="606.7" cy="188.9" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<circle data-role="marker" data-policy="b2u" cx="872.0" cy="291.1" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<path data-role="marker" data-policy="b3" d="M76.0,145.7 L81.4,151.1 L76.0,156.5 L70.6,151.1 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M341.3,145.7 L346.7,151.1 L341.3,156.5 L335.9,151.1 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M606.7,145.7 L612.1,151.1 L606.7,156.5 L601.3,151.1 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M872.0,237.1 L877.4,242.5 L872.0,247.9 L866.6,242.5 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M76.0,145.6 L80.5,137.0 L71.5,137.0 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M341.3,145.6 L345.8,137.0 L336.8,137.0 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M606.7,145.6 L611.2,137.0 L602.2,137.0 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M872.0,145.6 L876.5,137.0 L867.5,137.0 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="76.0" cy="151.1" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="341.3" cy="151.1" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="606.7" cy="151.1" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="srcla" cx="872.0" cy="366.5" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
 </svg>

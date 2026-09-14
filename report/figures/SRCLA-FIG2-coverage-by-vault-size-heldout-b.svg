@@ -75,11 +75,11 @@
 <line x1="76" y1="149.5" x2="872" y2="149.5" stroke="#3d3c39" stroke-width="1.25" stroke-dasharray="6 4"/>
 <text data-role="floor-label" x="84" y="166.5" font-size="12" fill="#0b0b0b" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">S2 release floor (0.95)</text>
 <path data-role="series" data-policy="b1" d="M76.0,134.3 L181.6,134.3 L261.5,134.3 L341.3,134.3 L446.9,134.3 L526.8,134.3 L573.5,134.0 L606.7,134.3 L653.4,134.3 L686.5,217.6 L733.3,224.4 L766.4,201.8 L792.1,193.2 L822.4,192.1 L846.3,196.9 L872.0,182.9" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b2" d="M76.0,134.2 L181.6,134.2 L261.5,134.2 L341.3,134.2 L446.9,134.0 L526.8,134.2 L573.5,134.0 L606.7,134.2 L653.4,134.2 L686.5,134.0 L733.3,134.0 L766.4,134.4 L792.1,148.4 L822.4,135.5 L846.3,147.1 L872.0,134.0" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b2u" d="M76.0,134.2 L181.6,134.2 L261.5,134.2 L341.3,134.2 L446.9,134.0 L526.8,134.2 L573.5,134.0 L606.7,134.2 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,135.2 L792.1,146.3 L822.4,162.9 L846.3,134.4 L872.0,134.2" fill="none" stroke="#8a8883" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
-<path data-role="series" data-policy="b3" d="M76.0,171.9 L181.6,171.9 L261.5,171.9 L341.3,171.9 L446.9,171.9 L526.8,171.9 L573.5,158.1 L606.7,171.9 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,134.0 L792.1,134.0 L822.4,134.0 L846.3,134.0 L872.0,134.0" fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="b4" d="M76.0,134.0 L181.6,134.0 L261.5,134.0 L341.3,134.0 L446.9,134.0 L526.8,134.0 L573.5,134.0 L606.7,134.0 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,213.7 L792.1,261.2 L822.4,261.2 L846.3,261.2 L872.0,261.2" fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<path data-role="series" data-policy="srcla" d="M76.0,134.0 L181.6,134.0 L261.5,134.0 L341.3,134.0 L446.9,134.0 L526.8,134.0 L573.5,134.0 L606.7,134.0 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,134.0 L792.1,134.0 L822.4,134.0 L846.3,134.0 L872.0,134.0" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2" d="M76.0,134.2 L181.6,134.2 L261.5,134.2 L341.3,134.2 L446.9,134.0 L526.8,134.2 L573.5,134.0 L606.7,134.2 L653.4,134.2 L686.5,134.0 L733.3,134.0 L766.4,150.1 L792.1,148.4 L822.4,135.5 L846.3,151.0 L872.0,143.3" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b2u" d="M76.0,134.2 L181.6,134.2 L261.5,134.2 L341.3,134.2 L446.9,134.0 L526.8,134.2 L573.5,134.0 L606.7,134.2 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,150.3 L792.1,146.3 L822.4,162.9 L846.3,150.1 L872.0,143.0" fill="none" stroke="#8a8883" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
+<path data-role="series" data-policy="b3" d="M76.0,190.5 L181.6,190.5 L261.5,190.5 L341.3,190.5 L446.9,190.5 L526.8,190.5 L573.5,176.0 L606.7,190.5 L653.4,142.3 L686.5,145.0 L733.3,134.0 L766.4,134.0 L792.1,134.0 L822.4,134.0 L846.3,134.0 L872.0,134.0" fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="b4" d="M76.0,134.0 L181.6,134.0 L261.5,134.0 L341.3,134.0 L446.9,134.0 L526.8,134.0 L573.5,134.0 L606.7,134.0 L653.4,134.0 L686.5,134.0 L733.3,138.5 L766.4,231.6 L792.1,284.4 L822.4,284.4 L846.3,284.4 L872.0,284.4" fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path data-role="series" data-policy="srcla" d="M76.0,134.0 L181.6,134.0 L261.5,134.0 L341.3,134.0 L446.9,134.0 L526.8,134.0 L573.5,137.5 L606.7,134.0 L653.4,134.0 L686.5,134.0 L733.3,134.0 L766.4,134.0 L792.1,134.0 L822.4,134.0 L846.3,134.0 L872.0,134.0" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
 <rect data-role="marker" data-policy="b1" x="72.2" y="130.5" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
 <rect data-role="marker" data-policy="b1" x="337.5" y="130.5" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
 <rect data-role="marker" data-policy="b1" x="602.8" y="130.5" width="7.6" height="7.6" rx="1" fill="#eb6834" stroke="#ffffff" stroke-width="1.5"/>
@@ -87,19 +87,19 @@
 <path data-role="marker" data-policy="b2" d="M76.0,129.0 L80.5,137.6 L71.5,137.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b2" d="M341.3,129.0 L345.8,137.6 L336.8,137.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b2" d="M606.7,129.0 L611.2,137.6 L602.2,137.6 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b2" d="M872.0,128.8 L876.5,137.4 L867.5,137.4 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b2" d="M872.0,138.2 L876.5,146.7 L867.5,146.7 Z" fill="#1baf7a" stroke="#ffffff" stroke-width="1.5"/>
 <circle data-role="marker" data-policy="b2u" cx="76.0" cy="134.2" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
 <circle data-role="marker" data-policy="b2u" cx="341.3" cy="134.2" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
 <circle data-role="marker" data-policy="b2u" cx="606.7" cy="134.2" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<circle data-role="marker" data-policy="b2u" cx="872.0" cy="134.2" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
-<path data-role="marker" data-policy="b3" d="M76.0,166.5 L81.4,171.9 L76.0,177.3 L70.6,171.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b3" d="M341.3,166.5 L346.7,171.9 L341.3,177.3 L335.9,171.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b3" d="M606.7,166.5 L612.1,171.9 L606.7,177.3 L601.3,171.9 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<circle data-role="marker" data-policy="b2u" cx="872.0" cy="143.0" r="4" fill="#ffffff" stroke="#8a8883" stroke-width="2"/>
+<path data-role="marker" data-policy="b3" d="M76.0,185.1 L81.4,190.5 L76.0,195.9 L70.6,190.5 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M341.3,185.1 L346.7,190.5 L341.3,195.9 L335.9,190.5 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b3" d="M606.7,185.1 L612.1,190.5 L606.7,195.9 L601.3,190.5 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b3" d="M872.0,128.6 L877.4,134.0 L872.0,139.4 L866.6,134.0 Z" fill="#eda100" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b4" d="M76.0,139.2 L80.5,130.6 L71.5,130.6 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b4" d="M341.3,139.2 L345.8,130.6 L336.8,130.6 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
 <path data-role="marker" data-policy="b4" d="M606.7,139.2 L611.2,130.6 L602.2,130.6 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
-<path data-role="marker" data-policy="b4" d="M872.0,266.4 L876.5,257.9 L867.5,257.9 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
+<path data-role="marker" data-policy="b4" d="M872.0,289.6 L876.5,281.0 L867.5,281.0 Z" fill="#e87ba4" stroke="#ffffff" stroke-width="1.5"/>
 <circle data-role="marker" data-policy="srcla" cx="76.0" cy="134.0" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
 <circle data-role="marker" data-policy="srcla" cx="341.3" cy="134.0" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
 <circle data-role="marker" data-policy="srcla" cx="606.7" cy="134.0" r="5" fill="#2a78d6" stroke="#ffffff" stroke-width="1.5"/>
