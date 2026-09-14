@@ -110,6 +110,12 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     /// @notice Whether deposits/mints are paused
     bool public paused;
 
+    /// @notice P37 release scope: the most `totalAssets()` that deposits and
+    ///         mints may bring the vault to, in asset base units.
+    ///         `type(uint256).max` (the default) means uncapped. Accrued yield
+    ///         may carry `totalAssets()` past it; withdrawals are never bounded.
+    uint256 public depositCap = type(uint256).max;
+
     /// @notice Active plan ID
     bytes32 public activePlanId;
 
@@ -266,14 +272,49 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
         // counters are cumulative telemetry, not additional NAV entries.
     }
 
+    /// @notice Assets still admissible under the deposit cap for `receiver`.
+    /// @dev P37: with a finite `depositCap`, the room is computed against the
+    ///      vault's CACHED NAV (`totalAssets()`, which sums the cached
+    ///      `strategyAssets` last written by a sync) - the same convention
+    ///      `previewMint`/`maxWithdraw` already follow, not a live adapter
+    ///      read (`IStrategyAdapter.sync()` is non-view, so a view function
+    ///      cannot call it). `deposit`/`mint` call `_syncAllStrategies()` to
+    ///      refresh every adapter's cache BEFORE OpenZeppelin's
+    ///      `maxDeposit`/`maxMint` check runs (see `deposit`/`mint` below),
+    ///      so the CAP ITSELF IS ALWAYS ENFORCED AGAINST THE SYNCED NAV. Only
+    ///      this advisory view can overstate the room, by whatever adapter
+    ///      interest has accrued since the last sync - a deposit sized to the
+    ///      stale room can then revert `ERC4626ExceededMaxDeposit` against
+    ///      the freshly-synced, smaller one. An uncapped vault
+    ///      (`depositCap == type(uint256).max`) is unaffected: `_depositRoom`
+    ///      returns the sentinel without reading `totalAssets()` at all.
     function maxDeposit(address) public view override(ERC4626) returns (uint256) {
         if (paused || _syncUnauthorised() || _cacheStale()) return 0;
-        return type(uint256).max;
+        return _depositRoom();
     }
 
-    function maxMint(address) public view override(ERC4626) returns (uint256) {
-        if (paused || _syncUnauthorised() || _cacheStale()) return 0;
-        return type(uint256).max;
+    /// @notice Shares mintable for the assets still admissible under the
+    ///         deposit cap for `receiver`.
+    /// @dev P37: subject to the same cached-NAV caveat as `maxDeposit` above.
+    function maxMint(address receiver) public view override(ERC4626) returns (uint256) {
+        uint256 room = maxDeposit(receiver);
+        // An uncapped vault advertises unlimited mints exactly as before P37:
+        // converting type(uint256).max to shares would overflow mulDiv.
+        if (room == type(uint256).max) return type(uint256).max;
+        // A paused, stale, unauthorised, or fully-capped vault has no room at
+        // all: skip convertToShares' totalAssets() adapter loop.
+        if (room == 0) return 0;
+        return convertToShares(room);
+    }
+
+    /// @dev P37: assets the deposit cap still admits. The uncapped sentinel is
+    ///      returned unchanged rather than netted against totalAssets(), so an
+    ///      uncapped vault's maxDeposit stays type(uint256).max.
+    function _depositRoom() private view returns (uint256) {
+        uint256 cap = depositCap;
+        if (cap == type(uint256).max) return type(uint256).max;
+        uint256 assets_ = totalAssets();
+        return cap > assets_ ? cap - assets_ : 0;
     }
 
     /// @dev Helper to check if reward cache is stale (blocks deposits/mints)
@@ -580,6 +621,20 @@ contract NavyVaultSRCLA is ERC20, ERC4626, ERC20Permit, AccessControl, IVaultEve
     function unpause() external onlyRole(ADMIN_ROLE) {
         paused = false;
         emit Unpause();
+    }
+
+    /// @notice P37 release scope: set the deposit cap. `type(uint256).max` is
+    ///         uncapped; a cap at or below `totalAssets()` closes deposits and
+    ///         mints without affecting withdrawals or redemptions.
+    /// @dev A finite cap must be a realistic USDC amount: `type(uint256).max`
+    ///      is the only value this contract treats as uncapped, and a finite
+    ///      cap set close to it can overflow `maxMint`'s `convertToShares`
+    ///      call. No overflow guard is enforced on-chain - the admin is
+    ///      trusted to pass a sane value.
+    function setDepositCap(uint256 newCap) external onlyRole(ADMIN_ROLE) {
+        uint256 previousCap = depositCap;
+        depositCap = newCap;
+        emit DepositCapSet(previousCap, newCap);
     }
 
     /// @notice Set the reward executor address

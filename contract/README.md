@@ -52,9 +52,19 @@ simulation pass. Fund accounts with `cast rpc anvil_impersonateAccount` + `cast 
 
 ## Admin operations
 
-`NavyVaultSRCLA` (owner): `setAdapterRisk`, `setAdapterState`, `setAdminReserve`, `setMinIdleBps`,
-`setMaxSynchronousLossBps`, `setDependencyGroup`, `setRewardAccountant`, `setRewardExecutor`,
-`setRewardTokenRoute`. Ownership transfer is two-step (the recipient must call `acceptOwnership`).
+`NavyVaultSRCLA` (`ADMIN_ROLE`): `setAdapterRisk`, `setAdapterAccountingCap`, `setAdapterState`,
+`setAdminReserve`, `setMinIdleBps`, `setMaxSynchronousLossBps`, `setDependencyGroup`, `setDepositCap`,
+`setRewardAccountant`, `setRewardExecutor`, `setRewardTokenRoute`, `registerAdapter`, `setWithdrawalOrder`,
+`recognizeLoss`, `pause`, `unpause`. Roles are OpenZeppelin `AccessControl`; `DEFAULT_ADMIN_ROLE` grants and
+revokes them. There is no `Ownable` owner.
+
+`emergencyExit` is callable by either `ADMIN_ROLE` or `ALLOCATOR_ROLE`, not gated by `onlyRole` alone — it
+divests one adapter to idle and is deliberately reachable without the admin when the allocator needs to unwind.
+
+`setDepositCap` (P37): the most `totalAssets()` deposits and mints may reach. Default `type(uint256).max`
+(uncapped); `DeployBaseSystem.s.sol` sets $1,000,000, from `script/ReleaseScope.sol`. It never bounds withdrawals.
+To remove the cap, set exactly `type(uint256).max`; never a near-max finite value, which makes `maxMint`/`mint`
+revert.
 
 The **allocator** role is deliberately narrow: it can only move funds *between allowlisted adapters*, never to
 an EOA, and every move is bounded by `capBps` / `minIdleBps` / `maxLossBps` on-chain. That allocator is the

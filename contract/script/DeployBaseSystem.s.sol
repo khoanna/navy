@@ -12,6 +12,7 @@ import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
 import {RewardAccountant} from "../src/reward/RewardAccountant.sol";
 import {VaultGuardrails} from "./VaultGuardrails.sol";
+import {MAINNET_DEPOSIT_CAP_BASE} from "./ReleaseScope.sol";
 
 /// @notice Deploys the Base vault and lending adapters with production identity checks.
 /// @dev Reward routes are configured even when inactive - the route manifest encodes
@@ -24,7 +25,12 @@ contract DeployBaseSystem is Script {
     address internal constant COMET = 0xb125E6687d4313864e53df431d5425969c15Eb2F;
     address internal constant M_USDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
     address internal constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address internal constant MOONWELL_INTEREST_MODEL = 0x76e1e2F2E3239A15bAD01f027B5A4bcDE5797f3C;
+    // Moonwell mUSDC's CURRENT interest-rate model (read from Base mainnet on
+    // 2026-09-13). MoonwellAdapter pins it: its constructor rejects a mismatch
+    // and supplyRatePerYear reverts after a governance change. Re-read
+    // `interestRateModel()` on 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22
+    // immediately before any real deploy and update this value if it moved.
+    address internal constant MOONWELL_INTEREST_MODEL = 0xcD6b4B047e55A513b8efc2B61F58B9f7Fa6096FC;
     address internal constant SWAP_ROUTER_02 = 0x2626664C2603336E57b271C5c0b26F42121e30D0;
     address internal constant FACTORY = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
     address internal constant SEQUENCER_FEED = 0x3D2E4d978Ba8351b82fe2d6E3b3DcEe9FA6307f7;
@@ -103,6 +109,11 @@ contract DeployBaseSystem is Script {
         ordered[2] = address(moonwell);
         VaultGuardrails.applyTo(vault, ordered);
 
+        // P37 release scope (see ReleaseScope.sol). Set here, not in
+        // VaultGuardrails: DeployAndFund's §11.1 tier vaults share those
+        // guardrails and must accept 10M.
+        vault.setDepositCap(MAINNET_DEPOSIT_CAP_BASE);
+
         // Admin gets DEFAULT_ADMIN_ROLE and ADMIN_ROLE only
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), admin);
         vault.grantRole(vault.ADMIN_ROLE(), admin);
@@ -133,6 +144,7 @@ contract DeployBaseSystem is Script {
         console2.log("RewardAccountant", address(accountant));
         console2.log("Admin", admin);
         console2.log("Allocator", allocator);
+        console2.log("Deposit cap (USDC base units)", vault.depositCap());
 
         // Steps the broadcaster cannot perform: RewardAccountant's
         // REWARD_ADMIN_ROLE is held only by `admin`. Printed on every run so

@@ -9,12 +9,13 @@ import {AaveV3Adapter} from "../src/adapters/AaveV3Adapter.sol";
 import {CompoundAdapter} from "../src/adapters/CompoundAdapter.sol";
 import {MoonwellAdapter} from "../src/adapters/MoonwellAdapter.sol";
 import {RewardExecutor} from "../src/reward/RewardExecutor.sol";
+import {MAINNET_DEPOSIT_CAP_BASE} from "./ReleaseScope.sol";
 
 /// @notice Verifies Base deployment conformance without mutating state.
 /// @dev This script reads state and reverts on any mismatch - safe to run against mainnet.
 ///      Usage: forge script script/VerifyBaseSystem.s.sol --fork-url $BASE_RPC_URL
-///             --sig "run(address,address,address,address,address,address)" \
-///             <vault> <aave> <compound> <moonwell> <rewards> <admin>
+///             --sig "run(address,address,address,address,address,address,address)" \
+///             <vault> <aave> <compound> <moonwell> <rewards> <admin> <allocator>
 contract VerifyBaseSystem is Script {
     // === Constants ===
 
@@ -90,6 +91,9 @@ contract VerifyBaseSystem is Script {
 
         // Verify reward executor is set
         if (v.rewardExecutor() == address(0)) revert Mismatch("Reward executor not set");
+
+        // P37 release scope (see ReleaseScope.sol)
+        if (v.depositCap() != MAINNET_DEPOSIT_CAP_BASE) revert Mismatch("Vault deposit cap");
 
         console2.log("Vault verified");
     }

@@ -11,6 +11,7 @@ import {RewardAccountant} from "../../src/reward/RewardAccountant.sol";
 import {IRewardExecutor} from "../../src/interfaces/IRewardExecutor.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {MAINNET_DEPOSIT_CAP_BASE} from "../../script/ReleaseScope.sol";
 
 /// @notice Minimal Chainlink feed interface
 interface AggregatorV3Interface {
@@ -193,6 +194,9 @@ contract DeployBaseSystemTest is Test {
         // Set reward executor and accountant (requires admin role - deployer has it)
         vault.setRewardExecutor(address(rewards));
         vault.setRewardAccountant(address(accountant));
+
+        // P37 release scope, mirroring DeployBaseSystem.s.sol.
+        vault.setDepositCap(MAINNET_DEPOSIT_CAP_BASE);
 
         // Transfer admin roles to BASE_ADMIN
         vault.grantRole(vault.DEFAULT_ADMIN_ROLE(), BASE_ADMIN);
@@ -385,7 +389,11 @@ contract DeployBaseSystemTest is Test {
     ///      vault that read as an open one.
     function testDeployedVaultAcceptsADeposit() public {
         assertEq(accountant.vault(), address(vault), "the accountant must authorise the vault");
-        assertEq(vault.maxDeposit(address(this)), type(uint256).max, "the deployed vault must advertise capacity");
+        assertEq(
+            vault.maxDeposit(address(this)),
+            MAINNET_DEPOSIT_CAP_BASE,
+            "the deployed vault must advertise capacity up to its cap"
+        );
 
         address depositor = address(0xD0D0);
         mockUsdc.mint(depositor, 1_000e6);
@@ -395,6 +403,17 @@ contract DeployBaseSystemTest is Test {
         vm.stopPrank();
 
         assertGt(shares, 0, "a deposit against the deployed wiring must succeed");
+    }
+
+    /// @dev P37: the first mainnet vault accepts at most $1,000,000 of deposits.
+    function testVaultCarriesTheMainnetDepositCap() public {
+        assertEq(vault.depositCap(), MAINNET_DEPOSIT_CAP_BASE, "the mainnet vault must carry the P37 deposit cap");
+    }
+
+    /// @dev P37: pins the release decision to a single literal so a future
+    ///      change to ReleaseScope.sol is a deliberate, reviewed edit.
+    function testReleaseScopeIsOneMillionUsdc() public pure {
+        assertEq(MAINNET_DEPOSIT_CAP_BASE, 1_000_000e6, "the P37 release scope must be $1,000,000 of USDC");
     }
 
     function testRolesAreComplete() public {
