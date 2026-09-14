@@ -116,7 +116,8 @@ P37. Since v0.11, `heldout-b` carries one too (P37 was designed by reading it); 
 `heldout-d` carries none.
 **All three sealed eras are reported. Since Amendment P38 (paper v0.12), release is
 decided by P37's verdict on `heldout-c` alone — a post-hoc verdict, because `heldout-c`
-is design data; `heldout-b` and `heldout-d` never decide it.**
+is design data; `heldout-b` and `heldout-d` never decide it. Under Amendment P39, yield
+non-inferiority is reported but does not block release; every other P37 check does.**
 
 ⚠️ **`heldout-c` is DESIGN DATA as of v0.9, and `heldout-b` is DESIGN DATA as of
 v0.11 (P37).** The first registered run opened `heldout-c`, returned `FAIL`, and its

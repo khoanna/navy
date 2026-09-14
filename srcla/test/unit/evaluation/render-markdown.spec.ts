@@ -955,6 +955,54 @@ describe('renderReport — P37 three verdicts', () => {
     expect(threeVerdicts([d(true)]).release.status).toBe('NOT RUN');
   });
 
+  // Amendment P39: yield non-inferiority is reported, not gating, for release.
+  // Every other P37 check -- forecast, sustainability, safety, demonstration,
+  // the fork replay -- still blocks, and the P37 post-hoc line is unchanged.
+  const NON_INFERIOR = 'Non-inferior to every sustainable baseline (margin 43.0 bps)';
+  const withP37PolicyBlocked = (run: RunSummary, blocked: string[]): RunSummary => ({
+    ...run,
+    gateP37: { ...run.gateP37!, pass: blocked.length === 0, blockedReasons: blocked },
+  });
+
+  it('P39: releases when non-inferiority is the only failing P37 check on heldout-c, and still reports it', () => {
+    const v = threeVerdicts([withP37PolicyBlocked(releaseRun(true), [NON_INFERIOR])]);
+    expect(v.release.status).toBe('PASS');
+    expect(v.release.eras[0]!.policy).toBe('PASS');
+    expect(v.release.eras[0]!.blocked).toEqual([
+      `reported (not gating, Amendment P39): policy: ${NON_INFERIOR}`,
+    ]);
+    expect(v.release.note).toMatch(/Amendment P39/);
+    expect(v.release.note).toMatch(/non-inferiority is reported, not gating/);
+  });
+
+  it('P39: any other failing P37 policy check still blocks release', () => {
+    const v = threeVerdicts([
+      withP37PolicyBlocked(releaseRun(true), [NON_INFERIOR, 'Safety: stressed liquid coverage']),
+    ]);
+    expect(v.release.status).toBe('FAIL');
+    expect(v.release.eras[0]!.policy).toBe('FAIL');
+  });
+
+  it('P39: a failing P37 forecast gate still blocks release', () => {
+    const c = withP37PolicyBlocked(releaseRun(true), [NON_INFERIOR]);
+    const v = threeVerdicts([
+      {
+        ...c,
+        evaluation: { ...c.evaluation, forecastGateP37: fakeForecastGate(false) },
+      } as RunSummary,
+    ]);
+    expect(v.release.status).toBe('FAIL');
+  });
+
+  it('P39: leaves the P37 post-hoc line unchanged -- non-inferiority still blocks it there', () => {
+    const v = threeVerdicts([
+      withP37PolicyBlocked(releaseRun(true), [NON_INFERIOR]),
+      { ...withP37(fakeRun('heldout-b', true), true), originGaps: 0 },
+    ]);
+    expect(v.p37PostHoc.status).toBe('FAIL');
+    expect(v.release.status).toBe('PASS');
+  });
+
   it('never lets a missing P37 gate read as a pass', () => {
     const v = threeVerdicts([fakeRun('heldout-c', true), fakeRun('heldout-b', true)]);
     expect(v.registered.status).toBe('PASS');
@@ -1146,6 +1194,24 @@ describe('renderReport — P37 three verdicts', () => {
     });
     expect(md).toMatch(/^> \*\*RELEASE\.\*\*/m);
     expect(md).not.toContain('**DO NOT RELEASE.**');
+  });
+
+  it('P39: the banner reads RELEASE when non-inferiority is the only failing P37 check, and the shortfall stays printed', () => {
+    const c = releaseRun(true);
+    const run: RunSummary = {
+      ...c,
+      gateP37: {
+        ...c.gateP37!,
+        pass: false,
+        blockedReasons: ['Non-inferior to every sustainable baseline (margin 43.0 bps)'],
+      },
+    };
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).not.toContain('**DO NOT RELEASE.**');
+    expect(md).toContain(
+      'reported (not gating, Amendment P39): policy: Non-inferior to every sustainable baseline',
+    );
   });
 
   // I-2 (b): with no `heldout-c` run at all, the pre-P37 sentence pair is

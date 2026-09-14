@@ -136,6 +136,34 @@ function designEraLine(runs: readonly RunSummary[], amended: boolean, note: stri
 export const RELEASE_ERA: EraTag = 'heldout-c';
 
 /**
+ * The name every non-inferiority check starts with (`kernel/gates.ts`,
+ * `nonInferiorName`). Matched by prefix because the name carries the margin.
+ */
+const NON_INFERIORITY_CHECK = 'Non-inferior to every sustainable baseline';
+
+/**
+ * The release era's verdict under Amendment P39: P37's gates, except that a
+ * failed non-inferiority check is reported and does not block. Any other failed
+ * P37 check -- and a missing P37 gate -- still blocks, so this fails closed.
+ */
+function releaseEraVerdict(run: RunSummary): EraVerdict {
+  const v = eraVerdict(run, true);
+  const pg = run.gateP37;
+  if (pg === undefined || pg.pass) return v;
+  const reported = pg.blockedReasons.filter((b) => b.startsWith(NON_INFERIORITY_CHECK));
+  const blocking = pg.blockedReasons.filter((b) => !b.startsWith(NON_INFERIORITY_CHECK));
+  if (blocking.length > 0 || reported.length === 0) return v;
+  return {
+    ...v,
+    policy: 'PASS',
+    blocked: [
+      ...v.blocked.filter((b) => !b.startsWith('policy: ')),
+      ...reported.map((b) => `reported (not gating, Amendment P39): policy: ${b}`),
+    ],
+  };
+}
+
+/**
  * The three verdicts (paper v0.11; release moved by P38). PURE, and the only
  * place they are decided.
  *
@@ -166,13 +194,14 @@ export function threeVerdicts(runs: readonly RunSummary[]): ThreeVerdicts {
         `release verdict needs ${HELDOUT_D_MIN_ORIGINS} with zero gaps, so it blocks.`,
     };
   } else {
-    const v = eraVerdict(c, true);
+    const v = releaseEraVerdict(c);
     release = {
       status: v.forecast === 'PASS' && v.policy === 'PASS' ? 'PASS' : 'FAIL',
       eras: [v],
       note:
         "POST-HOC (Amendment P38): P37's gates on `heldout-c`, which is design data — it " +
-        'informed P29, P31 and P37 — so this verdict is not an out-of-sample test of P37.',
+        'informed P29, P31 and P37 — so this verdict is not an out-of-sample test of P37. ' +
+        'Amendment P39: yield non-inferiority is reported, not gating; every other P37 check blocks.',
     };
   }
   return {
