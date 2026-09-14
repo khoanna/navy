@@ -100,10 +100,10 @@ Base archive state for all three venues reads back to the deployment floor (bloc
 |---|---|---|---|
 | `calibration` | 2024-03-15 → 2025-05-31 | 443 | the ONLY data anything may be fit on |
 | `burned-a` | 2025-06-01 → 2026-02-28 | 273 | former held-out A; burned while diagnosing v0.5. Reported by nothing |
-| `heldout-c` | 2026-03-01 → 2026-05-25 | 86 | **sealed** — the era with statistical power |
+| `heldout-c` | 2026-03-01 → 2026-05-25 | 86 | **sealed** — the era with statistical power; P37's verdict on it decides release (P38, post-hoc) |
 | `burned` | 2026-05-26 → 2026-08-23 | 90 | §4.1 design data; in NEITHER era |
 | `heldout-b` | 2026-08-24 → 2026-09-23T00:00:00Z | closed by P37 | **sealed**; design data for P37 (fourth burned-window declaration) |
-| `heldout-d` | 2026-09-23T00:00:00Z + 1s → present | open | **sealed** — P37's release era; graded only at ≥ 2,064 origins with zero gaps |
+| `heldout-d` | 2026-09-23T00:00:00Z + 1s → present | open | **sealed** — P37 confirmation era; reported when run, never decides release (P38) |
 
 **There is no `heldout-a`** — it was renamed `burned-a` when v0.5's diagnosis read
 its aggregates. Read the windows from `eras.ts`, never from memory.
@@ -114,7 +114,9 @@ inside calibration and here it is in neither (including it would place fitting d
 burned window, so it carried a design-knowledge caveat `heldout-b` did not — before
 P37. Since v0.11, `heldout-b` carries one too (P37 was designed by reading it); only
 `heldout-d` carries none.
-**All three sealed eras are reported; only `heldout-d` decides release.**
+**All three sealed eras are reported. Since Amendment P38 (paper v0.12), release is
+decided by P37's verdict on `heldout-c` alone — a post-hoc verdict, because `heldout-c`
+is design data; `heldout-b` and `heldout-d` never decide it.**
 
 ⚠️ **`heldout-c` is DESIGN DATA as of v0.9, and `heldout-b` is DESIGN DATA as of
 v0.11 (P37).** The first registered run opened `heldout-c`, returned `FAIL`, and its
@@ -123,8 +125,8 @@ after reading its per-venue and per-policy results to design G1, G3 and G5 (the 
 burned-window declaration). Any further result against either is a CONFIRMATORY
 RE-RUN, not a fresh test. `heldout-d` grows as origins are backfilled (`pnpm
 backfill:history`; R30 refuses live-collector rows in a sealed era) and is the only
-era that will carry no design knowledge; it alone decides release, once it holds 2,064
-origins with zero gaps.
+era that will carry no design knowledge; since P38 it is a confirmation era, reported
+when run, that never decides release.
 
 ### Running the experiment
 
@@ -233,9 +235,10 @@ changes; it re-derives from columns already stored and fetches no blocks.
 - **`run-phase4`'s exit code tracks only the registered v0.10 gates** (`scripts/run-phase4.ts:967`)
   — a passing release verdict can still exit 1, and that is deliberate, not a bug to
   "fix" by widening the exit check. The release decision itself is `verdicts.release.status`
-  in `SRCLA-REPORT.json` (`threeVerdicts` in `src/evaluation/report/render-markdown.ts`), and
-  grading `heldout-d` needs `pnpm backfill:history` to have written its rows first (R30
-  refuses live-collector rows in any sealed era).
+  in `SRCLA-REPORT.json` (`threeVerdicts` in `src/evaluation/report/render-markdown.ts`),
+  which since Amendment P38 grades P37's gates on `heldout-c` (`RELEASE_ERA`) — post-hoc,
+  on design data. A sealed era's origins must be written by `pnpm backfill:history`
+  before it can be graded (R30 refuses live-collector rows in any sealed era).
 
 ### Still open
 
@@ -265,9 +268,9 @@ changes; it re-derives from columns already stored and fetches no blocks.
    10k/100k, S1/S3/S4 (NOT DEMONSTRATED at 10M) and scale invariance.
    `gates.ts` attaches `CAPACITY_INFEASIBLE` only to SRCLA runs below the coverage
    floor, so its absence says nothing about the stress arithmetic. Do not "fix" these
-   by moving a threshold. Paper v0.11's P37 re-grades both eras post-hoc under G1–G5 and
-   moves the release decision onto the sealed `heldout-d`; the registered verdict above
-   is unchanged.
+   by moving a threshold. Paper v0.11's P37 re-grades both eras post-hoc under G1–G5, and
+   Amendment P38 (paper v0.12) decides release on P37's verdict on `heldout-c` alone —
+   post-hoc, on design data; the registered verdict above is unchanged.
 2. **Withdrawals are a registered schedule, not observed.** The Navy vault has no
    Base mainnet history, so §8.1's `W_H` has no real series. Its cadence is now in
    SECONDS: counted in snapshots it silently meant "every 7 hours" on hourly

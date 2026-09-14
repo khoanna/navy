@@ -44,7 +44,8 @@
  *    and G5, which makes it design data too (the fourth burned-window
  *    declaration). Since P37, only `heldout-d` carries none. All THREE sealed
  *    eras (`heldout-c`, `heldout-b`, `heldout-d`) are reported for the
- *    registered v0.10 verdict; only `heldout-d` decides release.
+ *    registered v0.10 verdict; since Amendment P38, release is decided by
+ *    P37's verdict on `heldout-c` alone (post-hoc: it is design data).
  *
  *    (In v0.5 this disclosure was about `heldout-a`, 2025-09-01 -> 2026-05-25.
  *    Reading that era's aggregates while diagnosing v0.5 burned it; it is now
@@ -170,7 +171,7 @@ export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.f
       'window. Registered open-ended; P37 closed it at P37_FREEZE_SECONDS (disclosed), and ' +
       'it is DESIGN DATA for P37 (fourth burned-window declaration, paper v0.11). Low ' +
       'power; reported alongside `heldout-c` for the registered v0.10 verdict, not as ' +
-      'release evidence -- only `heldout-d` decides release.',
+      "release evidence -- release is decided by P37's verdict on `heldout-c` (Amendment P38).",
   },
   'heldout-d': {
     tag: 'heldout-d',
@@ -178,10 +179,10 @@ export const REGISTERED_ERAS: Readonly<Record<EraTag, RegisteredEra>> = Object.f
     endSeconds: OPEN_ENDED,
     sealed: true,
     role:
-      'P37 RELEASE era, open-ended from one second after P37_FREEZE_SECONDS and growing with ' +
-      'collection. Nothing in P37 was designed, fit or tuned with any of it in view. The ' +
-      `release verdict is graded on it only once it holds ${HELDOUT_D_MIN_ORIGINS} hourly ` +
-      'origins with zero gaps.',
+      'P37 confirmation era, open-ended from one second after P37_FREEZE_SECONDS and growing ' +
+      'as origins are backfilled. Nothing in P37 was designed, fit or tuned with any of it in ' +
+      'view. Since Amendment P38 it does not decide release; it is reported when evaluated ' +
+      `and graded only once it holds ${HELDOUT_D_MIN_ORIGINS} hourly origins with zero gaps.`,
   },
 });
 

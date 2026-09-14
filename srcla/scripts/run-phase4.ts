@@ -20,9 +20,11 @@
  *              the registered v0.10 verdict, not for release.
  * Neither alone is sufficient evidence for the registered v0.10 verdict.
  * Reporting only the flattering one would be the choice this whole phase
- * exists to make impossible. Release itself is decided by `heldout-d` alone
- * (see `--eras` below), which carries no design knowledge and grows only as
- * origins are backfilled -- R30 refuses live-collector rows in a sealed era.
+ * exists to make impossible. Release itself is decided by P37's verdict on
+ * `heldout-c` (Amendment P38) -- post-hoc, since heldout-c is design data.
+ * `heldout-d`, which carries no design knowledge and grows only as origins
+ * are backfilled (R30 refuses live-collector rows in a sealed era), is
+ * reported when run and never decides release.
  *
  * THIS IS THE MOMENT THE SEALED DATA IS OPENED. Everything that fits anything
  * must already be committed: a result that prompts a change to the artifact
@@ -34,7 +36,7 @@
  *   DATABASE_URL=... pnpm exec tsx scripts/run-phase4.ts \
  *     [--artifact config/registered-artifact.json] \
  *     [--tiers 10000,100000,1000000,10000000] \
- *     [--eras heldout-c,heldout-b]      (add heldout-d for the P37 release verdict) \
+ *     [--eras heldout-c,heldout-b]      (heldout-c decides release under P38; heldout-d is optional) \
  *     [--out-dir .]
  *
  * UNITS: money is bigint USDC base units (6 dp); rates WAD annualized.

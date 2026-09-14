@@ -159,6 +159,31 @@ function fakeRun(era: 'heldout-c' | 'heldout-b', pass: boolean): RunSummary {
   };
 }
 
+/**
+ * A run carrying P37 gates that pass or fail together. `originGaps` stays as
+ * the caller sets it: without it the run's power is unmeasured, and the release
+ * line (Amendment P38) blocks on that.
+ */
+function withP37(run: RunSummary, pass: boolean): RunSummary {
+  return {
+    ...run,
+    gateP37: {
+      ...run.gate,
+      pass,
+      blockedReasons: pass ? [] : ['Safety: stressed liquid coverage'],
+    } as RegisteredGateResult,
+    evaluation: {
+      ...run.evaluation,
+      forecastGateP37: fakeForecastGate(pass),
+    } as unknown as RegisteredEvaluationResult,
+  };
+}
+
+/** A fully powered `heldout-c` run (6,400 origins, zero gaps) whose P37 gates pass or fail. */
+function releaseRun(p37Pass: boolean, registeredPass = p37Pass): RunSummary {
+  return { ...withP37(fakeRun('heldout-c', registeredPass), p37Pass), originGaps: 0 };
+}
+
 const provenance = {
   chainId: 8453,
   multicall3Address: '0xcA11bde05977b3631167028862bE2a173976CA11',
@@ -359,13 +384,17 @@ describe('renderReport — mandatory disclosures', () => {
   // sentence stays (the test above pins it), but it is no longer the whole
   // story once Amendment P37 makes `heldout-b` design data too. The report
   // must say so immediately after, scope "neither alone is sufficient" to the
-  // registered v0.10 verdict, and name `heldout-d` as the only era release is
-  // decided on.
+  // registered v0.10 verdict, and name where release is decided. Amendment P38
+  // moved that onto P37's verdict on `heldout-c`; no era description may still
+  // claim `heldout-d` decides it.
   it('scopes the pre-P37 heldout-b caveat to the registered verdict and names heldout-d as the only design-free era (I-1)', () => {
     expect(md).toMatch(/registered for the v0\.10 verdict/);
     expect(md).toMatch(/heldout-b`\s+is design data too/);
     expect(md).toMatch(/only `heldout-d` carries no\s+design knowledge/);
-    expect(md).toMatch(/release itself is decided by `heldout-d` alone/);
+    expect(md).toMatch(/release itself is decided by P37's verdict on `heldout-c` \(Amendment P38, post-hoc\)/);
+    expect(md).not.toMatch(/decided by `heldout-d` alone/);
+    expect(md).not.toMatch(/only `heldout-d` decides release/);
+    expect(md).not.toMatch(/P37 RELEASE era/);
   });
 
   it('no longer publishes the retired v0.5 held-out-A claims', () => {
@@ -590,7 +619,8 @@ describe('renderReport — §11.5 has TWO gates', () => {
 
 describe('renderReport — a passing run', () => {
   it('does not print a blocked-reasons clause when the gate passed', () => {
-    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+    // Amendment P38: RELEASE needs P37's gates to pass on a powered `heldout-c`.
+    const md = renderReport({ ...params, runs: [releaseRun(true)] });
     expect(md).toMatch(/\*\*Forecast gate: PASS\*\*/);
     expect(md).toMatch(/\*\*Policy gate: PASS\*\*/);
     // A passing run must not emit a bullet list of reasons, and must reach
@@ -866,49 +896,63 @@ describe('renderReport — §11.5 sustainability sections', () => {
 });
 
 describe('renderReport — P37 three verdicts', () => {
-  const withP37 = (run: RunSummary, pass: boolean): RunSummary => ({
-    ...run,
-    gateP37: {
-      ...run.gate,
-      pass,
-      blockedReasons: pass ? [] : ['Safety: stressed liquid coverage'],
-    } as RegisteredGateResult,
-    evaluation: {
-      ...run.evaluation,
-      forecastGateP37: fakeForecastGate(pass),
-    } as unknown as RegisteredEvaluationResult,
-  });
-
   it('prints all three verdicts, after the registered verdict and without changing it', () => {
     const md = renderReport(params);
     expect(md).toContain('## Verdicts under Amendment P37 (paper v0.11)');
     expect(md).toMatch(/\*\*1\. Registered v0\.10: FAIL\*\*/);
     expect(md).toMatch(/\*\*2\. P37, post-hoc: FAIL\*\*/);
-    expect(md).toMatch(/\*\*3\. Release \(`heldout-d`\): NOT RUN\*\*/);
+    // `params` carries no measured gap count, so its `heldout-c` cannot be graded.
+    expect(md).toMatch(/\*\*3\. Release \(`heldout-c`, Amendment P38\): NOT YET POWERED\*\*/);
     expect(md.indexOf('## Verdict\n')).toBeLessThan(md.indexOf('## Verdicts under Amendment P37'));
   });
 
-  it('labels the P37 verdict on the design eras post-hoc', () => {
-    const v = threeVerdicts([
-      withP37(fakeRun('heldout-c', true), true),
-      withP37(fakeRun('heldout-b', true), true),
-    ]);
+  it('labels both the P37 verdict on the design eras and the release verdict on heldout-c post-hoc', () => {
+    const v = threeVerdicts([releaseRun(true), withP37(fakeRun('heldout-b', true), true)]);
     expect(v.p37PostHoc.status).toBe('PASS');
     expect(v.p37PostHoc.note).toMatch(/POST-HOC/);
-    expect(v.release.status).toBe('NOT RUN');
+    expect(v.release.status).toBe('PASS');
+    expect(v.release.eras.map((e) => e.era)).toEqual(['heldout-c']);
+    expect(v.release.note).toMatch(/POST-HOC \(Amendment P38\)/);
+    expect(v.release.note).toMatch(/design data/);
   });
 
-  it('reads NOT YET POWERED below 2,064 origins or with a gap, and grades only once powered', () => {
-    const d = (origins: number, gaps: number, pass: boolean): RunSummary => ({
-      ...withP37(fakeRun('heldout-c', pass), pass),
-      era: 'heldout-d',
+  it('reads NOT RUN when heldout-c was not evaluated, however heldout-b fared', () => {
+    const v = threeVerdicts([{ ...withP37(fakeRun('heldout-b', true), true), originGaps: 0 }]);
+    expect(v.release.status).toBe('NOT RUN');
+    expect(v.release.note).toMatch(/`heldout-c` was not evaluated/);
+  });
+
+  it('reads NOT YET POWERED below 2,064 origins or with a gap on heldout-c, and grades only once powered', () => {
+    const c = (origins: number, gaps: number, pass: boolean): RunSummary => ({
+      ...releaseRun(pass),
       datasetOrigins: origins,
       originGaps: gaps,
     });
-    expect(threeVerdicts([d(2_063, 0, true)]).release.status).toBe('NOT YET POWERED');
-    expect(threeVerdicts([d(2_064, 1, true)]).release.status).toBe('NOT YET POWERED');
-    expect(threeVerdicts([d(2_064, 0, true)]).release.status).toBe('PASS');
-    expect(threeVerdicts([d(2_064, 0, false)]).release.status).toBe('FAIL');
+    expect(threeVerdicts([c(2_063, 0, true)]).release.status).toBe('NOT YET POWERED');
+    expect(threeVerdicts([c(2_064, 1, true)]).release.status).toBe('NOT YET POWERED');
+    expect(threeVerdicts([c(2_064, 0, true)]).release.status).toBe('PASS');
+    expect(threeVerdicts([c(2_064, 0, false)]).release.status).toBe('FAIL');
+  });
+
+  it('does not let a failing heldout-b block a passing heldout-c release', () => {
+    const v = threeVerdicts([
+      releaseRun(true),
+      { ...withP37(fakeRun('heldout-b', false), false), originGaps: 0 },
+    ]);
+    expect(v.p37PostHoc.status).toBe('FAIL');
+    expect(v.release.status).toBe('PASS');
+  });
+
+  it('never lets a heldout-d run decide release', () => {
+    const d = (pass: boolean): RunSummary => ({
+      ...withP37(fakeRun('heldout-c', pass), pass),
+      era: 'heldout-d',
+      datasetOrigins: HELDOUT_D_MIN_ORIGINS,
+      originGaps: 0,
+    });
+    expect(threeVerdicts([releaseRun(true), d(false)]).release.status).toBe('PASS');
+    expect(threeVerdicts([releaseRun(false), d(true)]).release.status).toBe('FAIL');
+    expect(threeVerdicts([d(true)]).release.status).toBe('NOT RUN');
   });
 
   it('never lets a missing P37 gate read as a pass', () => {
@@ -1064,85 +1108,54 @@ describe('renderReport — P37 three verdicts', () => {
     expect(section).toMatch(/price of unsustainability/i);
   });
 
-  // I-2: once `heldout-d` is produced, the release line -- not `anyBlocked`
-  // over the registered v0.10 gates -- decides the top banner. Without this
-  // fix the documented release invocation (`--eras heldout-c,heldout-b,
-  // heldout-d`) prints DO NOT RELEASE forever, because the registered v0.10
-  // result on the design eras is frozen FAIL, even the moment release itself
-  // passes.
-  it('I-2 (a): the banner reads RELEASE from the heldout-d release verdict alone, even though the registered v0.10 line is FAIL', () => {
-    const d: RunSummary = {
-      ...withP37(fakeRun('heldout-c', true), true),
-      era: 'heldout-d',
-      datasetOrigins: HELDOUT_D_MIN_ORIGINS,
-      originGaps: 0,
-    };
-    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', false), d] });
+  // I-2 under Amendment P38: whenever `heldout-c` is in the run, the release
+  // line -- P37's verdict on `heldout-c` -- decides the top banner, never
+  // `anyBlocked` over the registered v0.10 gates, which are frozen FAIL on
+  // the design eras.
+  it('I-2 (a): the banner reads RELEASE from P37 on heldout-c alone, even though the registered v0.10 line is FAIL', () => {
+    const md = renderReport({
+      ...params,
+      runs: [releaseRun(true, false), fakeRun('heldout-b', false)],
+    });
     expect(md).toMatch(/^> \*\*RELEASE\.\*\*/m);
     expect(md).not.toContain('**DO NOT RELEASE.**');
-    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) passed/);
+    expect(md).toMatch(/release verdict \(P37's gates on `heldout-c`, Amendment P38\) passed/);
+    expect(md).toMatch(/post-hoc/);
     expect(md).toMatch(/do not decide release/);
   });
 
-  it('I-2 (a): the banner reads DO NOT RELEASE when heldout-d is produced but its own verdict is not PASS', () => {
-    const d: RunSummary = {
-      ...withP37(fakeRun('heldout-c', false), false),
-      era: 'heldout-d',
-      datasetOrigins: HELDOUT_D_MIN_ORIGINS,
-      originGaps: 0,
-    };
-    const md = renderReport({ ...params, runs: [d] });
+  it('I-2 (a): the banner reads DO NOT RELEASE when P37 fails on heldout-c, even though its v0.10 gates pass', () => {
+    const md = renderReport({ ...params, runs: [releaseRun(false, true)] });
     expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
     expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
-    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) did not pass/);
+    expect(md).toMatch(/release verdict \(P37's gates on `heldout-c`, Amendment P38\) did not pass/);
   });
 
-  it('I-2 (a): a NOT YET POWERED heldout-d still reads DO NOT RELEASE, never RELEASE', () => {
-    const d: RunSummary = {
-      ...withP37(fakeRun('heldout-c', true), true),
-      era: 'heldout-d',
-      datasetOrigins: HELDOUT_D_MIN_ORIGINS - 1,
-      originGaps: 0,
-    };
-    const v = threeVerdicts([d]);
-    expect(v.release.status).toBe('NOT YET POWERED');
-    const md = renderReport({ ...params, runs: [d] });
+  it('I-2 (a): an underpowered heldout-c reads DO NOT RELEASE, never RELEASE', () => {
+    const c: RunSummary = { ...releaseRun(true), datasetOrigins: HELDOUT_D_MIN_ORIGINS - 1 };
+    expect(threeVerdicts([c]).release.status).toBe('NOT YET POWERED');
+    const md = renderReport({ ...params, runs: [c] });
     expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
+    expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
   });
 
-  // Ruling T10-0(b): both design eras passing the v0.10 gates must not leak
-  // into the banner once a `heldout-d` run is present but not yet powered --
-  // the release line alone decides, and an underpowered release still reads
-  // DO NOT RELEASE, never RELEASE, however clean `heldout-c`/`heldout-b` are.
-  it('reads DO NOT RELEASE from an underpowered heldout-d even when both design eras pass v0.10 (T10-0(b))', () => {
-    const d: RunSummary = {
-      ...withP37(fakeRun('heldout-c', true), true),
-      era: 'heldout-d',
-      datasetOrigins: HELDOUT_D_MIN_ORIGINS - 1,
-      originGaps: 0,
-    };
+  it('I-2 (a): a failing heldout-b under P37 does not turn a passing heldout-c release into DO NOT RELEASE', () => {
     const md = renderReport({
       ...params,
-      runs: [fakeRun('heldout-c', true), fakeRun('heldout-b', true), d],
+      runs: [releaseRun(true), { ...withP37(fakeRun('heldout-b', false), false), originGaps: 0 }],
     });
-    expect(threeVerdicts([fakeRun('heldout-c', true), fakeRun('heldout-b', true), d]).release.status).toBe(
-      'NOT YET POWERED',
-    );
-    expect(md).toMatch(/^> \*\*DO NOT RELEASE\.\*\*/m);
-    expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
-    expect(md).toMatch(/release verdict \(`heldout-d`, Amendment P37\) did not pass/);
+    expect(md).toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).not.toContain('**DO NOT RELEASE.**');
   });
 
-  // I-2 (b): with no `heldout-d` run at all, the pre-P37 sentence pair is
-  // untouched (existing tests at :565 and :577-578 already pin its
-  // substrings), and exactly one new sentence names where release is
-  // actually decided.
-  it('I-2 (b): with no heldout-d run, the pre-P37 banner sentence is byte-identical and one new sentence names heldout-d', () => {
-    const md = renderReport({ ...params, runs: [fakeRun('heldout-c', true)] });
+  // I-2 (b): with no `heldout-c` run at all, the pre-P37 sentence pair is
+  // untouched and exactly one new sentence names where release is decided.
+  it('I-2 (b): with no heldout-c run, the pre-P37 banner sentence is byte-identical and one new sentence names heldout-c', () => {
+    const md = renderReport({ ...params, runs: [fakeRun('heldout-b', true)] });
     expect(md).toContain(
       '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
     );
-    expect(md).toMatch(/release decision under Amendment P37 is the `heldout-d` line/);
+    expect(md).toMatch(/release decision under Amendment P38 is the `heldout-c` line/);
   });
 });
 

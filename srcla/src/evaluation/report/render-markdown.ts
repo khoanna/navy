@@ -94,7 +94,7 @@ export interface ThreeVerdicts {
   registered: VerdictLine;
   /** P37's gates on the same two eras — POST-HOC, since P37 was designed after both were read. */
   p37PostHoc: VerdictLine;
-  /** P37's gates on `heldout-d`, graded only once it is powered. */
+  /** Amendment P38: P37's gates on `heldout-c`, graded only once it is powered. Post-hoc. */
   release: VerdictLine;
 }
 
@@ -129,39 +129,50 @@ function designEraLine(runs: readonly RunSummary[], amended: boolean, note: stri
 }
 
 /**
- * P37's three verdicts (paper v0.11). PURE, and the only place they are decided.
+ * The era whose P37 verdict decides release (Amendment P38, paper v0.12).
+ * `heldout-c` is design data -- it informed P29, P31 and P37 -- so a release
+ * verdict drawn from it is post-hoc, and its note says so.
+ */
+export const RELEASE_ERA: EraTag = 'heldout-c';
+
+/**
+ * The three verdicts (paper v0.11; release moved by P38). PURE, and the only
+ * place they are decided.
  *
  *  1. Registered v0.10 — the unchanged gates on `heldout-c` + `heldout-b`.
  *  2. P37, post-hoc — the amended gates on the same eras, which P37 was
  *     designed after reading; never a test of P37.
- *  3. Release — the amended gates on `heldout-d`, graded only once it holds
- *     HELDOUT_D_MIN_ORIGINS origins with zero gaps. A missing P37 gate is NOT
- *     PRODUCED and never passes.
+ *  3. Release (P38) — P37's gates on RELEASE_ERA alone, graded only once it
+ *     holds HELDOUT_D_MIN_ORIGINS origins with zero gaps. `heldout-b` and
+ *     `heldout-d` never decide it. A missing P37 gate is NOT PRODUCED and
+ *     never passes.
  */
 export function threeVerdicts(runs: readonly RunSummary[]): ThreeVerdicts {
-  const d = runs.find((r) => r.era === 'heldout-d');
+  const c = runs.find((r) => r.era === RELEASE_ERA);
   let release: VerdictLine;
-  if (d === undefined) {
+  if (c === undefined) {
     release = {
       status: 'NOT RUN',
       eras: [],
-      note: '`heldout-d` was not evaluated in this run, so the release verdict blocks.',
+      note: '`heldout-c` was not evaluated in this run, so the release verdict blocks.',
     };
-  } else if (!releasePowered(d.datasetOrigins, d.originGaps ?? Number.POSITIVE_INFINITY)) {
+  } else if (!releasePowered(c.datasetOrigins, c.originGaps ?? Number.POSITIVE_INFINITY)) {
     release = {
       status: 'NOT YET POWERED',
-      eras: [eraVerdict(d, true)],
+      eras: [eraVerdict(c, true)],
       note:
-        `\`heldout-d\` holds ${d.datasetOrigins} origins with ` +
-        `${d.originGaps === undefined ? 'an unmeasured number of' : d.originGaps} gap(s); the ` +
+        `\`heldout-c\` holds ${c.datasetOrigins} origins with ` +
+        `${c.originGaps === undefined ? 'an unmeasured number of' : c.originGaps} gap(s); the ` +
         `release verdict needs ${HELDOUT_D_MIN_ORIGINS} with zero gaps, so it blocks.`,
     };
   } else {
-    const v = eraVerdict(d, true);
+    const v = eraVerdict(c, true);
     release = {
       status: v.forecast === 'PASS' && v.policy === 'PASS' ? 'PASS' : 'FAIL',
       eras: [v],
-      note: 'The amended gates on data P37 has not seen.',
+      note:
+        "POST-HOC (Amendment P38): P37's gates on `heldout-c`, which is design data — it " +
+        'informed P29, P31 and P37 — so this verdict is not an out-of-sample test of P37.',
     };
   }
   return {
@@ -183,6 +194,12 @@ function threeVerdictsSection(v: ThreeVerdicts): string[] {
       'to SRCLA\'s own plans — and scopes the release to vaults up to 1,000,000 USDC.',
   );
   out.push('');
+  out.push(
+    "Amendment P38 (paper v0.12) decides release on P37's verdict on `heldout-c` alone. " +
+      '`heldout-c` is design data, so that verdict is post-hoc; `heldout-b` and `heldout-d` ' +
+      'are reported and never decide it.',
+  );
+  out.push('');
   const line = (title: string, l: VerdictLine): void => {
     out.push(`**${title}: ${l.status}** — ${l.note}`);
     out.push('');
@@ -196,7 +213,7 @@ function threeVerdictsSection(v: ThreeVerdicts): string[] {
   };
   line('1. Registered v0.10', v.registered);
   line('2. P37, post-hoc', v.p37PostHoc);
-  line('3. Release (`heldout-d`)', v.release);
+  line('3. Release (`heldout-c`, Amendment P38)', v.release);
   return out;
 }
 
@@ -1109,26 +1126,30 @@ export function renderReport(params: ReportParams): string {
   const anyBlocked = params.runs.some((r) => !r.evaluation.forecastGate.pass || !r.gate.pass);
   // I-2: computed once and reused below (`threeVerdictsSection`) so the
   // banner and the "Verdicts under Amendment P37" section can never disagree
-  // about what `heldout-d` did.
+  // about what the release era did.
   const verdicts = threeVerdicts(params.runs);
   out.push('## Verdict');
   out.push('');
   if (verdicts.release.status !== 'NOT RUN') {
-    // (a) `heldout-d` was evaluated: the release line is the ONLY verdict
-    // this banner may be drawn from -- the registered v0.10 result on
-    // `heldout-c`/`heldout-b` is frozen FAIL and would otherwise pin this
-    // banner to DO NOT RELEASE forever, even once release itself passes.
+    // (a) `heldout-c` was evaluated: the release line (Amendment P38) is the
+    // ONLY verdict this banner may be drawn from -- the registered v0.10
+    // result on the design eras is frozen FAIL and would otherwise pin this
+    // banner to DO NOT RELEASE forever.
     out.push(
       verdicts.release.status === 'PASS'
-        ? '> **RELEASE.** The release verdict (`heldout-d`, Amendment P37) passed both §11.5 ' +
-            'gates. The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` ' +
-            'are reported beside it below and do not decide release.'
-        : '> **DO NOT RELEASE.** The release verdict (`heldout-d`, Amendment P37) did not pass ' +
-            'both §11.5 gates. The registered v0.10 and P37 post-hoc verdicts on ' +
-            '`heldout-c`/`heldout-b` are reported beside it below and do not decide release.',
+        ? "> **RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) passed " +
+            'both §11.5 gates. It is post-hoc: `heldout-c` is design data. The registered v0.10 ' +
+            'and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are reported beside it below ' +
+            'and do not decide release.'
+        : "> **DO NOT RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) " +
+            (verdicts.release.status === 'NOT YET POWERED'
+              ? 'is NOT YET POWERED. '
+              : 'did not pass both §11.5 gates. ') +
+            'The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are ' +
+            'reported beside it below and do not decide release.',
     );
   } else {
-    // (b) No `heldout-d` run in this report. Keep the pre-P37 sentence pair
+    // (b) No `heldout-c` run in this report. Keep the pre-P37 sentence pair
     // byte-identical -- it still decides between the two branches on
     // `anyBlocked` exactly as before -- and add ONE sentence, on its own
     // line, naming where the actual release decision lives.
@@ -1140,7 +1161,7 @@ export function renderReport(params: ReportParams): string {
     );
     out.push('');
     out.push(
-      'The release decision under Amendment P37 is the `heldout-d` line under "Verdicts ' +
+      'The release decision under Amendment P38 is the `heldout-c` line under "Verdicts ' +
         'under Amendment P37" below, which this run did not produce.',
     );
   }
@@ -1206,8 +1227,8 @@ export function renderReport(params: ReportParams): string {
       'Amendment P37 (paper v0.11), `heldout-b` is design data too — its per-venue and ' +
       'per-policy results were read to design G1, G3 and G5 — so only `heldout-d` carries no ' +
       'design knowledge. "Neither alone is sufficient" above applies to the registered v0.10 ' +
-      'verdict; release itself is decided by `heldout-d` alone (see "Verdicts under Amendment ' +
-      'P37" below).',
+      "verdict; release itself is decided by P37's verdict on `heldout-c` (Amendment P38, " +
+      'post-hoc); see "Verdicts under Amendment P37" below.',
   );
   out.push(
     '3. `heldout-c` is **less burned, not pristine.** It was carved out of the era this ' +
