@@ -9,7 +9,10 @@
  */
 import {
   renderReport,
+  renderVerdictBlock,
+  spliceVerdictBlock,
   threeVerdicts,
+  verdictRunFromReportJson,
   type RunSummary,
 } from '../../../src/evaluation/report/render-markdown.js';
 import { eraBounds, HELDOUT_D_MIN_ORIGINS } from '../../../src/evaluation/eras.js';
@@ -1222,6 +1225,78 @@ describe('renderReport — P37 three verdicts', () => {
       '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
     );
     expect(md).toMatch(/release decision under Amendment P38 is the `heldout-c` line/);
+  });
+});
+
+/**
+ * `run-phase4 --render-verdicts-only`: after a finished run, a release-rule
+ * change (P38, P39) re-renders ONLY the verdict block -- the `## Verdict`
+ * banner, its per-era list and "Verdicts under Amendment P37" -- from the
+ * run's own SRCLA-REPORT.json, without a replay. Every other line of the
+ * report must stay exactly as the run wrote it.
+ */
+describe('renderVerdictBlock / spliceVerdictBlock (render-verdicts-only)', () => {
+  const lines = (block: readonly string[]): string[] => block.join('\n').split('\n');
+  const between = (md: string): string[] => {
+    const all = md.split('\n');
+    return all.slice(all.indexOf('## Verdict'), all.indexOf('## Read this before citing any number'));
+  };
+
+  it('is exactly what renderReport prints between "## Verdict" and "## Read this before citing any number"', () => {
+    expect(between(renderReport(params))).toEqual(lines(renderVerdictBlock(params.runs)));
+  });
+
+  it('splicing a report with its own verdict block is the identity', () => {
+    const md = renderReport(params);
+    expect(spliceVerdictBlock(md, renderVerdictBlock(params.runs))).toBe(md);
+  });
+
+  it('splicing a different run set changes the verdict block and nothing else', () => {
+    const md = renderReport(params);
+    const next = spliceVerdictBlock(md, renderVerdictBlock([releaseRun(true)]));
+    const a = md.split('\n');
+    const b = next.split('\n');
+    expect(b.slice(0, b.indexOf('## Verdict'))).toEqual(a.slice(0, a.indexOf('## Verdict')));
+    expect(b.slice(b.indexOf('## Read this before citing any number'))).toEqual(
+      a.slice(a.indexOf('## Read this before citing any number')),
+    );
+    expect(next).toMatch(/^> \*\*RELEASE\.\*\*/m);
+    expect(md).not.toMatch(/^> \*\*RELEASE\.\*\*/m);
+  });
+
+  it('refuses to splice a document without both anchors', () => {
+    expect(() => spliceVerdictBlock('# Not a report\n', renderVerdictBlock(params.runs))).toThrow(
+      /## Verdict/,
+    );
+  });
+
+  it('rebuilds from SRCLA-REPORT.json everything the verdict block reads', () => {
+    const run = releaseRun(true);
+    const json = JSON.parse(
+      JSON.stringify({
+        era: run.era,
+        origins: run.datasetOrigins,
+        originGaps: run.originGaps ?? null,
+        provenance: run.provenance,
+        forecastGate: run.evaluation.forecastGate,
+        forecastGateP37: run.evaluation.forecastGateP37 ?? null,
+        releaseGate: run.gate,
+        policyGateP37: run.gateP37 ?? null,
+      }),
+    );
+    expect(renderVerdictBlock([verdictRunFromReportJson(json)])).toEqual(renderVerdictBlock([run]));
+    expect(threeVerdicts([verdictRunFromReportJson(json)])).toEqual(threeVerdicts([run]));
+  });
+
+  it('discloses a re-render, naming both commits, only when asked', () => {
+    const block = renderVerdictBlock(params.runs, {
+      rerendered: { at: '2026-09-14T08:00:00.000Z', codeCommit: 'abc1234', runCodeCommit: 'f5f67806' },
+    });
+    expect(block.join('\n')).toContain(
+      'Verdict block re-rendered on 2026-09-14T08:00:00.000Z at commit abc1234 from the run at ' +
+        'commit f5f67806, without a replay',
+    );
+    expect(renderVerdictBlock(params.runs).join('\n')).not.toContain('re-rendered');
   });
 });
 

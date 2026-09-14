@@ -1081,6 +1081,167 @@ function comparisonTable(gate: RegisteredGateResult): string {
   ].join('\n');
 }
 
+/** Options for `renderVerdictBlock`. */
+export interface VerdictBlockOptions {
+  /**
+   * Set by `run-phase4 --render-verdicts-only`: the block was re-rendered after
+   * the run, from its SRCLA-REPORT.json, under a later release rule. Printed
+   * under the banner so no reader takes the re-render for the run itself.
+   */
+  rerendered?: { at: string; codeCommit: string; runCodeCommit: string };
+}
+
+/**
+ * The `## Verdict` banner, its per-era itemisation and "Verdicts under
+ * Amendment P37" -- everything the release rule decides, and nothing that
+ * needs a replay. `renderReport` prints exactly this block, and
+ * `run-phase4 --render-verdicts-only` re-renders it from a finished run's
+ * SRCLA-REPORT.json (`verdictRunFromReportJson`, `spliceVerdictBlock`).
+ */
+export function renderVerdictBlock(
+  runs: readonly RunSummary[],
+  opts: VerdictBlockOptions = {},
+): string[] {
+  const out: string[] = [];
+  // Every gate's blocked reasons used to be joined with '; ' into one
+  // paragraph per era, which for a run that blocks on ten forecast checks and
+  // eight policy checks is a wall of text nobody reads to the end. The
+  // release decision is the single most important line in this document, so
+  // it is stated once, in the imperative, and then itemised.
+  const anyBlocked = runs.some((r) => !r.evaluation.forecastGate.pass || !r.gate.pass);
+  // I-2: computed once and reused below (`threeVerdictsSection`) so the
+  // banner and the "Verdicts under Amendment P37" section can never disagree
+  // about what the release era did.
+  const verdicts = threeVerdicts(runs);
+  out.push('## Verdict');
+  out.push('');
+  if (verdicts.release.status !== 'NOT RUN') {
+    // (a) `heldout-c` was evaluated: the release line (Amendment P38) is the
+    // ONLY verdict this banner may be drawn from -- the registered v0.10
+    // result on the design eras is frozen FAIL and would otherwise pin this
+    // banner to DO NOT RELEASE forever.
+    out.push(
+      verdicts.release.status === 'PASS'
+        ? "> **RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) passed " +
+            'both §11.5 gates. It is post-hoc: `heldout-c` is design data. The registered v0.10 ' +
+            'and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are reported beside it below ' +
+            'and do not decide release.'
+        : "> **DO NOT RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) " +
+            (verdicts.release.status === 'NOT YET POWERED'
+              ? 'is NOT YET POWERED. '
+              : 'did not pass both §11.5 gates. ') +
+            'The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are ' +
+            'reported beside it below and do not decide release.',
+    );
+  } else {
+    // (b) No `heldout-c` run in this report. Keep the pre-P37 sentence pair
+    // byte-identical -- it still decides between the two branches on
+    // `anyBlocked` exactly as before -- and add ONE sentence, on its own
+    // line, naming where the actual release decision lives.
+    out.push(
+      anyBlocked
+        ? '> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. ' +
+            'The blocking checks are itemised below and evidenced in full further down.'
+        : '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
+    );
+    out.push('');
+    out.push(
+      'The release decision under Amendment P38 is the `heldout-c` line under "Verdicts ' +
+        'under Amendment P37" below, which this run did not produce.',
+    );
+  }
+  out.push('');
+  if (opts.rerendered !== undefined) {
+    out.push(
+      `_Verdict block re-rendered on ${opts.rerendered.at} at commit ${opts.rerendered.codeCommit} ` +
+        `from the run at commit ${opts.rerendered.runCodeCommit}, without a replay; every number ` +
+        "outside this block is that run's._",
+    );
+    out.push('');
+  }
+  for (const run of runs) {
+    const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
+    out.push(`### \`${run.era}\` — ${span}, ${run.datasetOrigins} origins`);
+    out.push('');
+    const fg = run.evaluation.forecastGate;
+    out.push(`**Forecast gate: ${fg.pass ? 'PASS' : 'FAIL'}**`);
+    if (!fg.pass) {
+      out.push('');
+      for (const b of fg.blockedReasons) out.push(`- ${b}`);
+    }
+    out.push('');
+    out.push(`**Policy gate: ${run.gate.pass ? 'PASS' : 'FAIL'}**`);
+    if (!run.gate.pass) {
+      out.push('');
+      for (const b of run.gate.blockedReasons) out.push(`- ${b}`);
+    }
+    out.push('');
+  }
+  out.push(
+    'A `FAIL` here is a result, not an error. §11.5 requires publishing a negative ' +
+      'result rather than retuning against held-out data, and nothing in this run was ' +
+      'retuned after a sealed era was opened.',
+  );
+  out.push('');
+  out.push(...threeVerdictsSection(verdicts));
+  return out;
+}
+
+/** The verdict block's first line and the heading that follows it, in every generated report. */
+const VERDICT_BLOCK_START = '## Verdict';
+const VERDICT_BLOCK_END = '## Read this before citing any number';
+
+/**
+ * Replace a generated report's verdict block -- from its `## Verdict` line up
+ * to, not including, `## Read this before citing any number` -- with `block`.
+ * Every other line comes back byte-identical. Throws if either anchor is
+ * missing or out of order rather than guessing where the block is.
+ */
+export function spliceVerdictBlock(markdown: string, block: readonly string[]): string {
+  const lines = markdown.split('\n');
+  const start = lines.indexOf(VERDICT_BLOCK_START);
+  const end = lines.indexOf(VERDICT_BLOCK_END);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error(
+      `cannot splice the verdict block: expected a "${VERDICT_BLOCK_START}" line followed by a ` +
+        `"${VERDICT_BLOCK_END}" line`,
+    );
+  }
+  return [...lines.slice(0, start), ...block.join('\n').split('\n'), ...lines.slice(end)].join('\n');
+}
+
+/** The fields of one SRCLA-REPORT.json run (`serialisableRun` in run-phase4) the verdict block reads. */
+export interface ReportJsonRun {
+  era: EraTag;
+  origins: number;
+  originGaps: number | null;
+  provenance: RunSummary['provenance'];
+  forecastGate: RegisteredEvaluationResult['forecastGate'];
+  forecastGateP37: NonNullable<RegisteredEvaluationResult['forecastGateP37']> | null;
+  releaseGate: RegisteredGateResult;
+  policyGateP37: RegisteredGateResult | null;
+}
+
+/**
+ * Rebuild, from one run of SRCLA-REPORT.json, a `RunSummary` carrying exactly
+ * what `renderVerdictBlock` and `threeVerdicts` read. It is NOT a full run --
+ * per-policy replay results are absent -- so it must never reach `renderReport`.
+ */
+export function verdictRunFromReportJson(run: ReportJsonRun): RunSummary {
+  return {
+    era: run.era,
+    datasetOrigins: run.origins,
+    ...(run.originGaps === null ? {} : { originGaps: run.originGaps }),
+    provenance: run.provenance,
+    evaluation: {
+      forecastGate: run.forecastGate,
+      ...(run.forecastGateP37 === null ? {} : { forecastGateP37: run.forecastGateP37 }),
+    } as unknown as RegisteredEvaluationResult,
+    gate: run.releaseGate,
+    ...(run.policyGateP37 === null ? {} : { gateP37: run.policyGateP37 }),
+  };
+}
+
 export function renderReport(params: ReportParams): string {
   const { artifactSummary: a } = params;
   const primary = params.runs[0];
@@ -1147,79 +1308,10 @@ export function renderReport(params: ReportParams): string {
   out.push('');
 
   // ---- Verdict. -----------------------------------------------------------
-  // Every gate's blocked reasons used to be joined with '; ' into one
-  // paragraph per era, which for a run that blocks on ten forecast checks and
-  // eight policy checks is a wall of text nobody reads to the end. The
-  // release decision is the single most important line in this document, so
-  // it is stated once, in the imperative, and then itemised.
-  const anyBlocked = params.runs.some((r) => !r.evaluation.forecastGate.pass || !r.gate.pass);
-  // I-2: computed once and reused below (`threeVerdictsSection`) so the
-  // banner and the "Verdicts under Amendment P37" section can never disagree
-  // about what the release era did.
-  const verdicts = threeVerdicts(params.runs);
-  out.push('## Verdict');
-  out.push('');
-  if (verdicts.release.status !== 'NOT RUN') {
-    // (a) `heldout-c` was evaluated: the release line (Amendment P38) is the
-    // ONLY verdict this banner may be drawn from -- the registered v0.10
-    // result on the design eras is frozen FAIL and would otherwise pin this
-    // banner to DO NOT RELEASE forever.
-    out.push(
-      verdicts.release.status === 'PASS'
-        ? "> **RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) passed " +
-            'both §11.5 gates. It is post-hoc: `heldout-c` is design data. The registered v0.10 ' +
-            'and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are reported beside it below ' +
-            'and do not decide release.'
-        : "> **DO NOT RELEASE.** The release verdict (P37's gates on `heldout-c`, Amendment P38) " +
-            (verdicts.release.status === 'NOT YET POWERED'
-              ? 'is NOT YET POWERED. '
-              : 'did not pass both §11.5 gates. ') +
-            'The registered v0.10 and P37 post-hoc verdicts on `heldout-c`/`heldout-b` are ' +
-            'reported beside it below and do not decide release.',
-    );
-  } else {
-    // (b) No `heldout-c` run in this report. Keep the pre-P37 sentence pair
-    // byte-identical -- it still decides between the two branches on
-    // `anyBlocked` exactly as before -- and add ONE sentence, on its own
-    // line, naming where the actual release decision lives.
-    out.push(
-      anyBlocked
-        ? '> **DO NOT RELEASE.** At least one registered era blocked at least one §11.5 gate. ' +
-            'The blocking checks are itemised below and evidenced in full further down.'
-        : '> **RELEASE.** Every registered era passed both §11.5 gates at every registered tier.',
-    );
-    out.push('');
-    out.push(
-      'The release decision under Amendment P38 is the `heldout-c` line under "Verdicts ' +
-        'under Amendment P37" below, which this run did not produce.',
-    );
-  }
-  out.push('');
-  for (const run of params.runs) {
-    const span = isOpenEnded(run.era) ? 'open-ended' : `${eraBounds(run.era).days}d`;
-    out.push(`### \`${run.era}\` — ${span}, ${run.datasetOrigins} origins`);
-    out.push('');
-    const fg = run.evaluation.forecastGate;
-    out.push(`**Forecast gate: ${fg.pass ? 'PASS' : 'FAIL'}**`);
-    if (!fg.pass) {
-      out.push('');
-      for (const b of fg.blockedReasons) out.push(`- ${b}`);
-    }
-    out.push('');
-    out.push(`**Policy gate: ${run.gate.pass ? 'PASS' : 'FAIL'}**`);
-    if (!run.gate.pass) {
-      out.push('');
-      for (const b of run.gate.blockedReasons) out.push(`- ${b}`);
-    }
-    out.push('');
-  }
-  out.push(
-    'A `FAIL` here is a result, not an error. §11.5 requires publishing a negative ' +
-      'result rather than retuning against held-out data, and nothing in this run was ' +
-      'retuned after a sealed era was opened.',
-  );
-  out.push('');
-  out.push(...threeVerdictsSection(verdicts));
+  // The banner, its per-era itemisation and "Verdicts under Amendment P37" --
+  // everything the release rule decides -- live in `renderVerdictBlock`, so
+  // `run-phase4 --render-verdicts-only` can re-render exactly this block.
+  out.push(...renderVerdictBlock(params.runs));
 
   // ---- What the reader must know before reading a number. -----------------
   out.push('## Read this before citing any number');

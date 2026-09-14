@@ -77,7 +77,11 @@ import type { ArtifactRegistration } from '../src/evaluation/kernel/forecast-gat
 import { generateManifest, signManifest } from '../src/evaluation/manifest/generator.js';
 import {
   renderReport,
+  renderVerdictBlock,
+  spliceVerdictBlock,
   threeVerdicts,
+  verdictRunFromReportJson,
+  type ReportJsonRun,
   type RunSummary,
   type DatasetProvenance,
   type EraProvenanceRow,
@@ -837,6 +841,49 @@ async function runEra(
   };
 }
 
+/**
+ * `--render-verdicts-only`: re-render ONLY the report's verdict block (banner,
+ * per-era itemisation, "Verdicts under Amendment P37") and SRCLA-REPORT.json's
+ * `verdicts`, from that file's own runs, after a finished run -- for a
+ * release-rule change (Amendments P38, P39) that must not wait for a replay.
+ * Every other line of report/SRCLA-REPORT.md stays exactly as the run wrote it,
+ * and both files record which commit re-rendered the verdicts from which run.
+ * No database, no replay, no figures.
+ */
+function renderVerdictsOnly(outDir: string): void {
+  const jsonPath = join(outDir, 'SRCLA-REPORT.json');
+  const mdPath = join(outDir, 'report', 'SRCLA-REPORT.md');
+  const report = JSON.parse(readFileSync(jsonPath, 'utf8')) as {
+    generatedAt: string;
+    codeCommit: string;
+    runs: ReportJsonRun[];
+    verdicts: unknown;
+    verdictsRerendered?: unknown;
+  };
+  const runs = report.runs.map(verdictRunFromReportJson);
+  const rerendered = {
+    at: new Date().toISOString(),
+    codeCommit: codeCommit(),
+    runCodeCommit: report.codeCommit,
+  };
+  writeFileSync(
+    mdPath,
+    spliceVerdictBlock(readFileSync(mdPath, 'utf8'), renderVerdictBlock(runs, { rerendered })),
+  );
+  const verdicts = threeVerdicts(runs);
+  report.verdicts = verdicts;
+  report.verdictsRerendered = { ...rerendered, runGeneratedAt: report.generatedAt };
+  writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n');
+  console.error(
+    `[phase4] re-rendered the verdict block of ${mdPath} and the verdicts in ${jsonPath} ` +
+      `from the run at ${report.codeCommit} (no replay)`,
+  );
+  console.error(
+    `[phase4] verdicts: registered v0.10 ${verdicts.registered.status}, P37 post-hoc ` +
+      `${verdicts.p37PostHoc.status}, release ${verdicts.release.status}`,
+  );
+}
+
 async function main(): Promise<void> {
   const artifactPath = arg('artifact') ?? 'config/registered-artifact.json';
   // Default to the REPOSITORY ROOT, not the cwd: writing to srcla/ produced a
@@ -845,6 +892,10 @@ async function main(): Promise<void> {
   // shows go under <out-dir>/report/ (figures/, chart/); SRCLA-REPORT.json and
   // the run records stay at <out-dir>.
   const outDir = arg('out-dir') ?? '..';
+  if (process.argv.includes('--render-verdicts-only')) {
+    renderVerdictsOnly(outDir);
+    return;
+  }
   const eras = (arg('eras') ?? 'heldout-c,heldout-b').split(',').map((e) => e.trim()) as EraTag[];
   const tiers = arg('tiers')
     ? arg('tiers')!.split(',').map((t) => BigInt(t.trim()) * 1_000_000n)
