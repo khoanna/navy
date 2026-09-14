@@ -233,9 +233,13 @@ function threeVerdictsSection(v: ThreeVerdicts): string[] {
     out.push(`**${title}: ${l.status}** — ${l.note}`);
     out.push('');
     for (const e of l.eras) {
+      // Amendment P39: a reported entry does not block, so it never prints after "blocked on".
+      const reported = e.blocked.filter((b) => b.startsWith('reported (not gating'));
+      const blocking = e.blocked.filter((b) => !b.startsWith('reported (not gating'));
       out.push(
         `- \`${e.era}\`: forecast ${e.forecast}, policy ${e.policy}` +
-          (e.blocked.length > 0 ? ` — blocked on ${e.blocked.join('; ')}` : ''),
+          (blocking.length > 0 ? ` — blocked on ${blocking.join('; ')}` : '') +
+          (reported.length > 0 ? ` — ${reported.join('; ')}` : ''),
       );
     }
     if (l.eras.length > 0) out.push('');

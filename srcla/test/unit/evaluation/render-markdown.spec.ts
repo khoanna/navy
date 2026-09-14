@@ -1217,6 +1217,24 @@ describe('renderReport — P37 three verdicts', () => {
     );
   });
 
+  it('P39: prints a reported shortfall as reported, never as "blocked on"', () => {
+    const c = releaseRun(true);
+    const run: RunSummary = {
+      ...c,
+      gateP37: {
+        ...c.gateP37!,
+        pass: false,
+        blockedReasons: ['Non-inferior to every sustainable baseline (margin 43.0 bps)'],
+      },
+    };
+    const md = renderReport({ ...params, runs: [run] });
+    expect(md).toContain(
+      '- `heldout-c`: forecast PASS, policy PASS — reported (not gating, Amendment P39): ' +
+        'policy: Non-inferior to every sustainable baseline (margin 43.0 bps)',
+    );
+    expect(md).not.toMatch(/blocked on reported/);
+  });
+
   // I-2 (b): with no `heldout-c` run at all, the pre-P37 sentence pair is
   // untouched and exactly one new sentence names where release is decided.
   it('I-2 (b): with no heldout-c run, the pre-P37 banner sentence is byte-identical and one new sentence names heldout-c', () => {
